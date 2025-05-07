@@ -62,7 +62,7 @@ impl Parser {
         self.aliases.get(token).and_then(|v| v.as_ref()).unwrap_or(token)
     }
 
-    pub fn raise(&self, error_type: &str, msg: &str) -> Result<(Vec<Value>, Vec<(Value, Value)>), Error> {
+    pub fn raise<T>(&self, error_type: &str, msg: &str) -> Result<T, Error> {
         Err(Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
@@ -70,21 +70,39 @@ impl Parser {
             column: self.get_line_column(),
         })
     }
+    
 
     fn next(&mut self) -> Option<&Token> {
         self.pos += 1;
         self.token()
     }
 
-    fn check_for(&mut self, expected_type: &str, expected_value: &str) {
+    fn check_for(&mut self, expected_type: &str, expected_value: &str) -> Result<(Vec<Value>, Vec<(Value, Value)>), Error> {
         if let Some(token) = self.token() {
-            if token.0 != expected_type || token.1 != expected_value {
-                panic!("Expected token type: {}, value: {} but found: {:?}", expected_type, expected_value, token);
+            let (token_type, token_value) = (token.0.clone(), token.1.clone()); // Clone if needed to shorten borrow
+    
+            if token_type != expected_type || token_value != expected_value {
+                return self.raise(
+                    "UEFError",
+                    &format!(
+                        "Expected token type: {}, value: {} but found: {}",
+                        expected_type, expected_value, token_value
+                    ),
+                );
             }
         } else {
-            panic!("Expected token type: {}, value: {} but found end of input", expected_type, expected_value);
+            return self.raise(
+                "UEFError",
+                &format!(
+                    "Expected token type: {}, value: {} but found end of input",
+                    expected_type, expected_value
+                ),
+            );
         }
+    
+        Ok((vec![], vec![]))
     }
+    
 
     fn get_next(&mut self) -> Option<&Token> {
         let mut offset = 1;
@@ -134,7 +152,10 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Value, Error> {
-        let token = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected token"))?.clone();
+        let token = self.token().ok_or_else(|| {
+            self.raise::<Token>("SyntaxError", "Expected token").unwrap_err()
+        })?.clone();
+        
         let next_token = self.get_next();
         let token_type = &token.0;
         let token_value = &token.1;
@@ -161,8 +182,12 @@ impl Parser {
         self.check_for("SEPARATOR", ")");
         self.next();
 
+        if self.token().is_none() {
+            return self.raise("UEFError", "Unexpected end of input");
+        }
+
         if self.token().unwrap().0 == "IDENTIFIER" && self.get_next() == Some(&Token("OPERATOR".to_string(), "=".to_string())) {
-            return Err(Error::new("SyntaxError", "Unexpected '=' in function call"));
+            return self.raise("SyntaxError", "Unexpected '=' in function call");
         }
 
         let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();

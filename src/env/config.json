@@ -1,7 +1,7 @@
 {
   "moded": false,
-  "debug": false,
-  "debug_mode": "normal",
+  "debug": true,
+  "debug_mode": "full",
   "supports_color": true,
   "use_lucia_traceback": true,
   "warnings": true,

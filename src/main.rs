@@ -26,14 +26,7 @@ use crate::interpreter::Interpreter;
 
 const VERSION: &str = "1.3.1";
 
-fn handle_error(
-    error: &Error,
-    source: &str,
-    line: (usize, String),
-    config: &Config,
-    use_colors: bool,
-    file_name: Option<&str>,
-) {
+fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>,) {
     let mut file_name = file_name.unwrap_or("<stdin>");
 
     if file_name.starts_with("\\\\?\\") {
@@ -44,7 +37,7 @@ fn handle_error(
     let error_type = error.error_type();
     let error_msg = error.msg();
 
-    let current_line = get_line_info(source, line_number).unwrap_or_else(|| "Unknown line".to_string());
+    let current_line = get_line_info(source, line_number).unwrap_or_else(|| "".to_string());
     let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
     let next_line = get_line_info(source, line_number + 1);
 
@@ -102,6 +95,13 @@ fn handle_error(
         if next_line.is_some() {
             trace.push_str(&format!("\t{} ...\n", indent));
         }
+    } else {
+        trace.push_str(&format!(
+            "{}-> File '{}:{}' got traceback:\n",
+            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            file_name,
+            line_number
+        ));
     }
 
     trace.push_str(&format!(
@@ -114,9 +114,6 @@ fn handle_error(
 
     eprintln!("{}", trace);
 }
-
-
-
 
 
 fn format_value(value: &Value) -> String {
@@ -392,8 +389,8 @@ fn main() {
                     &config,
                     Some(use_colors),
                 );
-                //let interpreter = Interpreter::new(config.clone());
-                //interpreter.interpret(statements);
+                let interpreter = Interpreter::new(config.clone());
+                interpreter.interpret(statements);
             } else {
                 eprintln!("Error: File '{}' does not exist or is not a valid file", file_path);
             }
@@ -432,10 +429,16 @@ fn main() {
                 Some(use_colors),
             );         
             let tokens: Vec<Token> = raw_tokens.into_iter()
-                .map(|(t, v)| Token(t, v))
-                .collect();
+            .map(|(t, v)| Token(t, v))
+            .collect();
             let mut parser = Parser::new(tokens, config.clone(), input.to_string());
-            let statements = parser.parse();
+            let statements = match parser.parse_safe() {
+                Ok(stmts) => stmts,
+                Err(error) => {
+                    handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                    return;
+                }
+            };
             debug_log(
                 &format!(
                     "Statements: [{}]",
@@ -447,7 +450,7 @@ fn main() {
                 ),
                 &config,
                 Some(use_colors),
-            );            
+            );
             // interpreter.interpret(statements);
         }
     }
