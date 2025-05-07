@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error {
     pub error_type: String,
     pub msg: String,
+    pub line: (usize, String),
+    pub column: usize,
 }
 
 impl Error {
@@ -11,6 +13,17 @@ impl Error {
         Self {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
+            line: (0, "<unknown>".to_string()),
+            column: 0,
+        }
+    }
+
+    pub fn with_position(error_type: &str, msg: &str, line: usize, line_text: &str, column: usize) -> Self {
+        Self {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            line: (line, line_text.to_string()),
+            column,
         }
     }
 
@@ -21,10 +34,6 @@ impl Error {
     pub fn msg(&self) -> &str {
         &self.msg
     }
-
-    pub fn format_error(&self) -> String {
-        format!("{}: {}", self.error_type, self.msg)
-    }
 }
 
 impl From<&str> for Error {
@@ -32,6 +41,7 @@ impl From<&str> for Error {
         Error::new("UnknownError", msg)
     }
 }
+
 
 
 
@@ -52,13 +62,11 @@ pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
 
 
 pub fn clear_terminal() {
-    // Clear terminal screen for supported platforms (Windows, Linux, etc)
-    print!("{}[2J", 27 as char); // ANSI Escape Code
+    print!("{}[2J", 27 as char);
     io::stdout().flush().unwrap();
 }
 
 pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
-    // Simple conversion of hex color to ANSI escape code
     let use_colors = use_colors.unwrap_or(true);
 
     if !use_colors {
@@ -69,7 +77,6 @@ pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
         return "\x1b[0m".to_string();
     }
 
-    // Basic regex-like pattern for a 6-digit color code
     let hex = if hex_color.starts_with('#') { &hex_color[1..] } else { hex_color };
 
     if hex.len() == 6 {
@@ -79,7 +86,7 @@ pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
         return format!("\x1b[38;2;{};{};{}m", r, g, b);
     }
 
-    "\x1b[0m".to_string() // Return reset if invalid color
+    "\x1b[0m".to_string()
 }
 
 pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {

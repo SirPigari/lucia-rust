@@ -29,12 +29,13 @@ pub struct Parser {
     pos: usize,
     statements: Vec<Value>,
     aliases: HashMap<Token, Option<Token>>,
-    config: Config, // Placeholder for config
+    config: Config, 
     include_whitespace: bool,
+    source: String,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>, config: Config) -> Self {
+    pub fn new(tokens: Vec<Token>, config: Config, source: String) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -42,38 +43,37 @@ impl Parser {
             aliases: HashMap::new(),
             config,
             include_whitespace: false,
+            source,
         }
     }
 
     fn token(&mut self) -> Option<&Token> {
-        if self.pos >= self.tokens.len() {
-            return None
-        }
-        if self.include_whitespace {
-            return Some(self.apply_aliases(&self.tokens[self.pos]));
-        }
-        while self.pos < self.tokens.len() && self.tokens[self.pos].0 == "WHITESPACE" {
+        while self.pos < self.tokens.len() {
+            let token = &self.tokens[self.pos];
+            if self.include_whitespace || token.0 != "WHITESPACE" {
+                return Some(self.apply_aliases(token));
+            }
             self.pos += 1;
         }
-        if self.pos >= self.tokens.len() {
-            return None;
-        }
-        Some(self.apply_aliases(&self.tokens[self.pos]))
+        None
     }
 
     fn apply_aliases<'a>(&'a self, token: &'a Token) -> &'a Token {
         self.aliases.get(token).and_then(|v| v.as_ref()).unwrap_or(token)
     }
 
+    pub fn raise(&self, error_type: &str, msg: &str) -> Result<(Vec<Value>, Vec<(Value, Value)>), Error> {
+        Err(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            line: (self.current_line(), self.source.clone()),
+            column: self.get_line_column(),
+        })
+    }
+
     fn next(&mut self) -> Option<&Token> {
         self.pos += 1;
         self.token()
-    }
-
-    fn check_token(&mut self) {
-        if self.token().is_none() {
-            panic!("Unexpected end of input");
-        }
     }
 
     fn check_for(&mut self, expected_type: &str, expected_value: &str) {
@@ -86,16 +86,6 @@ impl Parser {
         }
     }
 
-    //def get_next(self):
-    //    offset = 1
-    //    if self.pos + offset >= len(self.tokens):
-    //        return None
-    //    while self.pos + offset < len(self.tokens) and self.tokens[self.pos + offset][0] == 'WHITESPACE' and (not self.include_whitespace):
-    //        offset += 1
-    //    if self.pos + offset >= len(self.tokens):
-    //        return (None, None)
-    //    return self.apply_aliases(self.tokens[self.pos + offset])
-
     fn get_next(&mut self) -> Option<&Token> {
         let mut offset = 1;
         while self.pos + offset < self.tokens.len() {
@@ -107,87 +97,77 @@ impl Parser {
         None
     }
 
-    fn current_line(&self) -> usize {
-        self.tokens
-            .get(self.pos)
-            .and_then(|Token(_, val)| val.parse::<usize>().ok())
-            .unwrap_or(1)
+    pub fn current_line(&self) -> usize {
+        let index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
+        self.source[..index].chars().filter(|&c| c == '\n').count() + 1
     }
 
-    pub fn parse_safe(&mut self) -> Result<Vec<Value>, (String, usize)> {
+    pub fn get_line_column(&self) -> usize {
+        let mut index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
+        let mut char_pos = 0;
+        while index > 0 && &self.source[index - 1..index] != "\n" {
+            char_pos += 1;
+            index -= 1;
+        }
+        char_pos + 1
+    }
+
+    pub fn parse_safe(&mut self) -> Result<Vec<Value>, Error> {
         let mut statements = Vec::new();
-        while self.token().is_some() {
-            let line_number = self.current_line(); // You’ll need to track this
+        while let Some(_) = self.token() {
             match self.parse_expression() {
-                Some(stmt) => statements.push(stmt),
-                None => return Err(("Syntax error while parsing".into(), line_number)),
+                Ok(stmt) => statements.push(stmt),
+                Err(e) => return Err(e),
             }
         }
         Ok(statements)
-    }    
+    }
 
     pub fn parse(&mut self) -> Vec<Value> {
         while self.pos < self.tokens.len() {
-            if let Some(expr) = self.parse_expression() {
+            if let Some(expr) = self.parse_expression().ok() {
                 self.statements.push(expr);
             }
             self.pos += 1;
         }
         self.statements.clone()
     }
-    
 
-    fn parse_expression(&mut self) -> Option<Value> {
-        let token = self.token()?.clone();           // clone the (type, value) tuple
-        let next_token = self.get_next();            // mutable borrow ends here
-    
-        let token_type = token.0;
-        let token_value = token.1;
-        let next_token_type = next_token.as_ref().map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
-        let next_token_value = next_token.as_ref().map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());        
-    
-        if token_type == "IDENTIFIER" && next_token_type == "SEPARATOR" && next_token_value == "(" {
+    fn parse_expression(&mut self) -> Result<Value, Error> {
+        let token = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected token"))?.clone();
+        let next_token = self.get_next();
+        let token_type = &token.0;
+        let token_value = &token.1;
+
+        if token_type == "IDENTIFIER" && next_token.as_ref().map(|t| t.0 == "SEPARATOR" && t.1 == "(").unwrap_or(false) {
             return self.parse_function_call();
         }
 
         if token_type == "NUMBER" {
-            self.next(); // Move to the next token
-            return Some(Value::Number(token_value.parse::<f64>().unwrap_or(0.0)));
+            self.next();
+            return Ok(Value::Number(token_value.parse::<f64>().unwrap_or(0.0)));
         }
-    
-        self.pos += 1; // Move to the next token
-        None
-    }
-    
-    
 
-    //def parse_function_call(self):
-    //    name = self.token[1]
-    //    self.next()
-    //    self.check_for('SEPARATOR', '(')
-    //    self.next()
-    //    pos_arguments, named_arguments = self.parse_arguments()
-    //    self.check_for('SEPARATOR', ')')
-    //    self.next()
-    //    return {
-    //        "type": "CALL",
-    //        "name": name,
-    //        "pos_arguments": pos_arguments,
-    //        "named_arguments": named_arguments
-    //    }
-    fn parse_function_call(&mut self) -> Option<Value> {
-        let name = self.token()?.1.clone().to_string(); // Get the function name
-        self.next(); // Skip the name
-        self.check_for("SEPARATOR", "("); // Check for the next token
-        self.next(); // Skip the '(' token
-        let (pos_args, named_args) = self.parse_arguments().ok()?;
-        self.check_for("SEPARATOR", ")"); // Check for the next token
+        self.pos += 1;
+        Ok(Value::Null)
+    }
+
+    fn parse_function_call(&mut self) -> Result<Value, Error> {
+        let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name"))?.1.clone();
+        self.next();
+        self.check_for("SEPARATOR", "(");
+        self.next();
+        let (pos_args, named_args) = self.parse_arguments()?;
+        self.check_for("SEPARATOR", ")");
+        self.next();
+
         if self.token().unwrap().0 == "IDENTIFIER" && self.get_next() == Some(&Token("OPERATOR".to_string(), "=".to_string())) {
-            return None; // Expected closing parenthesis
+            return Err(Error::new("SyntaxError", "Unexpected '=' in function call"));
         }
-        self.next(); // Skip the ')' token
+
         let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
-        Some(Value::Map {
+        
+        Ok(Value::Map {
             keys: vec![
                 Value::String("type".to_string()),
                 Value::String("name".to_string()),
@@ -203,57 +183,46 @@ impl Parser {
         })
     }
 
-    // def parse_arguments(self):
-    //     pos_args = []
-    //     named_args = []
-    //     while self.token != ('SEPARATOR', ')'):
-    //         if self.token[0] == 'IDENTIFIER' and self.get_next() and self.get_next() == ('OPERATOR', '='):
-    //             name = self.token[1]
-    //             self.next()
-    //             self.next()
-    //             value = self.parse_expression()
-    //             named_args.append({"type": "NAMEDARG", "name": name, "value": value})
-    //         else:
-    //             pos_args.append(self.parse_expression())
-    //         if self.token == ('SEPARATOR', ')'):
-    //             break
-    //         self.check_for('SEPARATOR', ',')
-    //         self.next()
-    //     return pos_args, named_args
     fn parse_arguments(&mut self) -> Result<(Vec<Value>, Vec<(Value, Value)>), Error> {
         let mut pos_args = Vec::new();
         let mut named_args = Vec::new();
         let mut seen_named = false;
     
-        while let Some(token) = self.token().cloned() {
-            if let Some(Token(t_type, t_val)) = self.token() {
-                if t_type == "SEPARATOR" && t_val == ")" {
-                    break;
-                }
+        while let Some(current_token) = self.token().cloned() {
+            let next_token = self.get_next().cloned();
+    
+            if current_token.0 == "SEPARATOR" && current_token.1 == ")" {
+                break;
             }
     
-            if let Some(Token(t_type, t_val)) = self.get_next() {
+            if let Some(Token(t_type, t_val)) = &next_token {
                 if t_type == "OPERATOR" && t_val == "=" {
-                    let name = token.1;
+                    let name = current_token.1;
                     self.next();
                     self.next();
-                    let value = self.parse_expression().ok_or("Expected expression")?;
+                    let value = self.parse_expression()?;
                     named_args.push((Value::String(name), value));
                     seen_named = true;
                 } else {
                     if seen_named {
-                        return Err(Error::new("ArgumentOrderError", "Positional arguments cannot follow named arguments"));
+                        return self.raise(
+                            "ArgumentOrderError",
+                            "Positional arguments cannot follow named arguments",
+                        );
                     }
-                    pos_args.push(self.parse_expression().ok_or("Expected expression")?);
+                    pos_args.push(self.parse_expression()?);
                 }
             } else {
                 if seen_named {
-                    return Err(Error::new("ArgumentOrderError", "Positional arguments cannot follow named arguments"));
+                    return self.raise(
+                        "ArgumentOrderError",
+                        "Positional arguments cannot follow named arguments",
+                    );
                 }
-                pos_args.push(self.parse_expression().ok_or("Expected expression")?);
+                pos_args.push(self.parse_expression()?);
             }
     
-            self.check_token();
+        
             if let Some(Token(t_type, t_val)) = self.token() {
                 if t_type == "SEPARATOR" && t_val == "," {
                     self.next();
@@ -262,5 +231,9 @@ impl Parser {
         }
     
         Ok((pos_args, named_args))
-    }    
+    }
+    
+    
+    
+    
 }

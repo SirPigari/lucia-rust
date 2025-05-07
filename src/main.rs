@@ -26,23 +26,96 @@ use crate::interpreter::Interpreter;
 
 const VERSION: &str = "1.3.1";
 
-fn handle_error(error: &Error, source: &str, line_number: usize, config: &Config, use_colors: bool, file_name: Option<&str>) {
-    //-> File '<stdin>' got traceback:
-    //    NameError: Name 'asdas' is not defined.
-    let file_name = file_name.unwrap_or("<stdin>");
-    let line = get_line_info(source, line_number)
-        .unwrap_or_else(|| "<line not found>".to_string());
+fn handle_error(
+    error: &Error,
+    source: &str,
+    line: (usize, String),
+    config: &Config,
+    use_colors: bool,
+    file_name: Option<&str>,
+) {
+    let mut file_name = file_name.unwrap_or("<stdin>");
 
-    let formatted = format!(
-        "{}File '{}' got tracebock:\n\t{}{}",
-        hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-        line_number,
-        hex_to_ansi("reset", Some(use_colors)),
-        line.trim()
-    );
+    if file_name.starts_with("\\\\?\\") {
+        file_name = &file_name[4..];
+    }
 
-    eprintln!("{}", formatted);
+    let line_number = line.0;
+    let error_type = error.error_type();
+    let error_msg = error.msg();
+
+    let current_line = get_line_info(source, line_number).unwrap_or_else(|| "Unknown line".to_string());
+    let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
+    let next_line = get_line_info(source, line_number + 1);
+
+    let indent = " ".repeat(line_number.to_string().len());
+
+    let mut arrows_under = String::new();
+
+    let lexer = Lexer::new(&current_line);
+    let line_tokens = lexer.tokenize(true);
+
+    let mut trace = String::new();
+    
+    if !(error.column == 0 && error.line.0 == 0) {
+        let mut current_pos = 1;
+        let mut found = false;
+
+        for (token_type, token_value) in line_tokens {
+            let token_len = token_value.len();
+
+            if token_type.starts_with("COMMENT") {
+                current_pos += token_len;
+                break;
+            }
+        
+            if !found && current_pos == error.column {
+                arrows_under.push_str(&"^".repeat(token_len));
+                found = true;
+            } else {
+                arrows_under.push_str(&"~".repeat(token_len));
+            }
+
+            current_pos += token_len;
+        }
+
+        if !found {
+            arrows_under = " ".repeat(error.column.saturating_sub(1)) + "^";
+        }
+
+        trace.push_str(&format!(
+            "{}-> File '{}:{}:{}' got traceback:\n",
+            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            file_name,
+            line_number,
+            error.column
+        ));
+
+        if prev_line.is_some() {
+            trace.push_str(&format!("\t{} ...\n", indent));
+        }
+
+        trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
+
+        trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
+
+        if next_line.is_some() {
+            trace.push_str(&format!("\t{} ...\n", indent));
+        }
+    }
+
+    trace.push_str(&format!(
+        "\t{} | {}: {}{}\n",
+        indent,
+        error_type,
+        error_msg,
+        hex_to_ansi("reset", Some(use_colors))
+    ));
+
+    eprintln!("{}", trace);
 }
+
+
 
 
 
@@ -55,17 +128,17 @@ fn format_value(value: &Value) -> String {
         Value::Map { keys, values } => {
             let formatted_pairs: Vec<String> = keys
                 .iter()
-                .zip(values.iter()) // Zips keys with corresponding values
-                .map(|(key, value)| format!("{}: {}", format_value(key), format_value(value))) // Formats each pair
+                .zip(values.iter())
+                .map(|(key, value)| format!("{}: {}", format_value(key), format_value(value)))
                 .collect();
-            format!("{{{}}}", formatted_pairs.join(", ")) // Joins all pairs with commas
+            format!("{{{}}}", formatted_pairs.join(", "))
         },
         Value::List(values) => {
             if values.is_empty() {
-                "[]".to_string() // Format empty lists as "[]"
+                "[]".to_string()
             } else {
                 let formatted_values: Vec<String> = values.iter().map(|v| format_value(v)).collect();
-                format!("[{}]", formatted_values.join(", ")) // Format non-empty lists as "[value1, value2, ...]"
+                format!("[{}]", formatted_values.join(", "))
             }
         },
         Value::ListCompletion { pattern, end } => {
@@ -174,12 +247,22 @@ fn main() {
             }
         }
     }
-    let working_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Err(e) = std_env::set_current_dir(&working_dir) {
+    let working_dir = std_env::current_dir()
+    .unwrap_or_else(|_| PathBuf::from("."))
+    .display()
+    .to_string()
+    .replace("\\", "/");
+
+    let working_dir_path = PathBuf::from(working_dir.clone());
+    if let Err(e) = std_env::set_current_dir(&working_dir_path) {
         eprintln!("Failed to change the directory: {}", e);
     }
 
-    let env_path = working_dir.join("..").canonicalize().unwrap_or_else(|_| working_dir.clone());
+    if working_dir.ends_with(".exe") && !working_dir_path.components().any(|comp| comp.as_os_str() == "bin") {
+        eprintln!("Executable is not located in a 'bin' directory. Exiting.");
+        exit(1);
+    }
+    let env_path = working_dir_path.join("..").canonicalize().unwrap_or_else(|_| working_dir_path.clone());
 
     let args: Vec<String> = std_env::args().collect();
     let activate_flag = args.contains(&"--activate".to_string());
@@ -213,8 +296,29 @@ fn main() {
         load_config(&config_path).unwrap();
     };
 
-    if let Err(e) = std_env::set_current_dir(&config.home_dir) {
+    let home_dir = config.home_dir
+    .to_string()
+    .replace("\\", "/");
+
+    let home_dir_path = PathBuf::from(home_dir.clone());
+
+    if let Err(e) = std_env::set_current_dir(&home_dir_path) {
+        if let Err(err) = activate_environment(&env_path) {
+            eprintln!("Failed to activate environment: {}", err);
+            exit(1);
+        }
+        load_config(&config_path).unwrap();
+    }
+
+    let home_dir = config.home_dir
+    .to_string()
+    .replace("\\", "/");
+
+    let home_dir_path = PathBuf::from(home_dir.clone());
+
+    if let Err(e) = std_env::set_current_dir(&home_dir_path) {
         eprintln!("Failed to change the directory: {}", e);
+        exit(1);
     }
 
 
@@ -226,24 +330,24 @@ fn main() {
         .filter(|arg| !arg.starts_with('-'))
         .cloned()
         .filter_map(|arg| {
-
-            let mut path: PathBuf = Path::new(&arg).to_path_buf();
+            let mut path: PathBuf = PathBuf::from(&arg);
 
             if path.is_relative() {
-                path = env_path.join(path);
+                path = working_dir_path.join(path);
             }
 
-            match fs::canonicalize(path) {
-                Ok(canon_path) => {
-                    Some(canon_path.to_string_lossy().to_string())
-                },
-                Err(_) => {
-                    Some(arg.clone())
-                },
-            }
+            path = match path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Error: File '{}' does not exist or is not a valid file", path.display());
+                    exit(1);
+                }
+            };
+
+            Some(path.display().to_string())
         })
         .collect();
-    
+
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
             let path = Path::new(&file_path);
@@ -259,8 +363,8 @@ fn main() {
                         "Tokens: {:?}",
                         raw_tokens
                             .iter()
-                            .filter(|token| token.0 != "WHITESPACE")  // Filter out whitespace tokens
-                            .collect::<Vec<_>>()  // Collect filtered tokens into a new Vec
+                            .filter(|token| token.0 != "WHITESPACE")
+                            .collect::<Vec<_>>()
                     ),
                     &config,
                     Some(use_colors),
@@ -268,14 +372,14 @@ fn main() {
                 let tokens: Vec<Token> = raw_tokens.into_iter()
                     .map(|(t, v)| Token(t, v))
                     .collect();
-                let mut parser = Parser::new(tokens, config.clone());
+                let mut parser = Parser::new(tokens, config.clone(), file_content.to_string());
                 let statements = match parser.parse_safe() {
                     Ok(stmts) => stmts,
-                    Err((error, line)) => {
-                        handle_error(&error, &file_content, line, &config, use_colors, Some(file_path.as_str()));
-                        continue;
+                    Err(error) => {
+                        handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                        return;
                     }
-                };                
+                };
                 debug_log(
                     &format!(
                         "Statements: [{}]",
@@ -321,8 +425,8 @@ fn main() {
                     "Tokens: {:?}",
                     raw_tokens
                         .iter()
-                        .filter(|token| token.0 != "WHITESPACE")  // Filter out whitespace tokens
-                        .collect::<Vec<_>>()  // Collect filtered tokens into a new Vec
+                        .filter(|token| token.0 != "WHITESPACE")
+                        .collect::<Vec<_>>()
                 ),
                 &config,
                 Some(use_colors),
@@ -330,7 +434,7 @@ fn main() {
             let tokens: Vec<Token> = raw_tokens.into_iter()
                 .map(|(t, v)| Token(t, v))
                 .collect();
-            let mut parser = Parser::new(tokens, config.clone());
+            let mut parser = Parser::new(tokens, config.clone(), input.to_string());
             let statements = parser.parse();
             debug_log(
                 &format!(
