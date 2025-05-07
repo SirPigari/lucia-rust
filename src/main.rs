@@ -271,8 +271,8 @@ fn main() {
                 let mut parser = Parser::new(tokens, config.clone());
                 let statements = match parser.parse_safe() {
                     Ok(stmts) => stmts,
-                    Err((msg, line)) => {
-                        handle_error(&msg, &file_content, line, &config, use_colors, Some(file_path.as_str()));
+                    Err((error, line)) => {
+                        handle_error(&error, &file_content, line, &config, use_colors, Some(file_path.as_str()));
                         continue;
                     }
                 };                

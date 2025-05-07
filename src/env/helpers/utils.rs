@@ -27,6 +27,13 @@ impl Error {
     }
 }
 
+impl From<&str> for Error {
+    fn from(msg: &str) -> Self {
+        Error::new("UnknownError", msg)
+    }
+}
+
+
 
 #[derive(Debug, Clone)]
 pub enum Value {

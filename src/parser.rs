@@ -220,7 +220,7 @@ impl Parser {
     //         self.check_for('SEPARATOR', ',')
     //         self.next()
     //     return pos_args, named_args
-    fn parse_arguments(&mut self) -> Result<(Vec<Value>, Vec<(Value, Value)>), String> {
+    fn parse_arguments(&mut self) -> Result<(Vec<Value>, Vec<(Value, Value)>), Error> {
         let mut pos_args = Vec::new();
         let mut named_args = Vec::new();
         let mut seen_named = false;
