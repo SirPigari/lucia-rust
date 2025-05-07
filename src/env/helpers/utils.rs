@@ -1,5 +1,49 @@
 use std::io::{self, Write};
 
+#[derive(Debug)]
+pub struct Error {
+    pub error_type: String,
+    pub msg: String,
+}
+
+impl Error {
+    pub fn new(error_type: &str, msg: &str) -> Self {
+        Self {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+        }
+    }
+
+    pub fn error_type(&self) -> &str {
+        &self.error_type
+    }
+
+    pub fn msg(&self) -> &str {
+        &self.msg
+    }
+
+    pub fn format_error(&self) -> String {
+        format!("{}: {}", self.error_type, self.msg)
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub enum Value {
+    Number(f64),
+    String(String),
+    Boolean(bool),
+    Null,
+    Map { keys: Vec<Value>, values: Vec<Value> },
+    List(Vec<Value>),
+    ListCompletion { pattern: Vec<Value>, end: Option<Box<Value>> },
+}
+
+pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
+    source.lines().nth(line_number.saturating_sub(1)).map(|s| s.to_string())
+}
+
+
 pub fn clear_terminal() {
     // Clear terminal screen for supported platforms (Windows, Linux, etc)
     print!("{}[2J", 27 as char); // ANSI Escape Code

@@ -11,5 +11,5 @@ ___
 - And rust is a <a href="https://www.reddit.com/r/feminineboys/comments/j91rv7/comment/g8gk0fy/?context=3" target="_blank">femboy lang</a>
 ---
 
-Lucia Stable release in python: [SirPigari/lucia](https://github.com/SirPigari/lucia)
+Lucia Stable release in python: [SirPigari/lucia](https://github.com/SirPigari/lucia)  
 License: [LICENSE](LICENSE)

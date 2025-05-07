@@ -4,6 +4,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::process::exit;
+use std::collections::HashMap;
 
 mod env {
     pub mod helpers {
@@ -18,12 +19,71 @@ mod lexer;
 
 use crate::env::helpers::utils;
 use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::hex_to_ansi;
+use crate::utils::{hex_to_ansi, Value, get_line_info, Error};
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
 const VERSION: &str = "1.3.1";
+
+fn handle_error(error: &Error, source: &str, line_number: usize, config: &Config, use_colors: bool, file_name: Option<&str>) {
+    //-> File '<stdin>' got traceback:
+    //    NameError: Name 'asdas' is not defined.
+    let file_name = file_name.unwrap_or("<stdin>");
+    let line = get_line_info(source, line_number)
+        .unwrap_or_else(|| "<line not found>".to_string());
+
+    let formatted = format!(
+        "{}File '{}' got tracebock:\n\t{}{}",
+        hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+        line_number,
+        hex_to_ansi("reset", Some(use_colors)),
+        line.trim()
+    );
+
+    eprintln!("{}", formatted);
+}
+
+
+
+fn format_value(value: &Value) -> String {
+    match value {
+        Value::Number(n) => format!("{}", n),
+        Value::String(s) => format!("\"{}\"", s),
+        Value::Boolean(b) => format!("{}", b),
+        Value::Null => "null".to_string(),
+        Value::Map { keys, values } => {
+            let formatted_pairs: Vec<String> = keys
+                .iter()
+                .zip(values.iter()) // Zips keys with corresponding values
+                .map(|(key, value)| format!("{}: {}", format_value(key), format_value(value))) // Formats each pair
+                .collect();
+            format!("{{{}}}", formatted_pairs.join(", ")) // Joins all pairs with commas
+        },
+        Value::List(values) => {
+            if values.is_empty() {
+                "[]".to_string() // Format empty lists as "[]"
+            } else {
+                let formatted_values: Vec<String> = values.iter().map(|v| format_value(v)).collect();
+                format!("[{}]", formatted_values.join(", ")) // Format non-empty lists as "[value1, value2, ...]"
+            }
+        },
+        Value::ListCompletion { pattern, end } => {
+            let formatted_pattern: Vec<String> = pattern.iter().map(|v| format_value(v)).collect();
+            let formatted_end = match end {
+                Some(e) => format_value(e),
+                None => "None".to_string(),
+            };
+            format!(
+                "ListCompletion {{ pattern: [{}], end: {} }}",
+                formatted_pattern.join(", "),
+                formatted_end
+            )
+        }
+    }
+}
+
+
 
 fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
@@ -104,6 +164,16 @@ fn activate_environment(env_path: &Path) -> io::Result<()> {
 }
 
 fn main() {
+    if let Ok(exec_path) = std_env::current_exe() {
+        if let Some(ext) = exec_path.extension() {
+            if ext == "exe" {
+                if !exec_path.components().any(|comp| comp.as_os_str() == "bin") {
+                    eprintln!("Executable is not located in a 'bin' directory. Exiting.");
+                    exit(1);
+                }
+            }
+        }
+    }
     let working_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if let Err(e) = std_env::set_current_dir(&working_dir) {
         eprintln!("Failed to change the directory: {}", e);
@@ -174,8 +244,6 @@ fn main() {
         })
         .collect();
     
-    debug_log(&format!("{:?}", non_flag_args), &config, Some(use_colors));
-    
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
             let path = Path::new(&file_path);
@@ -186,12 +254,40 @@ fn main() {
                 let file_content = fs::read_to_string(path).expect("Failed to read file");
                 let lexer = Lexer::new(&file_content);
                 let raw_tokens = lexer.tokenize(config.print_comments);
-                debug_log(&format!("Tokens: {:?}", raw_tokens), &config, Some(use_colors));
+                debug_log(
+                    &format!(
+                        "Tokens: {:?}",
+                        raw_tokens
+                            .iter()
+                            .filter(|token| token.0 != "WHITESPACE")  // Filter out whitespace tokens
+                            .collect::<Vec<_>>()  // Collect filtered tokens into a new Vec
+                    ),
+                    &config,
+                    Some(use_colors),
+                );
                 let tokens: Vec<Token> = raw_tokens.into_iter()
                     .map(|(t, v)| Token(t, v))
                     .collect();
                 let mut parser = Parser::new(tokens, config.clone());
-                let statements = parser.parse();
+                let statements = match parser.parse_safe() {
+                    Ok(stmts) => stmts,
+                    Err((msg, line)) => {
+                        handle_error(&msg, &file_content, line, &config, use_colors, Some(file_path.as_str()));
+                        continue;
+                    }
+                };                
+                debug_log(
+                    &format!(
+                        "Statements: [{}]",
+                        statements
+                            .iter()
+                            .map(|stmt| format_value(stmt))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    ),
+                    &config,
+                    Some(use_colors),
+                );
                 //let interpreter = Interpreter::new(config.clone());
                 //interpreter.interpret(statements);
             } else {
@@ -220,12 +316,34 @@ fn main() {
     
             let lexer = Lexer::new(&input);
             let raw_tokens = lexer.tokenize(config.print_comments);
-            debug_log(&format!("Tokens: {:?}", raw_tokens), &config, Some(use_colors));
+            debug_log(
+                &format!(
+                    "Tokens: {:?}",
+                    raw_tokens
+                        .iter()
+                        .filter(|token| token.0 != "WHITESPACE")  // Filter out whitespace tokens
+                        .collect::<Vec<_>>()  // Collect filtered tokens into a new Vec
+                ),
+                &config,
+                Some(use_colors),
+            );         
             let tokens: Vec<Token> = raw_tokens.into_iter()
                 .map(|(t, v)| Token(t, v))
                 .collect();
             let mut parser = Parser::new(tokens, config.clone());
             let statements = parser.parse();
+            debug_log(
+                &format!(
+                    "Statements: [{}]",
+                    statements
+                        .iter()
+                        .map(|stmt| format_value(stmt))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ),
+                &config,
+                Some(use_colors),
+            );            
             // interpreter.interpret(statements);
         }
     }
