@@ -10,6 +10,7 @@ mod env {
     pub mod helpers {
         pub mod utils;
         pub mod config;
+        pub mod structs;
     }
 }
 
@@ -23,6 +24,7 @@ use crate::utils::{hex_to_ansi, Value, get_line_info, Error};
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
+use crate::env::helpers::structs::Boolean;
 
 const VERSION: &str = "1.3.1";
 

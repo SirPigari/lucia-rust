@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use crate::env::helpers::structs::Boolean;
 
 #[derive(Debug, Clone)]
 pub struct Error {
@@ -45,7 +46,7 @@ impl From<&str> for Error {
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     String(String),

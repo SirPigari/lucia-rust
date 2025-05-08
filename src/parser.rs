@@ -132,46 +132,109 @@ impl Parser {
 
     pub fn parse_safe(&mut self) -> Result<Vec<Value>, Error> {
         let mut statements = Vec::new();
-        while let Some(_) = self.token() {
+        while let Some(token) = self.token().cloned() {
             match self.parse_expression() {
-                Ok(stmt) => statements.push(stmt),
+                Ok(stmt) => {
+                    if stmt != Value::Null {
+                        statements.push(stmt);
+                    }
+                }
                 Err(e) => return Err(e),
             }
         }
         Ok(statements)
     }
+    
 
     pub fn parse(&mut self) -> Vec<Value> {
         while self.pos < self.tokens.len() {
             if let Some(expr) = self.parse_expression().ok() {
-                self.statements.push(expr);
+                if expr != Value::Null {
+                    self.statements.push(expr);
+                }
             }
             self.pos += 1;
         }
         self.statements.clone()
     }
-
+    
     fn parse_expression(&mut self) -> Result<Value, Error> {
-        let token = self.token().ok_or_else(|| {
-            self.raise::<Token>("SyntaxError", "Expected token").unwrap_err()
-        })?.clone();
-        
+        let token = match self.token() {
+            Some(tok) => tok.clone(),
+            None => {
+                return Err(self.raise::<Token>("SyntaxError", "Expected token").unwrap_err().clone());
+            }
+        };
+    
         let next_token = self.get_next();
         let token_type = &token.0;
         let token_value = &token.1;
-
-        if token_type == "IDENTIFIER" && next_token.as_ref().map(|t| t.0 == "SEPARATOR" && t.1 == "(").unwrap_or(false) {
+        
+        if token_type == "IDENTIFIER"
+            && next_token
+                .as_ref()
+                .map(|t| t.0 == "SEPARATOR" && t.1 == "(")
+                .unwrap_or(false)
+        {
             return self.parse_function_call();
         }
-
+    
         if token_type == "NUMBER" {
             self.next();
-            return Ok(Value::Number(token_value.parse::<f64>().unwrap_or(0.0)));
+            return Ok(Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("NUMBER".to_string()),
+                    Value::String(token_value.clone()),
+                ],
+            });
         }
-
+    
+        if token_type == "STRING" {
+            self.next();
+            return Ok(Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("STRING".to_string()),
+                    Value::String(token_value.clone()),
+                ],
+            });
+        }
+    
+        if token_type == "BOOLEAN" {
+            self.next();
+            let literal_value = match token_value.as_str() {
+                "true" => true,
+                "false" => false,
+                "null" => false,  // Assuming null is treated as false
+                _ => false,  // Default fallback if none of the expected values match
+            };
+    
+            return Ok(Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string()),
+                    Value::String("literal_value".to_string()),
+                ],
+                values: vec![
+                    Value::String("BOOLEAN".to_string()),
+                    Value::String(token_value.clone()),
+                    Value::String(literal_value.to_string()),
+                ],
+            });
+        }
+    
         self.pos += 1;
-        Ok(Value::Null)
+        Ok(Value::Null)  // Return Null if no matching token type is found
     }
+    
+    
 
     fn parse_function_call(&mut self) -> Result<Value, Error> {
         let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name"))?.1.clone();
@@ -182,13 +245,27 @@ impl Parser {
         self.check_for("SEPARATOR", ")");
         self.next();
 
-        if self.token().is_none() {
-            return self.raise("UEFError", "Unexpected end of input");
+        if pos_args.is_empty() && named_args.is_empty() {
+            let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
+            return Ok(Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("name".to_string()),
+                    Value::String("pos_arguments".to_string()),
+                    Value::String("named_arguments".to_string()),
+                ],
+                values: vec![
+                    Value::String("CALL".to_string()),
+                    Value::String(name.to_string()),
+                    Value::List(pos_args),
+                    Value::Map { keys, values },
+                ],
+            })
         }
 
-        if self.token().unwrap().0 == "IDENTIFIER" && self.get_next() == Some(&Token("OPERATOR".to_string(), "=".to_string())) {
-            return self.raise("SyntaxError", "Unexpected '=' in function call");
-        }
+        //if self.token().unwrap().0 == "IDENTIFIER" && self.get_next() == Some(&Token("OPERATOR".to_string(), "=".to_string())) {
+        //    return self.raise("SyntaxError", "Unexpected '=' in function call");
+        //}
 
         let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
         
@@ -215,6 +292,10 @@ impl Parser {
     
         while let Some(current_token) = self.token().cloned() {
             let next_token = self.get_next().cloned();
+
+            if self.token().is_none() {
+                return self.raise("UEFError", "Unexpected end of input");
+            }
     
             if current_token.0 == "SEPARATOR" && current_token.1 == ")" {
                 break;
