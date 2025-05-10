@@ -28,7 +28,7 @@ use crate::env::helpers::structs::Boolean;
 
 const VERSION: &str = "1.3.1";
 
-fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>,) {
+fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>) {
     let mut file_name = file_name.unwrap_or("<stdin>");
 
     if file_name.starts_with("\\\\?\\") {
@@ -79,7 +79,7 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
         }
 
         trace.push_str(&format!(
-            "{}-> File '{}:{}:{}' got traceback:\n",
+            "{}-> File '{}:{}:{}' got error:\n",
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
             file_name,
             line_number,
@@ -99,7 +99,7 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
         }
     } else {
         trace.push_str(&format!(
-            "{}-> File '{}:{}' got traceback:\n",
+            "{}-> File '{}:{}' got error:\n",
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
             file_name,
             line_number
@@ -107,13 +107,16 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     }
 
     trace.push_str(&format!(
-        "\t{} | {}: {}{}\n",
+        "\t{} | {}: {}{}",
         indent,
         error_type,
         error_msg,
         hex_to_ansi("reset", Some(use_colors))
     ));
-
+ 
+    if !(file_name == "<stdin>") {
+        trace.push_str("\n");
+    }
     eprintln!("{}", trace);
 }
 
@@ -124,7 +127,7 @@ fn format_value(value: &Value) -> String {
         Value::String(s) => format!("\"{}\"", s),
         Value::Boolean(b) => format!("{}", b),
         Value::Null => "null".to_string(),
-        Value::Map { keys, values } => {
+        Value::Map { keys, values, .. } => {
             let formatted_pairs: Vec<String> = keys
                 .iter()
                 .zip(values.iter())
@@ -391,7 +394,7 @@ fn main() {
                     &config,
                     Some(use_colors),
                 );
-                let interpreter = Interpreter::new(config.clone());
+                let mut interpreter = Interpreter::new(config.clone(), file_content.to_string(), use_colors);
                 interpreter.interpret(statements);
             } else {
                 eprintln!("Error: File '{}' does not exist or is not a valid file", file_path);
@@ -403,8 +406,7 @@ fn main() {
             hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
             config.version, 
             hex_to_ansi("reset", Some(use_colors))
-        );        
-        let interpreter = Interpreter::new(config.clone());
+        );
         loop {
             print!("{}{}{} ", 
                 hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
@@ -438,7 +440,7 @@ fn main() {
                 Ok(stmts) => stmts,
                 Err(error) => {
                     handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
-                    return;
+                    continue;
                 }
             };
             debug_log(
@@ -453,7 +455,22 @@ fn main() {
                 &config,
                 Some(use_colors),
             );
-            // interpreter.interpret(statements);
+            let mut interpreter = Interpreter::new(config.clone(), input.to_string(), use_colors);
+            let out = match interpreter.interpret(statements) {
+                Ok(out) => out,
+                Err(error) => {
+                    handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                    continue;
+                }
+            };
+            debug_log(
+                &format!(
+                    "Output: {}",
+                    format_value(&out)
+                ),
+                &config,
+                Some(use_colors),
+            );
         }
     }
 }

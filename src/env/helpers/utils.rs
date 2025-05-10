@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 use crate::env::helpers::structs::Boolean;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone)]
 pub struct Error {
@@ -44,17 +46,44 @@ impl From<&str> for Error {
 }
 
 
-
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
     Null,
-    Map { keys: Vec<Value>, values: Vec<Value> },
+    Map {
+        keys: Vec<Value>,
+        values: Vec<Value>,
+        line: usize,
+        column: usize,
+    },
     List(Vec<Value>),
     ListCompletion { pattern: Vec<Value>, end: Option<Box<Value>> },
+}
+
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match *self {
+            Value::Number(n) => {
+                (n.to_bits()).hash(state);
+            }
+            Value::String(ref s) => s.hash(state),
+            Value::Boolean(b) => b.hash(state),
+            Value::Null => 0.hash(state),
+            Value::Map { ref keys, ref values, .. } => {
+                keys.hash(state);
+                values.hash(state);
+            }
+            Value::List(ref v) => v.hash(state),
+            Value::ListCompletion { ref pattern, ref end } => {
+                pattern.hash(state);
+                end.hash(state);
+            }
+        }
+    }
 }
 
 pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
