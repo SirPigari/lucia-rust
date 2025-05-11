@@ -26,7 +26,7 @@ use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 use crate::env::helpers::structs::Boolean;
 
-const VERSION: &str = "1.3.1";
+const VERSION: &str = "1.0.0-rust";
 
 fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>) {
     let mut file_name = file_name.unwrap_or("<stdin>");
@@ -274,7 +274,7 @@ fn main() {
 
     let config_path = env_path.join("config.json");
 
-    let config = if config_path.exists() {
+    let mut config = if config_path.exists() {
         match load_config(&config_path) {
             Ok(config) => config,
             Err(_) => {
@@ -287,15 +287,19 @@ fn main() {
             }
         }
     } else {
-        eprintln!("Config file does not exist and no --activate flag passed.");
-        exit(1);
+        eprintln!("Config file not found, activating environment...");
+        if let Err(err) = activate_environment(&env_path) {
+            eprintln!("Failed to activate environment: {}", err);
+            exit(1);
+        }
+        load_config(&config_path).unwrap()
     };
     if activate_flag {
         if let Err(err) = activate_environment(&env_path) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
-        load_config(&config_path).unwrap();
+        config = load_config(&config_path).unwrap();
     };
 
     let home_dir = config.home_dir
@@ -309,7 +313,7 @@ fn main() {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
-        load_config(&config_path).unwrap();
+        config = load_config(&config_path).unwrap();
     }
 
     let home_dir = config.home_dir
