@@ -93,19 +93,18 @@ impl Interpreter {
             return Value::Null;
         }
     
-        match &statement {
-            Value::Map { keys, values, .. } => {
-                let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+        let Value::Map { keys, values, .. } = statement else {
+            return self.raise("SyntaxError", "Expected a statement map");
+        };
+        
+        let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
-                match map.get(&Value::String("type".to_string())) {
-                    Some(Value::String(t)) => match t.as_str() {
-                        "NUMBER" => self.handle_number(map),
-                        _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
-                    },
-                    _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
-                }
-            }
-            _ => self.raise("SyntaxError", "Expected a statement map"),
+        match map.get(&Value::String("type".to_string())) {
+            Some(Value::String(t)) => match t.as_str() {
+                "NUMBER" => self.handle_number(map),
+                _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
+            },
+            _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
 
@@ -113,12 +112,12 @@ impl Interpreter {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             if s.contains('.') {
                 match s.parse::<f64>() {
-                    Ok(num) => Value::Number(num),
+                    Ok(num) => Value::Float(num as f64),
                     Err(_) => self.raise("RuntimeError", "Invalid float format"),
                 }
             } else {
                 match s.parse::<i64>() {
-                    Ok(num) => Value::Number(num as f64),
+                    Ok(num) => Value::Int(num as i64),
                     Err(_) => self.raise("RuntimeError", "Invalid integer format"),
                 }
             }

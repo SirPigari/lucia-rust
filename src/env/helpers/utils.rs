@@ -48,7 +48,8 @@ impl From<&str> for Error {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Number(f64),
+    Float(f64),
+    Int(i64),
     String(String),
     Boolean(bool),
     Null,
@@ -67,8 +68,13 @@ impl Eq for Value {}
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match *self {
-            Value::Number(n) => {
-                (n.to_bits()).hash(state);
+            Value::Float(n) => {
+                0u8.hash(state);
+                n.to_bits().hash(state);
+            }
+            Value::Int(n) => {
+                1u8.hash(state);
+                n.hash(state);
             }
             Value::String(ref s) => s.hash(state),
             Value::Boolean(b) => b.hash(state),

@@ -123,7 +123,8 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
 
 fn format_value(value: &Value) -> String {
     match value {
-        Value::Number(n) => format!("{}", n),
+        Value::Float(n) => format!("{}", *n as f64),
+        Value::Int(n) => format!("{}", *n as i64),
         Value::String(s) => format!("\"{}\"", s),
         Value::Boolean(b) => format!("{}", b),
         Value::Null => "null".to_string(),
@@ -460,20 +461,16 @@ fn main() {
                 Some(use_colors),
             );
             let mut interpreter = Interpreter::new(config.clone(), input.to_string(), use_colors);
-            let out = match interpreter.interpret(statements) {
+            let out: Value = match interpreter.interpret(statements) {
                 Ok(out) => out,
                 Err(error) => {
                     handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
                     continue;
                 }
             };
-            debug_log(
-                &format!(
-                    "Output: {}",
+            println!(
+                    "{}",
                     format_value(&out)
-                ),
-                &config,
-                Some(use_colors),
             );
         }
     }

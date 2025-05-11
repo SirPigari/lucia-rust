@@ -9,8 +9,8 @@ lazy_static! {
 
 fn get_type_default(type_: &str) -> Value {
     match type_ {
-        "int" => Value::Number(0.0),
-        "float" => Value::Number(0.0),
+        "int" => Value::Float(0.0),
+        "float" => Value::Int(0),
         "string" => Value::String(String::new()),
         "bool" => Value::Boolean(false),
         "any" => Value::Null,
