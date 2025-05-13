@@ -36,7 +36,7 @@ impl<'a> Lexer<'a> {
             ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
             ("OPERATOR", &operator_pattern),
             ("IDENTIFIER", r"\bnon-static\b|\b[a-zAZ_]\w*\b"),
-            ("NUMBER", r"-?\b\d+(\.\d+)?\b"),
+            ("NUMBER", r"-?(?:\d(?:_?\d)*)?(?:\.(?:\d(?:_?\d)*))?"),
             ("SEPARATOR", r"\.\.\.|[(){}\[\];:.,\?]"),
             ("WHITESPACE", r"\s+"),
             ("INVALID", r"."),
@@ -66,6 +66,8 @@ impl<'a> Lexer<'a> {
                             value = value.replace("  ", "\\t");
                             value = value.replace(" ", "\\t");
                             value
+                        } else if capture_name == "NUMBER" {
+                            value.as_str().replace("_", "")
                         } else {
                             value.as_str().to_string()
                         };

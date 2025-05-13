@@ -20,7 +20,7 @@ mod lexer;
 
 use crate::env::helpers::utils;
 use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::{hex_to_ansi, Value, get_line_info, Error};
+use crate::utils::{hex_to_ansi, Value, get_line_info, Error, format_value};
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
@@ -98,12 +98,20 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
             trace.push_str(&format!("\t{} ...\n", indent));
         }
     } else {
-        trace.push_str(&format!(
-            "{}-> File '{}:{}' got error:\n",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            file_name,
-            line_number
-        ));
+        if line_number > 0 {
+            trace.push_str(&format!(
+                "{}-> File '{}:{}' got error:\n",
+                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                file_name,
+                line_number
+            ));
+        } else {
+            trace.push_str(&format!(
+                "{}-> File '{}' got error:\n",
+                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                file_name
+            ));
+        }
     }
 
     trace.push_str(&format!(
@@ -119,47 +127,6 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     }
     eprintln!("{}", trace);
 }
-
-
-fn format_value(value: &Value) -> String {
-    match value {
-        Value::Float(n) => format!("{}", *n as f64),
-        Value::Int(n) => format!("{}", *n as i64),
-        Value::String(s) => format!("\"{}\"", s),
-        Value::Boolean(b) => format!("{}", b),
-        Value::Null => "null".to_string(),
-        Value::Map { keys, values, .. } => {
-            let formatted_pairs: Vec<String> = keys
-                .iter()
-                .zip(values.iter())
-                .map(|(key, value)| format!("{}: {}", format_value(key), format_value(value)))
-                .collect();
-            format!("{{{}}}", formatted_pairs.join(", "))
-        },
-        Value::List(values) => {
-            if values.is_empty() {
-                "[]".to_string()
-            } else {
-                let formatted_values: Vec<String> = values.iter().map(|v| format_value(v)).collect();
-                format!("[{}]", formatted_values.join(", "))
-            }
-        },
-        Value::ListCompletion { pattern, end } => {
-            let formatted_pattern: Vec<String> = pattern.iter().map(|v| format_value(v)).collect();
-            let formatted_end = match end {
-                Some(e) => format_value(e),
-                None => "None".to_string(),
-            };
-            format!(
-                "ListCompletion {{ pattern: [{}], end: {} }}",
-                formatted_pattern.join(", "),
-                formatted_end
-            )
-        }
-    }
-}
-
-
 
 fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
@@ -392,7 +359,7 @@ fn main() {
                         "Statements: [{}]",
                         statements
                             .iter()
-                            .map(|stmt| format_value(stmt))
+                            .map(|stmt| format_value(&stmt.convert_to_map()))
                             .collect::<Vec<String>>()
                             .join(", ")
                     ),
@@ -444,6 +411,11 @@ fn main() {
             let statements = match parser.parse_safe() {
                 Ok(stmts) => stmts,
                 Err(error) => {
+                    debug_log(
+                        "Error while parsing:",
+                        &config,
+                        Some(use_colors),
+                    );
                     handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
                     continue;
                 }
@@ -453,7 +425,7 @@ fn main() {
                     "Statements: [{}]",
                     statements
                         .iter()
-                        .map(|stmt| format_value(stmt))
+                        .map(|stmt| format_value(&stmt.convert_to_map()))
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
@@ -464,6 +436,11 @@ fn main() {
             let out: Value = match interpreter.interpret(statements) {
                 Ok(out) => out,
                 Err(error) => {
+                    debug_log(
+                        "Error while interpreting:",
+                        &config,
+                        Some(use_colors),
+                    );
                     handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
                     continue;
                 }
