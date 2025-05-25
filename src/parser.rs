@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Statement};
+use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Statement, Float, Int};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -9,8 +9,8 @@ lazy_static! {
 
 fn get_type_default(type_: &str) -> Value {
     match type_ {
-        "int" => Value::Float(0.0),
-        "float" => Value::Int(0),
+        "int" => Value::Float(0.0.into()),
+        "float" => Value::Int(0.into()),
         "string" => Value::String(String::new()),
         "bool" => Value::Boolean(false),
         "any" => Value::Null,
@@ -260,6 +260,49 @@ impl Parser {
             return self.parse_operand()
         }
 
+        if token_type == "OPERATOR" {
+            let operator = token_value.clone();
+
+            if ["+", "-"].contains(&operator.as_str()) {
+                self.next();
+                let right = self.parse_expression();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+                self.next();
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("left".to_string()),
+                        Value::String("operator".to_string()),
+                        Value::String("right".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("OPERATION".to_string()),
+                        Value::Map { 
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("value".to_string()),
+                            ], 
+                            values: vec![
+                                Value::String("NUMBER".to_string()),
+                                Value::String("0".to_string()),
+                            ],
+                        },
+                        Value::String(operator),
+                        right.convert_to_map(),
+                    ],
+                    line,
+                    column,
+                };
+            } else {
+                self.raise("SyntaxError", &format!(
+                    "Unexpected operator '{}' at start of expression.",
+                    operator
+                ));
+                return Statement::Null;
+            }
+        }
 
         self.raise("SyntaxError", &format!(
             "Invalid syntax. '{}' was unexpected.",
@@ -390,58 +433,6 @@ impl Parser {
         (pos_args, named_args)
     }
 
-    //def parse_operation(self):
-    //   left = self.parse_operand()
-    //   while self.token and self.token[0] == 'OPERATOR':
-    //       operator = self.parse_operator()
-    //       right = self.parse_operand()
-    //       left = {"type": "OPERATION", "left": left, "operator": operator, "right": right}
-    //   return left
-
-    //def parse_operand(self):
-    //    if self.token[0] == 'NUMBER':
-    //        value = {"type": "NUMBER", "value": float(self.token[1])}
-    //    elif self.token == ('OPERATOR', '-') and self.get_next() and self.get_next()[0] == 'NUMBER':
-    //        self.next()
-    //        value = {"type": "NUMBER", "value": -float(self.token[1])}
-    //    elif self.token == ('SEPARATOR', '('):
-    //        self.next()
-    //        value = self.parse_expression()
-    //        self.check_for('SEPARATOR', ')')
-    //    elif self.token[0] == 'IDENTIFIER' and self.get_next() and self.get_next() == ('SEPARATOR', '['):
-    //        name = self.token[1]
-    //        self.next()
-    //        self.check_for('SEPARATOR', '[')
-    //        self.next()
-    //        index = self.parse_expression()
-    //        self.check_for('SEPARATOR', ']')
-    //        self.next()
-    //        value = {
-    //            "type": "INDEX",
-    //            "name": name,
-    //            "index": index
-    //        }
-    //    elif self.token[0] == 'IDENTIFIER' and self.get_next() and self.get_next() == ('SEPARATOR', '.'):
-    //        value = self.parse_property()
-    //        self.pos -= 1
-    //    elif self.token[0] == 'IDENTIFIER' and self.get_next() and self.get_next() == ('SEPARATOR', '('):
-    //        value = self.parse_function_call()
-    //        self.pos -= 1
-    //    elif self.token[0] == 'IDENTIFIER':
-    //        value = {"type": "VARIABLE", "name": self.token[1]}
-    //    elif self.token[0] == 'STRING':
-    //        value = {"type": "STRING", "value": self.token[1][1:-1]}
-    //    elif self.token[0] == 'BOOLEAN':
-    //        value_ = self.token[1]
-    //        literal_value = True if value_ == 'true' else False if value_ == 'false' else None if value_ == 'null' else "Undefined"
-    //        self.next()
-    //        value = {"type": "BOOLEAN", "value": value_, "literal_value": literal_value}
-    //    else:
-    //        value = self.parse_expression()
-    //        self.pos -= 1
-    //    self.next()
-    //    return value
-
     fn parse_operand(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or_else(|| Token("".to_string(), "".to_string()));
         let line = self.current_line();
@@ -498,7 +489,11 @@ impl Parser {
                 line,
                 column,
             };
-        };
+        };        
+        self.raise("SyntaxError", &format!(
+            "Invalid syntax. '{}' was unexpected.",
+            token_value
+        ));
         Statement::Null
     }
 

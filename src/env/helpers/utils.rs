@@ -1,12 +1,330 @@
 use std::io::{self, Write};
+use std::fmt;
 use crate::env::helpers::structs::Boolean;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::helpers::config::{Config};
 use std::any::Any;
+use num_bigint::BigInt;
+use num_bigfloat::BigFloat;
+use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
+use std::str::FromStr;
+use crate::env::helpers::functions::Function;
 
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Debug)]
+pub struct Int {
+    pub value: BigInt,
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
+pub struct Float {
+    pub value: BigFloat,
+}
+
+impl From<i64> for Int {
+    fn from(i: i64) -> Self {
+        Self { value: BigInt::from(i) }
+    }
+}
+
+impl From<f64> for Float {
+    fn from(f: f64) -> Self {
+        Self { value: BigFloat::from_f64(f) }
+    }
+}
+
+impl From<Float> for Int {
+    fn from(f: Float) -> Self {
+        Self { value: BigInt::from_f64(f.value.to_f64()).unwrap() }
+    }
+}
+
+impl From<Int> for Float {
+    fn from(i: Int) -> Self {
+        Self { value: BigFloat::from_i64(i.value.to_i64().unwrap()) }
+    }
+}
+
+impl From<BigFloat> for Int {
+    fn from(f: BigFloat) -> Self {
+        Self { value: BigInt::from_f64(f.to_f64()).unwrap() }
+    }
+}
+
+impl From<BigInt> for Float {
+    fn from(i: BigInt) -> Self {
+        Self { value: BigFloat::from_i64(i.to_i64().unwrap()) }
+    }
+}
+
+impl Hash for Int {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.to_str_radix(10).hash(state);
+    }
+}
+
+impl Hash for Float {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value.to_string().hash(state);
+    }
+}
+
+// === Arithmetic Ops for Int ===
+impl Add for Int {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self { value: self.value + rhs.value }
+    }
+}
+
+impl Sub for Int {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self { value: self.value - rhs.value }
+    }
+}
+
+impl Mul for Int {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self { value: self.value * rhs.value }
+    }
+}
+
+impl Div for Int {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        Self { value: self.value / rhs.value }
+    }
+}
+
+impl Rem for Int {
+    type Output = Self;
+    fn rem(self, rhs: Self) -> Self::Output {
+        Self { value: self.value % rhs.value }
+    }
+}
+
+impl Neg for Int {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self { value: -self.value }
+    }
+}
+
+// === Arithmetic Ops for Float ===
+impl Add for Float {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self { value: self.value + rhs.value }
+    }
+}
+
+impl Sub for Float {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self { value: self.value - rhs.value }
+    }
+}
+
+impl Mul for Float {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self { value: self.value * rhs.value }
+    }
+}
+
+impl Div for Float {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        Self { value: self.value / rhs.value }
+    }
+}
+
+impl Rem for Float {
+    type Output = Self;
+    fn rem(self, rhs: Self) -> Self::Output {
+        Self { value: self.value % rhs.value }
+    }
+}
+
+impl Neg for Float {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Self { value: -self.value }
+    }
+}
+
+impl Float {
+    pub fn new(f: f64) -> Self {
+        Float {
+            value: BigFloat::from_f64(f),
+        }
+    }
+    pub fn is_zero(&self) -> bool {
+        self.value.is_zero()
+    }
+    pub fn to_i64(&self) -> Option<i64> {
+        self.value.to_i64()
+    }
+    pub fn to_f64(&self) -> Option<f64> {
+        Some(self.value.to_f64())
+    }
+    pub fn to_u32(&self) -> Option<u32> {
+        self.value.to_u32()
+    }
+    pub fn abs(&self) -> Self {
+        Float {
+            value: self.value.abs(),
+        }
+    }
+    pub fn powf(&self, exp: Float) -> Self {
+        Float {
+            value: self.value.pow(&exp.value),
+        }
+    }
+    pub fn powi(&self, exp: Int) -> Self {
+        Float {
+            value: self.value.pow(&BigFloat::from_i64(exp.to_i64().unwrap())),
+        }
+    }
+    pub fn from_int(i: Int) -> Self {
+        Float {
+            value: BigFloat::from(i.to_i64().unwrap()),
+        }
+    }
+    pub fn checked_pow(&self, exp: &Float) -> Option<Float> {
+        if exp.is_zero() {
+            return Some(Float::new(1.0));
+        }
+
+        let result = self.value.pow(&exp.value);
+        if result.is_zero() {
+            return None;
+        }
+        Some(Float { value: result })
+    }
+    pub fn checked_mul(&self, exp: u32) -> Option<Float> {
+        let result = self.value.mul(BigFloat::from(exp));
+        Some(Float { value: result })
+    }
+    pub fn checked_powf(&self, exp: &Float) -> Option<Float> {
+        let result = self.value.pow(&exp.value);
+        Some(Float { value: result })
+    }
+
+    pub fn checked_mulf(&self, exp: &Float) -> Option<Float> {
+        let result = self.value.mul(&exp.value);
+        Some(Float { value: result })
+    }
+    pub fn round(&self) -> Self {
+        Float {
+            value: self.clone().value,
+        }
+    }
+}
+
+impl Int {
+    pub fn new(i: i64) -> Self {
+        Int {
+            value: BigInt::from(i),
+        }
+    }
+    pub fn is_zero(&self) -> bool {
+        self.value.is_zero()
+    }
+    pub fn to_i64(&self) -> Option<i64> {
+        self.value.to_i64()
+    }
+    pub fn to_f64(&self) -> Option<f64> {
+        self.value.to_f64()
+    }
+    pub fn to_u32(&self) -> Option<u32> {
+        self.value.to_u32()
+    }
+    pub fn abs(&self) -> Self {
+        Int {
+            value: self.value.abs(),
+        }
+    }
+    pub fn pow(&self, exp: Int) -> Self {
+        Int {
+            value: self.value.pow(exp.to_u32().unwrap()),
+        }
+    }
+    pub fn checked_pow(&self, exp: u32) -> Option<Int> {
+        if exp == 0 {
+            return Some(Int::new(1));
+        }
+
+        let result = self.value.pow(exp);
+        if result.is_zero() {
+            return None;
+        }
+        Some(Int { value: result })
+    }
+    pub fn checked_mul(&self, exp: &Int) -> Option<Int> {
+        let bigint_exp = &exp.value;
+        self.value.checked_mul(bigint_exp).map(|v| Int { value: v })
+    }
+    pub fn from_float(f: Float) -> Self {
+        let s = f.value.to_string();
+        let parts: Vec<&str> = s.split('.').collect();
+        let int_str = parts[0];
+
+        let value = BigInt::parse_bytes(int_str.as_bytes(), 10)
+            .expect("Failed to parse BigFloat string into BigInt");
+
+        Int { value }
+    }
+
+    pub fn checked_powf(&self, exp: &Float) -> Option<Float> {
+        if let Some(exp_u32) = exp.to_u32() {
+            let result = self.value.pow(exp_u32);
+            let result_str = result.to_str_radix(10);
+            let result_bigfloat = BigFloat::from_str(&result_str).ok()?;
+            return Some(Float { value: result_bigfloat });
+        }
+
+        if let Some(exp_f64) = exp.to_f64() {
+            let result = self.value.to_f64().unwrap_or(0.0).powf(exp_f64);
+            let result_bigfloat = BigFloat::from_f64(result);
+            return Some(Float { value: result_bigfloat });
+        }
+
+        None
+    }
+    pub fn checked_mulf(&self, exp: &Float) -> Option<Float> {
+        if let Some(f64_value) = self.value.to_f64() {
+            let big_float = BigFloat::from_f64(f64_value);
+            let result = big_float.mul(&exp.value);
+            Some(Float { value: result })
+        } else {
+            None
+        }
+    }
+    pub fn round(&self) -> Self {
+        Int {
+            value: self.clone().value,
+        }
+    }
+}
+
+impl fmt::Display for Float {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl fmt::Display for Int {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Error {
     pub error_type: String,
     pub msg: String,
@@ -48,6 +366,7 @@ impl From<&str> for Error {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Variable {
     name: String,
     value: Value,
@@ -118,55 +437,6 @@ impl Variable {
     }
 }
 
-pub struct Function {
-    name: String,
-    parameters: Vec<String>,
-    return_type: String,    
-    is_static: bool,
-    is_public: bool,
-    is_final: bool,
-    is_builtin: bool,
-    function: Box<dyn Fn(&[Box<dyn Any>]) -> Box<dyn Any>>,
-}
-
-impl Function {
-    pub fn new(
-        name: String,
-        parameters: Vec<String>,
-        return_type: String,
-        is_static: bool,
-        is_public: bool,
-        is_final: bool,
-        is_builtin: bool,
-        function: Box<dyn Fn(&[Box<dyn Any>]) -> Box<dyn Any>>,
-    ) -> Self {
-        Self {
-            name,
-            parameters,
-            return_type,
-            is_static,
-            is_public,
-            is_final,
-            is_builtin,
-            function,
-        }
-    }
-
-    pub fn execute(&self, args: Vec<Box<dyn Any>>) -> Box<dyn Any> {
-        (self.function)(&args)
-    }
-
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-    pub fn get_parameters(&self) -> &Vec<String> {
-        &self.parameters
-    }
-
-    pub fn get_return_type(&self) -> &str {
-        &self.return_type
-    }
-}
 
 pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let (s1, s2) = if s1.len() > s2.len() { (s2, s1) } else { (s1, s2) };
@@ -189,50 +459,73 @@ pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     costs[s1.len()]
 }
 
-
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
-    Float(f64),
-    Int(i64),
+    Float(Float),
+    Int(Int),
     String(String),
     Boolean(bool),
     Null,
     Map {
         keys: Vec<Value>,
-        values: Vec<Value>
+        values: Vec<Value>,
     },
     List(Vec<Value>),
-    ListCompletion { pattern: Vec<Value>, end: Option<Box<Value>> },
+    ListCompletion {
+        pattern: Vec<Value>,
+        end: Option<Box<Value>>,
+    },
+    Function(Function),
+    Error(&'static str, &'static str),
 }
 
 impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        match *self {
+        match self {
             Value::Float(n) => {
                 0u8.hash(state);
-                n.to_bits().hash(state);
+                let canonical = n.value.to_string();
+                canonical.hash(state);
             }
+
             Value::Int(n) => {
                 1u8.hash(state);
-                n.hash(state);
+                let canonical = n.value.to_str_radix(10);
+                canonical.hash(state);
             }
-            Value::String(ref s) => s.hash(state),
+
+            Value::String(s) => s.hash(state),
+
             Value::Boolean(b) => b.hash(state),
+
             Value::Null => 0.hash(state),
-            Value::Map { ref keys, ref values, .. } => {
+
+            Value::Map { keys, values, .. } => {
                 keys.hash(state);
                 values.hash(state);
             }
-            Value::List(ref v) => v.hash(state),
-            Value::ListCompletion { ref pattern, ref end } => {
+
+            Value::List(v) => v.hash(state),
+
+            Value::ListCompletion { pattern, end } => {
                 pattern.hash(state);
                 end.hash(state);
+            }
+            Value::Function(func) => {
+                func.get_name().hash(state);
+                func.get_parameters().hash(state);
+                func.get_return_type().hash(state);
+            }
+            Value::Error(err_type, err_msg) => {
+                err_type.hash(state);
+                err_msg.hash(state);
             }
         }
     }
 }
+
 
 impl Add for Value {
     type Output = Value;
@@ -241,8 +534,8 @@ impl Add for Value {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
             (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-            (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 + b),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a + b as f64),
+            (Value::Int(a), Value::Float(b)) => Value::Float((a + b.into()).into()),
+            (Value::Float(a), Value::Int(b)) => Value::Float(a + b.into()),
             (Value::String(a), Value::String(b)) => Value::String(a + &b),
             _ => Value::Null,
         }
@@ -256,8 +549,8 @@ impl Sub for Value {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
             (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-            (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 - b),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a - b as f64),
+            (Value::Int(a), Value::Float(b)) => Value::Float((a - b.into()).into()),
+            (Value::Float(a), Value::Int(b)) => Value::Float(a - b.into()),
             _ => Value::Null,
         }
     }
@@ -270,8 +563,8 @@ impl Mul for Value {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
             (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-            (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 * b),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a * b as f64),
+            (Value::Int(a), Value::Float(b)) => Value::Float((a * b.into()).into()),
+            (Value::Float(a), Value::Int(b)) => Value::Float(a * b.into()),
             _ => Value::Null,
         }
     }
@@ -282,22 +575,22 @@ impl Div for Value {
 
     fn div(self, other: Value) -> Value {
         match (self, other) {
-            (Value::Int(_), Value::Int(0)) => Value::Null,
-            (Value::Float(_), Value::Float(b)) if b == 0.0 => Value::Null,
+            (Value::Int(_), Value::Int(b)) if b.is_zero() => Value::Null,
+            (Value::Float(_), Value::Float(b)) if b == 0.0.into() => Value::Null,
             (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
             (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
             (Value::Int(a), Value::Float(b)) => {
-                if b == 0.0 {
+                if b == 0.0.into() {
                     Value::Null
                 } else {
-                    Value::Float(a as f64 / b)
+                    Value::Float((a / b.into()).into())
                 }
             }
             (Value::Float(a), Value::Int(b)) => {
-                if b == 0 {
+                if b == 0.into() {
                     Value::Null
                 } else {
-                    Value::Float(a / b as f64)
+                    Value::Float(a / b.into())
                 }
             }
             _ => Value::Null,
@@ -305,21 +598,18 @@ impl Div for Value {
     }
 }
 
-
 impl Rem for Value {
     type Output = Value;
 
     fn rem(self, other: Value) -> Value {
         match (self, other) {
-            (_, Value::Int(0)) => Value::Null,
-
-            (_, Value::Float(b)) if b == 0.0 => Value::Null,
+            (_, Value::Int(b)) if b == 0.into() => Value::Null,
+            (_, Value::Float(b)) if b == 0.0.into() => Value::Null,
 
             (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
             (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-            (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 % b),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a % b as f64),
-
+            (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
+            (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
             _ => Value::Null,
         }
     }
@@ -351,13 +641,13 @@ impl Value {
                     if let Value::String(s) = key {
                         if s == "_line" {
                             if let Some(Value::Int(val)) = values.get(i) {
-                                line = *val as usize;
+                                line = val.to_u32().unwrap() as usize;
                                 continue;
                             }
                         }
                         if s == "_column" {
                             if let Some(Value::Int(val)) = values.get(i) {
-                                column = *val as usize;
+                                column = val.to_u32().unwrap() as usize;
                                 continue;
                             }
                         }
@@ -380,8 +670,8 @@ impl Value {
     }
     pub fn is_zero(&self) -> bool {
         match self {
-            Value::Int(0) => true,
-            Value::Float(f) if *f == 0.0 => true,
+            Value::Int(val) if val == &Int::new(0) => true,
+            Value::Float(f) if *f == 0.0.into() => true,
             _ => false,
         }
     }
@@ -395,6 +685,8 @@ impl Value {
             Value::Map { .. } => "map",
             Value::List(_) => "list",
             Value::ListCompletion { .. } => "list_completion",
+            Value::Function(_) => "function",
+            Value::Error(_, _) => "error",
         }
     }
     pub fn type_name(&self) -> String {
@@ -407,24 +699,28 @@ impl Value {
             Value::Map { .. } => "map".to_string(),
             Value::List(_) => "list".to_string(),
             Value::ListCompletion { .. } => "list_completion".to_string(),
+            Value::Function(func) => func.get_return_type().to_string(),
+            Value::Error(err_type, _) => err_type.to_string(),
         }
     }
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Boolean(b) => *b,
-            Value::Int(n) => *n != 0,
-            Value::Float(f) => *f != 0.0,
+            Value::Int(n) => *n != 0.into(),
+            Value::Float(f) => *f != 0.0.into(),
             Value::String(s) => !s.is_empty(),
             Value::List(l) => !l.is_empty(),
             Value::Map { keys, .. } => !keys.is_empty(), // If no keys, assume empty
             Value::ListCompletion { pattern, .. } => !pattern.is_empty(),
+            Value::Function(_) => true,
+            Value::Error(_, _) => true,
             Value::Null => false,
         }
     }
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum Statement {
     Statement {
         keys: Vec<Value>,
@@ -448,8 +744,8 @@ impl Statement {
                     },
                     values: {
                         let mut new_values = values.clone();
-                        new_values.push(Value::Int(*line as i64));
-                        new_values.push(Value::Int(*column as i64));
+                        new_values.push(Value::Int(Int::from(*line as i64)));
+                        new_values.push(Value::Int(Int::from(*column as i64)));
                         new_values
                     },
                 }
@@ -461,8 +757,8 @@ impl Statement {
                         Value::String("_column".to_string())
                     ],
                     values: vec![
-                        Value::Int(0),
-                        Value::Int(0),
+                        Value::Int(0.into()),
+                        Value::Int(0.into()),
                     ],
                 }
             },
@@ -521,8 +817,29 @@ pub fn read_input(prompt: &str) -> String {
 
 pub fn format_value(value: &Value) -> String {
     match value {
-        Value::Float(n) => format!("{}", *n as f64),
-        Value::Int(n) => format!("{}", *n as i64),
+        Value::Float(n) => {
+            let n_str = n.to_string();
+            if let Some(dot_pos) = n_str.find('.') {
+                let mut trimmed = n_str.trim_start_matches('0');
+                if trimmed.starts_with('.') {
+                    trimmed = &trimmed[1..];
+                }
+                let trimmed = trimmed.trim_end_matches('0');
+                if trimmed == "" {
+                    return "0".to_string();
+                }
+                trimmed.to_string()
+            } else {
+                n_str.trim_start_matches('0').to_string()
+            }
+        }
+        Value::Int(n) => {
+            let trimmed = n.to_string().trim_start_matches('0').to_string();
+            if trimmed == "" {
+                return "0".to_string();
+            }
+            trimmed
+        }
         Value::String(s) => format!("\"{}\"", s),
         Value::Boolean(b) => format!("{}", b),
         Value::Null => "null".to_string(),
@@ -561,6 +878,16 @@ pub fn format_value(value: &Value) -> String {
                 formatted_end
             )
         }
+        Value::Function(func) => {
+            format!("<function '{}' at {:p}>", func.get_name(), func)
+        }
+        Value::Error(err_type, err_msg) => {
+            format!(
+                "<{}: {}>",
+                err_type,
+                err_msg
+            )
+        }
     }
 }
 
@@ -570,7 +897,6 @@ pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
         print_colored(message, &config.color_scheme.debug, Some(use_colors));
     }
 }
-
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

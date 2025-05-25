@@ -11,6 +11,8 @@ mod env {
         pub mod utils;
         pub mod config;
         pub mod structs;
+        pub mod functions;
+        pub mod native;
     }
 }
 
@@ -382,7 +384,7 @@ fn main() {
         loop {
             print!("{}{}{} ", 
                 hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
-                ">>> ", 
+                ">>>", 
                 hex_to_ansi(&config.color_scheme.input_text, Some(use_colors))
             );
             let input = utils::read_input("");
@@ -445,10 +447,12 @@ fn main() {
                     continue;
                 }
             };
-            println!(
-                    "{}",
-                    format_value(&out)
-            );
+            if !matches!(out, Value::Null) {
+                println!(
+                        "{}",
+                        format_value(&out)
+                );
+            }
         }
     }
 }
