@@ -11,6 +11,21 @@ use num_bigfloat::BigFloat;
 use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
 use std::str::FromStr;
 use crate::env::helpers::functions::Function;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+static ERROR_CACHE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn to_static(s: String) -> &'static str {
+    let mut cache = ERROR_CACHE.lock().unwrap();
+    if let Some(&static_ref) = cache.get(&s) {
+        return static_ref;
+    }
+    let static_ref: &'static str = Box::leak(s.clone().into_boxed_str());
+    cache.insert(s, static_ref);
+    static_ref
+}
+
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Debug)]
 pub struct Int {
@@ -20,6 +35,24 @@ pub struct Int {
 #[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct Float {
     pub value: BigFloat,
+}
+
+impl From<usize> for Value {
+    fn from(i: usize) -> Self {
+        Value::Int(Int { value: BigInt::from(i) })
+    }
+}
+
+impl From<usize> for Int {
+    fn from(i: usize) -> Self {
+        Self { value: BigInt::from(i) }
+    }
+}
+
+impl From<i32> for Int {
+    fn from(i: i32) -> Self {
+        Self { value: BigInt::from(i) }
+    }
 }
 
 impl From<i64> for Int {
@@ -194,6 +227,11 @@ impl Float {
             value: BigFloat::from(i.to_i64().unwrap()),
         }
     }
+    pub fn to_int(&self) -> Int {
+        Int {
+            value: BigInt::from_f64(self.value.to_f64()).unwrap(),
+        }
+    }
     pub fn checked_pow(&self, exp: &Float) -> Option<Float> {
         if exp.is_zero() {
             return Some(Float::new(1.0));
@@ -328,6 +366,7 @@ impl fmt::Display for Int {
 pub struct Error {
     pub error_type: String,
     pub msg: String,
+    pub help: Option<String>,
     pub line: (usize, String),
     pub column: usize,
 }
@@ -337,6 +376,17 @@ impl Error {
         Self {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
+            help: None,
+            line: (0, "<unknown>".to_string()),
+            column: 0,
+        }
+    }
+
+    pub fn error_with_help(error_type: &'static str, msg: &'static str, help: String) -> Self {
+        Self {
+            error_type: to_static(error_type.to_string()).to_string(),
+            msg: to_static(msg.to_string()).to_string(),
+            help: Some(help),
             line: (0, "<unknown>".to_string()),
             column: 0,
         }
@@ -346,6 +396,7 @@ impl Error {
         Self {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
+            help: None,
             line: (line, line_text.to_string()),
             column,
         }
@@ -357,6 +408,10 @@ impl Error {
 
     pub fn msg(&self) -> &str {
         &self.msg
+    }
+
+    pub fn help(&self) -> Option<&str> {
+        self.help.as_deref()
     }
 }
 
@@ -717,6 +772,35 @@ impl Value {
             Value::Null => false,
         }
     }
+    pub fn to_string(&self) -> String {
+        match self {
+            Value::Float(f) => f.to_string(),
+            Value::Int(i) => i.to_string(),
+            Value::String(s) => s.clone(),
+            Value::Boolean(b) => b.to_string(),
+            Value::Null => "null".to_string(),
+            Value::Map { keys, values } => {
+                let pairs: Vec<String> = keys.iter().zip(values.iter())
+                    .map(|(k, v)| format!("{}: {}", k.to_string(), v.to_string()))
+                    .collect();
+                format!("{{{}}}", pairs.join(", "))
+            }
+            Value::List(v) => {
+                let items: Vec<String> = v.iter().map(|item| item.to_string()).collect();
+                format!("[{}]", items.join(", "))
+            }
+            Value::ListCompletion { pattern, end } => {
+                let pattern_str: Vec<String> = pattern.iter().map(|v| v.to_string()).collect();
+                let end_str = match end {
+                    Some(e) => e.to_string(),
+                    None => "None".to_string(),
+                };
+                format!("ListCompletion {{ pattern: [{}], end: {} }}", pattern_str.join(", "), end_str)
+            }
+            Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func),
+            Value::Error(err_type, err_msg) => format!("<{}: {}>", err_type, err_msg),
+        }
+    }
 }
 
 
@@ -888,6 +972,51 @@ pub fn format_value(value: &Value) -> String {
                 err_msg
             )
         }
+    }
+}
+
+pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a str> {
+    fn levenshtein(a: &str, b: &str) -> usize {
+        let mut costs = vec![0; b.len() + 1];
+        for j in 0..=b.len() {
+            costs[j] = j;
+        }
+
+        for (i, ca) in a.chars().enumerate() {
+            let mut last = i;
+            costs[0] = i + 1;
+            for (j, cb) in b.chars().enumerate() {
+                let old = costs[j + 1];
+                costs[j + 1] = std::cmp::min(
+                    std::cmp::min(costs[j] + 1, costs[j + 1] + 1),
+                    last + if ca == cb { 0 } else { 1 },
+                );
+                last = old;
+            }
+        }
+        costs[b.len()]
+    }
+
+    let mut closest: Option<(&str, usize)> = None;
+
+    for opt in options {
+        let dist = levenshtein(target, opt);
+        if closest.is_none() || dist < closest.unwrap().1 {
+            closest = Some((opt.as_str(), dist));
+        }
+    }
+
+    match closest {
+        Some((s, dist)) if dist <= 2 && dist < target.len() => Some(s),
+        _ => None,
+    }
+}
+
+pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
+    if !*use_colors {
+        &ansi[0..0]
+    } else {
+        ansi
     }
 }
 

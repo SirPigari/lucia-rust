@@ -22,7 +22,7 @@ mod lexer;
 
 use crate::env::helpers::utils;
 use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::{hex_to_ansi, Value, get_line_info, Error, format_value};
+use crate::utils::{hex_to_ansi, Value, get_line_info, Error, format_value, check_ansi};
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
@@ -31,7 +31,7 @@ use crate::env::helpers::structs::Boolean;
 const VERSION: &str = "1.0.0-rust";
 
 fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>) {
-    let mut file_name = file_name.unwrap_or("<stdin>");
+    let mut file_name: &str = file_name.unwrap_or("<stdin>");
 
     if file_name.starts_with("\\\\?\\") {
         file_name = &file_name[4..];
@@ -40,6 +40,7 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     let line_number = line.0;
     let error_type = error.error_type();
     let error_msg = error.msg();
+    let error_help = error.help();
 
     let current_line = get_line_info(source, line_number).unwrap_or_else(|| "".to_string());
     let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
@@ -117,16 +118,33 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     }
 
     trace.push_str(&format!(
-        "\t{} | {}: {}{}",
+        "\t{} | {}: {}",
         indent,
         error_type,
         error_msg,
-        hex_to_ansi("reset", Some(use_colors))
     ));
+
+    if let Some(help) = error_help {
+        if !help.is_empty() {
+            trace.push_str(&format!(
+                "\n\t{} ...\n\t{}{} | {}Help:{} {}{}",
+                indent,
+                indent,
+                hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                check_ansi("\x1b[1m", &use_colors),
+                check_ansi("\x1b[22m", &use_colors),
+                help,
+                hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+            ));
+        }
+    }
  
     if !(file_name == "<stdin>") {
         trace.push_str("\n");
     }
+
+    trace.push_str(&format!("{}", hex_to_ansi("reset", Some(use_colors))));
+
     eprintln!("{}", trace);
 }
 
@@ -188,6 +206,7 @@ fn activate_environment(env_path: &Path) -> io::Result<()> {
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),
             warning: "#FFC107".to_string(),
+            help: "#21B8DB".to_string(),
             debug: "#434343".to_string(),
             comment: "#757575".to_string(),
             input_arrows: "#136163".to_string(),

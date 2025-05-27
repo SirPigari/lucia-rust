@@ -68,6 +68,18 @@ impl Parser {
         self.err = Some(Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
+            help: None,
+            line: (self.current_line(), self.source.clone()),
+            column: self.get_line_column(),
+        });
+        Statement::Null
+    }
+
+    pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Statement {
+        self.err = Some(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: Some(help.to_string()),
             line: (self.current_line(), self.source.clone()),
             column: self.get_line_column(),
         });
@@ -84,14 +96,30 @@ impl Parser {
             let (token_type, token_value) = (token.0.clone(), token.1.clone());
             if token_type != expected_type || token_value != expected_value {
                 self.raise("UEFError", &format!(
-                    "Expected token type: {}, value: {} but found: {}",
-                    expected_type, expected_value, token_value
+                    "Expected token '{}' but found: {}",
+                    expected_value, token_value
                 ));
             }
         } else {
+            if expected_type == "SEPARATOR" && [")", "]", "}", "end"].contains(&expected_value) {
+                let mut opening = "".to_string();
+                match expected_value {
+                    ")" => opening = "(".to_string(),
+                    "]" => opening = "[".to_string(),
+                    "}" => opening = "{".to_string(),
+                    "end" => opening = ":".to_string(),
+                    _ => {}
+                }
+                self.raise_with_help("SyntaxError", &format!(
+                    "\"{}\" was never closed",
+                    opening
+                ),
+                &format!("Maybe you forgot '{}'?", expected_value));
+                return (vec![], vec![]);
+            }
             self.raise("UEFError", &format!(
-                "Expected token type: {}, value: {} but found end of input",
-                expected_type, expected_value
+                "Expected token '{}' but found end of input",
+                expected_value
             ));
         }
         (vec![], vec![])
@@ -108,6 +136,14 @@ impl Parser {
             offset += 1;
         }
         None
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        if self.pos + 1 < self.tokens.len() {
+            Some(self.apply_aliases(&self.tokens[self.pos + 1]))
+        } else {
+            None
+        }
     }
 
     pub fn current_line(&self) -> usize {
@@ -153,164 +189,219 @@ impl Parser {
     }
     
     fn parse_expression(&mut self) -> Statement {
-        let token = if let Some(tok) = self.token() {
-            tok.clone()
-        } else {
-            self.raise("SyntaxError", "Expected token");
-            return Statement::Statement {
-                keys: vec![],
-                values: vec![],
-                line: 0,
-                column: 0,
-            };
-        };
-
         let line = self.current_line();
         let column = self.get_line_column();
-    
-        let next_token = self.get_next();
-        let token_type = &token.0;
-        let token_value = &token.1;
-    
-        if token_type == "IDENTIFIER"
-            && next_token
-                .as_ref()
-                .map(|t| t.0 == "SEPARATOR" && t.1 == "(")
-                .unwrap_or(false)
-        {
-            return self.parse_function_call();
-        }
-    
-        if token_type == "SEPARATOR" && token_value == "[" {
-            self.next();
-            let mut elements = Vec::new();
-    
-            while let Some(tok) = self.token() {
-                if tok.0 == "SEPARATOR" && tok.1 == "]" {
-                    break;
+
+        let mut out = match self.token().cloned() {
+            Some(token) => match token.0.as_str() {
+                "OPERATOR" if ["+", "-", "!"].contains(&token.1.as_str()) => {
+                    let operator = token.1.clone();
+                    self.next();
+                    let operand = self.parse_expression();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("operator".to_string()),
+                            Value::String("operand".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("UNARY_OPERATION".to_string()),
+                            Value::String(operator),
+                            operand.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }
                 }
-    
-                let element = self.parse_expression();
-                elements.push(element.convert_to_map());
-    
-                if let Some(tok) = self.token() {
-                    if tok.0 == "SEPARATOR" && tok.1 == "]" {
+
+                "SEPARATOR" if token.1 == "(" => {
+                    self.next();
+                    let mut expr = Statement::Null;
+                    while let Some(next_token) = self.token() {
+                        if next_token.0 == "SEPARATOR" && next_token.1 == ")" {
+                            break;
+                        }
+                        expr = self.parse_expression();
                         break;
                     }
-    
-                    if tok.0 == "SEPARATOR" && tok.1 == "..." {
-                        self.check_for("SEPARATOR", "...");
-                        self.next();
-                        let end = self.parse_expression();
-                        self.check_for("SEPARATOR", "]");
-                        self.next();
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("iterable_type".to_string()),
-                                Value::String("pattern".to_string()),
-                                Value::String("end".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("ITERABLE".to_string()),
-                                Value::String("LIST_COMPLETION".to_string()),
-                                Value::List(elements),
-                                end.convert_to_map(),
-                            ],
-                            line,
-                            column,
-                        };
+                    self.check_for("SEPARATOR", ")");
+                    self.next();
+                    expr
+                }
+
+                "SEPARATOR" if token.1 == "[" => {
+                    self.parse_list()
+                }
+
+                "IDENTIFIER" => {
+                    let next_token = self.get_next().cloned();
+                    if let Some(next_tok) = next_token {
+                        if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
+                            self.parse_function_call()
+                        } else {
+                            self.parse_operand()
+                        }
+                    } else {
+                        self.parse_operand()
                     }
                 }
-    
-                if let Some(tok) = self.token() {
-                    if tok.0 == "SEPARATOR" && tok.1 == "," {
-                        self.next();
-                    }
+
+                "NUMBER" | "STRING" | "BOOLEAN" => {
+                    self.parse_operand()
                 }
+
+                _ => {
+                    self.raise("SyntaxError", &format!("Invalid syntax. '{}' was unexpected.", token.1));
+                    Statement::Null
+                }
+            },
+            None => {
+                self.raise("SyntaxError", "Expected expression");
+                Statement::Null
             }
-    
+        };
+
+        while let Some(tok) = self.token() {
+            if tok.0 != "OPERATOR" {
+                break;
+            }
+
+            let operator = tok.1.clone();
             self.next();
-            return Statement::Statement {
+            let right = self.parse_expression();
+
+            out = Statement::Statement {
                 keys: vec![
                     Value::String("type".to_string()),
-                    Value::String("iterable_type".to_string()),
-                    Value::String("elements".to_string()),
+                    Value::String("left".to_string()),
+                    Value::String("operator".to_string()),
+                    Value::String("right".to_string()),
                 ],
                 values: vec![
-                    Value::String("ITERABLE".to_string()),
-                    Value::String("LIST".to_string()),
-                    Value::List(elements),
+                    Value::String("OPERATION".to_string()),
+                    out.convert_to_map(),
+                    Value::String(operator),
+                    right.convert_to_map(),
                 ],
                 line,
                 column,
             };
         }
 
-        //if self.token[0] in ('IDENTIFIER', 'NUMBER', 'STRING', 'BOOLEAN') and self.get_next() and self.get_next()[0] == 'OPERATOR':
-        //  return self.parse_operation()
-        
-        if ["IDENTIFIER", "NUMBER", "STRING", "BOOLEAN"].contains(&token_type.as_str()) && next_token.is_some() && next_token.unwrap().0 == "OPERATOR" {
-            if let Some(next_token) = next_token {
-                return self.parse_operation()
-            }
-        }
+        out
+    }
 
-        if ["IDENTIFIER", "NUMBER", "STRING", "BOOLEAN"].contains(&token_type.as_str()) {
-            return self.parse_operand()
-        }
+    fn parse_primary(&mut self) -> Statement {
+        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+        let line = self.current_line();
+        let column = self.get_line_column();
 
-        if token_type == "OPERATOR" {
-            let operator = token_value.clone();
-
-            if ["+", "-"].contains(&operator.as_str()) {
+        match token.0.as_str() {
+            "NUMBER" | "STRING" | "BOOLEAN" => {
                 self.next();
-                let right = self.parse_expression();
-                if self.err.is_some() {
-                    return Statement::Null;
+                return self.parse_operand();
+            }
+            "IDENTIFIER" => {
+                if let Some(peek) = self.peek() {
+                    if peek.0 == "SEPARATOR" && peek.1 == "(" {
+                        return self.parse_function_call();
+                    }
                 }
                 self.next();
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("left".to_string()),
-                        Value::String("operator".to_string()),
-                        Value::String("right".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("OPERATION".to_string()),
-                        Value::Map { 
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                            ], 
-                            values: vec![
-                                Value::String("NUMBER".to_string()),
-                                Value::String("0".to_string()),
-                            ],
-                        },
-                        Value::String(operator),
-                        right.convert_to_map(),
-                    ],
-                    line,
-                    column,
-                };
-            } else {
-                self.raise("SyntaxError", &format!(
-                    "Unexpected operator '{}' at start of expression.",
-                    operator
-                ));
+                return self.parse_operand();
+            }
+            "SEPARATOR" if token.1 == "(" => {
+                self.next();
+                let expr = self.parse_expression();
+                self.check_for("SEPARATOR", ")");
+                self.next();
+                return expr;
+            }
+            "SEPARATOR" if token.1 == "[" => {
+                return self.parse_list();
+            }
+            _ => {
+                self.raise("SyntaxError", &format!("Unexpected token '{}'", token.1));
                 return Statement::Null;
             }
         }
-
-        self.raise("SyntaxError", &format!(
-            "Invalid syntax. '{}' was unexpected.",
-            token_value
-        ));
-        Statement::Null
     }
-    
+
+    fn parse_unary(&mut self) -> Statement {
+        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+        let line = self.current_line();
+        let column = self.get_line_column();
+
+        if token.0 == "OPERATOR" && ["-", "+", "!"].contains(&token.1.as_str()) {
+            let op = token.1.clone();
+            self.next();
+            let operand = self.parse_unary();
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("operator".to_string()),
+                    Value::String("operand".to_string()),
+                ],
+                values: vec![
+                    Value::String("UNARY_OPERATION".to_string()),
+                    Value::String(op),
+                    operand.convert_to_map(),
+                ],
+                line,
+                column,
+            };
+        }
+
+        self.parse_primary()
+    }
+
+    fn parse_list(&mut self) -> Statement {
+        let line = self.current_line();
+        let column = self.get_line_column();
+        self.next();
+
+        let mut elements = Vec::new();
+        while let Some(token) = self.token() {
+            if token.0 == "SEPARATOR" && token.1 == "]" {
+                break;
+            }
+
+            let expr = self.parse_expression();
+            if self.err.is_some() {
+                return Statement::Null;
+            }
+            elements.push(expr.convert_to_map());
+
+            if let Some(next_token) = self.token() {
+                if next_token.0 == "SEPARATOR" && next_token.1 == "," {
+                    self.next();
+                } else if next_token.0 == "SEPARATOR" && next_token.1 == "]" {
+                    break;
+                } else {
+                    self.raise("SyntaxError", "Expected ',' or ']'");
+                    return Statement::Null;
+                }
+            }
+        }
+
+        self.check_for("SEPARATOR", "]");
+        self.next();
+
+        Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("iterable_type".to_string()),
+                Value::String("elements".to_string()),
+            ],
+            values: vec![
+                Value::String("ITERABLE".to_string()),
+                Value::String("LIST".to_string()),
+                Value::List(elements),
+            ],
+            line,
+            column,
+        }
+    }
     
     fn parse_function_call(&mut self) -> Statement {
         let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();
@@ -442,6 +533,17 @@ impl Parser {
         let next_token = self.get_next();
         let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
         let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
+        
+        if token_type == "SEPARATOR" && token_value == "(" {
+            self.next();
+            let expr = self.parse_expression();
+            if self.err.is_some() {
+                return Statement::Null;
+            }
+            self.check_for("SEPARATOR", ")");
+            self.next();
+            return expr;
+        }
 
         if token_type == "NUMBER" {
             self.next();
@@ -538,61 +640,4 @@ impl Parser {
 
         left
     }
-
-
-    //fn parse_parameters(&mut self) -> Vec<HashMap<String, Value>> {
-    //    self.check_for("SEPARATOR", "(");
-    //    self.next();
-    //    let mut parameters = Vec::new();
-
-    //    while let Some(token) = self.token() {
-    //        if token.0 == "SEPARATOR" && token.1 == ")" {
-    //            break;
-    //        }
-
-    //        let mut parameter = HashMap::new();
-    //        
-    //        if let Some(Value::String(name)) = self.token().clone() {
-    //            parameter.insert("name".to_string(), Value::String(name.clone()));
-    //            self.next();
-
-    //            let mut variable_type = Value::String("any".to_string());
-    //            let mut default_value = HashMap::new();
-    //            default_value.insert("type".to_string(), Value::String("BOOLEAN".to_string()));
-    //            default_value.insert("value".to_string(), Value::Null);
-
-    //            if let Some(token) = self.token() {
-    //                if token.0 == "SEPARATOR" && token.1 == ":" {
-    //                    self.next();
-    //                    if let Some(Value::String(&type_)) = self.token().clone() {
-    //                        variable_type = Value::String(&type_);
-    //                        self.next();
-    //                    }
-    //                }
-    //            }
-
-    //            if let Some(token) = self.token() {
-    //                if token.0 == "OPERATOR" && token.1 == "=" {
-    //                    self.next();
-    //                    default_value.insert("value".to_string(), self.parse_expression());
-    //                }
-    //            }
-
-    //            parameter.insert("variable_type".to_string(), variable_type);
-    //            parameter.insert("default_value".to_string(), Value::Map(default_value));
-    //        }
-    //        parameters.push(parameter);
-
-    //        if let Some(token) = self.token() {
-    //            if token.0 == "SEPARATOR" && token.1 == ")" {
-    //                break;
-    //            }
-    //        }
-
-    //        self.check_for("SEPARATOR", ",");
-    //        self.next();
-    //    }
-    //    self.next();
-    //    parameters
-    //}
 }

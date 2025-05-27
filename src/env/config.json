@@ -25,6 +25,7 @@
   "color_scheme": {
     "exception": "#F44350",
     "warning": "#FFC107",
+    "help": "#21B8DB",
     "debug": "#434343",
     "comment": "#757575",
     "input_arrows": "#136163",

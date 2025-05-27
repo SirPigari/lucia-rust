@@ -15,7 +15,6 @@ use crate::env::helpers::utils::{Value, Error}; // Adjust imports based on actua
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ParameterKind {
     Positional,
-    Optional,
     Variadic,
     KeywordVariadic
 }
@@ -46,20 +45,20 @@ pub struct FunctionMetadata {
 // -------------------------------
 
 pub trait Callable: Send + Sync {
-    fn call(&self, pos_args: Vec<Value>, named_args: &HashMap<String, Value>) -> Value;
+    fn call(&self, args: &HashMap<String, Value>) -> Value;
     fn metadata(&self) -> &FunctionMetadata;
 }
 
 pub trait NativeCallable: Send + Sync {
-    fn call(&self, pos_args: Vec<Value>, named_args: &HashMap<String, Value>) -> Value;
+    fn call(&self, _args: &HashMap<String, Value>) -> Value;
 }
 
 impl<F> NativeCallable for F
 where
-    F: Fn(Vec<Value>, &HashMap<String, Value>) -> Value + Send + Sync + 'static,
+    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
 {
-    fn call(&self, pos_args: Vec<Value>, named_args: &HashMap<String, Value>) -> Value {
-        (self)(pos_args, named_args)
+    fn call(&self, _args: &HashMap<String, Value>) -> Value {
+        (self)(_args)
     }
 }
 
@@ -105,8 +104,8 @@ impl NativeFunction {
 
 
 impl Callable for NativeFunction {
-    fn call(&self, pos_args: Vec<Value>, named_args: &HashMap<String, Value>) -> Value {
-        self.func.call(pos_args, named_args)
+    fn call(&self, args: &HashMap<String, Value>) -> Value {
+        self.func.call(args)
     }
 
     fn metadata(&self) -> &FunctionMetadata {
@@ -126,7 +125,7 @@ pub struct UserFunction {
 }
 
 impl Callable for UserFunction {
-    fn call(&self, _pos_args: Vec<Value>, _named_args: &std::collections::HashMap<String, Value>) -> Value {
+    fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
         // TODO: actual interpretation logic here
         println!(
             "Calling user-defined function '{}'",
@@ -153,10 +152,10 @@ pub enum Function {
 }
 
 impl Function {
-    pub fn call(&self, pos_args: &Vec<Value>, named_args: &HashMap<String, Value>) -> Value {
+    pub fn call(&self, args: &HashMap<String, Value>) -> Value {
         match self {
-            Function::Native(f) => f.call(pos_args.clone(), named_args),
-            Function::Custom(f) => f.call(pos_args.clone(), named_args),
+            Function::Native(f) => f.call(args),
+            Function::Custom(f) => f.call(args),
         }
     }
 
@@ -217,11 +216,19 @@ impl PartialOrd for Function {
 }
 
 impl Parameter {
-    pub fn positional(name: &str, ty: &str, default: Option<Value>) -> Self {
+    pub fn positional(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
             ty: ty.to_string(),
-            default,
+            default: None,
+            kind: ParameterKind::Positional,
+        }
+    }
+    pub fn positional_optional(name: &str, ty: &str, default: Value) -> Self {
+        Self {
+            name: name.to_string(),
+            ty: ty.to_string(),
+            default: Some(default),
             kind: ParameterKind::Positional,
         }
     }
@@ -259,15 +266,6 @@ impl Parameter {
             ty: ty.to_string(),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
-        }
-    }
-
-    pub fn optional(name: &str, ty: &str, default: Value) -> Self {
-        Self {
-            name: name.to_string(),
-            ty: ty.to_string(),
-            default: Some(default),
-            kind: ParameterKind::Optional,
         }
     }
 }
