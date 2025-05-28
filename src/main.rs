@@ -7,12 +7,16 @@ use std::process::exit;
 use std::collections::HashMap;
 
 mod env {
-    pub mod helpers {
+    pub mod core {
         pub mod utils;
         pub mod config;
-        pub mod structs;
+        pub mod types;
+        pub mod errors;
+        pub mod value;
         pub mod functions;
+        pub mod variables;
         pub mod native;
+        pub mod statements;
     }
 }
 
@@ -20,13 +24,15 @@ mod interpreter;
 mod parser;
 mod lexer;
 
-use crate::env::helpers::utils;
-use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::{hex_to_ansi, Value, get_line_info, Error, format_value, check_ansi};
+use crate::env::core::utils;
+use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
+use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi};
+use crate::env::core::types::{Int, Float, Boolean};
+use crate::env::core::errors::Error;
+use crate::env::core::value::Value;
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
-use crate::env::helpers::structs::Boolean;
 
 const VERSION: &str = "1.0.0-rust";
 
@@ -424,7 +430,7 @@ fn main() {
                 ),
                 &config,
                 Some(use_colors),
-            );         
+            );
             let tokens: Vec<Token> = raw_tokens.into_iter()
             .map(|(t, v)| Token(t, v))
             .collect();

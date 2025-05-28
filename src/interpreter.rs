@@ -1,12 +1,20 @@
 use std::collections::HashMap;
-use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Variable, Statement, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, Int, Float, check_ansi};
+use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::core::utils::{print_colored, hex_to_ansi, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, check_ansi, unescape_string};
+use crate::env::core::types::{Int, Float, VALID_TYPES};
+use crate::env::core::value::Value;
+use crate::env::core::errors::Error;
+use crate::env::core::variables::Variable;
+use crate::env::core::statements::Statement;
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use num_traits::{Zero, self};
 use lazy_static::lazy_static;
-use crate::env::helpers::native;
-use crate::env::helpers::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
+use crate::env::core::native;
+use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
+
+use crate::lexer::Lexer;
+use crate::parser::{Parser, Token};
 
 
 pub struct Interpreter {
@@ -55,6 +63,10 @@ impl Interpreter {
             "len".to_string(),
             Variable::new("len".to_string(), Value::Function(native::len_fn()), "function".to_string(), false, true, true),
         );
+        this.variables.insert(
+            "help".to_string(),
+            Variable::new("help".to_string(), Value::Function(native::help_fn()), "help".to_string(), false, true, true),
+        );
 
         this
     }
@@ -66,8 +78,7 @@ impl Interpreter {
         return_value: Option<Value>,
         error: bool,
     ) -> bool {
-        let valid_types = vec!["void", "any", "null", "int", "float", "bool", "string", "map"];
-    
+        let valid_types = VALID_TYPES.to_vec();
         let mut types_mapping = std::collections::HashMap::new();
         types_mapping.insert("void", "null");
         types_mapping.insert("any", "any");
@@ -77,7 +88,7 @@ impl Interpreter {
         types_mapping.insert("int", "int");
         types_mapping.insert("float", "float");
         types_mapping.insert("bool", "bool");
-        types_mapping.insert("string", "string");
+        types_mapping.insert("str", "str");
         types_mapping.insert("list", "list");
         types_mapping.insert("map", "map");
         types_mapping.insert("function", "function");
@@ -235,6 +246,7 @@ impl Interpreter {
     }
     
     pub fn evaluate(&mut self, statement: Statement) -> Value {
+        self.current_statement = Some(statement.clone());
         if self.err.is_some() {
             return NULL;
         }
@@ -443,7 +455,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(arg_value.clone()), false) {
+                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), false) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
@@ -454,14 +466,13 @@ impl Interpreter {
                                             check_ansi("\x1b[4m", &self.use_colors),
                                             param_name,
                                             param_type,
-                                            check_ansi("\x1b[24m", &self.use_colors),
-                                            positional[pos_index].to_string()
+                                            format_value(&positional[pos_index]).to_string(),
+                                            check_ansi("\x1b[24m", &self.use_colors)
                                         ),
                                     );
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                println!("{}, {}, {}", param_type, named_value.type_name(), named_value.clone().type_name());
                                 if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), false) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
@@ -862,7 +873,138 @@ impl Interpreter {
 
     fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            Value::String(s.clone()[1..s.len()-1].to_string())
+            let mut modified_string = s.clone();
+            let mut is_raw = false;
+    
+            if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
+                for mod_value in mods {
+                    if let Value::String(modifier) = mod_value {
+                        match modifier.as_str() {
+                            "f" => {
+                                let mut output = String::new();
+                                let mut chars = modified_string.chars().peekable();
+    
+                                while let Some(c) = chars.next() {
+                                    if c == '{' {
+                                        if let Some(&'{') = chars.peek() {
+                                            chars.next();
+                                            output.push('{');
+                                            continue;
+                                        }
+    
+                                        let mut expr = String::new();
+                                        let mut brace_level = 1;
+    
+                                        while let Some(&next_c) = chars.peek() {
+                                            chars.next();
+                                            if next_c == '{' {
+                                                brace_level += 1;
+                                            } else if next_c == '}' {
+                                                brace_level -= 1;
+                                                if brace_level == 0 {
+                                                    break;
+                                                }
+                                            }
+                                            expr.push(next_c);
+                                        }
+    
+                                        if brace_level != 0 {
+                                            return self.raise("SyntaxError", "Unmatched '{' in f-string");
+                                        }
+    
+                                        let raw_tokens = Lexer::new(&expr).tokenize(self.config.print_comments);
+                                        if raw_tokens.is_empty() {
+                                            return self.raise("SyntaxError", "Empty expression inside {}");
+                                        }
+                                        debug_log(
+                                            &format!(
+                                                "Generated f-string tokens: {:?}",
+                                                raw_tokens
+                                                    .iter()
+                                                    .filter(|token| token.0 != "WHITESPACE")
+                                                    .collect::<Vec<_>>()
+                                            ),
+                                            &self.config,
+                                            Some(self.use_colors),
+                                        );
+                                        
+                                        let tokens: Vec<Token> = raw_tokens.into_iter()
+                                            .map(|(t, v)| Token(t, v))
+                                            .collect();
+                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone()).parse_safe() {
+                                            Ok(parsed) => parsed,
+                                            Err(error) => {
+                                                return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));
+                                            }
+                                        };
+                                        if parsed.is_empty() {
+                                            return self.raise("SyntaxError", "Empty expression inside {}");
+                                        }
+                                        if parsed.len() > 1 {
+                                            return self.raise("SyntaxError", "Expected a single expression inside {} in f-string");
+                                        }
+                                        debug_log(
+                                            &format!(
+                                                "Generated f-string statements: [{}]",
+                                                parsed
+                                                    .iter()
+                                                    .map(|stmt| format_value(&stmt.convert_to_map()))
+                                                    .collect::<Vec<String>>()
+                                                    .join(", ")
+                                            ),
+                                            &self.config,
+                                            Some(self.use_colors),
+                                        );
+
+                                        debug_log(
+                                            &format!("<FString: {}>", expr.clone()),
+                                            &self.config,
+                                            Some(self.use_colors.clone()),
+                                        );
+    
+                                        let result = self.evaluate(parsed[0].clone());
+                                        output.push_str(&result.to_string());
+                                    } else if c == '}' {
+                                        if let Some(&'}') = chars.peek() {
+                                            chars.next();
+                                            output.push('}');
+                                            continue;
+                                        } else {
+                                            return self.raise("SyntaxError", "Single '}' encountered in format string");
+                                        }
+                                    } else {
+                                        output.push(c);
+                                    }
+                                }
+    
+                                modified_string = output;
+                            }
+                            "r" => {
+                                is_raw = true;
+                            }
+                            _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
+                        }
+                    } else {
+                        self.raise("TypeError", "Expected a string for string modifier");
+                        return NULL;
+                    }
+                }
+            }
+
+            if !is_raw {
+                modified_string = match unescape_string(&modified_string) {
+                    Ok(unescaped) => unescaped,
+                    Err(e) => return self.raise("JSONDecodeError", &e),
+                };
+            }            
+            
+            let unquoted = if modified_string.len() >= 2 && modified_string.starts_with('"') && modified_string.ends_with('"') {
+                modified_string[1..modified_string.len() - 1].to_string()
+            } else {
+                modified_string
+            };
+    
+            Value::String(unquoted)
         } else {
             self.raise("RuntimeError", "Missing 'value' in string statement")
         }

@@ -9,6 +9,10 @@ build:
 	@cmd /C "move $(LUCIA_DIR)\target\debug\lucia.exe $(TARGET)\lucia.exe"
 	@echo Build complete. Executable is located at $(TARGET)\lucia.exe
 
+release:
+	@cmd /C "cd $(LUCIA_DIR) && set RUSTFLAGS=$(RUSTFLAGS) && cargo build --release"
+	@cmd /C "move $(LUCIA_DIR)\target\release\lucia.exe $(TARGET)\lucia.exe"
+	@echo Release build complete. Executable is located at $(TARGET)\lucia.exe
 
 run: $(TARGET)
 	@cd $(TARGET) && lucia

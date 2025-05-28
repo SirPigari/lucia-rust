@@ -1,6 +1,10 @@
 use std::collections::HashMap;
-use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Statement, Float, Int};
+use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::core::utils::{print_colored, hex_to_ansi, to_static};
+use crate::env::core::value::Value;
+use crate::env::core::errors::Error;
+use crate::env::core::statements::Statement;
+use crate::env::core::types::{Float, Int};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -192,6 +196,11 @@ impl Parser {
         let line = self.current_line();
         let column = self.get_line_column();
 
+        let next_token = self.get_next().cloned();
+        let next_token_type = next_token.as_ref().map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
+        let next_token_value = next_token.as_ref().map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
+        
+
         let mut out = match self.token().cloned() {
             Some(token) => match token.0.as_str() {
                 "OPERATOR" if ["+", "-", "!"].contains(&token.1.as_str()) => {
@@ -212,6 +221,10 @@ impl Parser {
                         line,
                         column,
                     }
+                }
+
+                "IDENTIFIER" if ["f", "r"].iter().any(|m| token.1.as_str().starts_with(m)) => {
+                    self.parse_operand()
                 }
 
                 "SEPARATOR" if token.1 == "(" => {
@@ -421,6 +434,9 @@ impl Parser {
         }
         self.check_for("SEPARATOR", ")");
         self.next();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
 
         if pos_args.is_empty() && named_args.is_empty() {
             let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
@@ -525,14 +541,14 @@ impl Parser {
     }
 
     fn parse_operand(&mut self) -> Statement {
-        let token = self.token().cloned().unwrap_or_else(|| Token("".to_string(), "".to_string()));
-        let line = self.current_line();
-        let column = self.get_line_column();
-        let token_type = &token.0;
-        let token_value = &token.1;
-        let next_token = self.get_next();
-        let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
-        let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
+        let mut token = self.token().cloned().unwrap_or_else(|| Token("".to_string(), "".to_string()));
+        let mut line = self.current_line();
+        let mut column = self.get_line_column();
+        let mut token_type = token.0.clone();
+        let mut token_value = token.1.clone();        
+        let mut next_token = self.get_next();
+        let mut next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
+        let mut next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
         
         if token_type == "SEPARATOR" && token_value == "(" {
             self.next();
@@ -567,10 +583,74 @@ impl Parser {
                 keys: vec![
                     Value::String("type".to_string()),
                     Value::String("value".to_string()),
+                    Value::String("mod".to_string()),
                 ],
                 values: vec![
                     Value::String("STRING".to_string()),
                     Value::String(token_value.clone()),
+                    Value::String("".to_string()),
+                ],
+                line,
+                column,
+            };
+        }
+
+        if token_type == "IDENTIFIER" && ["f", "r"].iter().any(|m| token.1.as_str().starts_with(m)) {
+            let valid_mods = ["f", "r"];
+            let mut mods: Vec<Value> = Vec::new();
+        
+            loop {
+                if token_type != "IDENTIFIER" {
+                    break;
+                }
+        
+                let mod_name = token.1.clone();
+        
+                for ch in mod_name.chars() {
+                    let ch_str = ch.to_string();
+                    if !valid_mods.contains(&ch_str.as_str()) {
+                        let expected = valid_mods.join(", ");
+                        self.raise_with_help(
+                            "StringModifierError",
+                            to_static(format!("Invalid modifier: '{}'.", ch)),
+                            to_static(format!("Expected one of: {}", expected)),
+                        );
+                        return Statement::Null;
+                    }
+        
+                    mods.push(Value::String(ch_str));
+                }
+        
+                self.next();
+        
+                match self.token().cloned() {
+                    Some(next_tok) => {
+                        token_type = next_tok.0.clone();
+                        token = next_tok;
+                    }
+                    None => {
+                        self.raise(
+                            "UEFError",
+                            "Unexpected end of input. Expected 'str' after modifiers.",
+                        );
+                        return Statement::Null;
+                    }
+                }
+            }
+
+            token_value = token.1.clone();
+            self.next();
+        
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string()),
+                    Value::String("mods".to_string()),
+                ],
+                values: vec![
+                    Value::String("STRING".to_string()),
+                    Value::String(token_value.clone()),
+                    Value::List(mods),
                 ],
                 line,
                 column,

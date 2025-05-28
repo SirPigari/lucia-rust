@@ -27,9 +27,7 @@ impl<'a> Lexer<'a> {
         );
 
         let token_specifications = vec![
-            ("FSTRINGSTART", r#"f"|f'"#),
             ("STRING", r#""[^"]*"|'[^']*'"#),
-            ("FSTRINGEND", r#""|'"#),
             ("BOOLEAN", r"\b(true|false|null)\b"),
             ("COMMENT_INLINE", r"<#.*?#>"),
             ("COMMENT_SINGLE", r"//.*"),
