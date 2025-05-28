@@ -34,9 +34,9 @@ impl<'a> Lexer<'a> {
             ("COMMENT_INLINE", r"<#.*?#>"),
             ("COMMENT_SINGLE", r"//.*"),
             ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
-            ("OPERATOR", &operator_pattern),
             ("IDENTIFIER", r"\bnon-static\b|\b[a-zAZ_]\w*\b"),
-            ("NUMBER", r"-?(?:\d(?:_?\d)*)?(?:\.(?:\d(?:_?\d)*))?"),
+            ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
+            ("OPERATOR", &operator_pattern),
             ("SEPARATOR", r"\.\.\.|[(){}\[\];:.,\?]"),
             ("WHITESPACE", r"\s+"),
             ("INVALID", r"."),
@@ -62,9 +62,9 @@ impl<'a> Lexer<'a> {
                         let value = if capture_name.starts_with("COMMENT") {
                             let mut value = value.as_str().to_string();
                             value = value.replace("    ", "\\t");
-                            value = value.replace("\t", "\\t");
-                            value = value.replace("  ", "\\t");
-                            value = value.replace(" ", "\\t");
+                            value = value.replace("\t", "\t");
+                            value = value.replace("  ", "\t");
+                            value = value.replace(" ", "\t");
                             value
                         } else if capture_name == "NUMBER" {
                             value.as_str().replace("_", "")

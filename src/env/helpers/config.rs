@@ -31,6 +31,7 @@ pub struct CodeBlocks {
 pub struct ColorScheme {
     pub exception: String,
     pub warning: String,
+    pub help: String,
     pub debug: String,
     pub comment: String,
     pub input_arrows: String,

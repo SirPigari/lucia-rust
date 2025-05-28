@@ -1,2 +1,1 @@
-main(10, h=10, j="HITLER")
-hitler
+print("hello world")

@@ -6,7 +6,7 @@ ___
 
 ## Currently working on:
 
-- Converting the entire codebase to <a href="https://www.rust-lang.org/" target="_blank">Rust</a>... god what have I done this is gonna take forever
+- Converting the entire codebase to <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
 - At least its gonna be **BLAZINGLY FAST**
 - And rust is a <a href="https://www.reddit.com/r/feminineboys/comments/j91rv7/comment/g8gk0fy/?context=3" target="_blank">femboy lang</a>
 ---

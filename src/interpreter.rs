@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 use crate::env::helpers::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Variable, Statement, format_value, levenshtein_distance, TRUE, FALSE, NULL, debug_log};
+use crate::env::helpers::utils::{print_colored, hex_to_ansi, Value, Error, Variable, Statement, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, Int, Float, check_ansi};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
+use num_traits::{Zero, self};
 use lazy_static::lazy_static;
+use crate::env::helpers::native;
+use crate::env::helpers::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
+use std::sync::Arc;
+
 
 pub struct Interpreter {
     config: Config,
@@ -18,17 +23,40 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new(config: Config, source: String, use_colors: bool) -> Self {
-        Self { 
+        let mut this = Self {
             config,
             err: None,
             return_value: NULL,
             is_returning: false,
-            source: source,
+            source,
             stack: vec![],
-            use_colors: use_colors,
+            use_colors,
             current_statement: None,
             variables: HashMap::new(),
-        }
+        };
+
+        this.variables.insert(
+            "print".to_string(),
+            Variable::new("print".to_string(), Value::Function(native::print_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "styledprint".to_string(),
+            Variable::new("styledprint".to_string(), Value::Function(native::styled_print_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "input".to_string(),
+            Variable::new("input".to_string(), Value::Function(native::input_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "exit".to_string(),
+            Variable::new("exit".to_string(), Value::Function(native::exit_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "len".to_string(),
+            Variable::new("len".to_string(), Value::Function(native::len_fn()), "function".to_string(), false, true, true),
+        );
+
+        this
     }
 
     fn check_type(
@@ -39,7 +67,7 @@ impl Interpreter {
         error: bool,
     ) -> bool {
         let valid_types = vec!["void", "any", "null", "int", "float", "bool", "string", "map"];
-
+    
         let mut types_mapping = std::collections::HashMap::new();
         types_mapping.insert("void", "null");
         types_mapping.insert("any", "any");
@@ -52,64 +80,62 @@ impl Interpreter {
         types_mapping.insert("string", "string");
         types_mapping.insert("list", "list");
         types_mapping.insert("map", "map");
-
-        let type_ = types_mapping.get(type_).unwrap_or(&type_);
-        let binding = expected.unwrap_or("");  // Bind the value to a longer-lived variable.
-        let expected = expected.and_then(|e| types_mapping.get(e)).unwrap_or(&binding);
-
-        let mut type_ = type_;
-        let mut expected = expected;
-
-        //if let Some(return_value) = return_value {
-        //    if return_value.is_boolean() {
-        //        return_value = Some(return_value.to_boolean());
-        //    }
-        //}
-
-        if *type_ == "bool" && *expected == "null" && return_value == Some(NULL) {
+        types_mapping.insert("function", "function");
+        let normalized_type = types_mapping.get(type_).unwrap_or(&type_);
+        let expected_type = expected
+            .and_then(|e| types_mapping.get(e))
+            .map_or(expected.unwrap_or(""), |v| *v);
+    
+        let normalized_type = *normalized_type;
+        let expected_type = expected_type;
+    
+        if normalized_type == "bool" && expected_type == "null" && return_value == Some(NULL) {
             return true;
         }
-
-        if expected == expected {
-            if ["any", type_].contains(&type_) {
-                return true;
-            }
-            if !valid_types.contains(&type_) || !valid_types.contains(&expected) {
-                return self._handle_invalid_type(expected, valid_types);
-            }
-
-            if *type_ == "int" && *expected == "float" {
-                return true;
-            }
-
-            if type_ != expected {
-                if error {
-                    self.raise("TypeError", &format!("Expected type '{}', but got '{}'", expected, type_));
-                } else {
-                    return false;
-                }
-            }
+    
+        if expected_type == "any" || normalized_type == "any" {
             return true;
         }
-
-        valid_types.contains(&type_) || self._handle_invalid_type(type_, valid_types)
+    
+        if !valid_types.contains(&normalized_type) || !valid_types.contains(&expected_type) {
+            return self._handle_invalid_type(expected_type, valid_types);
+        }
+    
+        if normalized_type == "int" && expected_type == "float" {
+            return true;
+        }
+    
+        if normalized_type != expected_type {
+            if error {
+                self.raise(
+                    "TypeError",
+                    &format!("Expected type '{}', but got '{}'", expected_type, normalized_type),
+                );
+            } else {
+                return false;
+            }
+        }
+    
+        true
     }
-
+    
+    
     fn _handle_invalid_type(&mut self, type_: &str, valid_types: Vec<&str>) -> bool {
-        if let Some(closest_match) = self.find_closest_match(valid_types, type_) {
-            self.raise("TypeError", &format!("Type '{}' is not supported. Did you mean: '{}'?", type_, closest_match));
+        let valid_types_owned: Vec<String> = valid_types.into_iter().map(|s| s.to_string()).collect();
+        let valid_types_slice: &[String] = &valid_types_owned;
+    
+        if let Some(closest_match) = find_closest_match(type_, valid_types_slice) {
+            self.raise(
+                "TypeError",
+                &format!("Type '{}' is not supported. Did you mean: '{}'?", type_, closest_match),
+            );
         } else {
             self.raise("TypeError", &format!("Type '{}' is not supported.", type_));
         }
+    
         false
     }
-
-    fn find_closest_match(&self, valid_types: Vec<&str>, type_: &str) -> Option<String> {
-        valid_types
-            .iter()
-            .min_by_key(|&valid_type| levenshtein_distance(valid_type, type_))
-            .map(|&match_type| match_type.to_string())
-    }
+    
 
     pub fn interpret(&mut self, statements: Vec<Statement>) -> Result<Value, Error> {
         for statement in statements {
@@ -122,6 +148,9 @@ impl Interpreter {
                 self.current_statement = Some(statement.clone());
 
                 let value = self.evaluate(statement.clone());
+                if let Value::Error(err_type, err_msg) = value {
+                    self.raise(err_type, &err_msg);
+                }
                 if self.is_returning {
                     return Ok(value.clone());
                 }
@@ -148,6 +177,7 @@ impl Interpreter {
                 self.err = Some(Error {
                     error_type: error_type.to_string(),
                     msg: msg.to_string(),
+                    help: None,
                     line: (*line, "".to_string()),
                     column: *column,
                 });
@@ -155,6 +185,7 @@ impl Interpreter {
                 self.err = Some(Error {
                     error_type: error_type.to_string(),
                     msg: msg.to_string(),
+                    help: None,
                     line: (0, "".to_string()),
                     column: 0,
                 });
@@ -163,11 +194,43 @@ impl Interpreter {
             self.err = Some(Error {
                 error_type: error_type.to_string(),
                 msg: msg.to_string(),
+                help: None,
                 line: (0, "".to_string()),
                 column: 0,
             });
         }
     
+        NULL
+    }
+
+    pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
+        if let Some(current_statement) = &self.current_statement {
+            if let Statement::Statement { line, column, .. } = current_statement {
+                self.err = Some(Error {
+                    error_type: error_type.to_string(),
+                    msg: msg.to_string(),
+                    help: Some(help.to_string()),
+                    line: (*line, "".to_string()),
+                    column: *column,
+                });
+            } else {
+                self.err = Some(Error {
+                    error_type: error_type.to_string(),
+                    msg: msg.to_string(),
+                    help: Some(help.to_string()),
+                    line: (0, "".to_string()),
+                    column: 0,
+                });
+            }
+        } else {
+            self.err = Some(Error {
+                error_type: error_type.to_string(),
+                msg: msg.to_string(),
+                help: Some(help.to_string()),
+                line: (0, "".to_string()),
+                column: 0,
+            });
+        }
         NULL
     }
     
@@ -188,11 +251,341 @@ impl Interpreter {
                 "STRING" => self.handle_string(statement.clone()),
                 "BOOLEAN" => self.handle_boolean(statement.clone()),
                 "OPERATION" => self.handle_operation(statement.clone()),
+                "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
+                "CALL" => self.handle_call(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
+
+    fn handle_call(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let function_name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(s)) => s.as_str(),
+            _ => return self.raise("TypeError", "Expected a string for function name"),
+        };
+
+        let pos_args = match statement.get(&Value::String("pos_arguments".to_string())) {
+            Some(Value::List(args)) => {
+                args.iter()
+                    .map(|stmt| self.evaluate(stmt.clone().convert_to_statement()))
+                    .collect::<Vec<Value>>()
+            }
+            _ => return self.raise("TypeError", "Expected a list for function arguments"),
+        };
+
+        let named_args = match statement.get(&Value::String("named_arguments".to_string())) {
+            Some(Value::Map { keys, values }) => {
+                let mut map = HashMap::new();
+                for (key, val_stmt) in keys.iter().zip(values.iter()) {
+                    if let Value::String(key_str) = key {
+                        let val = self.evaluate(val_stmt.clone().convert_to_statement());
+                        map.insert(key_str.clone(), val);
+                    } else {
+                        return self.raise("TypeError", "Expected string keys for named arguments");
+                    }
+                }
+                map
+            }
+            _ => return self.raise("TypeError", "Expected a map for named arguments"),
+        };
+
+        self.call_function(function_name, pos_args, named_args)
+    }
+
+    fn call_function(
+        &mut self,
+        function_name: &str,
+        pos_args: Vec<Value>,
+        named_args: HashMap<String, Value>,
+    ) -> Value {
+        let var = match self.variables.get(function_name) {
+            Some(v) => v.clone(),
+            None => {
+                let available_names: Vec<String> = self.variables.keys().cloned().collect();
+                if let Some(closest) = find_closest_match(function_name, &available_names) {
+                    return self.raise_with_help(
+                        "NameError",
+                        &format!("Function '{}' is not defined", function_name),
+                        &format!("Did you mean '{}{}{}'?",
+                            check_ansi("\x1b[4m", &self.use_colors),
+                            closest,
+                            check_ansi("\x1b[24m", &self.use_colors),
+                        ),
+                    );
+                } else {
+                    return self.raise("NameError", &format!("Function '{}' is not defined", function_name));
+                }
+            }
+        };
+    
+        let value = var.get_value();
+    
+        match value {
+            Value::Function(func) => {
+                if let Some(state) = func.metadata().state.as_ref() {
+                    if state == "deprecated" {
+                        println!("Warning: Function '{}' is deprecated", function_name);
+                    } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Function '{}' has been renamed to '{}'.",
+                                function_name, alt_name
+                            ),
+                            &format!(
+                                "Try using: '{}{}{}'",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                alt_name,
+                                check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );
+                    } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
+                        let mut parts = alt_info.splitn(2, ',').map(str::trim);
+                        let version = parts.next().unwrap_or("unknown");
+                        let alt_name = parts.next().unwrap_or("an alternative");
+                    
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Function '{}' has been removed in version {}.",
+                                function_name, version
+                            ),
+                            &format!(
+                                "Use '{}{}{}' instead.",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                alt_name,
+                                check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );                
+                    } else if let Some(alt_name) = state.strip_prefix("removed_in: ") {
+                        return self.raise(
+                            "NameError",
+                            &format!(
+                                "Function '{}' has been removed in version {}.",
+                                function_name, alt_name
+                            ),
+                        );
+                    } else if let Some(alt_name) = state.strip_prefix("removed: ") {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Function '{}' has been removed.",
+                                function_name
+                            ),
+                            &format!(
+                                "Use '{}{}{}' instead.",
+                                check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );
+                    }
+                }
+
+                let metadata = func.metadata();
+    
+                let positional: Vec<Value> = pos_args.clone();
+                let mut named_map: HashMap<String, Value> = named_args.clone();
+                let mut final_args: HashMap<String, Value> = HashMap::new();
+    
+                let passed_args_count = positional.len() + named_map.len();
+                let expected_args_count = metadata.parameters.len();
+                
+                if expected_args_count == 0 && passed_args_count > 0 {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Function '{}' expects no arguments, but got {}.",
+                            function_name,
+                            passed_args_count
+                        ),
+                    );
+                }
+                
+                if passed_args_count > expected_args_count {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Too many arguments for function '{}'. Expected at most {}, but got {}.",
+                            function_name,
+                            expected_args_count,
+                            passed_args_count
+                        ),
+                    );
+                }                
+
+                let mut pos_index = 0;
+                let required_positional_count = metadata.parameters
+                .iter()
+                .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
+                .count();
+            
+                let provided_positional_count = positional.len();
+                
+                if provided_positional_count < required_positional_count {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Missing required positional argument{} for function '{}'. Expected at least {}, but got {}.",
+                            if required_positional_count == 1 { "" } else { "s" },
+                            function_name,
+                            required_positional_count,
+                            provided_positional_count
+                        ),
+                    );
+                }            
+    
+                for param in &metadata.parameters {
+                    let param_name = &param.name;
+                    let param_type = &param.ty;
+                    let param_default = &param.default;
+
+                    match param.kind {
+                        ParameterKind::Positional => {
+                            if pos_index < positional.len() {
+                                let arg_value = positional[pos_index].clone();
+                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(arg_value.clone()), false) {
+                                    final_args.insert(param_name.clone(), arg_value);
+                                } else {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, arg_value.type_name()),
+                                        &format!(
+                                            "Try using: '{}{}={}({}){}'",
+                                            check_ansi("\x1b[4m", &self.use_colors),
+                                            param_name,
+                                            param_type,
+                                            check_ansi("\x1b[24m", &self.use_colors),
+                                            positional[pos_index].to_string()
+                                        ),
+                                    );
+                                }
+                                pos_index += 1;
+                            } else if let Some(named_value) = named_map.remove(param_name) {
+                                println!("{}, {}, {}", param_type, named_value.type_name(), named_value.clone().type_name());
+                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), false) {
+                                    final_args.insert(param_name.clone(), named_value);
+                                } else {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, named_value.type_name()),
+                                        &format!(
+                                            "Try using: '{}{}={}({}){}'",
+                                            check_ansi("\x1b[4m", &self.use_colors),
+                                            param_name,
+                                            param_type,
+                                            check_ansi("\x1b[24m", &self.use_colors),
+                                            named_value.to_string()
+                                        ),
+                                    );
+                                }
+                            } else if let Some(default) = param_default {
+                                final_args.insert(param_name.clone(), default.clone());
+                            } else {
+                                return self.raise("TypeError", &format!("Missing required positional argument: '{}'", param_name));
+                            }
+                        }                        
+                        ParameterKind::Variadic => {
+                            let mut variadic_args = positional[pos_index..].to_vec();
+
+                            for (i, arg) in variadic_args.iter().enumerate() {
+                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), false) {
+                                    return self.raise(
+                                        "TypeError",
+                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
+                                    );
+                                }
+                            }
+                    
+                            final_args.insert(param_name.clone(), Value::List(variadic_args));
+                    
+                            pos_index = positional.len();
+                        }
+                        ParameterKind::KeywordVariadic => {
+                            let mut keyword_args = HashMap::new();
+                            for (key, value) in &named_map {
+                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), true) {
+                                    keyword_args.insert(key.clone(), value.clone());
+                                } else {
+                                    return self.raise(
+                                        "TypeError",
+                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, param_type),
+                                    );
+                                }
+                            }
+                            let keys: Vec<Value> = keyword_args.keys()
+                            .cloned()
+                            .map(|k| Value::String(k))
+                            .collect();
+                        
+                            let values: Vec<Value> = keyword_args.values()
+                                .cloned()
+                                .collect();
+                            
+                            final_args.insert(
+                                param_name.clone(),
+                                Value::Map { keys, values },
+                            );
+                        }                        
+                    }
+                }
+
+                if !named_map.is_empty() {
+                    let mut expect_one_of = String::new();
+                    let params_count = metadata.parameters.len();
+                    
+                    if params_count > 4 {
+                        expect_one_of.clear();
+                    } else {
+                        expect_one_of.push_str(" Expected one of: ");
+                        
+                        for (i, param) in metadata.parameters.iter().enumerate() {
+                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty));
+                            if i != params_count - 1 {
+                                expect_one_of.push_str(", ");
+                            }
+                        }
+                    }
+                    
+                    if named_map.len() == 1 {
+                        let (key, value) = named_map.into_iter().next().unwrap();
+                        return self.raise(
+                            "TypeError",
+                            &format!("Unexpected keyword argument '{}'.{}", key, expect_one_of),
+                        );
+                    } else {
+                        return self.raise(
+                            "TypeError",
+                            &format!("Unexpected keyword arguments: {}.{}", named_map.keys().cloned().collect::<Vec<String>>().join(", "), expect_one_of),
+                        );
+                    }
+                }
+
+                debug_log(
+                    &format!(
+                        "<Call: {}({})>",
+                        function_name,
+                        final_args
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    ),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
+    
+                return func.call(&final_args)
+            }
+            other => {
+                self.raise_with_help(
+                    "TypeError",
+                    &format!("'{}' is not callable", function_name),
+                    &format!("Expected a function, but got: {}", other.to_string()),
+                )
+            }
+        }
+    }
+    
 
     fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
         let left_opt = statement.get(&Value::String("left".to_string()));
@@ -200,7 +593,7 @@ impl Interpreter {
             Some(val) => self.evaluate(val.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'left' key in the statement.");
-                return Value::Null;
+                return NULL;
             }
         };
 
@@ -209,7 +602,7 @@ impl Interpreter {
             Some(val) => self.evaluate(val.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
-                return Value::Null;
+                return NULL;
             }
         };
 
@@ -233,10 +626,12 @@ impl Interpreter {
         let prec = precision + 2;
 
         if let Value::Float(l) = left {
-            left = Value::Float((l * 10f64.powi(prec as i32)).round() / 10f64.powi(prec as i32));
+            let factor = Float::new(10f64.powi(prec as i32));
+            left = Value::Float((l * factor.clone()).round() / factor);
         }
         if let Value::Float(r) = right {
-            right = Value::Float((r * 10f64.powi(prec as i32)).round() / 10f64.powi(prec as i32));
+            let factor = Float::new(10f64.powi(prec as i32));
+            right = Value::Float((r * factor.clone()).round() / factor);
         }
 
         if let Value::List(ref list) = left {
@@ -247,13 +642,50 @@ impl Interpreter {
         }
 
         if let Value::Boolean(b) = left {
-            left = Value::Float(if b { 1.0 } else { 0.0 });
+            left = Value::Float(if b { 1.0.into() } else { 0.0.into() });
         }
         if let Value::Boolean(b) = right {
-            right = Value::Float(if b { 1.0 } else { 0.0 });
+            right = Value::Float(if b { 1.0.into() } else { 0.0.into() });
         }
 
         self.make_operation(left, right, &operator)
+    }
+
+    fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let operand_opt = statement.get(&Value::String("operand".to_string()));
+        let operand = match operand_opt {
+            Some(val) => self.evaluate(val.convert_to_statement()),
+            None => {
+                self.raise("KeyError", "Missing 'operand' key in the statement.");
+                return NULL;
+            }
+        };
+
+        let operator = match statement.get(&Value::String("operator".to_string())) {
+            Some(Value::String(s)) => s,
+            _ => return self.raise("TypeError", "Expected a string for operator"),
+        };
+
+        debug_log(
+            &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
+            &self.config,
+            Some(self.use_colors.clone()),
+        );
+
+        match operator.as_str() {
+            "-" => match operand {
+                Value::Int(n) => Value::Int(-n),
+                Value::Float(f) => Value::Float(-f),
+                _ => self.raise("TypeError", &format!("Cannot negate {}", operand.type_name())),
+            },
+            "+" => match operand {
+                Value::Int(n) => Value::Int(n.abs()),
+                Value::Float(f) => Value::Float(f.abs()),
+                _ => self.raise("TypeError", &format!("Cannot apply unary plus to {}", operand.type_name())),
+            },
+            "!" => Value::Boolean(!operand.is_truthy()),
+            _ => self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
+        }
     }
 
     fn make_operation(&mut self, left: Value, right: Value, operator: &str) -> Value {
@@ -272,8 +704,8 @@ impl Interpreter {
             "+" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 + b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a + b as f64),
+                (Value::Int(a), Value::Float(b)) => Value::Float((a + b.into()).into()),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a + b.into()),
                 (Value::String(a), Value::String(b)) => Value::String(a + &b),
                 (a, b) => self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
             },
@@ -281,46 +713,46 @@ impl Interpreter {
             "-" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 - b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a - b as f64),
+                (Value::Int(a), Value::Float(b)) => Value::Float((a - b.into()).into()),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a - b.into()),
                 (a, b) => self.raise("TypeError", &format!("Cannot subtract {} and {}", a.type_name(), b.type_name())),
             },
 
             "*" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    match a.checked_mul(b) {
-                        Some(result) => Value::Int(result),
+                    match a.checked_mulf(&Float::from(b)) {
+                        Some(result) => Value::Int(result.into()),
                         None => {
                             self.raise("OverflowError", "Integer overflow during multiplication")
                         }
                     }
                 }
                 (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 * b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a * b as f64),
+                (Value::Int(a), Value::Float(b)) => Value::Float((a * b.into()).into()),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a * b.into()),
                 (a, b) => self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
             }
 
             "/" => match &right {
-                Value::Int(0) => self.raise("ZeroDivisionError", "Division by zero."),
-                Value::Float(f) if *f == 0.0 => self.raise("ZeroDivisionError", "Division by zero."),
+                Value::Int(val) if val == &Int::new(0) => self.raise("ZeroDivisionError", "Division by zero."),
+                Value::Float(f) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Division by zero."),
                 _ => match (left, right) {
                     (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 / b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a / b as f64),
+                    (Value::Int(a), Value::Float(b)) => Value::Float((a / b.into()).into()),
+                    (Value::Float(a), Value::Int(b)) => Value::Float((a / b.into()).into()),
                     (a, b) => self.raise("TypeError", &format!("Cannot divide {} by {}", a.type_name(), b.type_name())),
                 }
             },
 
             "%" => match (left, right) {
-                (_, Value::Int(0)) => self.raise("ZeroDivisionError", "Modulo by zero."),
-                (_, Value::Float(f)) if f == 0.0 => self.raise("ZeroDivisionError", "Modulo by zero."),
+                (_, Value::Int(val)) if val == 0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
+                (_, Value::Float(f)) if f == 0.0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
 
                 (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
-                (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(a as f64 % b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a % b as f64),
+                (Value::Float(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
+                (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
 
                 (a, b) => self.raise("TypeError", &format!(
                     "Cannot modulo {} and {}", a.type_name(), b.type_name()
@@ -328,27 +760,46 @@ impl Interpreter {
             }
 
             "^" => match (&left, &right) {
-                (_, Value::Int(0)) => Value::Int(1),
-                (_, Value::Float(f)) if *f == 0.0 => Value::Int(1),
+                (_, Value::Int(b)) if b.value.is_zero() => Value::Int(Int::new(1)),
+                (_, Value::Float(b)) if b.value.is_zero() => Value::Int(Int::new(1)),
 
                 (Value::Int(a), Value::Int(b)) => {
-                    if *b < 0 {
-                        Value::Float((*a as f64).powf(*b as f64))
+                    if b.value.sign() == num_bigint::Sign::Minus {
+                        let base = Float::from_int(a.clone());
+                        let exp = Float::from_int(b.clone());
+                        Value::Float(base.powf(exp))
                     } else {
-                        match a.checked_pow(*b as u32) {
-                            Some(result) => Value::Int(result),
-                            None => Value::Float((*a as f64).powf(*b as f64)),
+                        match b.to_u32() {
+                            Some(exp_u32) => match a.checked_pow(exp_u32) {
+                                Some(result) => Value::Int(result),
+                                None => {
+                                    let base = Float::from_int(a.clone());
+                                    let exp = Float::from_int(b.clone());
+                                    Value::Float(base.powf(exp))
+                                }
+                            },
+                            None => {
+                                let base = Float::from_int(a.clone());
+                                let exp = Float::from_int(b.clone());
+                                Value::Float(base.powf(exp))
+                            }
                         }
                     }
                 }
 
-                (Value::Float(a), Value::Float(b)) => Value::Float(a.powf(*b)),
-                (Value::Int(a), Value::Float(b)) => Value::Float((*a as f64).powf(*b)),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a.powf(*b as f64)),
+                (Value::Float(a), Value::Float(b)) => Value::Float(a.powf(b.clone())),
 
+                (Value::Int(a), Value::Float(b)) => {
+                    let base = Float::from_int(a.clone());
+                    Value::Float(base.powf(b.clone()))
+                }
+                (Value::Float(a), Value::Int(b)) => {
+                    let exp = b.clone();
+                    Value::Float(a.powi(exp))
+                }
                 (a, b) => self.raise("TypeError", &format!(
-                    "Operator '^' requires numeric operands, got '{}' and '{}'", 
-                    a.type_name(), 
+                    "Operator '^' requires numeric operands, got '{}' and '{}'",
+                    a.type_name(),
                     b.type_name()
                 )),
             }
@@ -395,12 +846,12 @@ impl Interpreter {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             if s.contains('.') {
                 match s.parse::<f64>() {
-                    Ok(num) => Value::Float(num as f64),
+                    Ok(num) => Value::Float(Float::from(num)),
                     Err(_) => self.raise("RuntimeError", "Invalid float format"),
                 }
             } else {
                 match s.parse::<i64>() {
-                    Ok(num) => Value::Int(num as i64),
+                    Ok(num) => Value::Int(Int::from(num)),
                     Err(_) => self.raise("RuntimeError", "Invalid integer format"),
                 }
             }

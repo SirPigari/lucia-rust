@@ -1,5 +1,5 @@
 /target
 Cargo.lock
-Makefile
 .git/
 .vscode/
+.temp/
