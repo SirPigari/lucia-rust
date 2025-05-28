@@ -192,7 +192,7 @@ pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
-    Float(f64),
+    Float(u32),
     Int(i64),
     String(String),
     Boolean(bool),
