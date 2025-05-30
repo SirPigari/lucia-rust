@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{print_colored, hex_to_ansi, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, check_ansi, unescape_string};
+use crate::env::core::utils::{print_colored, hex_to_ansi, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, check_ansi, unescape_string, to_static};
 use crate::env::core::types::{Int, Float, VALID_TYPES};
-use crate::env::core::value::Value;
+use crate::env::core::value::{Value, ValueContext};
 use crate::env::core::errors::Error;
 use crate::env::core::variables::Variable;
 use crate::env::core::statements::Statement;
@@ -23,7 +23,7 @@ pub struct Interpreter {
     is_returning: bool,
     return_value: Value,
     source: String,
-    stack: Vec<Value>,
+    stack: Vec<(String, HashMap<String, Value>, HashMap<String, Variable>)>,
     use_colors: bool,
     current_statement: Option<Statement>,
     variables: HashMap<String, Variable>,
@@ -265,12 +265,392 @@ impl Interpreter {
                 "OPERATION" => self.handle_operation(statement.clone()),
                 "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
                 "CALL" => self.handle_call(statement.clone()),
+                "METHOD_CALL" => self.handle_method_call(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
 
+    fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
+            return Value::Error("MethodCallError", "Missing 'object' in method call");
+        };
+    
+        let Some(Value::String(method)) = statement.get(&Value::String("method".to_string())).cloned() else {
+            return Value::Error("MethodCallError", "Missing or invalid 'method' in method call");
+        };
+    
+        let (pos_args, named_args) = match self.translate_args(
+            statement.get(&Value::String("pos_args".to_string())).cloned().unwrap_or(Value::List(vec![])),
+            statement.get(&Value::String("named_args".to_string())).cloned().unwrap_or(Value::Map { keys: vec![], values: vec![] }),
+        ) {
+            Ok(args) => args,
+            Err(err) => {
+                return self.raise("MethodCallError", to_static(err.to_string()));
+            }
+        };
+        
+    
+        let method_name = method.as_str();
+        let object_value = self.evaluate(object.convert_to_statement());
+        let object_type = object_value.type_name();
+
+        let object_context = ValueContext::new(object_value.clone());
+
+        return self.call_method(
+            &object_context,
+            method_name,
+            pos_args,
+            named_args,
+        );
+    }
+
+    fn call_method(
+        &mut self,
+        object_context: &ValueContext,
+        method_name: &str,
+        pos_args: Vec<Value>,
+        named_args: HashMap<String, Value>,
+    ) -> Value {
+        let var = match object_context.variables.get(method_name) {
+            Some(v) => v.clone(),
+            None => {
+                let available_names: Vec<String> = object_context.variables.keys().cloned().collect();
+                if let Some(closest) = find_closest_match(method_name, &available_names) {
+                    return self.raise_with_help(
+                        "NameError",
+                        &format!("No method '{}' in '{}'", method_name, object_context.type_name()),
+                        &format!("Did you mean '{}{}{}'?",
+                            check_ansi("\x1b[4m", &self.use_colors),
+                            closest,
+                            check_ansi("\x1b[24m", &self.use_colors),
+                        ),
+                    );
+                } else {
+                    return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_context.type_name()));
+                }
+            }
+        };
+    
+        let value = var.get_value();
+    
+        match value {
+            Value::Function(func) => {
+                if let Some(state) = func.metadata().state.as_ref() {
+                    if state == "deprecated" {
+                        println!("Warning: Method '{}' is deprecated", method_name);
+                    } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Method '{}' has been renamed to '{}'.",
+                                method_name, alt_name
+                            ),
+                            &format!(
+                                "Try using: '{}{}{}'",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                alt_name,
+                                check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );
+                    } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
+                        let mut parts = alt_info.splitn(2, ',').map(str::trim);
+                        let version = parts.next().unwrap_or("unknown");
+                        let alt_name = parts.next().unwrap_or("an alternative");
+                    
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Method '{}' has been removed in version {}.",
+                                method_name, version
+                            ),
+                            &format!(
+                                "Use '{}{}{}' instead.",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                alt_name,
+                                check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );                
+                    } else if let Some(alt_name) = state.strip_prefix("removed_in: ") {
+                        return self.raise(
+                            "NameError",
+                            &format!(
+                                "Method '{}' has been removed in version {}.",
+                                method_name, alt_name
+                            ),
+                        );
+                    } else if let Some(alt_name) = state.strip_prefix("removed: ") {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!(
+                                "Method '{}' has been removed.",
+                                method_name
+                            ),
+                            &format!(
+                                "Use '{}{}{}' instead.",
+                                check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
+                            ),
+                        );
+                    }
+                }
+
+                let metadata = func.metadata();
+    
+                let positional: Vec<Value> = pos_args.clone();
+                let mut named_map: HashMap<String, Value> = named_args.clone();
+                let mut final_args: HashMap<String, Value> = HashMap::new();
+    
+                let passed_args_count = positional.len() + named_map.len();
+                let expected_args_count = metadata.parameters.len();
+                
+                if expected_args_count == 0 && passed_args_count > 0 {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Method '{}' expects no arguments, but got {}.",
+                            method_name,
+                            passed_args_count
+                        ),
+                    );
+                }
+                
+                if passed_args_count > expected_args_count {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Too many arguments for method '{}'. Expected at most {}, but got {}.",
+                            method_name,
+                            expected_args_count,
+                            passed_args_count
+                        ),
+                    );
+                }                
+
+                let mut pos_index = 0;
+                let required_positional_count = metadata.parameters
+                .iter()
+                .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
+                .count();
+            
+                let provided_positional_count = positional.len();
+                
+                if provided_positional_count < required_positional_count {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Missing required positional argument{} for method '{}'. Expected at least {}, but got {}.",
+                            if required_positional_count == 1 { "" } else { "s" },
+                            method_name,
+                            required_positional_count,
+                            provided_positional_count
+                        ),
+                    );
+                }            
+    
+                for param in &metadata.parameters {
+                    let param_name = &param.name;
+                    let param_type = &param.ty;
+                    let param_default = &param.default;
+
+                    match param.kind {
+                        ParameterKind::Positional => {
+                            if pos_index < positional.len() {
+                                let arg_value = positional[pos_index].clone();
+                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), false) {
+                                    final_args.insert(param_name.clone(), arg_value);
+                                } else {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, arg_value.type_name()),
+                                        &format!(
+                                            "Try using: '{}{}={}({}){}'",
+                                            check_ansi("\x1b[4m", &self.use_colors),
+                                            param_name,
+                                            param_type,
+                                            format_value(&positional[pos_index]).to_string(),
+                                            check_ansi("\x1b[24m", &self.use_colors)
+                                        ),
+                                    );
+                                }
+                                pos_index += 1;
+                            } else if let Some(named_value) = named_map.remove(param_name) {
+                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), false) {
+                                    final_args.insert(param_name.clone(), named_value);
+                                } else {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, named_value.type_name()),
+                                        &format!(
+                                            "Try using: '{}{}={}({}){}'",
+                                            check_ansi("\x1b[4m", &self.use_colors),
+                                            param_name,
+                                            param_type,
+                                            check_ansi("\x1b[24m", &self.use_colors),
+                                            named_value.to_string()
+                                        ),
+                                    );
+                                }
+                            } else if let Some(default) = param_default {
+                                final_args.insert(param_name.clone(), default.clone());
+                            } else {
+                                return self.raise("TypeError", &format!("Missing required positional argument: '{}'", param_name));
+                            }
+                        }                        
+                        ParameterKind::Variadic => {
+                            let mut variadic_args = positional[pos_index..].to_vec();
+
+                            for (i, arg) in variadic_args.iter().enumerate() {
+                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), false) {
+                                    return self.raise(
+                                        "TypeError",
+                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
+                                    );
+                                }
+                            }
+                    
+                            final_args.insert(param_name.clone(), Value::List(variadic_args));
+                    
+                            pos_index = positional.len();
+                        }
+                        ParameterKind::KeywordVariadic => {
+                            let mut keyword_args = HashMap::new();
+                            for (key, value) in &named_map {
+                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), true) {
+                                    keyword_args.insert(key.clone(), value.clone());
+                                } else {
+                                    return self.raise(
+                                        "TypeError",
+                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, param_type),
+                                    );
+                                }
+                            }
+                            let keys: Vec<Value> = keyword_args.keys()
+                            .cloned()
+                            .map(|k| Value::String(k))
+                            .collect();
+                        
+                            let values: Vec<Value> = keyword_args.values()
+                                .cloned()
+                                .collect();
+                            
+                            final_args.insert(
+                                param_name.clone(),
+                                Value::Map { keys, values },
+                            );
+                        }                        
+                    }
+                }
+
+                if !named_map.is_empty() {
+                    let mut expect_one_of = String::new();
+                    let params_count = metadata.parameters.len();
+                    
+                    if params_count > 4 {
+                        expect_one_of.clear();
+                    } else {
+                        expect_one_of.push_str(" Expected one of: ");
+                        
+                        for (i, param) in metadata.parameters.iter().enumerate() {
+                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty));
+                            if i != params_count - 1 {
+                                expect_one_of.push_str(", ");
+                            }
+                        }
+                    }
+                    
+                    if named_map.len() == 1 {
+                        let (key, value) = named_map.into_iter().next().unwrap();
+                        return self.raise(
+                            "TypeError",
+                            &format!("Unexpected keyword argument '{}'.{}", key, expect_one_of),
+                        );
+                    } else {
+                        return self.raise(
+                            "TypeError",
+                            &format!("Unexpected keyword arguments: {}.{}", named_map.keys().cloned().collect::<Vec<String>>().join(", "), expect_one_of),
+                        );
+                    }
+                }
+
+                debug_log(
+                    &format!(
+                        "<Method call: {}.{}({})>",
+                        object_context.type_name(),
+                        method_name,
+                        final_args
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    ),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
+
+                self.stack.push((format!("{}.{}", object_context.type_name(), method_name).to_string(), final_args.clone(), self.variables.clone()));
+
+                let result = func.call(&final_args);  // func.call(&final_args, &mut self.stack);
+                self.stack.pop();
+                if let Value::Error(err_type, err_msg) = &result {
+                    return self.raise(err_type, err_msg);
+                }
+                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), false) {
+                    return self.raise_with_help(
+                        "TypeError",
+                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
+                        &format!(
+                            "Expected: '{}', but got: '{}'",
+                            metadata.return_type,
+                            result.type_name()
+                        ),
+                    );
+                }
+                return result;
+            }
+            other => {
+                self.raise_with_help(
+                    "TypeError",
+                    &format!("'{}' is not callable", method_name),
+                    &format!("Expected a method, but got: {}", other.to_string()),
+                )
+            }
+        }
+    }
+
+    fn translate_args(
+        &mut self,
+        pos_args: Value,
+        named_args: Value,
+    ) -> Result<(Vec<Value>, HashMap<String, Value>), Value> {
+        let pos_args = match pos_args {
+            Value::List(args) => {
+                args.iter()
+                    .map(|stmt| self.evaluate(stmt.clone().convert_to_statement()))
+                    .collect::<Vec<Value>>()
+            }
+            _ => return Err(self.raise("TypeError", "Expected a list for function arguments")),
+        };
+    
+        let named_args = match named_args {
+            Value::Map { keys, values } => {
+                let mut map = HashMap::new();
+                for (key, val_stmt) in keys.iter().zip(values.iter()) {
+                    if let Value::String(key_str) = key {
+                        let val = self.evaluate(val_stmt.clone().convert_to_statement());
+                        map.insert(key_str.clone(), val);
+                    } else {
+                        return Err(self.raise("TypeError", "Expected string keys for named arguments"));
+                    }
+                }
+                map
+            }
+            _ => return Err(self.raise("TypeError", "Expected a map for named arguments")),
+        };
+    
+        Ok((pos_args, named_args))
+    }
+    
     fn handle_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let function_name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(s)) => s.as_str(),
@@ -301,7 +681,6 @@ impl Interpreter {
             }
             _ => return self.raise("TypeError", "Expected a map for named arguments"),
         };
-
         self.call_function(function_name, pos_args, named_args)
     }
 
@@ -585,7 +964,25 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
     
-                return func.call(&final_args)
+                self.stack.push((function_name.to_string(), final_args.clone(), self.variables.clone()));
+
+                let result = func.call(&final_args);  // func.call(&final_args, &mut self.stack);
+                self.stack.pop();
+                if let Value::Error(err_type, err_msg) = &result {
+                    return self.raise(err_type, err_msg);
+                }
+                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), false) {
+                    return self.raise_with_help(
+                        "TypeError",
+                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
+                        &format!(
+                            "Expected: '{}', but got: '{}'",
+                            metadata.return_type,
+                            result.type_name()
+                        ),
+                    );
+                }
+                return result
             }
             other => {
                 self.raise_with_help(
@@ -741,6 +1138,17 @@ impl Interpreter {
                 (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
                 (Value::Int(a), Value::Float(b)) => Value::Float((a * b.into()).into()),
                 (Value::Float(a), Value::Int(b)) => Value::Float(a * b.into()),
+                (Value::String(a), Value::Int(b)) => {
+                    if b.value.is_zero() {
+                        Value::String("".to_string())
+                    } else {
+                        let mut result = String::new();
+                        for _ in 0..b.to_usize().unwrap_or(0) {
+                            result.push_str(&a);
+                        }
+                        Value::String(result)
+                    }
+                }
                 (a, b) => self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
             }
 
@@ -875,6 +1283,7 @@ impl Interpreter {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             let mut modified_string = s.clone();
             let mut is_raw = false;
+            let mut is_bytes = false;
     
             if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
                 for mod_value in mods {
@@ -982,6 +1391,9 @@ impl Interpreter {
                             "r" => {
                                 is_raw = true;
                             }
+                            "b" => {
+                                is_bytes = true;
+                            }
                             _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
                         }
                     } else {
@@ -994,15 +1406,25 @@ impl Interpreter {
             if !is_raw {
                 modified_string = match unescape_string(&modified_string) {
                     Ok(unescaped) => unescaped,
-                    Err(e) => return self.raise("JSONDecodeError", &e),
+                    Err(e) => return self.raise("UnicodeError", &e),
                 };
-            }            
+            }
             
-            let unquoted = if modified_string.len() >= 2 && modified_string.starts_with('"') && modified_string.ends_with('"') {
-                modified_string[1..modified_string.len() - 1].to_string()
+            let unquoted = if modified_string.len() >= 2 {
+                let first = modified_string.chars().next().unwrap();
+                let last = modified_string.chars().last().unwrap();
+                if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+                    modified_string[1..modified_string.len() - 1].to_string()
+                } else {
+                    modified_string
+                }
             } else {
                 modified_string
             };
+
+            if is_bytes {
+                return Value::Bytes(unquoted.clone().into_bytes());
+            }
     
             Value::String(unquoted)
         } else {

@@ -9,7 +9,7 @@ use crate::env::core::value::Value;
 use once_cell::sync::Lazy;
 
 pub const VALID_TYPES: &[&str] = &[
-    "void", "any", "null", "int", "float", "bool", "str", "map", "list", "function", "error",
+    "void", "any", "null", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes"
 ];
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Debug)]
@@ -192,6 +192,9 @@ impl Float {
     pub fn to_u32(&self) -> Option<u32> {
         self.value.to_u32()
     }
+    pub fn to_usize(&self) -> Option<usize> {
+        self.value.to_usize()
+    }
     pub fn abs(&self) -> Self {
         Float {
             value: self.value.abs(),
@@ -265,6 +268,9 @@ impl Int {
     }
     pub fn to_u32(&self) -> Option<u32> {
         self.value.to_u32()
+    }
+    pub fn to_usize(&self) -> Option<usize> {
+        self.value.to_usize()
     }
     pub fn abs(&self) -> Self {
         Int {
@@ -395,3 +401,14 @@ impl PartialEq for Boolean {
 }
 
 impl Eq for Boolean {}
+
+pub trait Str {
+    fn to_bytes(&self) -> Vec<u8>;
+}
+
+impl Str for String {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+

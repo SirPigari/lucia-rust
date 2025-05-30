@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::{self, Write, stdout};
 use std::fmt;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -11,12 +11,18 @@ use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
 use std::str::FromStr;
 use crate::env::core::functions::Function;
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
+use crate::env::core::functions::{Parameter, NativeMethod, FunctionMetadata};
 use crate::env::core::statements::Statement;
 use crate::env::core::types::{Int, Float, Boolean};
 use crate::env::core::value::{Value};
 use crate::env::core::errors::Error;
 use crate::env::core::variables::Variable;
+use crossterm::{
+    execute,
+    terminal::{Clear, ClearType},
+    cursor::MoveTo,
+};
 
 static ERROR_CACHE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -55,9 +61,15 @@ pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
     source.lines().nth(line_number.saturating_sub(1)).map(|s| s.to_string())
 }
 
-pub fn clear_terminal() {
-    print!("{}[2J", 27 as char);
-    io::stdout().flush().unwrap();
+pub fn clear_terminal() -> Result<(), io::Error> {
+    let mut stdout = stdout();
+    execute!(
+        stdout,
+        Clear(ClearType::All),
+        MoveTo(0, 0)
+    )?;
+    stdout.flush()?;
+    Ok(())
 }
 
 pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
@@ -123,14 +135,9 @@ pub fn format_value(value: &Value) -> String {
             format!("[{}]", formatted_values.join(", "))
         }
 
-        Value::ListCompletion { pattern, end } => {
-            let formatted_pattern: Vec<String> = pattern.iter().map(format_value).collect();
-            let formatted_end = end.as_ref().map_or("None".to_string(), |v| format_value(v));
-            format!(
-                "ListCompletion {{ pattern: [{}], end: {} }}",
-                formatted_pattern.join(", "),
-                formatted_end
-            )
+        Value::Bytes(bytes) => {
+            let formatted_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("b\"{}\"", formatted_bytes.join(" "))
         }
 
         Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func),
@@ -238,7 +245,7 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
         let inner = &s[1..s.len() - 1];
 
-        let json_quoted = format!("\"{}\"", inner.replace('\\', "\\\\").replace('"', "\\\""));
+        let json_quoted = format!("\"{}\"", inner);
 
         match serde_json::from_str::<String>(&json_quoted) {
             Ok(unescaped) => Ok(unescaped),
@@ -249,6 +256,35 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     }
 }
 
+pub fn make_native_method<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &str,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>,
+) -> Value
+where
+    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    let method = NativeMethod {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: return_type.to_string(),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+        },
+    };
+
+    Value::Function(Function::NativeMethod(Arc::new(method)))
+}
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

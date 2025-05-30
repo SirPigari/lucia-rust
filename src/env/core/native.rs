@@ -294,6 +294,12 @@ fn format_value(value: &Value) -> String {
                 format!("[{}]", formatted_values.join(", "))
             }
         }
+        Value::Bytes(bytes) => {
+            match String::from_utf8(bytes.clone()) {
+                Ok(decoded) => decoded,
+                Err(_) => format!("<invalid utf-8: {:?}>", bytes),
+            }
+        }        
         Value::Function(func) => {
             format!("<function '{}' at {:p}>", func.get_name(), func)
         }

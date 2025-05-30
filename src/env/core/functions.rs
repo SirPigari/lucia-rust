@@ -139,6 +139,83 @@ impl Callable for UserFunction {
     }
 }
 
+// -------------------------------
+// Native Method
+// -------------------------------
+
+#[derive(Clone)]
+pub struct NativeMethod {
+    pub func: Arc<dyn NativeCallable>,
+    pub meta: FunctionMetadata,
+}
+
+impl Callable for NativeMethod {
+    fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
+        self.func.call(_args)
+    }
+
+    fn metadata(&self) -> &FunctionMetadata {
+        &self.meta
+    }
+}
+
+impl NativeMethod {
+    pub fn new<F>(
+        name: &str,
+        func: F,
+        parameters: Vec<Parameter>,
+        return_type: &str,
+        is_public: bool,
+        is_static: bool,
+        is_final: bool,
+        state: Option<String>,
+    ) -> Self
+    where
+        F: NativeCallable + 'static,
+    {
+        Self {
+            func: Arc::new(func),
+            meta: FunctionMetadata {
+                name: name.to_string(),
+                parameters,
+                return_type: return_type.to_string(),
+                is_public,
+                is_static,
+                is_final,
+                is_native: true,
+                state,
+            },
+        }
+    }
+}
+
+
+// -------------------------------
+// User-defined Method
+// -------------------------------
+
+#[derive(Clone, PartialEq, Hash, PartialOrd)]
+pub struct UserFunctionMethod {
+    pub meta: FunctionMetadata,
+    pub body: Vec<Statement>,
+}
+
+impl Callable for UserFunctionMethod {
+    fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
+        // TODO: actual interpretation logic here
+        println!(
+            "Calling user-defined method '{}'",
+            self.meta.name
+        );
+
+        Value::Null
+    }
+
+    fn metadata(&self) -> &FunctionMetadata {
+        &self.meta
+    }
+}
+
 
 // -------------------------------
 // Function Enum
@@ -147,7 +224,9 @@ impl Callable for UserFunction {
 #[derive(Clone)]
 pub enum Function {
     Native(Arc<NativeFunction>),
-    Custom( Arc<UserFunction>),
+    Custom(Arc<UserFunction>),
+    NativeMethod(Arc<NativeMethod>),
+    CustomMethod(Arc<UserFunction>),
 }
 
 impl Function {
@@ -155,6 +234,8 @@ impl Function {
         match self {
             Function::Native(f) => f.call(args),
             Function::Custom(f) => f.call(args),
+            Function::NativeMethod(f) => f.call(args),
+            Function::CustomMethod(f) => f.call(args),
         }
     }
 
@@ -162,6 +243,8 @@ impl Function {
         match self {
             Function::Native(f) => f.metadata(),
             Function::Custom(f) => f.metadata(),
+            Function::NativeMethod(f) => f.metadata(),
+            Function::CustomMethod(f) => f.metadata(),
         }
     }
 
@@ -265,6 +348,15 @@ impl Parameter {
             ty: ty.to_string(),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
+        }
+    }
+
+    pub fn instance() -> Self {
+        Self {
+            name: "self".to_string(),
+            ty: "any".to_string(),
+            default: None,
+            kind: ParameterKind::Positional,
         }
     }
 }

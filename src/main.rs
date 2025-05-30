@@ -26,7 +26,7 @@ mod lexer;
 
 use crate::env::core::utils;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi};
+use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal};
 use crate::env::core::types::{Int, Float, Boolean};
 use crate::env::core::errors::Error;
 use crate::env::core::value::Value;
@@ -415,6 +415,35 @@ fn main() {
             let input = utils::read_input("");
             if input == "exit" {
                 println!("Use 'exit()' to exit.");
+                continue;
+            }
+            if input == "clear" || input == "cls" || input == "cls()" {
+                println!("Use 'clear()' to clear.");
+                continue;
+            }
+
+            if input == "help" || input == "?" {
+                println!("Use 'help()' for help.");
+                continue;
+            }
+
+            if input == "clear()" {
+                if let Err(e) =  clear_terminal() {
+                    handle_error(
+                        &Error::new("IOError", "Failed to clear screen"),
+                        &input,
+                        (0, "".to_string()),
+                        &config,
+                        use_colors,
+                        Some("<stdin>"),
+                    );
+                }
+                println!(
+                    "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
+                    hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
+                    config.version, 
+                    hex_to_ansi("reset", Some(use_colors))
+                );
                 continue;
             }
     
