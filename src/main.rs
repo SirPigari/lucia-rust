@@ -427,7 +427,11 @@ fn main() {
                 continue;
             }
 
-            if input == "clear()" {
+            if input == "\x03" {
+                exit(0);
+            }
+
+            if input == "clear()" || input == "\x11" || input == "\x0F" {
                 if let Err(e) =  clear_terminal() {
                     handle_error(
                         &Error::new("IOError", "Failed to clear screen"),

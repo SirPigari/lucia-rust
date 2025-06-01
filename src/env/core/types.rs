@@ -308,6 +308,12 @@ impl Int {
         Int { value }
     }
 
+    pub fn to_float(&self) -> Float {
+        let int_str = self.value.to_string();
+        let value = BigFloat::from_str(&int_str).unwrap_or_else(|_| BigFloat::from_u32(0));
+        Float { value }
+    }
+
     pub fn checked_powf(&self, exp: &Float) -> Option<Float> {
         if let Some(exp_u32) = exp.to_u32() {
             let result = self.value.pow(exp_u32);
@@ -401,14 +407,3 @@ impl PartialEq for Boolean {
 }
 
 impl Eq for Boolean {}
-
-pub trait Str {
-    fn to_bytes(&self) -> Vec<u8>;
-}
-
-impl Str for String {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.as_bytes().to_vec()
-    }
-}
-

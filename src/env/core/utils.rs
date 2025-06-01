@@ -1,5 +1,5 @@
 use std::io::{self, Write, stdout};
-use std::fmt;
+use std::fmt::{self, Write as FmtWrite};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
@@ -146,31 +146,88 @@ pub fn format_value(value: &Value) -> String {
     }
 }
 
-fn format_bigfloat(n: &BigFloat) -> String {
-    let s = n.to_string();
+pub fn format_bigfloat(n: &BigFloat) -> String {
+    let s = n.to_string(); // e.g. "5e-1" or "1.23e+3"
+    if let Some(e_index) = s.find('e') {
+        let (mantissa, exp_str) = s.split_at(e_index);
+        let exponent: i32 = exp_str[1..].parse().unwrap_or(0); // skip 'e'
 
-    if let Some(dot_pos) = s.find('.') {
-        let (int_part, frac_part) = s.split_at(dot_pos);
-        let trimmed_frac = frac_part.trim_end_matches('0');
+        // Split mantissa
+        let mut parts = mantissa.split('.');
+        let int_part = parts.next().unwrap_or("0");
+        let frac_part = parts.next().unwrap_or("");
 
-        if trimmed_frac == "." {
-            int_part.to_string()
+        let digits = format!("{}{}", int_part, frac_part);
+        let total_len = digits.len() as i32;
+
+        if exponent >= 0 {
+            // Move decimal to the right
+            let moved = exponent as usize;
+            let padded = format!("{:0<1$}", digits, int_part.len() + moved);
+            if moved >= frac_part.len() {
+                padded // no decimal needed
+            } else {
+                let split = int_part.len() + exponent as usize;
+                let (whole, frac) = padded.split_at(split);
+                let mut result = format!("{}.{}", whole, frac);
+                result = result.trim_end_matches('0').to_string();
+                if result.ends_with('.') {
+                    result.pop();
+                }
+                result
+            }
         } else {
-            format!("{}{}", int_part, trimmed_frac)
+            // Move decimal to the left
+            let exp_abs = exponent.abs() as usize;
+            let zeros = exp_abs.saturating_sub(int_part.len());
+            let padded = format!("{:0>width$}", digits, width = digits.len() + zeros);
+
+            let split_index = padded.len() - digits.len() - zeros;
+            let (whole, frac) = padded.split_at(split_index);
+            let mut result = format!("{}.{}", whole, frac);
+            result = result.trim_end_matches('0').to_string();
+            if result.ends_with('.') {
+                result.pop();
+            }
+            if result.starts_with('.') {
+                result = format!("0{}", result);
+            }
+            result
         }
     } else {
-        s
+        // If it's already normal notation
+        let mut cleaned = s.trim_end_matches('0').to_string();
+        if cleaned.ends_with('.') {
+            cleaned.pop();
+        }
+        if cleaned.starts_with('.') {
+            cleaned = format!("0{}", cleaned);
+        }
+        cleaned
     }
 }
 
-fn format_bigint(n: &BigInt) -> String {
+pub fn format_bigint(n: &BigInt) -> String {
     let s = n.to_string();
-    if s.starts_with("-0") {
-        "0".to_string()
-    } else if s.trim_start_matches('0').is_empty() {
+
+    if s == "-0" || s.trim_start_matches('0').is_empty() {
         "0".to_string()
     } else {
-        s
+        if s.starts_with('-') {
+            let trimmed = s[1..].trim_start_matches('0');
+            if trimmed.is_empty() {
+                "0".to_string()
+            } else {
+                format!("-{}", trimmed)
+            }
+        } else {
+            let trimmed = s.trim_start_matches('0');
+            if trimmed.is_empty() {
+                "0".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
     }
 }
 
@@ -222,9 +279,11 @@ pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
 pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
     if config.debug {
-        print_colored(message, &config.color_scheme.debug, Some(use_colors));
+        let single_line_message = message.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t").replace('\0', "\\0").replace('\x1b', "\\e");
+        print_colored(&single_line_message, &config.color_scheme.debug, Some(use_colors));
     }
 }
+
 
 pub fn capitalize(s: &str) -> String {
     let mut chars = s.chars();

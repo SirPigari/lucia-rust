@@ -160,14 +160,19 @@ impl Parser {
     }
 
     pub fn get_line_column(&self) -> usize {
-        let mut index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
-        let mut char_pos = 0;
-        while index > 0 && &self.source[index - 1..index] != "\n" {
-            char_pos += 1;
-            index -= 1;
+        let mut byte_index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
+    
+        let mut line_start = 0;
+        for (i, ch) in self.source[..byte_index].char_indices().rev() {
+            if ch == '\n' {
+                line_start = i + ch.len_utf8();
+                break;
+            }
         }
-        char_pos + 1
+    
+        self.source[line_start..byte_index].chars().count() + 1
     }
+    
 
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
@@ -255,6 +260,39 @@ impl Parser {
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.parse_function_call()
+                        } else {
+                            self.parse_operand()
+                        }
+                    } else {
+                        self.parse_operand()
+                    }
+                }
+
+                "NUMBER" => {
+                    let next_token = self.get_next().cloned();
+                    if let Some(next_tok) = next_token {
+                        if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
+                            let left = self.parse_operand();
+                            let right = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("operator".to_string()),
+                                    Value::String("left".to_string()),
+                                    Value::String("right".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("OPERATION".to_string()),
+                                    Value::String("*".to_string()),
+                                    left.convert_to_map(),
+                                    right.convert_to_map(),
+                                ],
+                                line,
+                                column,
+                            }
                         } else {
                             self.parse_operand()
                         }

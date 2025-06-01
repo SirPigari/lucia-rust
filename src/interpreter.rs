@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
 use crate::env::core::utils::{print_colored, hex_to_ansi, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, check_ansi, unescape_string, to_static};
 use crate::env::core::types::{Int, Float, VALID_TYPES};
-use crate::env::core::value::{Value, ValueContext};
+use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
 use crate::env::core::variables::Variable;
 use crate::env::core::statements::Statement;
@@ -296,10 +296,21 @@ impl Interpreter {
         let object_value = self.evaluate(object.convert_to_statement());
         let object_type = object_value.type_name();
 
-        let object_context = ValueContext::new(object_value.clone());
+        let mut object_variable = Variable::new(
+            "_".to_string(),
+            object_value,
+            object_type.clone(),
+            false,
+            true,
+            true,
+        );
+
+        if !object_variable.is_init() {
+            object_variable.init_properties();
+        }
 
         return self.call_method(
-            &object_context,
+            &object_variable,
             method_name,
             pos_args,
             named_args,
@@ -308,19 +319,19 @@ impl Interpreter {
 
     fn call_method(
         &mut self,
-        object_context: &ValueContext,
+        object_variable: &Variable,
         method_name: &str,
         pos_args: Vec<Value>,
         named_args: HashMap<String, Value>,
     ) -> Value {
-        let var = match object_context.variables.get(method_name) {
+        let var = match object_variable.properties.get(method_name) {
             Some(v) => v.clone(),
             None => {
-                let available_names: Vec<String> = object_context.variables.keys().cloned().collect();
+                let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
                 if let Some(closest) = find_closest_match(method_name, &available_names) {
                     return self.raise_with_help(
                         "NameError",
-                        &format!("No method '{}' in '{}'", method_name, object_context.type_name()),
+                        &format!("No method '{}' in '{}'", method_name, object_variable.type_name()),
                         &format!("Did you mean '{}{}{}'?",
                             check_ansi("\x1b[4m", &self.use_colors),
                             closest,
@@ -328,7 +339,7 @@ impl Interpreter {
                         ),
                     );
                 } else {
-                    return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_context.type_name()));
+                    return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.type_name()));
                 }
             }
         };
@@ -576,7 +587,7 @@ impl Interpreter {
                 debug_log(
                     &format!(
                         "<Method call: {}.{}({})>",
-                        object_context.type_name(),
+                        object_variable.type_name(),
                         method_name,
                         final_args
                             .iter()
@@ -588,7 +599,7 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
 
-                self.stack.push((format!("{}.{}", object_context.type_name(), method_name).to_string(), final_args.clone(), self.variables.clone()));
+                self.stack.push((format!("{}.{}", object_variable.type_name(), method_name).to_string(), final_args.clone(), self.variables.clone()));
 
                 let result = func.call(&final_args);  // func.call(&final_args, &mut self.stack);
                 self.stack.pop();
@@ -1096,7 +1107,18 @@ impl Interpreter {
         }
     }
 
-    fn make_operation(&mut self, left: Value, right: Value, operator: &str) -> Value {
+    fn make_operation(&mut self, left: Value, right: Value, mut operator: &str) -> Value {
+        operator = match operator {
+            "isnt" => "!=",
+            "isn't" => "!=",
+            "or" => "||",
+            "and" => "&&",
+            "is" => "==",
+            "not" => "!",
+            "nein" => "!=",
+            _ => operator,
+        };
+
         debug_log(
             &format!(
                 "<Operation: {} {} {}>",
@@ -1112,8 +1134,8 @@ impl Interpreter {
             "+" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                (Value::Int(a), Value::Float(b)) => Value::Float((a + b.into()).into()),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a + b.into()),
+                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) + b),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a + Float::from_int(b)),
                 (Value::String(a), Value::String(b)) => Value::String(a + &b),
                 (a, b) => self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
             },
@@ -1121,54 +1143,43 @@ impl Interpreter {
             "-" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                (Value::Int(a), Value::Float(b)) => Value::Float((a - b.into()).into()),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a - b.into()),
+                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) - b),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a - Float::from_int(b)),
                 (a, b) => self.raise("TypeError", &format!("Cannot subtract {} and {}", a.type_name(), b.type_name())),
             },
 
             "*" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    match a.checked_mulf(&Float::from(b)) {
-                        Some(result) => Value::Int(result.into()),
-                        None => {
-                            self.raise("OverflowError", "Integer overflow during multiplication")
-                        }
-                    }
+                    let result = Float::from(a.clone()) * Float::from(b.clone());
+                    Value::Float(result)
                 }
                 (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                (Value::Int(a), Value::Float(b)) => Value::Float((a * b.into()).into()),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a * b.into()),
+                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) * b),
+                (Value::Float(a), Value::Int(b)) => Value::Float(a * Float::from_int(b)),
                 (Value::String(a), Value::Int(b)) => {
-                    if b.value.is_zero() {
-                        Value::String("".to_string())
-                    } else {
-                        let mut result = String::new();
-                        for _ in 0..b.to_usize().unwrap_or(0) {
-                            result.push_str(&a);
-                        }
-                        Value::String(result)
-                    }
+                    let count = b.to_usize().unwrap_or(0);
+                    Value::String(a.repeat(count))
                 }
                 (a, b) => self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
-            }
+            },
 
             "/" => match &right {
-                Value::Int(val) if val == &Int::new(0) => self.raise("ZeroDivisionError", "Division by zero."),
+                Value::Int(val) if val.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
                 Value::Float(f) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Division by zero."),
                 _ => match (left, right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
+                    (Value::Int(a), Value::Int(b)) => Value::Float(Float::from(a) / Float::from(b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float((a / b.into()).into()),
-                    (Value::Float(a), Value::Int(b)) => Value::Float((a / b.into()).into()),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(Float::from(a) / b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a / Float::from(b)),
                     (a, b) => self.raise("TypeError", &format!("Cannot divide {} by {}", a.type_name(), b.type_name())),
                 }
-            },
+            },        
 
             "%" => match (left, right) {
                 (_, Value::Int(val)) if val == 0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
                 (_, Value::Float(f)) if f == 0.0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
 
-                (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
+                (Value::Int(a), Value::Int(b)) => Value::Float((a % b).into()),
                 (Value::Float(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
                 (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
                 (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
@@ -1179,8 +1190,8 @@ impl Interpreter {
             }
 
             "^" => match (&left, &right) {
-                (_, Value::Int(b)) if b.value.is_zero() => Value::Int(Int::new(1)),
-                (_, Value::Float(b)) if b.value.is_zero() => Value::Int(Int::new(1)),
+                (_, Value::Int(b)) if b.value.is_zero() => Value::Float(1.0.into()),
+                (_, Value::Float(b)) if b.value.is_zero() => Value::Float(1.0.into()),
 
                 (Value::Int(a), Value::Int(b)) => {
                     if b.value.sign() == num_bigint::Sign::Minus {
@@ -1190,7 +1201,7 @@ impl Interpreter {
                     } else {
                         match b.to_u32() {
                             Some(exp_u32) => match a.checked_pow(exp_u32) {
-                                Some(result) => Value::Int(result),
+                                Some(result) => Value::Float(result.into()),
                                 None => {
                                     let base = Float::from_int(a.clone());
                                     let exp = Float::from_int(b.clone());
@@ -1214,7 +1225,7 @@ impl Interpreter {
                 }
                 (Value::Float(a), Value::Int(b)) => {
                     let exp = b.clone();
-                    Value::Float(a.powi(exp))
+                    Value::Float(a.powf(exp.into()))
                 }
                 (a, b) => self.raise("TypeError", &format!(
                     "Operator '^' requires numeric operands, got '{}' and '{}'",
@@ -1245,7 +1256,7 @@ impl Interpreter {
             },
 
             "abs" => match right {
-                Value::Int(n) => Value::Int(n.abs()),
+                Value::Int(n) => Value::Float(n.abs().into()),
                 Value::Float(f) => Value::Float(f.abs()),
                 _ => self.raise("TypeError", "Operator 'abs' requires a numeric operand."),
             },
@@ -1256,7 +1267,6 @@ impl Interpreter {
             "xnor" => Value::Boolean(
                 (left.is_truthy() && right.is_truthy()) || (!left.is_truthy() && !right.is_truthy())
             ),
-
             _ => self.raise("SyntaxError", &format!("Unexpected operator: '{}'", operator)),
         }
     }

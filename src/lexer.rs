@@ -17,13 +17,19 @@ impl<'a> Lexer<'a> {
         ];
 
         let word_operators = vec![
-            "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein",
+            "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein"
         ];
 
         let operator_pattern = format!(
-            "({})|({})",
-            operators.iter().map(|op| regex::escape(op)).collect::<Vec<String>>().join("|"),
-            word_operators.iter().map(|op| regex::escape(op)).collect::<Vec<String>>().join("|")
+            "({})|\\b({})\\b",
+            operators.iter()
+                .map(|op| regex::escape(op))
+                .collect::<Vec<String>>()
+                .join("|"),
+            word_operators.iter()
+                .map(|op| regex::escape(op))
+                .collect::<Vec<String>>()
+                .join("|")
         );
 
         let token_specifications = vec![
@@ -32,9 +38,9 @@ impl<'a> Lexer<'a> {
             ("COMMENT_INLINE", r"<#.*?#>"),
             ("COMMENT_SINGLE", r"//.*"),
             ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
-            ("IDENTIFIER", r"\bnon-static\b|\b[a-zAZ_]\w*\b"),
             ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
             ("OPERATOR", &operator_pattern),
+            ("IDENTIFIER", r"\bnon-static\b|\b[a-zAZ_]\w*\b"),
             ("SEPARATOR", r"\.\.\.|[(){}\[\];:.,\?]"),
             ("WHITESPACE", r"\s+"),
             ("INVALID", r"."),

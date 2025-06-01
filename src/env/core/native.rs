@@ -1,4 +1,4 @@
-use crate::env::core::utils::{to_static, capitalize, self};
+use crate::env::core::utils::{to_static, capitalize, format_bigfloat, format_bigint, self};
 use crate::env::core::value::Value;
 use crate::env::core::types::{Int, Float};
 use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter};
@@ -243,31 +243,8 @@ Happy coding!"#, version);
 // Utility Functions
 fn format_value(value: &Value) -> String {
     match value {
-        Value::Float(n) => {
-            let n_str = n.to_string();
-            if let Some(dot_pos) = n_str.find('.') {
-                let mut trimmed = n_str.trim_start_matches('0');
-                if trimmed.starts_with('.') {
-                    trimmed = &trimmed[1..];
-                }
-                let trimmed = trimmed.trim_end_matches('0');
-                if trimmed == "" {
-                    "0".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            } else {
-                n_str.trim_start_matches('0').to_string()
-            }
-        }
-        Value::Int(n) => {
-            let trimmed = n.to_string().trim_start_matches('0').to_string();
-            if trimmed == "" {
-                "0".to_string()
-            } else {
-                trimmed
-            }
-        }
+        Value::Float(n) => format_bigfloat(&n.value.clone()),
+        Value::Int(n) => format_bigint(&n.value.clone()),
         Value::String(s) => s.clone(),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
@@ -394,7 +371,7 @@ pub fn help_fn() -> Function {
         "help",
         help,
         vec![
-            Parameter::positional_optional("object", "str", Value::Null),
+            Parameter::positional_optional("object", "any", Value::Null),
         ],
         "void",
         true, true, true,

@@ -25,7 +25,7 @@ $(TARGET):
 	@$(MAKE) run
 
 test:
-	@cd $(TARGET) && lucia ../tests/test.lucia
+	@cd $(TARGET) && lucia ../../tests/test.lucia
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
