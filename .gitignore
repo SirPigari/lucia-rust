@@ -4,3 +4,4 @@ Cargo.lock
 .vscode/
 /temp/
 /src/env/bin/lucia.exe
+/src/tests/
