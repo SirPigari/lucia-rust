@@ -124,9 +124,9 @@ impl Variable {
                 
 
                 self.properties.insert(
-                    "to_bytes".to_string(),
+                    "toBytes".to_string(),
                     Variable::new(
-                        "to_bytes".to_string(),
+                        "toBytes".to_string(),
                         to_bytes,
                         "function".to_string(),
                         false,
@@ -135,9 +135,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "ends_with".to_string(),
+                    "endsWith".to_string(),
                     Variable::new(
-                        "ends_with".to_string(),
+                        "endsWith".to_string(),
                         endswith,
                         "function".to_string(),
                         false,
@@ -146,9 +146,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "starts_with".to_string(),
+                    "startsWith".to_string(),
                     Variable::new(
-                        "starts_with".to_string(),
+                        "startsWith".to_string(),
                         startswith,
                         "function".to_string(),
                         false,
