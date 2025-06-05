@@ -33,14 +33,14 @@ impl<'a> Lexer<'a> {
         );
 
         let token_specifications = vec![
-            ("STRING", r#""[^"]*"|'[^']*'"#),
+            ("STRING", r#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#),
             ("BOOLEAN", r"\b(true|false|null)\b"),
             ("COMMENT_INLINE", r"<#.*?#>"),
             ("COMMENT_SINGLE", r"//.*"),
             ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
             ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
             ("OPERATOR", &operator_pattern),
-            ("IDENTIFIER", r"\bnon-static\b|\b[a-zAZ_]\w*\b"),
+            ("IDENTIFIER", r"\bnon-static\b|\b[a-zA-Z_]\w*\b"),
             ("SEPARATOR", r"\.\.\.|[(){}\[\];:.,\?]"),
             ("WHITESPACE", r"\s+"),
             ("INVALID", r"."),

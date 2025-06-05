@@ -345,6 +345,18 @@ where
     Value::Function(Function::NativeMethod(Arc::new(method)))
 }
 
+pub fn get_operator_precedence(op: &str) -> u8 {
+    match op {
+        "||" => 1,
+        "&&" => 2,
+        "==" | "!=" => 3,
+        "<" | ">" | "<=" | ">=" => 4,
+        "+" | "-" => 5,
+        "*" | "/" => 6,
+        _ => 0,
+    }
+}
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

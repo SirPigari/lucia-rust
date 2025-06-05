@@ -1,0 +1,21 @@
+// test functions
+
+print("hello!")
+input("yay input something here pls: ")
+print(len("this is 26 characters long"))
+
+// styled prints
+styledprint("hello", bold=true)
+styledprint("hello", italic=true)
+styledprint("hello", underline=true)
+styledprint("hello", blink=true)
+styledprint("hello", reverse=true)
+styledprint("hello", strikethrough=true)
+styledprint("hello", link="https://example.com")
+styledprint("hello", fg_color="red")
+styledprint("hello", bg_color="blue")
+styledprint("hello", end="✨")
+
+
+help()
+exit()

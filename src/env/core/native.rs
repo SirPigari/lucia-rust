@@ -50,11 +50,17 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
         _ => &vec![],
     };
 
-    let mut text = if let Some(Value::String(s)) = values.get(0) {
-        s.clone()
-    } else {
-        values.get(0).map_or("".to_string(), |v| format_value(v))
+    let sep = match args.get("sep") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => format_value(other),
+        None => " ".to_string(),
     };
+
+    let mut text = values
+        .iter()
+        .map(|v| format_value(v))
+        .collect::<Vec<_>>()
+        .join(sep.as_str());
 
     let mut style = String::new();
 
@@ -70,28 +76,28 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
                 u8::from_str_radix(&hex[2..4], 16),
                 u8::from_str_radix(&hex[4..6], 16),
             ) {
-                style += &format!("\x1b[48;2;{};{};{}m", r, g, b);
+                style.push_str(&format!("\x1b[48;2;{};{};{}m", r, g, b));
             }
         }
     }
 
     if matches!(args.get("bold"), Some(Value::Boolean(true))) {
-        style += "\x1b[1m";
+        style.push_str("\x1b[1m");
     }
     if matches!(args.get("italic"), Some(Value::Boolean(true))) {
-        style += "\x1b[3m";
+        style.push_str("\x1b[3m");
     }
     if matches!(args.get("underline"), Some(Value::Boolean(true))) {
-        style += "\x1b[4m";
+        style.push_str("\x1b[4m");
     }
     if matches!(args.get("blink"), Some(Value::Boolean(true))) {
-        style += "\x1b[5m";
+        style.push_str("\x1b[5m");
     }
     if matches!(args.get("reverse"), Some(Value::Boolean(true))) {
-        style += "\x1b[7m";
+        style.push_str("\x1b[7m");
     }
     if matches!(args.get("strikethrough"), Some(Value::Boolean(true))) {
-        style += "\x1b[9m";
+        style.push_str("\x1b[9m");
     }
 
     if let Some(Value::String(link)) = args.get("link") {
@@ -107,7 +113,8 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
         print_args.insert("end".to_string(), end_val.clone());
     }
 
-    print(&print_args)
+    print(&print_args);
+    return Value::Null;
 }
 
 fn input(args: &HashMap<String, Value>) -> Value {
@@ -214,6 +221,8 @@ pub fn help(args: &HashMap<String, Value>) -> Value {
             }
         } else {
             println!("No help available for '{}'", obj_name);
+            println!("This object may not exist or is not documented.");
+            return Value::Null;
         }
 
         return Value::Null;
@@ -310,16 +319,17 @@ pub fn styled_print_fn() -> Function {
         styled_print,
         vec![
             Parameter::variadic_optional("args", "any", Value::String("".to_string())),
-            Parameter::keyword_variadic_optional("end", "str", Value::String("\n".to_string())),
-            Parameter::keyword_variadic_optional("fg_color", "str", Value::String("#000000".to_string())),
-            Parameter::keyword_variadic_optional("bg_color", "str", Value::String("#FFFFFF".to_string())),
-            Parameter::keyword_variadic_optional("bold", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("italic", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("underline", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("blink", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("reverse", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("strikethrough", "bool", Value::Boolean(false)),
-            Parameter::keyword_variadic_optional("link", "str", Value::String("".to_string())),
+            Parameter::keyword_optional("sep", "str", Value::String(" ".to_string())),
+            Parameter::keyword_optional("end", "str", Value::String("\n".to_string())),
+            Parameter::keyword_optional("fg_color", "str", Value::String("reset".to_string())),
+            Parameter::keyword_optional("bg_color", "str", Value::String("reset".to_string())),
+            Parameter::keyword_optional("bold", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("italic", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("underline", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("blink", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("reverse", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("strikethrough", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("link", "any", Value::Null),
         ],
         "void",
         true, true, true,

@@ -48,6 +48,8 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     let error_msg = error.msg();
     let error_help = error.help();
 
+    let use_lucia_traceback = config.use_lucia_traceback;
+
     let current_line = get_line_info(source, line_number).unwrap_or_else(|| "".to_string());
     let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
     let next_line = get_line_info(source, line_number + 1);
@@ -60,6 +62,25 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     let line_tokens = lexer.tokenize(true);
 
     let mut trace = String::new();
+
+    if !use_lucia_traceback {
+        eprintln!(
+            "{}{}:{}:{} -> {}: {}{}{}{}",
+            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            file_name,
+            line_number,
+            error.column,
+            error_type,
+            error_msg,
+            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            match error_help {
+                Some(help) if !help.is_empty() => format!("   {}({}){}", hex_to_ansi(&config.color_scheme.help, Some(use_colors)), help, hex_to_ansi("reset", Some(use_colors))),
+                _ => "".to_string(),
+            },
+            hex_to_ansi("reset", Some(use_colors))
+        );
+        return;
+    }
     
     if !(error.column == 0 && error.line.0 == 0) {
         let mut current_pos = 1;
@@ -152,6 +173,19 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     trace.push_str(&format!("{}", hex_to_ansi("reset", Some(use_colors))));
 
     eprintln!("{}", trace);
+}
+
+fn get_config_path() -> std::io::Result<PathBuf> {
+    let exe_path = std_env::current_exe()?;
+
+    let exe_dir = exe_path.parent()
+        .expect("Executable must be in a directory");
+
+    let config_path = exe_dir.join("../").join("config.json");
+
+    let config_path = config_path.canonicalize()?;
+
+    Ok(config_path)
 }
 
 fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
@@ -264,10 +298,29 @@ fn main() {
     let args: Vec<String> = std_env::args().collect();
     let activate_flag = args.contains(&"--activate".to_string());
     let no_color_flag = args.contains(&"--no-color".to_string());
+    let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
+    let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
+    
+    let debug_mode = if debug_flag {
+        args.iter()
+            .find(|arg| arg.starts_with("--debug-mode="))
+            .and_then(|arg| arg.split('=').nth(1))
+            .map(String::from)
+            .filter(|mode| ["full", "normal", "minimal"].contains(&mode.as_str()))
+            .unwrap_or_else(|| "normal".to_string())
+    } else {
+        "normal".to_string()
+    };
 
     let use_colors = !no_color_flag;
 
-    let config_path = env_path.join("config.json");
+    let config_path: PathBuf = match get_config_path() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Error getting config path: {}", e);
+            exit(1);
+        }
+    };
 
     let mut config = if config_path.exists() {
         match load_config(&config_path) {
@@ -322,7 +375,20 @@ fn main() {
         exit(1);
     }
 
+    if !home_dir_path.exists() {
+        eprintln!("Home directory does not exist: {}", home_dir_path.display());
+        exit(1);
+    }
 
+    if debug_flag {
+        config.debug = true;
+        config.debug_mode = debug_mode;
+    }
+    if quiet_flag {
+        config.debug = false;
+        config.use_lucia_traceback = false;
+        config.warnings = false;
+    }
 
     let args: Vec<String> = std_env::args().collect();
 
@@ -413,6 +479,10 @@ fn main() {
                 hex_to_ansi(&config.color_scheme.input_text, Some(use_colors))
             );
             let input = utils::read_input("");
+            if input.is_empty() {
+                continue;
+            }
+            
             if input == "exit" {
                 println!("Use 'exit()' to exit.");
                 continue;

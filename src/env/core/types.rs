@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use num_bigfloat::BigFloat;
-use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed, };
+use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg, Not, BitAnd, BitOr};
@@ -54,13 +54,18 @@ impl From<f64> for Float {
 
 impl From<Float> for Int {
     fn from(f: Float) -> Self {
-        Self { value: BigInt::from_f64(f.value.to_f64()).unwrap() }
+        let float_str = f.value.to_string(); // like "1234.56789"
+        let int_part = float_str.split('.').next().unwrap_or("0"); // "1234"
+        let value = int_part.parse::<BigInt>().unwrap_or_else(|_| BigInt::from(0));
+        Self { value }
     }
 }
 
 impl From<Int> for Float {
     fn from(i: Int) -> Self {
-        Self { value: BigFloat::from_i64(i.value.to_i64().unwrap()) }
+        // Convert BigInt -> String -> BigFloat
+        let value = BigFloat::parse(&i.value.to_string()).unwrap_or_else(|| BigFloat::from(0));
+        Self { value }
     }
 }
 

@@ -342,6 +342,15 @@ impl Parameter {
         }
     }
 
+    pub fn keyword_optional(name: &str, ty: &str, default: Value) -> Self {
+        Self {
+            name: name.to_string(),
+            ty: ty.to_string(),
+            default: Some(default),
+            kind: ParameterKind::KeywordVariadic,
+        }
+    }
+
     pub fn keyword_variadic_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),

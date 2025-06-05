@@ -1,0 +1,49 @@
+// arithmetic
+print("1 + 1 =", 1 + 1)
+print("1.5 + 2 =", 1.5 + 2)
+print("\"hello\" + \"world\" =", "hello" + "world")
+
+print("2 - 1 =", 2 - 1)
+print("5.0 - 3 =", 5.0 - 3)
+print("3 - 1.5 =", 3 - 1.5)
+
+print("2 * 3 =", 2 * 3)
+print("2.5 * 4 =", 2.5 * 4)
+print("\"ha\" * 3 =", "ha" * 3)
+
+print("6 / 2 =", 6 / 2)
+print("3.0 / 1.5 =", 3.0 / 1.5)
+print("6 / 2.5 =", 6 / 2.5)
+
+print("2 ^ 3 =", 2 ^ 3)
+print("4.0 ^ 2 =", 4.0 ^ 2)
+print("2 ^ 2.5 =", 2 ^ 2.5)
+
+// comparison
+print("1 == 1 =", 1 == 1)
+print("2 != 3 =", 2 != 3)
+print("3 > 2 =", 3 > 2)
+print("2 < 4 =", 2 < 4)
+print("4 >= 4 =", 4 >= 4)
+print("5 <= 5 =", 5 <= 5)
+
+// logical
+print("true && true =", true && true)
+print("false || true =", false || true)
+print("!true =", !true)
+
+// membership
+print("1 in [1, 2, 3] =", 1 in [1, 2, 3])
+
+// logic extensions
+print("true xor false =", true xor false)
+print("false xnor false =", false xnor false)
+
+// aliases
+print("1 is 1 =", 1 is 1)
+print("2 isnt 3 =", 2 isnt 3)
+print("true and false =", true and false)
+print("false or true =", false or true)
+
+// nein
+print("1 nein 2 =", 1 nein 2)

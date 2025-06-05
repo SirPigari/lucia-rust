@@ -136,6 +136,11 @@ impl Parser {
     
 
     fn get_next(&mut self) -> Option<&Token> {
+        self.next();
+        self.token()
+    }
+
+    fn peek(&self) -> Option<&Token> {
         let mut offset = 1;
         while self.pos + offset < self.tokens.len() {
             if self.tokens[self.pos + offset].0 != "WHITESPACE" || self.include_whitespace {
@@ -146,32 +151,38 @@ impl Parser {
         None
     }
 
-    fn peek(&self) -> Option<&Token> {
-        if self.pos + 1 < self.tokens.len() {
-            Some(self.apply_aliases(&self.tokens[self.pos + 1]))
+    pub fn current_line(&self) -> usize {
+        // Count newlines up to the nth token's occurrence in the source
+        let binding = "".to_string();
+        let token_slice = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&binding);
+        if let Some(byte_index) = self.source.find(token_slice) {
+            self.source[..byte_index].chars().filter(|&c| c == '\n').count() + 1
         } else {
-            None
+            1
         }
     }
-
-    pub fn current_line(&self) -> usize {
-        let index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
-        self.source[..index].chars().filter(|&c| c == '\n').count() + 1
-    }
+    
 
     pub fn get_line_column(&self) -> usize {
-        let mut byte_index = self.tokens.iter().take(self.pos).map(|token| token.1.len()).sum::<usize>();
+        let binding = "".to_string();
+        let token_slice = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&binding);
     
-        let mut line_start = 0;
-        for (i, ch) in self.source[..byte_index].char_indices().rev() {
-            if ch == '\n' {
-                line_start = i + ch.len_utf8();
-                break;
+        if let Some(byte_index) = self.source.find(token_slice) {
+            // Walk backwards to find the start of the line
+            let mut line_start = 0;
+            for (i, ch) in self.source[..byte_index].char_indices().rev() {
+                if ch == '\n' {
+                    line_start = i + ch.len_utf8();
+                    break;
+                }
             }
-        }
     
-        self.source[line_start..byte_index].chars().count() + 1
+            self.source[line_start..byte_index].chars().count() + 1
+        } else {
+            1
+        }
     }
+    
     
 
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
@@ -202,15 +213,117 @@ impl Parser {
     }
     
     fn parse_expression(&mut self) -> Statement {
-        let mut line = self.current_line();
-        let mut column = self.get_line_column();
+        let mut expr = self.parse_primary();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+    
+        while let Some(tok) = self.token() {
+            if tok.0 == "SEPARATOR" && tok.1 == "." {
+                self.next();
+                let property_token = self.token().cloned().unwrap_or_else(|| {
+                    self.raise("SyntaxError", "Expected identifier after '.'");
+                    Token("".to_string(), "".to_string())
+                });
+    
+                if property_token.0 != "IDENTIFIER" {
+                    self.raise("SyntaxError", &format!("Expected identifier after '.', found '{}'", property_token.1));
+                    break;
+                }
+    
+                self.next();
+    
+                if let Some(next_tok) = self.token() {
+                    if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
+                        self.next();
+                        let (pos_args, named_args) = self.parse_arguments();
+                        self.check_for("SEPARATOR", ")");
+                        self.next();
+    
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+    
+                        expr = Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("object".to_string()),
+                                Value::String("method".to_string()),
+                                Value::String("pos_args".to_string()),
+                                Value::String("named_args".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("METHOD_CALL".to_string()),
+                                expr.convert_to_map(),
+                                Value::String(property_token.1),
+                                Value::List(pos_args),
+                                Value::Map {
+                                    keys: named_args.iter().map(|(k, _)| k.clone()).collect(),
+                                    values: named_args.iter().map(|(_, v)| v.clone()).collect(),
+                                },
+                            ],
+                            line: self.current_line(),
+                            column: self.get_line_column(),
+                        };
+                    } else {
+                        expr = Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("object".to_string()),
+                                Value::String("property".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("PROPERTY_ACCESS".to_string()),
+                                expr.convert_to_map(),
+                                Value::String(property_token.1),
+                            ],
+                            line: self.current_line(),
+                            column: self.get_line_column(),
+                        };
+                    }
+                }
+            }
+    
+            else if tok.0 == "OPERATOR" {
+                let operator = tok.1.clone();
+                self.next();
+                let mut right = self.parse_primary();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+    
+                expr = Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("left".to_string()),
+                        Value::String("operator".to_string()),
+                        Value::String("right".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("OPERATION".to_string()),
+                        expr.convert_to_map(),
+                        Value::String(operator),
+                        right.convert_to_map(),
+                    ],
+                    line: self.current_line(),
+                    column: self.get_line_column(),
+                };
+            }
+    
+            else {
+                break;
+            }
+        }
+    
+        expr
+    }
+    
 
-        let next_token = self.get_next().cloned();
-        let next_token_type = next_token.as_ref().map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
-        let next_token_value = next_token.as_ref().map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
-        
+    fn parse_primary(&mut self) -> Statement {
+        let line = self.current_line();
+        let column = self.get_line_column();
 
-        let mut out = match self.token().cloned() {
+        match self.token().cloned() {
             Some(token) => match token.0.as_str() {
                 "OPERATOR" if ["+", "-", "!"].contains(&token.1.as_str()) => {
                     let operator = token.1.clone();
@@ -256,7 +369,7 @@ impl Parser {
                 }
 
                 "IDENTIFIER" => {
-                    let next_token = self.get_next().cloned();
+                    let next_token = self.peek().cloned();
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.parse_function_call()
@@ -269,7 +382,7 @@ impl Parser {
                 }
 
                 "NUMBER" => {
-                    let next_token = self.get_next().cloned();
+                    let next_token = self.peek().cloned();
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             let left = self.parse_operand();
@@ -314,148 +427,6 @@ impl Parser {
                 self.raise("SyntaxError", "Expected expression");
                 Statement::Null
             }
-        };
-
-        loop {
-            line = self.current_line();
-            column = self.get_line_column();
-            if let Some(tok) = self.token() {
-                if tok.0 == "SEPARATOR" && tok.1 == "." {
-                    self.next();
-
-                    line = self.current_line();
-                    column = self.get_line_column();
-
-                    let property_token = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected identifier after '.'");
-                        Token("".to_string(), "".to_string())
-                    });
-
-                    if property_token.0 != "IDENTIFIER" {
-                        self.raise("SyntaxError", &format!("Expected identifier after '.', found '{}'", property_token.1));
-                        break;
-                    }
-
-                    self.next();
-
-                    if let Some(next_tok) = self.token() {
-                        if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
-                            self.next();
-                            let (pos_args, named_args) = self.parse_arguments();
-                            self.check_for("SEPARATOR", ")");
-                            self.next();
-
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-
-                            out = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("method".to_string()),
-                                    Value::String("pos_args".to_string()),
-                                    Value::String("named_args".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("METHOD_CALL".to_string()),
-                                    out.convert_to_map(),
-                                    Value::String(property_token.1),
-                                    Value::List(pos_args),
-                                    Value::Map {
-                                        keys: named_args.iter().map(|(k, _)| k.clone()).collect(),
-                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                                    },
-                                ],
-                                line,
-                                column,
-                            };
-                        } else {
-                            out = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("property".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("PROPERTY_ACCESS".to_string()),
-                                    out.convert_to_map(),
-                                    Value::String(property_token.1),
-                                ],
-                                line,
-                                column,
-                            };
-                        }
-                    }
-                }
-
-                else if tok.0 == "OPERATOR" {
-                    let operator = tok.1.clone();
-                    self.next();
-                    let right = self.parse_expression();
-
-                    out = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("OPERATION".to_string()),
-                            out.convert_to_map(),
-                            Value::String(operator),
-                            right.convert_to_map(),
-                        ],
-                        line,
-                        column,
-                    };
-                }
-
-                else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        out
-    }
-
-    fn parse_primary(&mut self) -> Statement {
-        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-        let line = self.current_line();
-        let column = self.get_line_column();
-
-        match token.0.as_str() {
-            "NUMBER" | "STRING" | "BOOLEAN" => {
-                self.next();
-                return self.parse_operand();
-            }
-            "IDENTIFIER" => {
-                if let Some(peek) = self.peek() {
-                    if peek.0 == "SEPARATOR" && peek.1 == "(" {
-                        return self.parse_function_call();
-                    }
-                }
-                self.next();
-                return self.parse_operand();
-            }
-            "SEPARATOR" if token.1 == "(" => {
-                self.next();
-                let expr = self.parse_expression();
-                self.check_for("SEPARATOR", ")");
-                self.next();
-                return expr;
-            }
-            "SEPARATOR" if token.1 == "[" => {
-                return self.parse_list();
-            }
-            _ => {
-                self.raise("SyntaxError", &format!("Unexpected token '{}'", token.1));
-                return Statement::Null;
-            }
         }
     }
 
@@ -487,185 +458,13 @@ impl Parser {
         self.parse_primary()
     }
 
-    fn parse_list(&mut self) -> Statement {
-        let line = self.current_line();
-        let column = self.get_line_column();
-        self.next();
-
-        let mut elements = Vec::new();
-        while let Some(token) = self.token() {
-            if token.0 == "SEPARATOR" && token.1 == "]" {
-                break;
-            }
-
-            let expr = self.parse_expression();
-            if self.err.is_some() {
-                return Statement::Null;
-            }
-            elements.push(expr.convert_to_map());
-
-            if let Some(next_token) = self.token() {
-                if next_token.0 == "SEPARATOR" && next_token.1 == "," {
-                    self.next();
-                } else if next_token.0 == "SEPARATOR" && next_token.1 == "]" {
-                    break;
-                } else {
-                    self.raise("SyntaxError", "Expected ',' or ']'");
-                    return Statement::Null;
-                }
-            }
-        }
-
-        self.check_for("SEPARATOR", "]");
-        self.next();
-
-        Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("iterable_type".to_string()),
-                Value::String("elements".to_string()),
-            ],
-            values: vec![
-                Value::String("ITERABLE".to_string()),
-                Value::String("LIST".to_string()),
-                Value::List(elements),
-            ],
-            line,
-            column,
-        }
-    }
-    
-    fn parse_function_call(&mut self) -> Statement {
-        let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();
-        if self.err.is_some() {
-            return Statement::Null;
-        }
-
-        let line = self.current_line();
-        let column = self.get_line_column();
-
-        self.next();
-        self.check_for("SEPARATOR", "(");
-        self.next();
-        let (pos_args, named_args) = self.parse_arguments();
-        if self.err.is_some() {
-            return Statement::Null;
-        }
-        self.check_for("SEPARATOR", ")");
-        self.next();
-        if self.err.is_some() {
-            return Statement::Null;
-        }
-
-        if pos_args.is_empty() && named_args.is_empty() {
-            let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("name".to_string()),
-                    Value::String("pos_arguments".to_string()),
-                    Value::String("named_arguments".to_string()),
-                ],
-                values: vec![
-                    Value::String("CALL".to_string()),
-                    Value::String(name.to_string()),
-                    Value::List(pos_args),
-                    Value::Map { keys, values },
-                ],
-                line,
-                column,
-            }
-        }
-
-        let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
-        
-        Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("name".to_string()),
-                Value::String("pos_arguments".to_string()),
-                Value::String("named_arguments".to_string()),
-            ],
-            values: vec![
-                Value::String("CALL".to_string()),
-                Value::String(name.to_string()),
-                Value::List(pos_args),
-                Value::Map { keys, values },
-            ],
-            line,
-            column,
-        }
-    }
-
-    fn parse_arguments(&mut self) -> (Vec<Value>, Vec<(Value, Value)>) {
-        let mut pos_args = Vec::new();
-        let mut named_args = Vec::new();
-        let mut seen_named = false;
-    
-        while let Some(current_token) = self.token().cloned() {
-            let next_token = self.get_next().cloned();
-    
-            if self.token().is_none() {
-                self.raise("UEFError", "Unexpected end of input");
-                return (vec![], vec![]);
-            }
-    
-            if current_token.0 == "SEPARATOR" && current_token.1 == ")" {
-                break;
-            }
-    
-            if let Some(Token(t_type, t_val)) = &next_token {
-                if t_type == "OPERATOR" && t_val == "=" {
-                    let name = current_token.1;
-                    self.next();
-                    self.next();
-                    let value = self.parse_expression();
-                    if self.err.is_some() {
-                        return (vec![], vec![]);
-                    }
-                    named_args.push((Value::String(name), value.convert_to_map()));
-                    seen_named = true;
-                } else {
-                    if seen_named {
-                        self.raise("ArgumentOrderError", "Positional arguments cannot follow named arguments");
-                        return (vec![], vec![]);
-                    }
-                    let expr = self.parse_expression();
-                    if self.err.is_some() {
-                        pos_args.push(Value::Null);
-                        return (vec![], vec![]);
-                    }
-                    pos_args.push(expr.convert_to_map());
-                }
-            } else {
-                if seen_named {
-                    self.raise("ArgumentOrderError", "Positional arguments cannot follow named arguments");
-                    return (vec![], vec![]);
-                }
-                let expr = self.parse_expression();
-                if self.err.is_some() {
-                    return (vec![], vec![]);
-                }
-                pos_args.push(expr.convert_to_map());
-            }
-    
-            if let Some(Token(t_type, t_val)) = self.token() {
-                if t_type == "SEPARATOR" && t_val == "," {
-                    self.next();
-                }
-            }
-        }
-    
-        (pos_args, named_args)
-    }
-
     fn parse_operand(&mut self) -> Statement {
         let mut token = self.token().cloned().unwrap_or_else(|| Token("".to_string(), "".to_string()));
         let mut line = self.current_line();
         let mut column = self.get_line_column();
         let mut token_type = token.0.clone();
         let mut token_value = token.1.clone();        
-        let mut next_token = self.get_next();
+        let mut next_token = self.peek();
         let mut next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
         let mut next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
         
@@ -838,5 +637,177 @@ impl Parser {
         }
 
         left
+    }
+
+    fn parse_list(&mut self) -> Statement {
+        let line = self.current_line();
+        let column = self.get_line_column();
+        self.next();
+
+        let mut elements = Vec::new();
+        while let Some(token) = self.token() {
+            if token.0 == "SEPARATOR" && token.1 == "]" {
+                break;
+            }
+
+            let expr = self.parse_expression();
+            if self.err.is_some() {
+                return Statement::Null;
+            }
+            elements.push(expr.convert_to_map());
+
+            if let Some(next_token) = self.token() {
+                if next_token.0 == "SEPARATOR" && next_token.1 == "," {
+                    self.next();
+                } else if next_token.0 == "SEPARATOR" && next_token.1 == "]" {
+                    break;
+                } else {
+                    self.raise("SyntaxError", "Expected ',' or ']'");
+                    return Statement::Null;
+                }
+            }
+        }
+
+        self.check_for("SEPARATOR", "]");
+        self.next();
+
+        Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("iterable_type".to_string()),
+                Value::String("elements".to_string()),
+            ],
+            values: vec![
+                Value::String("ITERABLE".to_string()),
+                Value::String("LIST".to_string()),
+                Value::List(elements),
+            ],
+            line,
+            column,
+        }
+    }
+    
+    fn parse_function_call(&mut self) -> Statement {
+        let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+
+        let line = self.current_line();
+        let column = self.get_line_column();
+
+        self.next();
+        self.check_for("SEPARATOR", "(");
+        self.next();
+        let (pos_args, named_args) = self.parse_arguments();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+        self.check_for("SEPARATOR", ")");
+        self.next();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+
+        if pos_args.is_empty() && named_args.is_empty() {
+            let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("name".to_string()),
+                    Value::String("pos_arguments".to_string()),
+                    Value::String("named_arguments".to_string()),
+                ],
+                values: vec![
+                    Value::String("CALL".to_string()),
+                    Value::String(name.to_string()),
+                    Value::List(pos_args),
+                    Value::Map { keys, values },
+                ],
+                line,
+                column,
+            }
+        }
+
+        let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
+        
+        Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("name".to_string()),
+                Value::String("pos_arguments".to_string()),
+                Value::String("named_arguments".to_string()),
+            ],
+            values: vec![
+                Value::String("CALL".to_string()),
+                Value::String(name.to_string()),
+                Value::List(pos_args),
+                Value::Map { keys, values },
+            ],
+            line,
+            column,
+        }
+    }
+
+    fn parse_arguments(&mut self) -> (Vec<Value>, Vec<(Value, Value)>) {
+        let mut pos_args = Vec::new();
+        let mut named_args = Vec::new();
+        let mut seen_named = false;
+    
+        while let Some(current_token) = self.token().cloned() {
+            let next_token = self.peek().cloned();
+    
+            if self.token().is_none() {
+                self.raise("UEFError", "Unexpected end of input");
+                return (vec![], vec![]);
+            }
+    
+            if current_token.0 == "SEPARATOR" && current_token.1 == ")" {
+                break;
+            }
+    
+            if let Some(Token(t_type, t_val)) = &next_token {
+                if t_type == "OPERATOR" && t_val == "=" {
+                    let name = current_token.1;
+                    self.next();
+                    self.next();
+                    let value = self.parse_expression();
+                    if self.err.is_some() {
+                        return (vec![], vec![]);
+                    }
+                    named_args.push((Value::String(name), value.convert_to_map()));
+                    seen_named = true;
+                } else {
+                    if seen_named {
+                        self.raise("ArgumentOrderError", "Positional arguments cannot follow named arguments");
+                        return (vec![], vec![]);
+                    }
+                    let expr = self.parse_expression();
+                    if self.err.is_some() {
+                        pos_args.push(Value::Null);
+                        return (vec![], vec![]);
+                    }
+                    pos_args.push(expr.convert_to_map());
+                }
+            } else {
+                if seen_named {
+                    self.raise("ArgumentOrderError", "Positional arguments cannot follow named arguments");
+                    return (vec![], vec![]);
+                }
+                let expr = self.parse_expression();
+                if self.err.is_some() {
+                    return (vec![], vec![]);
+                }
+                pos_args.push(expr.convert_to_map());
+            }
+    
+            if let Some(Token(t_type, t_val)) = self.token() {
+                if t_type == "SEPARATOR" && t_val == "," {
+                    self.next();
+                }
+            }
+        }
+    
+        (pos_args, named_args)
     }
 }

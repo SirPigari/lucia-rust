@@ -76,7 +76,7 @@ impl Interpreter {
         type_: &str,
         expected: Option<&str>,
         return_value: Option<Value>,
-        error: bool,
+        error: Option<bool>,
     ) -> bool {
         let valid_types = VALID_TYPES.to_vec();
         let mut types_mapping = std::collections::HashMap::new();
@@ -117,11 +117,12 @@ impl Interpreter {
         }
     
         if normalized_type != expected_type {
-            if error {
+            if error.unwrap_or(true) {
                 self.raise(
                     "TypeError",
                     &format!("Expected type '{}', but got '{}'", expected_type, normalized_type),
                 );
+                return false;
             } else {
                 return false;
             }
@@ -262,6 +263,7 @@ impl Interpreter {
                 "NUMBER" => self.handle_number(statement.clone()),
                 "STRING" => self.handle_string(statement.clone()),
                 "BOOLEAN" => self.handle_boolean(statement.clone()),
+                "ITERABLE" => self.handle_iterable(statement.clone()),
                 "OPERATION" => self.handle_operation(statement.clone()),
                 "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
                 "CALL" => self.handle_call(statement.clone()),
@@ -271,6 +273,39 @@ impl Interpreter {
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
+
+    fn handle_iterable(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let Some(iterable) = statement.get(&Value::String("iterable_type".to_string())).cloned() else {
+            return self.raise("IterableError", "Missing 'iterable' in iterable statement");
+        };
+    
+        let iterable_type = statement.get(&Value::String("iterable_type".to_string()))
+            .and_then(|v| Some(v.to_string()))
+            .unwrap_or_else(|| "LIST".to_string());
+    
+        debug_log(&format!("Handling iterable of type: {}", iterable_type), &self.config, Some(self.use_colors));
+        match iterable_type.as_str() {
+            "LIST" => {
+                let elements = statement.get(&Value::String("elements".to_string())).unwrap_or_else(|| {
+                    self.raise("IterableError", "Missing 'elements' in iterable statement");
+                    &NULL
+                });
+
+                if let Value::List(elements_list) = elements {
+                    let mut evaluated_elements = Vec::new();
+                    for element in elements_list {
+                        evaluated_elements.push(self.evaluate(element.convert_to_statement()));
+                    }
+                    Value::List(evaluated_elements)
+                } else {
+                    self.raise("TypeError", "Expected 'elements' to be a list")
+                }
+            }
+            _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
+        }
+    }
+    
+    
 
     fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
@@ -468,7 +503,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), false) {
+                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), Some(false)) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
@@ -486,7 +521,7 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), false) {
+                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise_with_help(
@@ -512,7 +547,7 @@ impl Interpreter {
                             let mut variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), false) {
+                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), Some(false)) {
                                     return self.raise(
                                         "TypeError",
                                         &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
@@ -527,7 +562,7 @@ impl Interpreter {
                         ParameterKind::KeywordVariadic => {
                             let mut keyword_args = HashMap::new();
                             for (key, value) in &named_map {
-                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), true) {
+                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), Some(false)) {
                                     keyword_args.insert(key.clone(), value.clone());
                                 } else {
                                     return self.raise(
@@ -606,7 +641,7 @@ impl Interpreter {
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), false) {
+                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), Some(false)) {
                     return self.raise_with_help(
                         "TypeError",
                         &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
@@ -845,7 +880,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), false) {
+                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), Some(false)) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
@@ -863,7 +898,7 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), false) {
+                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise_with_help(
@@ -889,7 +924,7 @@ impl Interpreter {
                             let mut variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), false) {
+                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), Some(false)) {
                                     return self.raise(
                                         "TypeError",
                                         &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
@@ -900,33 +935,27 @@ impl Interpreter {
                             final_args.insert(param_name.clone(), Value::List(variadic_args));
                     
                             pos_index = positional.len();
+                            named_map.remove(param_name); // Remove from named_map if it was variadic
                         }
                         ParameterKind::KeywordVariadic => {
-                            let mut keyword_args = HashMap::new();
-                            for (key, value) in &named_map {
-                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), true) {
-                                    keyword_args.insert(key.clone(), value.clone());
+                            if let Some(named_value) = named_map.remove(param_name) {
+                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
+                                    final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise(
                                         "TypeError",
-                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, param_type),
+                                        &format!(
+                                            "Keyword argument '{}' does not match expected type '{}', got '{}'",
+                                            param_name,
+                                            param_type,
+                                            named_value.type_name()
+                                        ),
                                     );
                                 }
+                            } else if let Some(default) = param_default {
+                                final_args.insert(param_name.clone(), default.clone());
                             }
-                            let keys: Vec<Value> = keyword_args.keys()
-                            .cloned()
-                            .map(|k| Value::String(k))
-                            .collect();
-                        
-                            let values: Vec<Value> = keyword_args.values()
-                                .cloned()
-                                .collect();
-                            
-                            final_args.insert(
-                                param_name.clone(),
-                                Value::Map { keys, values },
-                            );
-                        }                        
+                        }
                     }
                 }
 
@@ -982,7 +1011,7 @@ impl Interpreter {
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), false) {
+                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), Some(false)) {
                     return self.raise_with_help(
                         "TypeError",
                         &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
@@ -1118,6 +1147,19 @@ impl Interpreter {
             "nein" => "!=",
             _ => operator,
         };
+
+        // Handle if both left and right are zero for division or modulo
+        if left.is_zero() && right.is_zero() {
+            match operator {
+                "/" => {
+                    return self.raise("MathError", "Division by zero: 0 / 0 is undefined");
+                }
+                "%" => {
+                    return self.raise("MathError", "Modulo by zero: 0 % 0 is undefined");
+                }
+                _ => {}
+            }
+        }
 
         debug_log(
             &format!(

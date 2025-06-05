@@ -24,6 +24,14 @@ $(TARGET):
 	@$(MAKE) build
 	@$(MAKE) run
 
+test-all:
+	@echo Running all test files in src/env/Docs/examples/tests...
+	@for %%f in (src/env/Docs/examples/tests/*.lc) do ( \
+		echo. && \
+		echo Executing file: "%%f" && \
+		"$(TARGET)\\lucia.exe" "src/env/Docs/examples/tests/%%f" -q \
+	)
+
 test:
 	@cd $(TARGET) && lucia ../../tests/test.lucia
 
