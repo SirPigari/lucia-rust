@@ -278,12 +278,11 @@ impl Interpreter {
         let Some(iterable) = statement.get(&Value::String("iterable_type".to_string())).cloned() else {
             return self.raise("IterableError", "Missing 'iterable' in iterable statement");
         };
-    
+        
         let iterable_type = statement.get(&Value::String("iterable_type".to_string()))
             .and_then(|v| Some(v.to_string()))
             .unwrap_or_else(|| "LIST".to_string());
-    
-        debug_log(&format!("Handling iterable of type: {}", iterable_type), &self.config, Some(self.use_colors));
+        
         match iterable_type.as_str() {
             "LIST" => {
                 let elements = statement.get(&Value::String("elements".to_string())).unwrap_or_else(|| {
@@ -304,8 +303,6 @@ impl Interpreter {
             _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }
     }
-    
-    
 
     fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
