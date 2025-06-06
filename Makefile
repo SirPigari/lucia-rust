@@ -1,4 +1,3 @@
-# Detect OS
 IS_WINDOWS := $(shell echo $(ComSpec))
 IS_WINDOWS_CMD := $(findstring cmd.exe,$(IS_WINDOWS))
 
@@ -47,15 +46,19 @@ release:
 	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_EXE)" "$(subst /,\,$(TARGET))"
 
 run: $(TARGET)
+	@$(MKDIR)
 	@cd $(subst /,\,$(TARGET_DIR)) && $(RUN)
 
 activate:
+	@$(MKDIR)
 	@cd $(subst /,\,$(TARGET_DIR)) && $(RUN) --activate
 
 test:
+	@$(MKDIR)
 	@cd $(subst /,\,$(TARGET_DIR)) && $(RUN) ../../tests/test.lucia
 
 test-all:
+	@$(MKDIR)
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@for %%f in (src\env\Docs\examples\tests\*.lc) do ( \
 		echo Running: "%%f" && \
@@ -67,7 +70,6 @@ else
 		$(TARGET) "$$f" -q; \
 	done
 endif
-
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
