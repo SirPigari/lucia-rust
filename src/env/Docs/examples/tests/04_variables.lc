@@ -1,0 +1,7 @@
+i: int = 10
+a: str
+b: bool
+
+print(i)
+print(a)
+print(b)

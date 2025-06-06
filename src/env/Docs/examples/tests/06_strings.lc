@@ -1,0 +1,4 @@
+a: str = "hello"
+print(a)
+
+print(f"variable 'a' is {a}")

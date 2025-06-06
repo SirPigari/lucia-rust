@@ -41,7 +41,7 @@ impl<'a> Lexer<'a> {
             ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
             ("OPERATOR", &operator_pattern),
             ("IDENTIFIER", r"\bnon-static\b|\b[a-zA-Z_]\w*\b"),
-            ("SEPARATOR", r"\.\.\.|[(){}\[\];:.,\?]"),
+            ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?]"),
             ("WHITESPACE", r"\s+"),
             ("INVALID", r"."),
         ];

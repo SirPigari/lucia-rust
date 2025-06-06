@@ -1,28 +1,14 @@
 use std::collections::HashMap;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{print_colored, hex_to_ansi, to_static};
+use crate::env::core::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement};
 use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
 use crate::env::core::statements::Statement;
-use crate::env::core::types::{Float, Int};
+use crate::env::core::types::{Float, Int, VALID_TYPES};
 use lazy_static::lazy_static;
 
 lazy_static! {
     static ref DEFAULT_TOKEN: Token = Token("".to_string(), "".to_string());
-}
-
-fn get_type_default(type_: &str) -> Value {
-    match type_ {
-        "int" => Value::Float(0.0.into()),
-        "float" => Value::Int(0.into()),
-        "string" => Value::String(String::new()),
-        "bool" => Value::Boolean(false),
-        "any" => Value::Null,
-        "map" => Value::Map { keys: vec![], values: vec![] },
-        "list" => Value::List(vec![]),
-        "bytes" => Value::Bytes(vec![]),
-        _ => Value::Null,
-    }
 }
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
@@ -320,8 +306,8 @@ impl Parser {
     
 
     fn parse_primary(&mut self) -> Statement {
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let mut line = self.current_line();
+        let mut column = self.get_line_column();
 
         match self.token().cloned() {
             Some(token) => match token.0.as_str() {
@@ -339,6 +325,58 @@ impl Parser {
                             Value::String("UNARY_OPERATION".to_string()),
                             Value::String(operator),
                             operand.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "for" => {
+                    self.next();
+                    self.check_for("SEPARATOR", "(");
+                    self.next();
+                    let variable = self.token().cloned().unwrap_or_else(|| {
+                        self.raise("SyntaxError", "Expected identifier after 'for'");
+                        DEFAULT_TOKEN.clone()
+                    });
+                    self.next();
+                    self.check_for("OPERATOR", "in");
+                    self.next();
+                    let iterable = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    self.check_for("SEPARATOR", ")");
+                    self.next();
+                    line = self.current_line();
+                    column = self.get_line_column();
+                    self.check_for("SEPARATOR", ":");
+                    self.next();
+                    let mut body = vec![];
+                    while let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                            break;
+                        }
+                        let stmt = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        body.push(stmt);
+                    }
+                    self.check_for("IDENTIFIER", "end");
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("variable".to_string()),
+                            Value::String("iterable".to_string()),
+                            Value::String("body".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("FOR".to_string()),
+                            Value::String(variable.1),
+                            iterable.convert_to_map(),
+                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
                         line,
                         column,
@@ -430,6 +468,74 @@ impl Parser {
         }
     }
 
+    fn parse_variable(&mut self) -> Statement {
+        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+        let line = self.current_line();
+        let column = self.get_line_column();
+
+        if token.0 == "IDENTIFIER" {
+            let name = token.1.clone();
+            self.next();
+            if self.token_is("SEPARATOR", ":") {
+                self.next();
+                let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                if type_token.0 != "IDENTIFIER" {
+                    self.raise("SyntaxError", "Expected type after ':'");
+                    return Statement::Null;
+                }
+                let type_ = type_token.1.clone();
+                self.next();
+                if !VALID_TYPES.contains(&type_.as_str()) {
+                    self.raise("TypeError", &format!("Invalid type '{}'", type_));
+                    return Statement::Null;
+                }
+                let mut value = get_type_default_as_statement(&type_).convert_to_map();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+                if self.token_is("OPERATOR", "=") {
+                    self.next();
+                    value = self.parse_expression().convert_to_map();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                }
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("name".to_string()),
+                        Value::String("var_type".to_string()),
+                        Value::String("value".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("VARIABLE_DECLARATION".to_string()),
+                        Value::String(name),
+                        Value::String(type_.clone()),
+                        value,
+                    ],
+                    line,
+                    column,
+                };
+            } else {
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("name".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("VARIABLE".to_string()),
+                        Value::String(name),
+                    ],
+                    line,
+                    column,
+                };
+            }
+        }
+
+        self.raise("SyntaxError", &format!("Invalid syntax. '{}' was unexpected.", token.1));
+        Statement::Null
+    }
+
     fn parse_unary(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
         let line = self.current_line();
@@ -513,66 +619,48 @@ impl Parser {
             };
         }
 
-        if token_type == "IDENTIFIER" && ["f", "r", "b"].iter().any(|m| token.1.as_str().starts_with(m)) {
+        if token_type == "IDENTIFIER" && token.1.chars().all(|c| ["f", "r", "b"].contains(&c.to_string().as_str())) {
             let valid_mods = ["f", "r", "b"];
             let mut mods: Vec<Value> = Vec::new();
+            let mod_name = token.1.clone();
+            let saved_pos = self.pos.clone();
         
-            loop {
-                if token_type != "IDENTIFIER" {
-                    break;
-                }
-        
-                let mod_name = token.1.clone();
-        
-                for ch in mod_name.chars() {
-                    let ch_str = ch.to_string();
-                    if !valid_mods.contains(&ch_str.as_str()) {
-                        let expected = valid_mods.join(", ");
-                        self.raise_with_help(
-                            "StringModifierError",
-                            to_static(format!("Invalid modifier: '{}'.", ch)),
-                            to_static(format!("Expected one of: {}", expected)),
-                        );
-                        return Statement::Null;
-                    }
-        
-                    mods.push(Value::String(ch_str));
-                }
-        
-                self.next();
-        
-                match self.token().cloned() {
-                    Some(next_tok) => {
-                        token_type = next_tok.0.clone();
-                        token = next_tok;
-                    }
-                    None => {
-                        self.raise(
-                            "UEFError",
-                            "Unexpected end of input. Expected 'str' after modifiers.",
-                        );
-                        return Statement::Null;
-                    }
-                }
+            for ch in mod_name.chars() {
+                let ch_str = ch.to_string();
+                mods.push(Value::String(ch_str));
             }
-
-            token_value = token.1.clone();
+        
             self.next();
         
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string()),
-                    Value::String("mods".to_string()),
-                ],
-                values: vec![
-                    Value::String("STRING".to_string()),
-                    Value::String(token_value.clone()),
-                    Value::List(mods),
-                ],
-                line,
-                column,
-            };
+            match self.token().cloned() {
+                Some(next_tok) if next_tok.0 == "STRING" => {
+                    token_value = next_tok.1.clone();
+                    self.next();
+        
+                    return Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                            Value::String("mods".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("STRING".to_string()),
+                            Value::String(token_value.clone()),
+                            Value::List(mods),
+                        ],
+                        line,
+                        column,
+                    };
+                }
+                _ => {
+                    self.pos = saved_pos;
+                }
+            }
+        }
+    
+
+        if token_type == "IDENTIFIER" {
+            return self.parse_variable();
         }
     
         if token_type == "BOOLEAN" {
@@ -642,35 +730,77 @@ impl Parser {
     fn parse_list(&mut self) -> Statement {
         let line = self.current_line();
         let column = self.get_line_column();
+    
         self.next();
-
+    
         let mut elements = Vec::new();
+        let mut found_range = false;
+        let mut pattern_reg = false;
+    
         while let Some(token) = self.token() {
             if token.0 == "SEPARATOR" && token.1 == "]" {
                 break;
             }
-
+    
+            if token.0 == "SEPARATOR" && (token.1 == ".." || token.1 == "...") {
+                found_range = true;
+                pattern_reg = token.1 == "...";
+                self.next();
+    
+                let end_expr = self.parse_expression();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+    
+                self.check_for("SEPARATOR", "]");
+                self.next();
+    
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("iterable_type".to_string()),
+                        Value::String("seed".to_string()),
+                        Value::String("end".to_string()),
+                        Value::String("pattern_reg".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("ITERABLE".to_string()),
+                        Value::String("LIST_COMPLETION".to_string()),
+                        Value::List(elements),
+                        end_expr.convert_to_map(),
+                        Value::Boolean(pattern_reg),
+                    ],
+                    line,
+                    column,
+                };
+            }
+    
             let expr = self.parse_expression();
             if self.err.is_some() {
                 return Statement::Null;
             }
+    
             elements.push(expr.convert_to_map());
-
+    
             if let Some(next_token) = self.token() {
+                let token_str = next_token.1.clone();
+            
                 if next_token.0 == "SEPARATOR" && next_token.1 == "," {
                     self.next();
                 } else if next_token.0 == "SEPARATOR" && next_token.1 == "]" {
                     break;
+                } else if next_token.0 == "SEPARATOR" && (next_token.1 == ".." || next_token.1 == "...") {
+                    continue;
                 } else {
-                    self.raise("SyntaxError", "Expected ',' or ']'");
+                    self.raise("UEFError", &format!("Expected token ',' but found: {}", token_str));
                     return Statement::Null;
                 }
-            }
+            }            
         }
-
+    
         self.check_for("SEPARATOR", "]");
         self.next();
-
+    
         Statement::Statement {
             keys: vec![
                 Value::String("type".to_string()),
@@ -686,6 +816,8 @@ impl Parser {
             column,
         }
     }
+    
+    
     
     fn parse_function_call(&mut self) -> Statement {
         let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();

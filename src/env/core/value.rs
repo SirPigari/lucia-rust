@@ -230,6 +230,28 @@ impl Value {
             _ => Statement::Null,
         }
     }
+    pub fn is_iterable(&self) -> bool {
+        match self {
+            Value::List(_) | Value::Map { .. } => true,
+            Value::String(s) if !s.is_empty() => true,
+            Value::Bytes(b) if !b.is_empty() => true,
+            Value::Map { keys, values } if !keys.is_empty() && !values.is_empty() => true,
+            _ => false,
+        }
+    }
+    pub fn iter(&self) -> Box<dyn Iterator<Item = Value> + '_> {
+        match self {
+            Value::List(items) => Box::new(items.clone().into_iter()),
+
+            Value::Map { keys, .. } => Box::new(keys.clone().into_iter()),
+
+            Value::String(s) => Box::new(s.chars().map(|c| Value::String(c.to_string()))),
+
+            Value::Bytes(b) => Box::new(b.clone().into_iter().map(|byte| Value::Int(Int::from(byte as i32)))),
+
+            _ => Box::new(std::iter::empty()),
+        }
+    }
     pub fn is_zero(&self) -> bool {
         match self {
             Value::Int(val) if val == &Int::new(0) => true,

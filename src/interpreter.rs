@@ -1,6 +1,16 @@
 use std::collections::HashMap;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{print_colored, hex_to_ansi, format_value, find_closest_match, TRUE, FALSE, NULL, debug_log, check_ansi, unescape_string, to_static};
+use crate::env::core::utils::{
+    print_colored,
+    hex_to_ansi,
+    format_value,
+    find_closest_match,
+    TRUE, FALSE, NULL,
+    debug_log,
+    check_ansi,
+    unescape_string,
+    to_static,
+};
 use crate::env::core::types::{Int, Float, VALID_TYPES};
 use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
@@ -12,6 +22,8 @@ use lazy_static::lazy_static;
 use crate::env::core::native;
 use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
+use num_bigint::BigInt;
+use std::cmp::Ordering;
 
 use crate::lexer::Lexer;
 use crate::parser::{Parser, Token};
@@ -30,13 +42,13 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(config: Config, source: String, use_colors: bool) -> Self {
+    pub fn new(config: Config, use_colors: bool) -> Self {
         let mut this = Self {
             config,
             err: None,
             return_value: NULL,
             is_returning: false,
-            source,
+            source: String::new(),
             stack: vec![],
             use_colors,
             current_statement: None,
@@ -149,7 +161,12 @@ impl Interpreter {
     }
     
 
-    pub fn interpret(&mut self, statements: Vec<Statement>) -> Result<Value, Error> {
+    pub fn interpret(&mut self, statements: Vec<Statement>, source: String) -> Result<Value, Error> {
+        self.source = String::new();
+        self.is_returning = false;
+        self.return_value = NULL;
+        self.err = None;
+        self.current_statement = None;
         for statement in statements {
             if let Some(err) = &self.err {
                 println!("Error: {}", err.msg);
@@ -268,10 +285,95 @@ impl Interpreter {
                 "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
                 "CALL" => self.handle_call(statement.clone()),
                 "METHOD_CALL" => self.handle_method_call(statement.clone()),
+                "FOR" => self.handle_for_loop(statement.clone()),
+                "VARIABLE" => self.handle_variable(statement.clone()),
+                "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
+    }
+
+    fn handle_variable_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(s)) => s,
+            _ => return self.raise("SyntaxError", "Expected a string for variable name"),
+        };
+
+        if self.variables.contains_key(name) {
+            return self.raise("NameError", &format!("Variable '{}' is already declared", name));
+        }
+
+        let value = match statement.get(&Value::String("value".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'value' in variable declaration"),
+        };
+
+        let value = self.evaluate(value.convert_to_statement());
+        let var_type = value.type_name();
+
+        if !self.check_type(&var_type, Some("any"), Some(value.clone()), Some(true)) {
+            return self.raise("TypeError", &format!("Invalid type for variable '{}': expected 'any', got '{}'", name, var_type));
+        }
+
+        let variable = Variable::new(name.to_string(), value, var_type, false, true, true);
+        self.variables.insert(name.to_string(), variable);
+
+        NULL
+    }
+
+    fn handle_variable(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(s)) => s,
+            _ => return self.raise("SyntaxError", "Expected a string for variable name"),
+        };
+
+        if let Some(var) = self.variables.get(name) {
+            return var.get_value().clone();
+        } else {
+            return self.raise("NameError", &format!("Variable '{}' is not defined", name));
+        }
+    }
+
+    fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let iterable = match statement.get(&Value::String("iterable".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'iterable' in for loop statement"),
+        };
+
+        let iterable_value = self.evaluate(iterable.convert_to_statement());
+        if !iterable_value.is_iterable() {
+            return self.raise("TypeError", "Expected an iterable for 'for' loop");
+        }
+
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(body)) => body,
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
+        };
+
+        let variable_name = match statement.get(&Value::String("variable".to_string())) {
+            Some(Value::String(name)) => name,
+            _ => return self.raise("RuntimeError", "Expected a string for 'variable' in for loop statement"),
+        };
+
+        let mut result = NULL;
+        for item in iterable_value.iter() {
+            let mut local_vars = self.variables.clone();
+            local_vars.insert(
+                variable_name.to_string(),
+                Variable::new(variable_name.to_string(), item.clone(), item.type_name(), false, true, true),
+            );
+            self.variables = local_vars;
+
+            for stmt in body {
+                result = self.evaluate(stmt.convert_to_statement());
+                if self.is_returning {
+                    return result;
+                }
+            }
+        }
+
+        result
     }
 
     fn handle_iterable(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -299,6 +401,163 @@ impl Interpreter {
                 } else {
                     self.raise("TypeError", "Expected 'elements' to be a list")
                 }
+            }
+            "LIST_COMPLETION" => {
+                let seed_raw = statement.get(&Value::String("seed".to_string()))
+                    .cloned()
+                    .unwrap_or(Value::List(vec![]));
+
+                let end_raw = statement.get(&Value::String("end".to_string()))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+
+                let pattern_flag = statement.get(&Value::String("pattern_reg".to_string()))
+                    .cloned()
+                    .unwrap_or(Value::Boolean(false));
+
+                let seed: Vec<Value> = match &seed_raw {
+                    Value::List(elements) => elements.clone(),
+                    _ => {
+                        self.raise("TypeError", "Expected 'seed' to be a list");
+                        return Value::Null;
+                    }
+                };
+
+                let evaluated_seed: Vec<Value> = seed.into_iter().map(|map_val| {
+                    if let Value::Map { .. } = map_val {
+                        self.evaluate(map_val.convert_to_statement())
+                    } else {
+                        self.raise("RuntimeError", "Expected all elements in seed to be Map");
+                        Value::Null
+                    }
+                }).collect();
+
+                if self.err.is_some() {
+                    return Value::Null;
+                }
+
+                let end = self.evaluate(end_raw.convert_to_statement());
+
+                let pattern_flag_bool: bool = match pattern_flag {
+                    Value::Boolean(b) => b,
+                    _ => {
+                        self.raise("RuntimeError", "Expected 'pattern_reg' to be a boolean");
+                        return Value::Null;
+                    }
+                };
+
+                if !pattern_flag_bool {
+                    if evaluated_seed.is_empty() {
+                        self.raise("ValueError", "Seed list cannot be empty");
+                        return Value::Null;
+                    }
+
+                    for v in &evaluated_seed {
+                        if let Value::Int(_) = v {} else {
+                            self.raise("TypeError", "Seed elements must be Int");
+                            if self.err.is_some() {
+                                return Value::Null;
+                            }
+                        }
+                    }
+
+                    let nums: Vec<&Int> = evaluated_seed.iter().map(|v| {
+                        if let Value::Int(i) = v {
+                            i
+                        } else {
+                            unreachable!()
+                        }
+                    }).collect();
+
+                    if self.err.is_some() {
+                        return Value::Null;
+                    }
+
+                    if nums.len() >= 2 {
+                        let initial_step = &nums[1].value - &nums[0].value;
+
+                        for i in 1..(nums.len() - 1) {
+                            let current_step = &nums[i + 1].value - &nums[i].value;
+                            if current_step != initial_step {
+                                self.raise("PatternCompletionError", "Seed values do not have consistent step");
+                                if self.err.is_some() {
+                                    return Value::Null;
+                                }
+                            }
+                        }
+                    }
+
+                    let end_int = match &end {
+                        Value::Int(i) => i,
+                        _ => {
+                            self.raise("TypeError", "End value must be Int");
+                            return Value::Null;
+                        }
+                    };
+
+                    let step = if nums.len() == 1 {
+                        match nums[0].value.cmp(&end_int.value) {
+                            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => BigInt::from(1),
+                            std::cmp::Ordering::Greater => BigInt::from(-1),
+                        }
+                    } else {
+                        &nums[1].value - &nums[0].value
+                    };
+
+                    if step.is_zero() {
+                        self.raise("ValueError", "Step cannot be zero");
+                        return Value::Null;
+                    }
+
+                    let diff = &end_int.value - &nums.last().unwrap().value;
+
+                    let step_sign_int = match step.sign() {
+                        num_bigint::Sign::Plus => BigInt::from(1),
+                        num_bigint::Sign::Minus => BigInt::from(-1),
+                        num_bigint::Sign::NoSign => BigInt::from(0),
+                    };
+                    
+                    if (&diff * &step_sign_int) < BigInt::zero() {
+                        self.raise("PatternCompletionError", "End value is unreachable with given seed and step");
+                        return Value::Null;
+                    }
+                    
+
+                    if &diff % &step != BigInt::zero() {
+                        self.raise("PatternCompletionError", "Pattern does not fit into range defined by end");
+                        return Value::Null;
+                    }
+
+                    let mut result_list: Vec<Value> = evaluated_seed.clone();
+
+                    let mut current = nums.last().unwrap().value.clone();
+
+                    loop {
+                        current = current + &step;
+
+                        let done = if step > BigInt::from(0) {
+                            current > end_int.value
+                        } else {
+                            current < end_int.value
+                        };
+
+                        if done {
+                            break;
+                        }
+
+                        result_list.push(Value::Int(Int { value: current.clone() }));
+                    }
+
+                    return Value::List(result_list);
+                }
+
+                // TODO: Implement pattern-based list completion
+                self.raise_with_help(
+                    "NotImplementedError",
+                    "Pattern-based list completion ('...') is not yet supported.",
+                    "Please use standard range completion ('..') instead."
+                );
+                Value::Null
             }
             _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }

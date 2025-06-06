@@ -64,23 +64,34 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     let mut trace = String::new();
 
     if !use_lucia_traceback {
+        let location = match (line_number, error.column) {
+            (0, 0) => format!("{}", file_name),
+            (line, 0) => format!("{}:{}", file_name, line),
+            (0, col) => format!("{}", file_name),
+            (line, col) => format!("{}:{}:{}", file_name, line, col),
+        };
+    
         eprintln!(
-            "{}{}:{}:{} -> {}: {}{}{}{}",
+            "{}{} -> {}: {}{}{}{}",
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            file_name,
-            line_number,
-            error.column,
+            location,
             error_type,
             error_msg,
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
             match error_help {
-                Some(help) if !help.is_empty() => format!("   {}({}){}", hex_to_ansi(&config.color_scheme.help, Some(use_colors)), help, hex_to_ansi("reset", Some(use_colors))),
+                Some(help) if !help.is_empty() => format!(
+                    "   {}({}){}",
+                    hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                    help,
+                    hex_to_ansi("reset", Some(use_colors))
+                ),
                 _ => "".to_string(),
             },
             hex_to_ansi("reset", Some(use_colors))
         );
         return;
     }
+    
     
     if !(error.column == 0 && error.line.0 == 0) {
         let mut current_pos = 1;
@@ -452,8 +463,13 @@ fn main() {
                 let statements = match parser.parse_safe() {
                     Ok(stmts) => stmts,
                     Err(error) => {
+                        debug_log(
+                            "Error while parsing:",
+                            &config,
+                            Some(use_colors),
+                        );
                         handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
-                        return;
+                        continue;
                     }
                 };
                 debug_log(
@@ -468,8 +484,19 @@ fn main() {
                     &config,
                     Some(use_colors),
                 );
-                let mut interpreter = Interpreter::new(config.clone(), file_content.to_string(), use_colors);
-                interpreter.interpret(statements);
+                let mut interpreter = Interpreter::new(config.clone(), use_colors);
+                let out: Value = match interpreter.interpret(statements, file_content.clone()) {
+                    Ok(out) => out,
+                    Err(error) => {
+                        debug_log(
+                            "Error while interpreting:",
+                            &config,
+                            Some(use_colors),
+                        );
+                        handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                        continue;
+                    }
+                };
             } else {
                 eprintln!("Error: File '{}' does not exist or is not a valid file", file_path);
             }
@@ -481,6 +508,7 @@ fn main() {
             config.version, 
             hex_to_ansi("reset", Some(use_colors))
         );
+        let mut interpreter = Interpreter::new(config.clone(), use_colors);
         loop {
             print!("{}{}{} ", 
                 hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
@@ -571,8 +599,7 @@ fn main() {
                 &config,
                 Some(use_colors),
             );
-            let mut interpreter = Interpreter::new(config.clone(), input.to_string(), use_colors);
-            let out: Value = match interpreter.interpret(statements) {
+            let out: Value = match interpreter.interpret(statements, input.clone()) {
                 Ok(out) => out,
                 Err(error) => {
                     debug_log(

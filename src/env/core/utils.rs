@@ -12,6 +12,7 @@ use std::str::FromStr;
 use crate::env::core::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
+use std::cmp::Ordering;
 use crate::env::core::functions::{Parameter, NativeMethod, FunctionMetadata};
 use crate::env::core::statements::Statement;
 use crate::env::core::types::{Int, Float, Boolean};
@@ -356,6 +357,142 @@ pub fn get_operator_precedence(op: &str) -> u8 {
         _ => 0,
     }
 }
+
+pub fn get_type_default(type_: &str) -> Value {
+    match type_ {
+        "int" => Value::Float(0.0.into()),
+        "float" => Value::Int(0.into()),
+        "string" => Value::String(String::new()),
+        "bool" => Value::Boolean(false),
+        "any" => Value::Null,
+        "map" => Value::Map { keys: vec![], values: vec![] },
+        "list" => Value::List(vec![]),
+        "bytes" => Value::Bytes(vec![]),
+        _ => Value::Null,
+    }
+}
+
+pub fn get_type_default_as_statement(type_: &str) -> Statement {
+    match type_ {
+        "int" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("NUMBER".to_string()),
+                Value::String("0".to_string())
+            ],
+            line: 0,
+            column: 0,
+        },
+        "float" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("NUMBER".to_string()),
+                Value::String("0.0".to_string())
+            ],
+            line: 0,
+            column: 0,
+        },
+        "str" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string()),
+                Value::String("mods".to_string()),
+            ],
+            values: vec![
+                Value::String("STRING".to_string()),
+                Value::String("\"\"".to_string()),
+                Value::List(vec![]),
+            ],
+            line: 0,
+            column: 0,
+        },
+        "bool" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("BOOLEAN".to_string()),
+                Value::String("false".to_string()),
+            ],
+            line: 0,
+            column: 0,
+        },
+        "any" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("NULL".to_string()),
+                Value::Null,
+            ],
+            line: 0,
+            column: 0,
+        },
+        "map" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("keys".to_string()),
+                Value::String("values".to_string())
+            ],
+            values: vec![
+                Value::String("MAP".to_string()),
+                Value::List(vec![]),
+                Value::List(vec![])
+            ],
+            line: 0,
+            column: 0,
+        },
+        "list" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("iterable_type".to_string()),
+                Value::String("elements".to_string())
+            ],
+            values: vec![
+                Value::String("ITERABLE".to_string()),
+                Value::String("LIST".to_string()),
+                Value::List(vec![])
+            ],
+            line: 0,
+            column: 0,
+        },
+        "bytes" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string()),
+                Value::String("mods".to_string()),
+            ],
+            values: vec![
+                Value::String("STRING".to_string()),
+                Value::String("\"\"".to_string()),
+                Value::List(vec![Value::String("b".to_string())])
+            ],
+            line: 0,
+            column: 0,
+        },
+        _ => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("BOOLEAN".to_string()),
+                Value::String("null".to_string()),
+            ],
+            line: 0,
+            column: 0,
+        },
+    }
+}
+
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
