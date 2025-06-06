@@ -1,2 +1,4 @@
-Makefile linguist-generated=true
+Makefile linguist-language=Text
+*.lc linguist-language=Lucia
+*.lucia linguist-language=Lucia
 target/* linguist-generated=true
