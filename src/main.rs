@@ -302,12 +302,21 @@ fn main() {
     let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
     
     let debug_mode = if debug_flag {
-        args.iter()
-            .find(|arg| arg.starts_with("--debug-mode="))
-            .and_then(|arg| arg.split('=').nth(1))
-            .map(String::from)
-            .filter(|mode| ["full", "normal", "minimal"].contains(&mode.as_str()))
-            .unwrap_or_else(|| "normal".to_string())
+        if let Some(arg) = args.iter().find(|arg| arg.starts_with("--debug-mode=")) {
+            if let Some(mode) = arg.split('=').nth(1) {
+                if ["full", "normal", "minimal"].contains(&mode) {
+                    mode.to_string()
+                } else {
+                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', or 'minimal'. Defaulting to 'normal'.", mode);
+                    exit(1);
+                    "normal".to_string()
+                }
+            } else {
+                "normal".to_string()
+            }
+        } else {
+            "normal".to_string()
+        }
     } else {
         "normal".to_string()
     };
