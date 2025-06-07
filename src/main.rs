@@ -312,6 +312,7 @@ fn main() {
     let no_color_flag = args.contains(&"--no-color".to_string());
     let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
     let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
+    let exit_flag = args.contains(&"--exit".to_string()) || args.contains(&"-e".to_string());
     
     let debug_mode = if debug_flag {
         if let Some(arg) = args.iter().find(|arg| arg.starts_with("--debug-mode=")) {
@@ -435,6 +436,13 @@ fn main() {
             Some(path.display().to_string())
         })
         .collect();
+
+    if exit_flag {
+        if non_flag_args.is_empty() {
+            eprintln!("No files provided to execute. Exiting.");
+            exit(0);
+        }
+    }
 
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
