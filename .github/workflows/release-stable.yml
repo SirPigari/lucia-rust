@@ -1,5 +1,5 @@
-# .github/workflows/run-tests-nightly.yml
-name: Lucia Rust Test Suite - Nightly
+# .github/workflows/release-stable.yml
+name: Lucia Rust Test Suite - Stable
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: stable
           override: true
 
       - name: Cache cargo dependencies
@@ -38,9 +38,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-nightly-
+            ${{ runner.os }}-cargo-stable-
             ${{ runner.os }}-cargo-
 
       - name: Install dependencies
