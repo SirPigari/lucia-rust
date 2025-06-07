@@ -19,43 +19,138 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  nightly-build-check:
+    name: Stable Build Check
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust toolchain
+      - name: Set up Rust (stable)
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
 
-      - name: Cache cargo dependencies
+      - name: Cache Cargo dependencies
         uses: actions/cache@v3
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-stable-
-            ${{ runner.os }}-cargo-
+            ${{ matrix.os }}-cargo-stable-
+            ${{ matrix.os }}-cargo-
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y make
 
-      - name: Build lucia
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install make
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install make --no-progress
+
+      - name: Build project (release)
         run: make release
 
-      - name: Activate lucia environment
+      - name: Activate build environment
         run: make activate
 
-      - name: Build tests
+      - name: Upload release artifact (only Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-release
+          path: src/env/bin/lucia
+
+  nightly-build-check-arch:
+    name: Stable Build Check (Arch Linux)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install tools
+        run: pacman -Sy --noconfirm git make rustup
+
+      - name: Set Rust stable
+        run: rustup default stable
+
+      - uses: actions/checkout@v4
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+            target
+          key: arch-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            arch-cargo-stable-
+            arch-cargo-
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Activate build environment
+        run: make activate
+
+  nightly-test-suite:
+    name: Stable Test Suite (Ubuntu)
+    runs-on: ubuntu-latest
+    needs:
+      - nightly-build-check
+      - nightly-build-check-arch
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-latest-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-latest-cargo-stable-
+            ubuntu-latest-cargo-
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y make
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-release
+          path: src/env/bin
+      
+      - name: Make lucia executable
+        run: chmod +x src/env/bin/lucia
+
+      - name: Activate build environment
+        run: make activate
+
+      - name: Build test binaries
         run: make build-test
 
-      - name: Run tests
+      - name: Run test suite
         run: make test
 
       - name: Run benchmarks
