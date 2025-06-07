@@ -7,3 +7,5 @@ Cargo.lock
 /src/env/bin/lucia
 !src/env/bin/
 /src/tests/
+/tests/run_tests.exe
+/tests/run_tests

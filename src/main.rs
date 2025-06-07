@@ -469,7 +469,7 @@ fn main() {
                             Some(use_colors),
                         );
                         handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
-                        continue;
+                        exit(1);
                     }
                 };
                 debug_log(
@@ -494,7 +494,7 @@ fn main() {
                             Some(use_colors),
                         );
                         handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
-                        continue;
+                        exit(1);
                     }
                 };
             } else {

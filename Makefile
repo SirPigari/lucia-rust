@@ -36,7 +36,7 @@ else
 endif
 
 build:
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --bin lucia
 	@$(MKDIR)
 	@$(MOVE) "$(LUCIA_DIR)\target\debug\$(TARGET_EXE)" "$(subst /,\,$(TARGET))"
 
@@ -55,21 +55,24 @@ activate:
 
 test:
 	@$(MKDIR)
-	@cd $(subst /,\,$(TARGET_DIR)) && $(RUN) ../../tests/test.lucia
-
-test-all:
-	@$(MKDIR)
-ifeq ($(IS_WINDOWS_CMD),cmd.exe)
-	@for %%f in (src\env\Docs\examples\tests\*.lc) do ( \
-		echo Running: "%%f" && \
-		"$(subst /,\,$(TARGET))" "%%f" -q \
+	@if exist .\tests\run_tests.exe ( \
+		.\tests\run_tests.exe $(filter-out $@,$(MAKECMDGOALS)) \
+	) else if exist .\tests\run_tests ( \
+		.\tests\run_tests $(filter-out $@,$(MAKECMDGOALS)) \
+	) else ( \
+		echo Error: run_tests executable not found in .\tests && exit /b 1 \
 	)
-else
-	@for f in src/env/Docs/examples/tests/*.lc; do \
-		echo Running: "$$f"; \
-		$(TARGET) "$$f" -q; \
-	done
-endif
+	
+%:
+	@:
+
+
+
+build-test:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin run_tests
+	@$(MKDIR) tests
+	@$(MOVE) "$(LUCIA_DIR)\target\release\run_tests.exe" "tests\run_tests.exe"
+
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
