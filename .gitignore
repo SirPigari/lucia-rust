@@ -9,3 +9,5 @@ Cargo.lock
 /src/tests/
 /tests/run_tests.exe
 /tests/run_tests
+/tests/run_benchmarks.exe
+/tests/run_benchmarks

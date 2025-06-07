@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::process::exit;
 use std::collections::HashMap;
+use colored::*;
 
 mod env {
     pub mod core {
@@ -17,6 +18,7 @@ mod env {
         pub mod variables;
         pub mod native;
         pub mod statements;
+        pub mod build;
     }
 }
 
@@ -26,10 +28,11 @@ mod lexer;
 
 use crate::env::core::utils;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal};
+use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static};
 use crate::env::core::types::{Int, Float, Boolean};
 use crate::env::core::errors::Error;
 use crate::env::core::value::Value;
+use crate::env::core::build::{BuildInfo, get_build_info};
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
@@ -313,6 +316,13 @@ fn main() {
     let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
     let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
     let exit_flag = args.contains(&"--exit".to_string()) || args.contains(&"-e".to_string());
+
+    if args.contains(&"--build-info".to_string()) {
+        let info = get_build_info();
+
+        println!("{}", serde_json::to_string_pretty(&info).unwrap());
+        exit(0);
+    }
     
     let debug_mode = if debug_flag {
         if let Some(arg) = args.iter().find(|arg| arg.starts_with("--debug-mode=")) {
@@ -365,13 +375,13 @@ fn main() {
         load_config(&config_path).unwrap()
     };
     if activate_flag {
-        println!("Activating environment at: {}", env_path.display());
+        println!("{}", format!("Activating environment at: {}", env_path.display()).cyan().bold());
         if let Err(err) = activate_environment(&env_path) {
-            eprintln!("Failed to activate environment: {}", err);
+            eprintln!("{}", format!("Failed to activate environment: {}", err).red().bold());
             exit(1);
         }
         config = load_config(&config_path).unwrap();
-    };
+    }
 
     let home_dir = config.home_dir
     .to_string()

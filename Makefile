@@ -46,7 +46,7 @@ endif
 
 
 release:
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin lucia
 	@$(MKDIR)
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_EXE)" "$(subst /,\,$(TARGET))"
@@ -88,17 +88,40 @@ else
 	fi
 endif
 
+benchmark:
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MKDIR)
+	@if exist .\tests\run_benchmarks.exe ( \
+		.\tests\run_benchmarks.exe $(filter-out $@,$(MAKECMDGOALS)) \
+	) else if exist .\tests\run_benchmarks ( \
+		.\tests\run_benchmarks $(filter-out $@,$(MAKECMDGOALS)) \
+	) else ( \
+		echo Error: run_benchmarks executable not found in .\tests && exit /b 1 \
+	)
+else
+	@$(MKDIR)
+	@if [ -x ./tests/run_benchmarks ]; then \
+		./tests/run_benchmarks $(filter-out $@,$(MAKECMDGOALS)); \
+	elif [ -x ./tests/run_benchmarks.exe ]; then \
+		./tests/run_benchmarks.exe $(filter-out $@,$(MAKECMDGOALS)); \
+	else \
+		echo "Error: run_benchmarks executable not found in ./tests" && exit 1; \
+	fi
+endif
+
 %:
 	@:
 
 build-test:
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin run_tests
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin run_tests && $(CARGO_ENV) build --release --bin run_benchmarks
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@if not exist tests mkdir tests
 	@$(MOVE) "$(LUCIA_DIR)\target\release\run_tests.exe" "tests\run_tests.exe"
+	@$(MOVE) "$(LUCIA_DIR)\target\release\run_benchmarks.exe" "tests\run_benchmarks.exe"
 else
 	@mkdir -p tests
 	@$(MOVE) "$(LUCIA_DIR)/target/release/run_tests" "tests/run_tests"
+	@$(MOVE) "$(LUCIA_DIR)/target/release/run_benchmarks" "tests/run_benchmarks"
 endif
 
 clean:
