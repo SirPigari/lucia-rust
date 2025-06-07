@@ -62,8 +62,11 @@ run: $(TARGET)
 activate:
 	@echo "Changing directory to: $(TARGET_DIR)"
 	@$(MKDIR)
+ifeq ($(OS),Windows_NT)
 	@cd $(subst /,\\,$(TARGET_DIR)) && $(RUN) --activate
-
+else
+	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) --activate
+endif
 
 test:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
