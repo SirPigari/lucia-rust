@@ -4,9 +4,9 @@
 Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ---
-[![Nightly](https://github.com/SirPigari/lucia-rust/actions/workflows/release-nightly.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-nightly.yml)
-[![Stable](https://github.com/SirPigari/lucia-rust/actions/workflows/release-stable.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-stable.yml)
-[![Beta](https://github.com/SirPigari/lucia-rust/actions/workflows/release-beta.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-beta.yml)
+[![Nightly](https://github.com/SirPigari/lucia-rust/actions/workflows/release-nightly.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-nightly.yml)
+[![Stable](https://github.com/SirPigari/lucia-rust/actions/workflows/release-stable.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-stable.yml)
+[![Beta](https://github.com/SirPigari/lucia-rust/actions/workflows/release-beta.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/release-beta.yml)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 ---
