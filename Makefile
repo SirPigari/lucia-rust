@@ -38,12 +38,22 @@ endif
 build:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --bin lucia
 	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MOVE) "$(LUCIA_DIR)\target\debug\$(TARGET_EXE)" "$(subst /,\,$(TARGET))"
+else
+	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_EXE)" "$(TARGET)"
+endif
+
 
 release:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release
 	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_EXE)" "$(subst /,\,$(TARGET))"
+else
+	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_EXE)" "$(TARGET)"
+endif
+
 
 run: $(TARGET)
 	@$(MKDIR)
