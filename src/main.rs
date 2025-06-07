@@ -365,6 +365,7 @@ fn main() {
         load_config(&config_path).unwrap()
     };
     if activate_flag {
+        println!("Activating environment at: {}", env_path.display());
         if let Err(err) = activate_environment(&env_path) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
