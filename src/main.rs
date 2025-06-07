@@ -392,7 +392,6 @@ fn main() {
     let home_dir_path = PathBuf::from(home_dir.clone());
 
     if let Err(e) = std_env::set_current_dir(&home_dir_path) {
-        eprintln!("{}", home_dir_path.display());
         eprintln!("Failed to change the directory: {}", e);
         exit(1);
     }

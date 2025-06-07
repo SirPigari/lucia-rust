@@ -23,6 +23,9 @@ jobs:
       - name: Build lucia
         run: make release
 
+      - name: Activate lucia environment
+        run: make activate
+
       - name: Build tests
         run: make build-test
 
