@@ -1,15 +1,20 @@
-# Lucia 1.0.0-rust
+# Lucia 1.0.0 (Rust Edition)
 
-Lucia is a simple and lightweight programming language made in <a href="https://www.rust-lang.org/" target="_blank">Rust</a>.
+**Lucia** is a simple and lightweight programming language implemented in [Rust](https://www.rust-lang.org/).  
+Inspired by **Python**, **Lua**, and a bit of **Java**
 
-___
+---
 
 ## Currently working on:
 
-- Converting the entire codebase to <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
-- At least its gonna be **BLAZINGLY FAST**
-- And rust is a <a href="https://www.reddit.com/r/feminineboys/comments/j91rv7/comment/g8gk0fy/?context=3" target="_blank">femboy lang</a>
+- Porting the entire codebase to [Rust](https://www.rust-lang.org/) 🦀  
+- It’s gonna be **BLAZINGLY FAST™**  
+- Also, Rust is totally a [femboy language](https://www.reddit.com/r/feminineboys/comments/j91rv7/comment/g8gk0fy/?context=3) :3
+
 ---
 
-Lucia Stable release in python: [SirPigari/lucia](https://github.com/SirPigari/lucia)  
+## Want to try the stable release?
+
+Check out the original Python version here: [SirPigari/lucia](https://github.com/SirPigari/lucia)  
+
 License: [LICENSE](LICENSE)
