@@ -1,17 +1,9 @@
 use crate::env::core::types::{Float, Int};
-use crate::env::core::functions::{Function, NativeFunction, NativeMethod, Parameter};
+use crate::env::core::functions::Function;
 use crate::env::core::statements::Statement;
-use crate::env::core::variables::Variable;
-use crate::env::core::utils::{to_static, levenshtein_distance, get_line_info, clear_terminal, make_native_method};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
-use std::collections::HashMap;
-use std::sync::Mutex;
 use std::fmt;
-use once_cell::sync::Lazy;
-use std::sync::Arc;
-use crate::env::core::errors::Error;
-
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {

@@ -76,11 +76,11 @@ fn main() {
     println!("{}", "Lucia Benchmark Runner".bold().underline().cyan());
     println!("Using lucia version {}", info.version.bold().green());
     println!("Rustc version: {}", info.rustc_version.bold().green());
-    if info.git_hash != "not-cloned" || info.git_hash != "unknown" {
+    if info.git_hash != "not-cloned" && info.git_hash != "unknown" {
         println!("Git hash: {}", info.git_hash.bold().green());
     }
 
-    println!("{}\n", "──────────────────────────────────────".dimmed());
+    println!("{}\n", "─────────────────────────────────────────".dimmed());
 
     let is_debug = info.profile == "debug";
 
@@ -101,35 +101,42 @@ fn main() {
             }
 
             print!("Benchmarking: {:<40} ... ", file_name);
+            let mut durations = vec![];
+            let mut success = true;
 
-            let start = Instant::now();
-            let output = Command::new(&target_path)
-                .arg(&path)
-                .arg("-q")
-                .output();
-            let duration = start.elapsed();
-            let duration_ms = duration.as_millis();
-            total_time += duration_ms;
-            times.push(duration_ms);
-
-            if duration_ms < fastest_time {
-                fastest_time = duration_ms;
-                fastest_test = file_name.to_string();
-            }
-            if duration_ms > slowest_time {
-                slowest_time = duration_ms;
-                slowest_test = file_name.to_string();
-            }
-
-            match output {
-                Ok(out) if out.status.success() => {
-                    println!("{}", format!("{} ms", duration_ms).green());
-                    passed.push(file_name.to_string());
+            for _ in 0..10 {
+                let start = Instant::now();
+                let output = Command::new(&target_path)
+                    .arg(&path)
+                    .arg("-q")
+                    .output();
+                let duration = start.elapsed().as_millis();
+                match &output {
+                    Ok(out) if out.status.success() => durations.push(duration),
+                    _ => {
+                        success = false;
+                        break;
+                    }
                 }
-                _ => {
-                    println!("{}", "FAILED".red());
-                    failed.push(file_name.to_string());
+            }
+
+            if success {
+                let avg_duration = durations.iter().sum::<u128>() / durations.len() as u128;
+                println!("{}", format!("{} ms", avg_duration).green());
+                total_time += avg_duration;
+                times.push(avg_duration);
+                if avg_duration < fastest_time {
+                    fastest_time = avg_duration;
+                    fastest_test = file_name.to_string();
                 }
+                if avg_duration > slowest_time {
+                    slowest_time = avg_duration;
+                    slowest_test = file_name.to_string();
+                }
+                passed.push(file_name.to_string());
+            } else {
+                println!("{}", "FAILED".red());
+                failed.push(file_name.to_string());
             }
         }
     }
@@ -174,7 +181,7 @@ fn main() {
         0.0
     };
 
-    println!("\n{}", "──────────────────────────────────────".dimmed());
+    println!("\n{}", "─────────────────────────────────────────".dimmed());
     println!("{}", "Benchmark Summary".bold().purple());
 
     println!("{} {}", "Failed:".red(), failed.len());
@@ -190,10 +197,10 @@ fn main() {
     println!("{} {:.2}%", "Success Rate:".green(), success_rate);
 
     if is_debug {
-        println!("{}", "──────────────────────────────────────".dimmed());
+        println!("{}", "─────────────────────────────────────────".dimmed());
         println!("{} {}", "Note:".yellow(), "Benchmarks are slower in debug profile, consider using release profile for accurate results.");
     }
-    println!("{}", "──────────────────────────────────────".dimmed());
+    println!("{}", "─────────────────────────────────────────".dimmed());
 
     if failed.is_empty() {
         println!("{}", "ALL BENCHMARKS PASSED".bold().on_green().black());

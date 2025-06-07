@@ -18,7 +18,6 @@ use crate::env::core::variables::Variable;
 use crate::env::core::statements::Statement;
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use num_traits::{Zero, self};
-use lazy_static::lazy_static;
 use crate::env::core::native;
 use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;

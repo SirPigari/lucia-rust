@@ -5,11 +5,9 @@ use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
 use crate::env::core::statements::Statement;
 use crate::env::core::types::{Float, Int, VALID_TYPES};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
-lazy_static! {
-    static ref DEFAULT_TOKEN: Token = Token("".to_string(), "".to_string());
-}
+static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(|| Token("".to_string(), "".to_string()));
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct Token(pub String, pub String);

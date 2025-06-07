@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 colored = "3.0.0"
 crossterm = "0.29.0"
-lazy_static = "1.5.0"
 num-bigfloat = "1.7.2"
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
@@ -30,7 +29,7 @@ name = "run_benchmarks"
 path = "tests/bin/run_benchmarks.rs"
 
 [profile.release]
-lto = "thin"         # faster + smaller builds
-codegen-units = 1    # better optimization
-opt-level = "z"      # optimize for size (or "s" for balance)
-strip = true         # remove symbols in release build
+lto = "thin"
+codegen-units = 1
+opt-level = "z"
+strip = true
