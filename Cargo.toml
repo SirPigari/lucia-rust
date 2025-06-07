@@ -4,6 +4,7 @@ version = "2.0.0-rust"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.41"
 colored = "3.0.0"
 crossterm = "0.29.0"
 num-bigfloat = "1.7.2"

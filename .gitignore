@@ -11,3 +11,4 @@ Cargo.lock
 /tests/run_tests
 /tests/run_benchmarks.exe
 /tests/run_benchmarks
+/tests/benchmark-results/

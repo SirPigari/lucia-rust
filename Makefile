@@ -109,6 +109,27 @@ else
 	fi
 endif
 
+benchmark-save:
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MKDIR)
+	@if exist .\tests\run_benchmarks.exe ( \
+		.\tests\run_benchmarks.exe $(filter-out $@,$(MAKECMDGOALS)) --save-results \
+	) else if exist .\tests\run_benchmarks ( \
+		.\tests\run_benchmarks $(filter-out $@,$(MAKECMDGOALS)) --save-results \
+	) else ( \
+		echo Error: run_benchmarks executable not found in .\tests && exit /b 1 \
+	)
+else
+	@$(MKDIR)
+	@if [ -x ./tests/run_benchmarks ]; then \
+		./tests/run_benchmarks $(filter-out $@,$(MAKECMDGOALS)) --save-results; \
+	elif [ -x ./tests/run_benchmarks.exe ]; then \
+		./tests/run_benchmarks.exe $(filter-out $@,$(MAKECMDGOALS)) --save-results; \
+	else \
+		echo "Error: run_benchmarks executable not found in ./tests" && exit 1; \
+	fi
+endif
+
 %:
 	@:
 

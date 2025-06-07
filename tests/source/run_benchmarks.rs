@@ -4,11 +4,15 @@ use std::{
     process::Command,
     path::{Path, PathBuf},
     time::Instant,
+    fs::File,
+    io::Write,
+    collections::{HashSet, HashMap},
 };
 use colored::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use chrono::Utc;
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct BuildInfo {
     name: String,
     version: String,
@@ -21,11 +25,13 @@ struct BuildInfo {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let filter_prefixes: Vec<String> = if args.len() > 1 {
-        args[1..].to_vec()
-    } else {
-        vec![]
-    };
+    let filter_prefixes: Vec<String> = args.iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .cloned()
+        .collect();
+
+    let save_results = args.iter().any(|a| a == "--save-results");
 
     if let Ok(exe_path) = env::current_exe() {
         if let Some(parent_dir) = exe_path.parent() {
@@ -65,13 +71,16 @@ fn main() {
     let mut failed = vec![];
     let mut passed = vec![];
     let mut total_time = 0u128;
-    let mut found_prefixes = std::collections::HashSet::new();
+    let mut found_prefixes: HashSet<String> = HashSet::new();
     let mut times = vec![];
 
     let mut fastest_time = u128::MAX;
     let mut slowest_time = 0u128;
     let mut fastest_test = String::new();
     let mut slowest_test = String::new();
+
+    // map file_name -> list of times for --save-results
+    let mut times_map: HashMap<String, Vec<u128>> = HashMap::new();
 
     println!("{}", "Lucia Benchmark Runner".bold().underline().cyan());
     println!("Using lucia version {}", info.version.bold().green());
@@ -89,6 +98,7 @@ fn main() {
         eprintln!("{}", "No benchmark files found.".red());
         std::process::exit(1);
     }
+
     let mut all_entries_sorted_filtered: Vec<_> = all_entries
         .iter()
         .filter(|entry| {
@@ -104,7 +114,6 @@ fn main() {
             .and_then(|num_str| num_str.parse::<u32>().ok())
             .unwrap_or(0)
     });
-
 
     for entry in all_entries_sorted_filtered.iter() {
         let path = entry.path();
@@ -147,6 +156,8 @@ fn main() {
                 println!("{}", format!("{} ms", avg_duration).green());
                 total_time += avg_duration;
                 times.push(avg_duration);
+                times_map.insert(file_name.to_string(), durations);
+
                 if avg_duration < fastest_time {
                     fastest_time = avg_duration;
                     fastest_test = file_name.to_string();
@@ -223,6 +234,39 @@ fn main() {
         println!("{} {}", "Note:".yellow(), "Benchmarks are slower in debug profile, consider using release profile for accurate results.");
     }
     println!("{}", "─────────────────────────────────────────".dimmed());
+
+    if save_results {
+        if let Err(e) = fs::create_dir_all("./benchmark-results") {
+            eprintln!("{}", format!("Failed to create results directory: {}", e).red());
+            std::process::exit(1);
+        }
+
+        let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let result_path = format!("./benchmark-results/{}.json", timestamp);
+
+        let mut output_json = serde_json::Map::new();
+
+        for (file_name, times_list) in &times_map {
+            let times_json: Vec<serde_json::Value> = times_list.iter().map(|t| serde_json::json!(t)).collect();
+            output_json.insert(file_name.clone(), serde_json::Value::Array(times_json));
+        }
+
+        output_json.insert("build-info".to_string(), serde_json::to_value(&info).unwrap());
+
+        let json_value = serde_json::Value::Object(output_json);
+        match File::create(&result_path) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(serde_json::to_string_pretty(&json_value).unwrap().as_bytes()) {
+                    eprintln!("{}", format!("Failed to write results file: {}", e).red());
+                } else {
+                    println!("{}", format!("Saved benchmark results to {}", result_path).bold().green());
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", format!("Failed to create results file: {}", e).red());
+            }
+        }
+    }
 
     if failed.is_empty() {
         println!("{}", "ALL BENCHMARKS PASSED".bold().on_green().black());

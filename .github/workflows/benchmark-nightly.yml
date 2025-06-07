@@ -1,0 +1,107 @@
+# .github/workflows/benchmark-nightly.yml
+name: Lucia Rust Benchmark Nightly
+
+on:
+  schedule:
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark-other:
+    name: Benchmark on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (nightly)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-cargo-nightly-
+            ${{ matrix.os }}-cargo-
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y make
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install make
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install make --no-progress
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Activate build environment
+        run: make activate
+
+      - name: Run benchmark-save
+        run: make benchmark-save
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-benchmark-${{ matrix.os }}
+          path: benchmark-results/
+
+  benchmark-arch:
+    name: Benchmark on Arch Linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install tools
+        run: pacman -Sy --noconfirm git make rustup
+
+      - name: Set Rust nightly
+        run: rustup default nightly
+
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            /root/.cargo/registry
+            /root/.cargo/git
+            target
+          key: arch-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            arch-cargo-nightly-
+            arch-cargo-
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Activate build environment
+        run: make activate
+
+      - name: Run benchmark-save
+        run: make benchmark-save
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-benchmark-archlinux
+          path: benchmark-results/
