@@ -62,17 +62,19 @@ test:
 	) else ( \
 		echo Error: run_tests executable not found in .\tests && exit /b 1 \
 	)
-	
+
 %:
 	@:
 
-
-
 build-test:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin run_tests
-	@$(MKDIR) tests
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@if not exist tests mkdir tests
 	@$(MOVE) "$(LUCIA_DIR)\target\release\run_tests.exe" "tests\run_tests.exe"
-
+else
+	@mkdir -p tests
+	@$(MOVE) "$(LUCIA_DIR)/target/release/run_tests" "tests/run_tests"
+endif
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
