@@ -10,7 +10,7 @@ use std::{
 };
 use colored::*;
 use serde::{Deserialize, Serialize};
-use chrono::Utc;
+use chrono::{DateTime, Utc, Local, TimeZone};
 
 #[derive(Deserialize, Serialize)]
 struct BuildInfo {
@@ -241,17 +241,48 @@ fn main() {
             std::process::exit(1);
         }
 
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let result_path = format!("./benchmark-results/{}.json", timestamp);
 
         let mut output_json = serde_json::Map::new();
 
+        let mut benchmarks_json = serde_json::Map::new();
+
         for (file_name, times_list) in &times_map {
             let times_json: Vec<serde_json::Value> = times_list.iter().map(|t| serde_json::json!(t)).collect();
-            output_json.insert(file_name.clone(), serde_json::Value::Array(times_json));
+            benchmarks_json.insert(file_name.clone(), serde_json::Value::Array(times_json));
         }
 
+        output_json.insert("benchmarks".to_string(), serde_json::Value::Object(benchmarks_json));
+
         output_json.insert("build-info".to_string(), serde_json::to_value(&info).unwrap());
+        output_json.insert("benchmark-summary".to_string(), serde_json::json!({
+            "total_time": total_time,
+            "total_benchmarks": total_benchmarks,
+            "average_time": average_time,
+            "median_time": median_time,
+            "fastest_test": fastest_test,
+            "fastest_time": fastest_time,
+            "slowest_test": slowest_test,
+            "slowest_time": slowest_time,
+            "success_rate": success_rate,
+            "passed": passed.len(),
+            "failed": failed.len(),
+        }));
+
+        let start = std::time::SystemTime::now();
+        let datetime: DateTime<Local> = start.into();
+        let formatted = datetime.format("%d.%m.%Y %H:%M:%S").to_string();
+
+        output_json.insert("datetime".to_string(), serde_json::json!(formatted));
+
+        if !passed.is_empty() {
+            output_json.insert("passed_benchmarks".to_string(), serde_json::Value::Array(passed.iter().map(|p| serde_json::json!(p)).collect()));
+        }
+
+        if !failed.is_empty() {
+            output_json.insert("failed_benchmarks".to_string(), serde_json::Value::Array(failed.iter().map(|f| serde_json::json!(f)).collect()));
+        }
 
         let json_value = serde_json::Value::Object(output_json);
         match File::create(&result_path) {

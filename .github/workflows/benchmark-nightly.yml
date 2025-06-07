@@ -66,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lucia-benchmark-${{ matrix.os }}
-          path: benchmark-results/
+          path: benchmark-results/*.json
 
   benchmark-arch:
     name: Benchmark on Arch Linux
@@ -110,4 +110,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lucia-benchmark-archlinux
-          path: benchmark-results/
+          path: benchmark-results/*.json
