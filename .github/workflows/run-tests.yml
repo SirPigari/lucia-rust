@@ -1,11 +1,19 @@
-# run-tests.yml
+# .github/workflows/run-tests.yml
 name: Lucia Rust Test Suite
 
 on:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,9 +21,28 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y make
