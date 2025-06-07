@@ -19,6 +19,7 @@ mod env {
         pub mod native;
         pub mod statements;
         pub mod build;
+        pub mod pattern_reg;
     }
 }
 

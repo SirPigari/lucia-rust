@@ -1,0 +1,10 @@
+// variables
+x: int = 7
+y: int = 42
+z: int = 137
+
+print(x.toString().toBytes())
+
+print((x.toString() * y).toInt() / 42)
+
+print(z.toFloat().toInt() ^ (x / 2))

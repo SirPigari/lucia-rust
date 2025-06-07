@@ -10,7 +10,9 @@ use crate::env::core::utils::{
     check_ansi,
     unescape_string,
     to_static,
+
 };
+use crate::env::core::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::core::types::{Int, Float, VALID_TYPES};
 use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
@@ -550,13 +552,30 @@ impl Interpreter {
                     return Value::List(result_list);
                 }
 
-                // TODO: Implement pattern-based list completion
-                self.raise_with_help(
-                    "NotImplementedError",
-                    "Pattern-based list completion ('...') is not yet supported.",
-                    "Please use standard range completion ('..') instead."
-                );
-                Value::Null
+                // omg im a god it works yay
+                let vec_f64 = match predict_sequence(evaluated_seed.clone(), end) {
+                    Ok(v) => v,
+                    Err((err_type, err_msg, err_help)) => {
+                        if err_help.is_empty() {
+                            return self.raise(err_type, &err_msg);
+                        } else {
+                            return self.raise_with_help(err_type, &err_msg, &err_help);
+                        }
+                    }
+                };
+                let contains_float = evaluated_seed.iter().any(|v| matches!(v, Value::Float(_)));
+
+                let result_list: Vec<Value> = if contains_float {
+                    vec_f64.into_iter()
+                        .map(|v| Value::Float(Float { value: v.into() }))
+                        .collect()
+                } else {
+                    vec_f64.into_iter()
+                        .map(|v| Value::Int(Int::new(v as i64)))
+                        .collect()
+                };
+
+                return Value::List(result_list);
             }
             _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }

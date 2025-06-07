@@ -1,4 +1,14 @@
 a: str = "hello"
 print(a)
 
+
+// f-strings
 print(f"variable 'a' is {a}")
+
+// raw strings
+b: str = r"\"
+print(b)
+
+// bytes
+c: bytes = b"hello"
+print(c)

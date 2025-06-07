@@ -1,3 +1,16 @@
-print([1, 2, 3])
-print([1..10])
-print([2, 4..20])
+print([1, 2, 3])                    // Just a list nothing special
+print([1..10])                      // Range from 1 up to 10 (inclusive)                    
+print([2, 4..20])                   // Start with 2, then range from 4 up to 20 (inclusive)    
+
+print([1, 1, 2, 6...120])            // Non-linear pattern (factorials partial)
+print([2, 6, 12...30])              // Quadratic increments (2nd diff constant)
+print([1, 3, 9, 27...243])          // Geometric (ratio 3)
+print([1, 4, 10, 20...35])          // Polynomial 3rd degree partial sums
+print([0, 2, 4, 6...10])            // Linear ascending (diff 2)
+print([10, 8, 6, 4...0])            // Linear descending (diff -2)
+print([1, 1, 2, 3, 5, 8...55])      // Fibonacci longer seed
+print([2, 5, 10, 17...50])          // Quadratic pattern
+print([7...12])                     // Single element ascending simple
+print([12...7])                     // Single element descending simple
+print([0, 1, 1, 2, 3, 5, 8...34])   // Fibonacci extended
+print([1, 8, 27, 64...216])         // Cubic numbers (1³, 2³, 3³, 4³, ...)

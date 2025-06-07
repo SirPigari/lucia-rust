@@ -104,7 +104,9 @@ fn main() {
             let mut durations = vec![];
             let mut success = true;
 
-            for _ in 0..10 {
+            let times_to_run = if is_debug { 5 } else { 10 };
+
+            for _ in 0..times_to_run {
                 let start = Instant::now();
                 let output = Command::new(&target_path)
                     .arg(&path)

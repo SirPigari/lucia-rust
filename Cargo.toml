@@ -17,16 +17,16 @@ serde_json = "1.0"
 sha2 = "0.10.9"
 
 [[bin]]
-name = "run_tests"
-path = "tests/bin/run_tests.rs"
-
-[[bin]]
 name = "lucia"
 path = "src/main.rs"
 
 [[bin]]
+name = "run_tests"
+path = "tests/source/run_tests.rs"
+
+[[bin]]
 name = "run_benchmarks"
-path = "tests/bin/run_benchmarks.rs"
+path = "tests/source/run_benchmarks.rs"
 
 [profile.release]
 lto = "thin"

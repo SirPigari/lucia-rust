@@ -301,7 +301,6 @@ impl Parser {
     
         expr
     }
-    
 
     fn parse_primary(&mut self) -> Statement {
         let mut line = self.current_line();
@@ -381,10 +380,6 @@ impl Parser {
                     }
                 }
 
-                "IDENTIFIER" if ["f", "r", "b"].iter().any(|m| token.1.as_str().starts_with(m)) => {
-                    self.parse_operand()
-                }
-
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();
                     let mut expr = Statement::Null;
@@ -450,7 +445,7 @@ impl Parser {
                     }
                 }
 
-                "NUMBER" | "STRING" | "BOOLEAN" => {
+                "NUMBER" | "STRING" | "BOOLEAN" | "RAW_STRING" => {
                     self.parse_operand()
                 }
 
@@ -539,7 +534,7 @@ impl Parser {
         let line = self.current_line();
         let column = self.get_line_column();
 
-        if token.0 == "OPERATOR" && ["-", "+", "!"].contains(&token.1.as_str()) {
+        if token.0 == "OPERATOR" && ["-", "+", "!", "not"].contains(&token.1.as_str()) {
             let op = token.1.clone();
             self.next();
             let operand = self.parse_unary();
@@ -598,64 +593,100 @@ impl Parser {
                 column,
             };
         }
-    
-        if token_type == "STRING" {
-            self.next();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string()),
-                    Value::String("mods".to_string()),
-                ],
-                values: vec![
-                    Value::String("STRING".to_string()),
-                    Value::String(token_value.clone()),
-                    Value::List(vec![]),
-                ],
-                line,
-                column,
-            };
-        }
 
-        if token_type == "IDENTIFIER" && token.1.chars().all(|c| ["f", "r", "b"].contains(&c.to_string().as_str())) {
-            let valid_mods = ["f", "r", "b"];
-            let mut mods: Vec<Value> = Vec::new();
-            let mod_name = token.1.clone();
-            let saved_pos = self.pos.clone();
-        
-            for ch in mod_name.chars() {
-                let ch_str = ch.to_string();
-                mods.push(Value::String(ch_str));
-            }
+        if token_type == "STRING" {
+            let valid_mods = ['f', 'b'];
+            let token_value = token.1.clone();
         
             self.next();
         
-            match self.token().cloned() {
-                Some(next_tok) if next_tok.0 == "STRING" => {
-                    token_value = next_tok.1.clone();
-                    self.next();
+            if let Some(first_quote_idx) = token_value.find(|c| c == '\'' || c == '"') {
+                let (prefix_str, literal_str) = token_value.split_at(first_quote_idx);
         
-                    return Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("value".to_string()),
-                            Value::String("mods".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("STRING".to_string()),
-                            Value::String(token_value.clone()),
-                            Value::List(mods),
-                        ],
-                        line,
-                        column,
-                    };
-                }
-                _ => {
-                    self.pos = saved_pos;
-                }
+                let mods: Vec<Value> = prefix_str
+                    .chars()
+                    .filter(|ch| valid_mods.contains(ch))
+                    .map(|ch| Value::String(ch.to_string()))
+                    .collect();
+        
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("mods".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("STRING".to_string()),
+                        Value::String(literal_str.to_string()),
+                        Value::List(mods),
+                    ],
+                    line,
+                    column,
+                };
+            } else {
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("mods".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("STRING".to_string()),
+                        Value::String(token_value.clone()),
+                        Value::List(Vec::new()),
+                    ],
+                    line,
+                    column,
+                };
             }
         }
-    
+        
+        if token_type == "RAW_STRING" {
+            let valid_mods = ['f', 'r', 'b'];
+            let token_value = token.1.clone();
+        
+            self.next();
+        
+            if let Some(first_quote_idx) = token_value.find(|c| c == '\'' || c == '"') {
+                let (prefix_str, literal_str) = token_value.split_at(first_quote_idx);
+        
+                let mods: Vec<Value> = prefix_str
+                    .chars()
+                    .filter(|ch| valid_mods.contains(ch))
+                    .map(|ch| Value::String(ch.to_string()))
+                    .collect();
+        
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("mods".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("STRING".to_string()),
+                        Value::String(literal_str.to_string()),
+                        Value::List(mods),
+                    ],
+                    line,
+                    column,
+                };
+            } else {
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("mods".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("STRING".to_string()),
+                        Value::String(token_value.clone()),
+                        Value::List(Vec::new()),
+                    ],
+                    line,
+                    column,
+                };
+            }
+        }
 
         if token_type == "IDENTIFIER" {
             return self.parse_variable();
@@ -814,8 +845,6 @@ impl Parser {
             column,
         }
     }
-    
-    
     
     fn parse_function_call(&mut self) -> Statement {
         let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();

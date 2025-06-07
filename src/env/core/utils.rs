@@ -148,12 +148,11 @@ pub fn format_value(value: &Value) -> String {
 }
 
 pub fn format_bigfloat(n: &BigFloat) -> String {
-    let s = n.to_string(); // e.g. "5e-1" or "1.23e+3"
+    let s = n.to_string();
     if let Some(e_index) = s.find('e') {
         let (mantissa, exp_str) = s.split_at(e_index);
-        let exponent: i32 = exp_str[1..].parse().unwrap_or(0); // skip 'e'
+        let exponent: i32 = exp_str[1..].parse().unwrap_or(0);
 
-        // Split mantissa
         let mut parts = mantissa.split('.');
         let int_part = parts.next().unwrap_or("0");
         let frac_part = parts.next().unwrap_or("");
@@ -162,11 +161,10 @@ pub fn format_bigfloat(n: &BigFloat) -> String {
         let total_len = digits.len() as i32;
 
         if exponent >= 0 {
-            // Move decimal to the right
             let moved = exponent as usize;
             let padded = format!("{:0<1$}", digits, int_part.len() + moved);
             if moved >= frac_part.len() {
-                padded // no decimal needed
+                padded
             } else {
                 let split = int_part.len() + exponent as usize;
                 let (whole, frac) = padded.split_at(split);
@@ -178,7 +176,6 @@ pub fn format_bigfloat(n: &BigFloat) -> String {
                 result
             }
         } else {
-            // Move decimal to the left
             let exp_abs = exponent.abs() as usize;
             let zeros = exp_abs.saturating_sub(int_part.len());
             let padded = format!("{:0>width$}", digits, width = digits.len() + zeros);
@@ -196,7 +193,6 @@ pub fn format_bigfloat(n: &BigFloat) -> String {
             result
         }
     } else {
-        // If it's already normal notation
         let mut cleaned = s.trim_end_matches('0').to_string();
         if cleaned.ends_with('.') {
             cleaned.pop();
@@ -492,7 +488,6 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
         },
     }
 }
-
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

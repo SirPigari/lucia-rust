@@ -3,6 +3,10 @@ use crate::env::core::utils::make_native_method;
 use crate::env::core::functions::Parameter;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
+use std::str::FromStr;
+use num_bigint::BigInt;
+use num_bigfloat::BigFloat;
+use crate::env::core::types::{Float, Int};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
@@ -33,7 +37,7 @@ impl Variable {
         let to_string = {
             let val_clone = self.value.clone();
             make_native_method(
-                "to_string",
+                "toString",
                 move |_args| {
                     match val_clone.to_string() {
                         s if !s.is_empty() => Value::String(s),
@@ -48,9 +52,9 @@ impl Variable {
         };
     
         self.properties.insert(
-            "to_string".to_string(),
+            "toString".to_string(),
             Variable::new(
-                "to_string".to_string(),
+                "toString".to_string(),
                 to_string,
                 "function".to_string(),
                 false,
@@ -64,7 +68,7 @@ impl Variable {
                 let to_bytes = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "to_bytes",
+                        "toBytes",
                         move |_args| {
                             match val_clone.to_bytes() {
                                 Some(bytes) => Value::Bytes(bytes),
@@ -121,6 +125,50 @@ impl Variable {
                         None,
                     )
                 };
+                let to_int = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "toInt",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => Value::Int( Int {
+                                    value: BigInt::parse_bytes(&s.clone().into_bytes().as_slice(), 10).unwrap_or_else(|| BigInt::from(0))
+                                }),
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "int",
+                        true, true, true,
+                        None,
+                    )
+                };
+                let to_float = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "toFloat",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => {
+                                    if let Ok(f) = BigFloat::from_str(s) {
+                                        Value::Float(
+                                            Float {
+                                                value: f
+                                            }
+                                        )
+                                    } else {
+                                        Value::Null
+                                    }
+                                },
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "float",
+                        true, true, true,
+                        None,
+                    )
+                };
                 
 
                 self.properties.insert(
@@ -156,12 +204,34 @@ impl Variable {
                         true,
                     ),
                 );
+                self.properties.insert(
+                    "toInt".to_string(),
+                    Variable::new(
+                        "toInt".to_string(),
+                        to_int,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "toFloat".to_string(),
+                    Variable::new(
+                        "toFloat".to_string(),
+                        to_float,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
             }
             Value::Int(_) => {
                 let to_float = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "to_float",
+                        "toFloat",
                         move |_args| {
                             match &val_clone {
                                 Value::Int(i) => Value::Float(i.to_float()),
@@ -177,9 +247,9 @@ impl Variable {
                 };                
 
                 self.properties.insert(
-                    "to_float".to_string(),
+                    "toFloat".to_string(),
                     Variable::new(
-                        "to_float".to_string(),
+                        "toFloat".to_string(),
                         to_float,
                         "function".to_string(),
                         false,
@@ -192,7 +262,7 @@ impl Variable {
                 let to_int = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "to_int",
+                        "toInt",
                         move |_args| {
                             match &val_clone {
                                 Value::Float(f) => Value::Int(f.to_int()),
@@ -208,9 +278,9 @@ impl Variable {
                 };
 
                 self.properties.insert(
-                    "to_int".to_string(),
+                    "toInt".to_string(),
                     Variable::new(
-                        "to_int".to_string(),
+                        "toInt".to_string(),
                         to_int,
                         "function".to_string(),
                         false,

@@ -33,11 +33,12 @@ impl<'a> Lexer<'a> {
         );
 
         let token_specifications = vec![
-            ("STRING", r#""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#),
-            ("BOOLEAN", r"\b(true|false|null)\b"),
             ("COMMENT_INLINE", r"<#.*?#>"),
             ("COMMENT_SINGLE", r"//.*"),
             ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
+            ("RAW_STRING", r#"(?i)([fb]*r[fb]*)("([^"]*)"|'([^']*)')"#),
+            ("STRING", r#"(?i)([fb]{0,3})("([^"\\]|\\.)*"|'([^'\\]|\\.)*')"#),
+            ("BOOLEAN", r"\b(true|false|null)\b"),
             ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
             ("OPERATOR", &operator_pattern),
             ("IDENTIFIER", r"\bnon-static\b|\b[a-zA-Z_]\w*\b"),
@@ -55,6 +56,12 @@ impl<'a> Lexer<'a> {
 
         let mut tokens = Vec::new();
 
+        let prefixes = [
+            "rfb", "rfb", "rbf", "rbf", "frb", "fbr", "brf", "bfr",
+            "rf", "rb", "fr", "fb", "br", "bf",
+            "r", "f", "b"
+        ];
+
         for cap in full_regex.captures_iter(self.code) {
             for capture_name in full_regex.capture_names() {
                 if let Some(capture_name) = capture_name {
@@ -63,18 +70,16 @@ impl<'a> Lexer<'a> {
                             continue;
                         }
 
-                        let value = if capture_name.starts_with("COMMENT") {
-                            let mut value = value.as_str().to_string();
-                            value = value.replace("    ", "\\t");
-                            value = value.replace("\t", "\t");
-                            value = value.replace("  ", "\t");
-                            value = value.replace(" ", "\t");
-                            value
+                        let mut value = value.as_str().to_string();
+
+                        if capture_name == "COMMENT_SINGLE" || capture_name == "COMMENT_MULTI" || capture_name == "COMMENT_INLINE" {
+                            value = value.replace("    ", "\\t")
+                                         .replace("\t", "\t")
+                                         .replace("  ", "\t")
+                                         .replace(" ", "\t");
                         } else if capture_name == "NUMBER" {
-                            value.as_str().replace("_", "")
-                        } else {
-                            value.as_str().to_string()
-                        };
+                            value = value.replace("_", "");
+                        }
 
                         tokens.push((capture_name.to_string(), value));
                     }

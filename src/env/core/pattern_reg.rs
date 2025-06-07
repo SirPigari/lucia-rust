@@ -1,0 +1,351 @@
+use crate::env::core::value::Value;
+use crate::env::core::types::{
+    Float, Int,
+};
+use crate::env::core::utils::to_static;
+
+
+pub fn extract_seed_end(
+    seed: Vec<Value>,
+    end: Value,
+) -> Result<(Vec<f64>, f64), (&'static str, &'static str, &'static str)> {
+    let mut seed_f64 = Vec::with_capacity(seed.len());
+
+    for v in &seed {
+        let f = match v {
+            Value::Float(f) => f.to_f64().ok_or(("ConversionError", "float too big to convert to f64", ""))?,
+            Value::Int(i) => i.to_f64().ok_or(("ConversionError", "int too big to convert to f64", ""))?,
+            _ => return Err(("TypeError", "value is not a Float or Int", "")),
+        };
+        seed_f64.push(f);
+    }
+
+    let end_f64 = match &end {
+        Value::Float(f) => f.to_f64().ok_or(("ConversionError", "float too big to convert to f64", ""))?,
+        Value::Int(i) => i.to_f64().ok_or(("ConversionError", "int too big to convert to f64", ""))?,
+        _ => return Err(("TypeError", "end value is not a Float or Int", "")),
+    };
+
+    Ok((seed_f64, end_f64))
+}
+
+pub fn predict_sequence(
+    seed: Vec<Value>,
+    end: Value,
+) -> Result<Vec<f64>, (&'static str, &'static str, &'static str)> {
+    let (mut seed_f64, end_f64) = extract_seed_end(seed, end)?;
+
+    if seed_f64.is_empty() {
+        return Err((
+            "InputError",
+            "Seed cannot be empty",
+            "Provide a non-empty seed vector",
+        ));
+    }
+
+    if seed_f64.len() == 1 {
+        let start = seed_f64[0];
+        if end_f64 == start {
+            return Ok(vec![start]);
+        }
+    
+        let step = if end_f64 > start { 1.0 } else { -1.0 };
+    
+        let mut res = Vec::new();
+        let mut val = start;
+    
+        if (step > 0.0 && end_f64 < start) || (step < 0.0 && end_f64 > start) {
+            return Err((
+                "ValueError",
+                "End value does not match the sequence direction",
+                "",
+            ));
+        }
+    
+        while (step > 0.0 && val <= end_f64) || (step < 0.0 && val >= end_f64) {
+            res.push(val);
+            val += step;
+        }
+        return Ok(res);
+    }
+    
+
+    if try_fibonacci(&seed_f64) {
+        while *seed_f64.last().unwrap() < end_f64 {
+            let len = seed_f64.len();
+            let next = seed_f64[len - 1] + seed_f64[len - 2];
+            seed_f64.push(next);
+        }
+        if let Some(&last) = seed_f64.last() {
+            if last != end_f64 {
+                let closest = seed_f64.iter()
+                    .min_by(|a, b| {
+                        (*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()
+                    })
+                    .unwrap();
+                let help_msg = if *closest != end_f64 {
+                    to_static(format!("Did you mean to end with the closest Fibonacci number {} instead?", closest))
+                } else {
+                    ""
+                };
+                return Err((
+                    "PatternError",
+                    "Fibonacci sequence does not reach the exact end value",
+                    help_msg,
+                ));
+            }
+        }
+        return Ok(seed_f64);
+    }
+
+    if let Some(ratios) = try_geometric(&seed_f64) {
+        let ratio = ratios[0];
+        while *seed_f64.last().unwrap() < end_f64 {
+            let next = seed_f64.last().unwrap() * ratio;
+            seed_f64.push(next);
+        }
+        if let Some(&last) = seed_f64.last() {
+            if last != end_f64 {
+                return Err((
+                    "PatternError",
+                    "Geometric sequence does not reach the exact end value",
+                    "",
+                ));
+            }
+        }
+        return Ok(seed_f64);
+    }
+
+    if let Some(diff) = try_linear(&seed_f64) {
+        loop {
+            let last = *seed_f64.last().unwrap();
+            if last == end_f64 {
+                break;
+            }
+            let next = last + diff;
+    
+            if (diff > 0.0 && next > end_f64) || (diff < 0.0 && next < end_f64) {
+                let closest = *seed_f64.iter()
+                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .unwrap();
+                return Err((
+                    "PatternError",
+                    "Linear sequence does not reach the exact end value",
+                    to_static(format!("Did you mean to end at this closest linear value {} instead", closest))
+                ));
+            }
+    
+            seed_f64.push(next);
+        }
+        return Ok(seed_f64);
+    }
+
+    if try_factorial(&seed_f64) {
+        let mut i = seed_f64.len();
+        while *seed_f64.last().unwrap() < end_f64 {
+            let next = (1..=i).map(|x| x as f64).product::<f64>();
+            seed_f64.push(next);
+            i += 1;
+        }
+        if let Some(&last) = seed_f64.last() {
+            if last != end_f64 {
+                let closest = seed_f64.iter()
+                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .unwrap();
+                let help_msg = to_static(format!("Did you mean to end at this closest factorial value {} instead?", closest));
+                return Err(("PatternError", "Factorial sequence does not reach the exact end value", help_msg));
+            }
+        }
+        return Ok(seed_f64);
+    }
+
+    if let Some(second_diff) = try_quadratic(&seed_f64) {
+        while *seed_f64.last().unwrap() < end_f64 {
+            let len = seed_f64.len();
+            let next = 2.0 * seed_f64[len - 1] - seed_f64[len - 2] + second_diff;
+    
+            if (second_diff > 0.0 && next > end_f64) || (second_diff < 0.0 && next < end_f64) {
+                break;
+            }
+    
+            seed_f64.push(next);
+        }
+    
+        if let Some(&last) = seed_f64.last() {
+            if last != end_f64 {
+                let closest = seed_f64.iter()
+                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .unwrap();
+                return Err((
+                    "PatternError",
+                    "Quadratic sequence does not reach the exact end value",
+                    to_static(format!("Did you mean to end at this closest quadratic value {} instead?", closest)),
+                ));
+            }
+        }
+        return Ok(seed_f64);
+    }
+
+    if let Some(base_ratio) = try_exponential(&seed_f64) {
+        while *seed_f64.last().unwrap() < end_f64 {
+            let next = seed_f64.last().unwrap() * base_ratio;
+            seed_f64.push(next);
+        }
+        if let Some(&last) = seed_f64.last() {
+            if last != end_f64 {
+                return Err(("PatternError", "Exponential sequence does not reach the exact end value", ""));
+            }
+        }
+        return Ok(seed_f64);
+    }
+
+    let mut diffs = finite_differences(&seed_f64);
+
+    fn newton_next_element(diffs: &[Vec<f64>], n: usize) -> f64 {
+        let mut result = diffs[0][0];
+        let mut factorial = 1.0;
+        let mut product = 1.0;
+
+        for i in 1..diffs.len() {
+            factorial *= i as f64;
+            product *= n as f64 - (i as f64 - 1.0);
+            result += (product / factorial) * diffs[i][0];
+        }
+
+        result
+    }
+
+    loop {
+        let n = seed_f64.len();
+        let next = newton_next_element(&diffs, n);
+        let last = *seed_f64.last().unwrap();
+
+        if (last <= end_f64 && next > end_f64) || (last >= end_f64 && next < end_f64) {
+            break;
+        }
+        seed_f64.push(next);
+        diffs = finite_differences(&seed_f64);
+    }
+
+    if let Some(&last) = seed_f64.last() {
+        if last != end_f64 {
+            let closest = seed_f64.iter().min_by(|a, b| {
+                (*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()
+            }).unwrap();
+    
+            return Err((
+                "PatternError",
+                "Predicted polynomial sequence does not reach the exact end value",
+                to_static(format!("Did you mean to end at this closest predicted value {} instead?", closest)),
+            ));
+        }
+    } else {
+        return Err((
+            "PatternError",
+            "No sequence predicted",
+            "Check if the seed and end values are valid",
+        ));
+    }
+    
+
+    Ok(seed_f64)
+}
+
+
+fn is_close(a: f64, b: f64, epsilon: f64) -> bool {
+    (a - b).abs() < epsilon
+}
+
+fn try_geometric(seq: &[f64]) -> Option<Vec<f64>> {
+    if seq.len() < 2 {
+        return None;
+    }
+    let ratios: Vec<f64> = seq.windows(2).map(|w| w[1] / w[0]).collect();
+    let first_ratio = ratios[0];
+    if !ratios.iter().all(|&r| is_close(r, first_ratio, 1e-10)) {
+        return None;
+    }
+    Some(ratios)
+}
+
+fn try_fibonacci(seq: &[f64]) -> bool {
+    if seq.len() < 3 {
+        return false;
+    }
+    seq.windows(3).all(|w| is_close(w[2], w[1] + w[0], 1e-10))
+}
+
+fn try_linear(seq: &[f64]) -> Option<f64> {
+    if seq.len() < 2 {
+        return None;
+    }
+    let diffs: Vec<f64> = seq.windows(2).map(|w| w[1] - w[0]).collect();
+
+    let first_diff = diffs[0];
+
+    if diffs.iter().all(|&d| is_close(d, first_diff, 1e-8)) {
+        Some(first_diff)
+    } else {
+        None
+    }
+}
+
+fn try_factorial(seq: &[f64]) -> bool {
+    if seq.len() < 2 {
+        return false;
+    }
+    let mut fact = 1.0;
+    for (i, &val) in seq.iter().enumerate() {
+        if i > 0 {
+            fact *= i as f64;
+        }
+        if !is_close(val, fact, 1e-6) {
+            return false;
+        }
+    }
+    true
+}
+
+fn try_exponential(seq: &[f64]) -> Option<f64> {
+    if seq.len() < 2 {
+        return None;
+    }
+    let ratios: Vec<f64> = seq.windows(2).map(|w| w[1] / w[0]).collect();
+
+    if ratios.len() < 2 {
+        return None;
+    }
+    let ratio_of_ratios: Vec<f64> = ratios.windows(2).map(|w| w[1] / w[0]).collect();
+
+    if ratio_of_ratios.iter().all(|&r| is_close(r, ratio_of_ratios[0], 1e-6)) {
+        Some(ratios[0])
+    } else {
+        None
+    }
+}
+
+fn try_quadratic(seq: &[f64]) -> Option<f64> {
+    if seq.len() < 3 {
+        return None;
+    }
+    let first_diffs: Vec<f64> = seq.windows(2).map(|w| w[1] - w[0]).collect();
+    let second_diffs: Vec<f64> = first_diffs.windows(2).map(|w| w[1] - w[0]).collect();
+
+    let second_diff = second_diffs[0];
+    if second_diffs.iter().all(|&d| is_close(d, second_diff, 1e-8)) {
+        Some(second_diff)
+    } else {
+        None
+    }
+}
+
+
+fn finite_differences(seq: &[f64]) -> Vec<Vec<f64>> {
+    let mut table = vec![seq.to_vec()];
+    while table.last().unwrap().len() > 1 {
+        let prev = table.last().unwrap();
+        let next_diff: Vec<f64> = prev.windows(2).map(|w| w[1] - w[0]).collect();
+        table.push(next_diff);
+    }
+    table
+}
