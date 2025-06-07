@@ -56,6 +56,9 @@ jobs:
       - name: Activate build environment
         run: make activate
 
+      - name: Build benchmark
+        run: make build-test
+
       - name: Run benchmark-save
         run: make benchmark-save
 
@@ -96,6 +99,9 @@ jobs:
 
       - name: Activate build environment
         run: make activate
+
+      - name: Build benchmark
+        run: make build-test
 
       - name: Run benchmark-save
         run: make benchmark-save
