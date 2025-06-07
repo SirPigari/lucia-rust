@@ -1,4 +1,4 @@
-# Lucia 1.0.0 (Rust Edition)
+# Lucia 2.0.0 (Rust Edition)
 
 **Lucia** is a simple and lightweight programming language implemented in [Rust](https://www.rust-lang.org/).  
 Inspired by **Python**, **Lua**, and a bit of **Java**

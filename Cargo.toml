@@ -1,6 +1,6 @@
 [package]
 name = "lucia"
-version = "1.0.0-rust"
+version = "2.0.0-rust"
 edition = "2024"
 
 [dependencies]

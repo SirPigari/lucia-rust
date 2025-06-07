@@ -85,8 +85,28 @@ fn main() {
     let is_debug = info.profile == "debug";
 
     let all_entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    if all_entries.is_empty() {
+        eprintln!("{}", "No benchmark files found.".red());
+        std::process::exit(1);
+    }
+    let mut all_entries_sorted_filtered: Vec<_> = all_entries
+        .iter()
+        .filter(|entry| {
+            let path = entry.path();
+            path.is_file() && path.extension().map_or(false, |ext| ext == "lc")
+        })
+        .collect();
 
-    for entry in all_entries.iter() {
+    all_entries_sorted_filtered.sort_by_key(|entry| {
+        let binding = entry.path();
+        let file_name = binding.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        file_name.split('_').next()
+            .and_then(|num_str| num_str.parse::<u32>().ok())
+            .unwrap_or(0)
+    });
+
+
+    for entry in all_entries_sorted_filtered.iter() {
         let path = entry.path();
         if path.extension().map_or(false, |ext| ext == "lc") {
             let file_name = path.file_name().unwrap().to_string_lossy();
