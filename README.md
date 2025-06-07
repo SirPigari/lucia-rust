@@ -4,9 +4,9 @@
 Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ---
+[![Nightly](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml)
 [![Stable](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-stable.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-stable.yml)
 [![Beta](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-beta.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-beta.yml)
-[![Nightly](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 ---
