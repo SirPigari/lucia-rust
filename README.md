@@ -1,10 +1,12 @@
 # Lucia 2.0.0 (Rust Edition)
 
-**Lucia** is a simple and lightweight programming language, now being rewritten in [Rust](https://www.rust-lang.org/).  
+**Lucia** is a simple and lightweight programming language, now being rewritten in <img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: -2px;"/> [Rust](https://www.rust-lang.org/).  
 Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ---
-[![Lucia Rust Test Suite](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests.yml)
+[![Stable](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-stable.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-stable.yml)
+[![Beta](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-beta.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-beta.yml)
+[![Nightly](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests-nightly.yml)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 ---
