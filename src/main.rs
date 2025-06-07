@@ -298,6 +298,7 @@ fn main() {
     let working_dir_path = PathBuf::from(working_dir.clone());
     if let Err(e) = std_env::set_current_dir(&working_dir_path) {
         eprintln!("Failed to change the directory: {}", e);
+        exit(1);
     }
 
     if working_dir.ends_with(".exe") && !working_dir_path.components().any(|comp| comp.as_os_str() == "bin") {
@@ -391,6 +392,7 @@ fn main() {
     let home_dir_path = PathBuf::from(home_dir.clone());
 
     if let Err(e) = std_env::set_current_dir(&home_dir_path) {
+        eprintln!("{}", home_dir_path.display());
         eprintln!("Failed to change the directory: {}", e);
         exit(1);
     }
