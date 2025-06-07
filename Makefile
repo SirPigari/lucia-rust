@@ -63,9 +63,9 @@ activate:
 	@echo "Changing directory to: $(TARGET_DIR)"
 	@$(MKDIR)
 ifeq ($(OS),Windows_NT)
-	@cd $(subst /,\\,$(TARGET_DIR)) && $(RUN) --activate
+	@cd $(subst /,\\,$(TARGET_DIR)) && $(RUN) --activate -e
 else
-	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) --activate
+	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) --activate -e
 endif
 
 test:
