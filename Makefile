@@ -54,6 +54,7 @@ activate:
 	@cd $(subst /,\,$(TARGET_DIR)) && $(RUN) --activate
 
 test:
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MKDIR)
 	@if exist .\tests\run_tests.exe ( \
 		.\tests\run_tests.exe $(filter-out $@,$(MAKECMDGOALS)) \
@@ -62,6 +63,16 @@ test:
 	) else ( \
 		echo Error: run_tests executable not found in .\tests && exit /b 1 \
 	)
+else
+	@$(MKDIR)
+	@if [ -x ./tests/run_tests ]; then \
+		./tests/run_tests $(filter-out $@,$(MAKECMDGOALS)); \
+	elif [ -x ./tests/run_tests.exe ]; then \
+		./tests/run_tests.exe $(filter-out $@,$(MAKECMDGOALS)); \
+	else \
+		echo "Error: run_tests executable not found in ./tests" && exit 1; \
+	fi
+endif
 
 %:
 	@:
