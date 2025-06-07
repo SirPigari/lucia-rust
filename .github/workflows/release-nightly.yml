@@ -139,10 +139,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: lucia-release
-          path: target/release
-
+          path: src/env/bin
+      
       - name: Make lucia executable
-        run: chmod +x target/release/lucia
+        run: chmod +x src/env/bin/lucia
 
       - name: Activate build environment
         run: make activate
