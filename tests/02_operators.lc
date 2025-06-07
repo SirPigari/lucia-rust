@@ -47,3 +47,13 @@ print("false or true =", false or true)
 
 // nein
 print("1 nein 2 =", 1 nein 2)
+
+// abs
+print("|-1| =", |-1|)
+print("|1 - 2| =", |1 - 2|)
+print("|2.5 - 3.7| =", |2.5 - 3.7|)
+print("|(5 - 10) * 2| =", |(5 - 10) * 2|)
+
+// nested abs: use a space between '|' tokens to avoid '||' being parsed as the logical OR operator
+// without the space, the lexer would interpret '||' as a single token (logical OR) instead of two abs delimiters
+print("|-|-5| | =", |-|-5| |)

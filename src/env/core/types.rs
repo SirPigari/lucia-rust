@@ -71,15 +71,22 @@ impl From<Int> for Float {
 
 impl From<BigFloat> for Int {
     fn from(f: BigFloat) -> Self {
-        Self { value: BigInt::from_f64(f.to_f64()).unwrap() }
+        let float_str = f.to_f64().to_string();
+        let val = BigInt::parse_bytes(float_str.as_bytes(), 10)
+            .unwrap_or_else(|| BigInt::parse_bytes(b"inf", 10).unwrap_or(BigInt::zero()));
+        Self { value: val }
     }
 }
 
 impl From<BigInt> for Float {
     fn from(i: BigInt) -> Self {
-        Self { value: BigFloat::from_i64(i.to_i64().unwrap()) }
+        let int_str = i.to_string();
+        let val = BigFloat::parse(&int_str)
+            .unwrap_or_else(|| BigFloat::parse("inf").unwrap());
+        Self { value: val }
     }
 }
+
 
 impl Hash for Int {
     fn hash<H: Hasher>(&self, state: &mut H) {

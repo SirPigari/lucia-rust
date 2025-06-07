@@ -1312,22 +1312,25 @@ impl Interpreter {
     fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
         let left_opt = statement.get(&Value::String("left".to_string()));
         let left = match left_opt {
-            Some(val) => self.evaluate(val.convert_to_statement()),
+            Some(val_left) => self.evaluate(val_left.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'left' key in the statement.");
                 return NULL;
             }
         };
 
+        if self.err.is_some() {
+            return NULL;
+        }
+
         let right_opt = statement.get(&Value::String("right".to_string()));
         let right = match right_opt {
-            Some(val) => self.evaluate(val.convert_to_statement()),
+            Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
                 return NULL;
             }
         };
-
 
         let operator = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s,
@@ -1435,16 +1438,35 @@ impl Interpreter {
             }
         }
 
-        debug_log(
-            &format!(
-                "<Operation: {} {} {}>",
-                format_value(&left),
-                operator,
-                format_value(&right)
-            ),
-            &self.config,
-            Some(self.use_colors.clone()),
-        );
+        if left.is_nan() || right.is_nan() {
+            return self.raise("MathError", "Operation with NaN is not allowed");
+        }
+
+        if left.is_infinity() || right.is_infinity() {
+            return self.raise("MathError", "Operation with Infinity is not allowed");
+        }
+
+        if operator == "abs" {
+            debug_log(
+                &format!(
+                    "<Operation: |{}|>",
+                    format_value(&right),
+                ),
+                &self.config,
+                Some(self.use_colors.clone()),
+            );
+        } else {
+            debug_log(
+                &format!(
+                    "<Operation: {} {} {}>",
+                    format_value(&left),
+                    operator,
+                    format_value(&right)
+                ),
+                &self.config,
+                Some(self.use_colors.clone()),
+            );
+        }
 
         match operator {
             "+" => match (left, right) {

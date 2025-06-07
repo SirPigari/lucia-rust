@@ -269,6 +269,9 @@ impl Parser {
             }
     
             else if tok.0 == "OPERATOR" {
+                if tok.1 == "|" {
+                    break;
+                }
                 let operator = tok.1.clone();
                 self.next();
                 let mut right = self.parse_primary();
@@ -308,6 +311,29 @@ impl Parser {
 
         match self.token().cloned() {
             Some(token) => match token.0.as_str() {
+                "OPERATOR" if token.1 == "|" => {
+                    self.next();
+                    let expr = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
+                    self.check_for("OPERATOR", "|");
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("operator".to_string()),
+                            Value::String("left".to_string()),
+                            Value::String("right".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("OPERATION".to_string()),
+                            Value::String("abs".to_string()),
+                            Value::Null,
+                            expr.convert_to_map(),
+                        ],
+                        line: self.current_line(),
+                        column: self.get_line_column(),
+                    }
+                }
                 "OPERATOR" if ["+", "-", "!"].contains(&token.1.as_str()) => {
                     let operator = token.1.clone();
                     self.next();
@@ -445,8 +471,17 @@ impl Parser {
                     }
                 }
 
-                "NUMBER" | "STRING" | "BOOLEAN" | "RAW_STRING" => {
+                "STRING" | "BOOLEAN" | "RAW_STRING" => {
                     self.parse_operand()
+                }
+
+                "EOF" => {
+                    self.next();
+                    if self.pos == self.tokens.len() {
+                        return Statement::Null;
+                    }
+                    self.raise("SyntaxError", "Unexpected end of file");
+                    Statement::Null
                 }
 
                 _ => {

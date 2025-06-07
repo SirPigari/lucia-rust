@@ -4,6 +4,7 @@ use crate::env::core::statements::Statement;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
+use num_traits::{Float as NumFloat, Zero, ToPrimitive, FromPrimitive};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -219,6 +220,18 @@ impl Value {
                     column,
                 }
             }
+            Value::Null => Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("BOOLEAN".to_string()),
+                    Value::String("null".to_string()),
+                ],
+                line: 0,
+                column: 0,
+            },
             _ => Statement::Null,
         }
     }
@@ -388,6 +401,20 @@ impl Value {
                 let error = format!("<{}: {}>", kind, msg);
                 Some(error.into_bytes())
             }
+        }
+    }
+    pub fn is_infinity(&self) -> bool {
+        match self {
+            Value::Float(f) => !f.value.is_finite(),
+            Value::Int(i) => Value::Float(Float::from(i.value.clone())).is_infinity(),
+            _ => false,
+        }
+    }
+    pub fn is_nan(&self) -> bool {
+        match self {
+            Value::Float(f) => f.value.is_nan(),
+            Value::Int(i) => Value::Float(Float::from(i.value.clone())).is_nan(),
+            _ => false,
         }
     }
 }

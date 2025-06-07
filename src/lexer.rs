@@ -87,6 +87,8 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        tokens.push(("EOF".to_string(), "\0".to_string()));
+
         tokens
     }
 }
