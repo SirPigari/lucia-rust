@@ -5,6 +5,8 @@ Inspired by **Python**, **Lua**, and a bit of **Java**
 
 ---
 [![Lucia Rust Test Suite](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/run-tests.yml)
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+
 
 ## Currently working on:
 
