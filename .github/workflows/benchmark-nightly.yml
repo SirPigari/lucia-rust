@@ -69,7 +69,7 @@ jobs:
           path: ./tests/benchmark-results/*.json
 
   benchmark-arch:
-    name: Benchmark on Arch Linux
+    name: Benchmark on arch-linux
     runs-on: ubuntu-latest
     container: archlinux:base-devel
 

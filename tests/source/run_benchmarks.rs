@@ -11,6 +11,7 @@ use std::{
 use colored::*;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc, Local, TimeZone};
+use sys_info;
 
 #[derive(Deserialize, Serialize)]
 struct BuildInfo {
@@ -82,9 +83,25 @@ fn main() {
     // map file_name -> list of times for --save-results
     let mut times_map: HashMap<String, Vec<u128>> = HashMap::new();
 
+    let os_type = match sys_info::os_type() {
+        Ok(val) => val,
+        Err(_) => "".to_string(),
+    };
+
+    let os_release = match sys_info::os_release() {
+        Ok(val) => val,
+        Err(_) => "".to_string(),
+    };
+    let cpu_arch = env::consts::ARCH;
+
     println!("{}", "Lucia Benchmark Runner".bold().underline().cyan());
     println!("Using lucia version {}", info.version.bold().green());
     println!("Rustc version: {}", info.rustc_version.bold().green());
+
+    if !os_type.is_empty() {
+        println!("Running on: {} {} ({})", os_type.bold().green(), os_release.bold().green(), cpu_arch.bold().green());
+    }
+
     if info.git_hash != "not-cloned" && info.git_hash != "unknown" {
         println!("Git hash: {}", info.git_hash.bold().green());
     }
@@ -283,6 +300,11 @@ fn main() {
         if !failed.is_empty() {
             output_json.insert("failed_benchmarks".to_string(), serde_json::Value::Array(failed.iter().map(|f| serde_json::json!(f)).collect()));
         }
+
+        output_json.insert("os_type".to_string(), serde_json::json!(os_type));
+        output_json.insert("os_release".to_string(), serde_json::json!(os_release));
+        output_json.insert("cpu_arch".to_string(), serde_json::json!(cpu_arch));
+        output_json.insert("os".to_string(), serde_json::json!(format!("{} {} ({})", os_type, os_release, cpu_arch)));
 
         let json_value = serde_json::Value::Object(output_json);
         match File::create(&result_path) {
