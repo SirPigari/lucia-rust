@@ -207,6 +207,9 @@ impl Float {
     pub fn to_usize(&self) -> Option<usize> {
         self.value.to_usize()
     }
+    pub fn to_isize(&self) -> Option<isize> {
+        self.value.to_isize()
+    }
     pub fn abs(&self) -> Self {
         Float {
             value: self.value.abs(),
@@ -230,6 +233,17 @@ impl Float {
     pub fn to_int(&self) -> Int {
         Int {
             value: BigInt::from_f64(self.value.to_f64()).unwrap(),
+        }
+    }
+    pub fn fract(&self) -> Self {
+        let float_str = self.value.to_string();
+        let parts: Vec<&str> = float_str.split('.').collect();
+        if parts.len() > 1 {
+            let fraction_part = parts[1];
+            let value = BigFloat::from_str(&format!("0.{}", fraction_part)).unwrap();
+            Float { value }
+        } else {
+            Float { value: BigFloat::zero() }
         }
     }
     pub fn checked_pow(&self, exp: &Float) -> Option<Float> {
@@ -283,6 +297,9 @@ impl Int {
     }
     pub fn to_usize(&self) -> Option<usize> {
         self.value.to_usize()
+    }
+    pub fn to_isize(&self) -> Option<isize> {
+        self.value.to_isize()
     }
     pub fn abs(&self) -> Self {
         Int {

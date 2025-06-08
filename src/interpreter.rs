@@ -289,12 +289,147 @@ impl Interpreter {
                 "FOR" => self.handle_for_loop(statement.clone()),
                 "VARIABLE" => self.handle_variable(statement.clone()),
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
+                "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
 
+    fn handle_index_access(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let object_val = match statement.get(&Value::String("object".to_string())) {
+            Some(v) => self.evaluate(Value::convert_to_statement(v)),
+            None => return self.raise("RuntimeError", "Missing object in index access"),
+        };
+    
+        let access_val = match statement.get(&Value::String("access".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing access in index access"),
+        };
+    
+        let access_hashmap = match access_val {
+            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+            _ => return self.raise("RuntimeError", "Expected a map for index access"),
+        };
+    
+        let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
+        let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
+    
+        let len = match &object_val {
+            Value::String(s) => s.chars().count(),
+            Value::List(l) => l.len(),
+            Value::Bytes(b) => b.len(),
+            _ => return self.raise("TypeError", "Object not indexable"),
+        };
+    
+        let start_eval_opt = start_val_opt
+            .map(|v| self.evaluate(v.convert_to_statement()))
+            .and_then(|val| if val == Value::Null { None } else { Some(val) });
+        let end_eval_opt = end_val_opt
+            .map(|v| self.evaluate(v.convert_to_statement()))
+            .and_then(|val| if val == Value::Null { None } else { Some(val) });
+    
+        if self.err.is_some() {
+            return Value::Null;
+        }
+    
+        let mut to_index = |val: &Value| -> Result<usize, Value> {
+            match val {
+                Value::Int(i) => {
+                    let idx = i.to_isize().ok_or_else(|| self.raise("ConversionError", "Failed to convert Int to isize"))?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) <= len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err(self.raise("IndexError", "Index out of range"))
+                    }
+                }
+                Value::String(s) => {
+                    let idx: isize = s.parse().map_err(|_| self.raise("ConversionError", "Failed to parse string to int"))?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) <= len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err(self.raise("IndexError", "Index out of range"))
+                    }
+                }
+                Value::Float(f) => {
+                    if f.fract() != 0.0.into() {
+                        return Err(self.raise("ConversionError", "Float index must have zero fractional part"));
+                    }
+                    let idx = f.to_isize().ok_or_else(|| self.raise("ConversionError", "Failed to convert Float to isize"))?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) <= len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err(self.raise("IndexError", "Index out of range"))
+                    }
+                }
+                _ => Err(self.raise("TypeError", "Index must be Int, String or Float with no fraction")),
+            }
+        };
+    
+        match (start_eval_opt, end_eval_opt) {
+            (Some(start_val), None) => match &object_val {
+                Value::String(_) | Value::List(_) | Value::Bytes(_) => {
+                    let start_idx = match to_index(&start_val) {
+                        Ok(i) => i,
+                        Err(e) => return e,
+                    };
+    
+                    match &object_val {
+                        Value::String(s) => s.chars().nth(start_idx).map(|c| Value::String(c.to_string())).unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+                        Value::List(l) => l.get(start_idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+                        Value::Bytes(b) => b.get(start_idx).map(|&b| Value::Int((b as i64).into())).unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+                        _ => unreachable!(),
+                    }
+                }
+                Value::Map { keys, values } => {
+                    let key_val = start_val;
+                    for (k, v) in keys.iter().zip(values.iter()) {
+                        if k == &key_val {
+                            return v.clone();
+                        }
+                    }
+                    return self.raise("KeyError", "Key not found in map");
+                }
+                _ => return self.raise("TypeError", "Start must be int or string"),
+            },
+            (start_opt, end_opt) => {
+                let start_idx = match start_opt {
+                    Some(ref v) => match to_index(v) {
+                        Ok(i) => i,
+                        Err(e) => return e,
+                    },
+                    None => 0,
+                };
+    
+                let end_idx = match end_opt {
+                    Some(ref v) => match to_index(v) {
+                        Ok(i) => i,
+                        Err(e) => return e,
+                    },
+                    None => len,
+                };
+    
+                if start_idx > end_idx {
+                    return self.raise("IndexError", "Start index greater than end index");
+                }
+    
+                match &object_val {
+                    Value::String(s) => {
+                        let slice = s.chars().skip(start_idx).take(end_idx - start_idx).collect::<String>();
+                        Value::String(slice)
+                    }
+                    Value::List(l) => Value::List(l.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
+                    Value::Bytes(b) => Value::Bytes(b.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
+                    _ => return self.raise("TypeError", "Object not sliceable"),
+                }
+            }
+        }
+    }
+    
+    
     fn handle_variable_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
         let name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(s)) => s,

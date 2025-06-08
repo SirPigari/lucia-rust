@@ -1,0 +1,26 @@
+l: list = [0..10]
+m: str = "i love lucia"
+
+// simple indexing
+print(l[0])        // 0
+print(m[2])        // 'l'
+
+// negative indexing
+print(l[-1])       // 9
+print(m[-1])       // 'a'
+
+// slicing with both start and end
+print(l[2..5])     // [2, 3, 4]
+print(m[2..6])     // 'love'
+
+// slicing with only start
+print(l[5..])      // [5, 6, 7, 8, 9]
+print(m[7..])      // 'lucia'
+
+// slicing with only end
+print(l[..3])      // [0, 1, 2]
+print(m[..4])      // 'i lo'
+
+// full slice
+print(l[..])       // [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+print(m[..])       // 'i love lucia'

@@ -38,7 +38,7 @@ use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
-const VERSION: &str = "1.0.0-rust";
+const VERSION: &str = "2.0.0-rust";
 
 fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>) {
     let mut file_name: &str = file_name.unwrap_or("<stdin>");
@@ -592,9 +592,15 @@ fn main() {
                 &config,
                 Some(use_colors),
             );
-            let tokens: Vec<Token> = raw_tokens.into_iter()
-            .map(|(t, v)| Token(t, v))
-            .collect();
+            let tokens: Vec<Token> = {
+                let mut iter = raw_tokens.into_iter();
+                match iter.next_back() {
+                    Some((t, v)) if t == "EOF" => iter.map(|(t, v)| Token(t, v)).collect(),
+                    Some(last) => iter.map(|(t, v)| Token(t, v)).chain(std::iter::once(Token(last.0, last.1))).collect(),
+                    None => Vec::new(),
+                }
+            };
+            
             let mut parser = Parser::new(tokens, config.clone(), input.to_string());
             let statements = match parser.parse_safe() {
                 Ok(stmts) => stmts,
