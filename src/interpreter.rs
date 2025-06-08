@@ -291,10 +291,55 @@ impl Interpreter {
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
+                "TRY" => self.handle_try(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
+    }
+
+    fn handle_try(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(body)) => body,
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in try statement"),
+        };
+    
+        let catch_body = match statement.get(&Value::String("catch_body".to_string())) {
+            Some(Value::List(catch_body)) => catch_body,
+            _ => return self.raise("RuntimeError", "Expected a list for 'catch' in try statement"),
+        };
+    
+        let exception_vars = match statement.get(&Value::String("exception_vars".to_string())) {
+            Some(Value::List(vars)) => vars,
+            _ => return self.raise("RuntimeError", "Expected a list for 'exception_vars' in try statement"),
+        };
+    
+        if exception_vars.len() > 3 {
+            return self.raise("SyntaxError", "Too many exception variables (max is 3, err_msg, err_type, err_help)");
+        }
+    
+        if exception_vars.is_empty() {
+            return self.raise_with_help(
+                "SyntaxError",
+                "No exception variables provided",
+                &format!("Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'", 
+                    hex_to_ansi("#1CC58B", Some(self.use_colors)), 
+                    hex_to_ansi(&self.config.color_scheme.help, Some(self.use_colors)
+                ))
+            );
+        }
+    
+        let mut seen = std::collections::HashSet::new();
+        for var in exception_vars {
+            if let Value::String(name) = var {
+                if !seen.insert(name) {
+                    return self.raise("NameError", &format!("Duplicate exception variable name '{}'", name));
+                }
+            } else {
+                return self.raise("RuntimeError", "Invalid exception variable type");
+            }
+        }
+        NULL   
     }
 
     fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {

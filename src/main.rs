@@ -586,20 +586,16 @@ fn main() {
                     "Tokens: {:?}",
                     raw_tokens
                         .iter()
-                        .filter(|token| token.0 != "WHITESPACE")
+                        .filter(|token| token.0 != "WHITESPACE" && token.0 != "COMMENT_INLINE" && token.0 != "COMMENT_SINGLE" && token.0 != "COMMENT_MULTI" && token.0 != "EOF")
                         .collect::<Vec<_>>()
                 ),
                 &config,
                 Some(use_colors),
             );
-            let tokens: Vec<Token> = {
-                let mut iter = raw_tokens.into_iter();
-                match iter.next_back() {
-                    Some((t, v)) if t == "EOF" => iter.map(|(t, v)| Token(t, v)).collect(),
-                    Some(last) => iter.map(|(t, v)| Token(t, v)).chain(std::iter::once(Token(last.0, last.1))).collect(),
-                    None => Vec::new(),
-                }
-            };
+            let tokens: Vec<Token> = raw_tokens
+                .into_iter()
+                .map(|(t, v)| Token(t, v))
+                .collect();
             
             let mut parser = Parser::new(tokens, config.clone(), input.to_string());
             let statements = match parser.parse_safe() {
