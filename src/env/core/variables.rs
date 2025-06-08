@@ -11,7 +11,7 @@ use crate::env::core::types::{Float, Int};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     name: String,
-    value: Value,
+    pub value: Value,
     type_: String,
     is_static: bool,
     is_public: bool,

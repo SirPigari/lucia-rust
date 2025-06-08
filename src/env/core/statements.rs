@@ -1,5 +1,6 @@
 use crate::env::core::value::Value;
 use crate::env::core::types::{Float, Int};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum Statement {
@@ -42,6 +43,25 @@ impl Statement {
                         Value::Int(0.into()),
                     ],
                 }
+            },
+        }
+    }
+    pub fn convert_to_hashmap(&self) -> HashMap<Value, Value> {
+        match self {
+            Statement::Statement { keys, values, line, column } => {
+                let mut map = HashMap::new();
+                for (key, value) in keys.iter().zip(values.iter()) {
+                    map.insert(key.clone(), value.clone());
+                }
+                map.insert(Value::String("_line".to_string()), Value::Int(Int::from(*line as i64)));
+                map.insert(Value::String("_column".to_string()), Value::Int(Int::from(*column as i64)));
+                map
+            },
+            Statement::Null => {
+                let mut map = HashMap::new();
+                map.insert(Value::String("_line".to_string()), Value::Int(0.into()));
+                map.insert(Value::String("_column".to_string()), Value::Int(0.into()));
+                map
             },
         }
     }

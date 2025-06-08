@@ -290,12 +290,201 @@ impl Interpreter {
                 "VARIABLE" => self.handle_variable(statement.clone()),
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
+                "ASSIGNMENT" => self.handle_assignment(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         }
     }
 
+    fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let left = match statement.get(&Value::String("left".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'left' in assignment statement"),
+        };
+        let right = match statement.get(&Value::String("right".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'right' in assignment statement"),
+        };
+    
+        let right_value = self.evaluate(right.convert_to_statement());
+    
+        let left_hashmap = match left {
+            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+            Value::Null => Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("value".to_string())
+                ],
+                values: vec![
+                    Value::String("BOOLEAN".to_string()),
+                    Value::String("null".to_string())
+                ],
+                column: 0,
+                line: 0,
+            }.convert_to_hashmap(),
+            _ => return self.raise("RuntimeError", "Expected a map for assignment"),
+        };
+        let left_type = match left_hashmap.get(&Value::String("type".to_string())) {
+            Some(Value::String(t)) => t,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in assignment left"),
+        };
+    
+        fn to_index(val: &Value, len: usize) -> Result<usize, String> {
+            match val {
+                Value::Int(i) => {
+                    let idx = i.to_isize().ok_or("Failed to convert Int to isize")?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) < len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err("Index out of range".to_string())
+                    }
+                }
+                Value::String(s) => {
+                    let idx: isize = s.parse().map_err(|_| "Failed to parse string to int")?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) < len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err("Index out of range".to_string())
+                    }
+                }
+                Value::Float(f) => {
+                    if f.fract() != 0.0.into() {
+                        return Err("Float index must have zero fractional part".to_string());
+                    }
+                    let idx = f.to_isize().ok_or("Failed to convert Float to isize")?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) < len {
+                        Ok(adjusted as usize)
+                    } else {
+                        Err("Index out of range".to_string())
+                    }
+                }
+                _ => Err("Index must be Int, String or Float with no fraction".to_string()),
+            }
+        }
+    
+        match left_type.as_str() {
+            "VARIABLE" => {
+                let name = match left_hashmap.get(&Value::String("name".to_string())) {
+                    Some(Value::String(n)) => n,
+                    _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable assignment"),
+                };
+
+                let expected_type = {
+                    let var = match self.variables.get(name) {
+                        Some(v) => v,
+                        None => return self.raise_with_help("NameError", &format!("Variable '{}' is not defined", name), &format!("Use this instead: '{}{}: {} = {}{}'", check_ansi("\x1b[4m", &self.use_colors), name, right_value.type_name(), format_value(&right_value), check_ansi("\x1b[24m", &self.use_colors),)),
+                    };
+                    var.type_name().to_owned()
+                };
+
+                if !self.check_type(&expected_type, Some(&right_value.type_name().clone()), Some(right_value.clone()), Some(true)) {
+                    return self.raise("TypeError", &format!(
+                        "Invalid type for variable '{}': expected '{}', got '{}'",
+                        name, expected_type, right_value.type_name()
+                    ));
+                }
+                
+                let var = self.variables.get_mut(name).unwrap();
+                var.set_value(right_value);
+                NULL
+            }
+            "INDEX_ACCESS" => {
+                let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(v) => self.evaluate(Value::convert_to_statement(v)),
+                    None => return self.raise("RuntimeError", "Missing 'object' in index access"),
+                };
+    
+                let access_val = match left_hashmap.get(&Value::String("access".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'access' in index access"),
+                };
+    
+                let access_hashmap = match access_val {
+                    Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+                    _ => return self.raise("RuntimeError", "Expected a map for index access"),
+                };
+    
+                if let Value::String(name) = &object_val {
+                    let len = match self.variables.get(name) {
+                        Some(var) => match &var.value {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        },
+                        None => return self.raise("NameError", &format!("Variable '{}' not found for index assignment", name)),
+                    };
+    
+                    let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
+                    let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
+    
+                    let start_idx = match start_val_opt {
+                        Some(v) => match to_index(v, len) {
+                            Ok(i) => i,
+                            Err(e) => return self.raise("IndexError", &e),
+                        },
+                        None => 0,
+                    };
+    
+                    let end_idx = match end_val_opt {
+                        Some(v) => match to_index(v, len) {
+                            Ok(i) => i,
+                            Err(e) => return self.raise("IndexError", &e),
+                        },
+                        None => len,
+                    };
+    
+                    if let Some(var) = self.variables.get_mut(name) {
+                        match &mut var.value {
+                            Value::String(_) => {
+                                return self.raise("TypeError", "Cannot assign to string index (immutable)");
+                            }
+                            Value::List(l) => {
+                                if start_idx >= l.len() || end_idx > l.len() || start_idx > end_idx {
+                                    return self.raise("IndexError", "Invalid slice indices");
+                                }
+                                if start_idx + 1 == end_idx {
+                                    l[start_idx] = right_value;
+                                } else {
+                                    return self.raise("NotImplementedError", "Slice assignment not supported");
+                                }
+                            }
+                            Value::Bytes(b) => {
+                                if let Value::Int(i) = right_value {
+                                    if start_idx >= b.len() || end_idx > b.len() || start_idx > end_idx {
+                                        return self.raise("IndexError", "Invalid slice indices");
+                                    }
+                                    if start_idx + 1 == end_idx {
+                                        let int_val = i.to_i64().unwrap_or(-1);
+                                        if int_val < 0 || int_val > 255 {
+                                            return self.raise("ValueError", "Byte value out of range");
+                                        }
+                                        b[start_idx] = int_val as u8;
+                                    } else {
+                                        return self.raise("NotImplementedError", "Slice assignment not supported");
+                                    }
+                                } else {
+                                    return self.raise("TypeError", "Expected integer for byte assignment");
+                                }
+                            }
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }
+                        NULL
+                    } else {
+                        self.raise("NameError", &format!("Variable '{}' not found for index assignment", name))
+                    }
+                } else {
+                    self.raise("RuntimeError", "Expected variable name for index assignment object")
+                }
+            }
+            _ => self.raise("RuntimeError", &format!("Unsupported left type: {}", left_type)),
+        }
+    }
+    
     fn handle_index_access(&mut self, statement: HashMap<Value, Value>) -> Value {
         let object_val = match statement.get(&Value::String("object".to_string())) {
             Some(v) => self.evaluate(Value::convert_to_statement(v)),
@@ -429,32 +618,35 @@ impl Interpreter {
         }
     }
     
-    
     fn handle_variable_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
         let name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(s)) => s,
             _ => return self.raise("SyntaxError", "Expected a string for variable name"),
         };
-
+    
         if self.variables.contains_key(name) {
             return self.raise("NameError", &format!("Variable '{}' is already declared", name));
         }
-
+    
         let value = match statement.get(&Value::String("value".to_string())) {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'value' in variable declaration"),
         };
-
+    
         let value = self.evaluate(value.convert_to_statement());
-        let var_type = value.type_name();
-
-        if !self.check_type(&var_type, Some("any"), Some(value.clone()), Some(true)) {
-            return self.raise("TypeError", &format!("Invalid type for variable '{}': expected 'any', got '{}'", name, var_type));
+    
+        let declared_type = match statement.get(&Value::String("var_type".to_string())) {
+            Some(Value::String(t)) => t,
+            _ => "any",
+        };
+    
+        if !self.check_type(declared_type, Some(&value.type_name().clone()), Some(value.clone()), Some(true)) {
+            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type, value.type_name()));
         }
-
-        let variable = Variable::new(name.to_string(), value, var_type, false, true, true);
+    
+        let variable = Variable::new(name.to_string(), value, declared_type.to_string(), false, true, true);
         self.variables.insert(name.to_string(), variable);
-
+    
         NULL
     }
 
@@ -1344,7 +1536,7 @@ impl Interpreter {
                             final_args.insert(param_name.clone(), Value::List(variadic_args));
                     
                             pos_index = positional.len();
-                            named_map.remove(param_name); // Remove from named_map if it was variadic
+                            named_map.remove(param_name);
                         }
                         ParameterKind::KeywordVariadic => {
                             if let Some(named_value) = named_map.remove(param_name) {

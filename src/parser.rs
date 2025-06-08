@@ -346,6 +346,29 @@ impl Parser {
                         column: self.get_line_column(),
                     };
                 }
+
+                ("OPERATOR", op) if op == "=" => {
+                    self.next();
+                    let value = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+        
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("left".to_string()),
+                            Value::String("right".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("ASSIGNMENT".to_string()),
+                            expr.convert_to_map(),
+                            value.convert_to_map(),
+                        ],
+                        line: self.current_line(),
+                        column: self.get_line_column(),
+                    };
+                }
         
                 ("OPERATOR", op) if op != "|" => {
                     let operator = tok.1.clone();
