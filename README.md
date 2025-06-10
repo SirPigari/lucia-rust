@@ -5,9 +5,9 @@ Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ---
 
-[![Linux](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml)
-[![macOS](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml)
-[![Windows](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml/badge.svg)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml)
+[![Linux](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml)
+[![macOS](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml)
+[![Windows](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 ---
