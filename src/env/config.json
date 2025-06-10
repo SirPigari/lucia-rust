@@ -1,0 +1,36 @@
+{
+  "moded": false,
+  "debug": false,
+  "debug_mode": "normal",
+  "supports_color": true,
+  "use_lucia_traceback": true,
+  "warnings": true,
+  "use_predefs": true,
+  "print_comments": false,
+  "allow_fetch": true,
+  "execute_code_blocks": {
+    "C": true,
+    "ASM": true,
+    "PY": true
+  },
+  "lucia_file_extensions": [
+    ".lucia",
+    ".luc",
+    ".lc",
+    ".l"
+  ],
+  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
+  "recursion_limit": 9999,
+  "version": "2.0.0-rust",
+  "color_scheme": {
+    "exception": "#F44350",
+    "warning": "#FFC107",
+    "help": "#21B8DB",
+    "debug": "#434343",
+    "comment": "#757575",
+    "input_arrows": "#136163",
+    "input_text": "#BCBEC4",
+    "output_text": "#BCBEC4",
+    "info": "#9209B3"
+  }
+}
