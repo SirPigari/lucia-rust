@@ -22,6 +22,7 @@ jobs:
   test-ubuntu:
     name: Test (Ubuntu) - ${{ matrix.rust }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         rust: [stable, beta, nightly]
@@ -65,6 +66,7 @@ jobs:
   test-arch:
     name: Test (Arch Linux) - ${{ matrix.rust }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: archlinux:base-devel
     strategy:
       matrix:

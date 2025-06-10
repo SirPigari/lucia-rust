@@ -2113,6 +2113,46 @@ impl Interpreter {
             },
             "&&" => Value::Boolean(left.is_truthy() && right.is_truthy()),
             "||" => Value::Boolean(left.is_truthy() || right.is_truthy()),
+            "in" => {
+                if let Value::String(s) = &right {
+                    if let Value::String(sub) = &left {
+                        Value::Boolean(s.contains(sub))
+                    } else {
+                        self.raise("TypeError", "Left operand must be a string for 'in' operation");
+                        NULL
+                    }
+                } else if let Value::List(list) = &right {
+                    Value::Boolean(list.contains(&left))
+                } else {
+                    self.raise("TypeError", "Right operand must be a string or list for 'in' operation");
+                    NULL
+                }
+            },
+            "xor" => {
+                match (left, right) {
+                    (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(a ^ b),
+                    (Value::Int(a), Value::Int(b)) => Value::Boolean(a != b),
+                    (Value::Float(a), Value::Float(b)) => Value::Boolean(a != b),
+                    (Value::String(a), Value::String(b)) => Value::Boolean(a != b),
+                    (a, b) => self.raise("TypeError", &format!("Cannot apply 'xor' to {} and {}", a.type_name(), b.type_name())),
+                }
+            },
+            "xnor" => {
+                match (left, right) {
+                    (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(!(a ^ b)),
+                    (Value::Int(a), Value::Int(b)) => Value::Boolean(a == b),
+                    (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
+                    (Value::String(a), Value::String(b)) => Value::Boolean(a == b),
+                    (a, b) => self.raise("TypeError", &format!("Cannot apply 'xnor' to {} and {}", a.type_name(), b.type_name())),
+                }
+            },
+            "abs" => {
+                match right {
+                    Value::Int(n) => Value::Int(n.abs()),
+                    Value::Float(f) => Value::Float(f.abs()),
+                    _ => self.raise("TypeError", &format!("Cannot apply 'abs' to {}", right.type_name())),
+                }
+            },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
         }
     }
