@@ -348,10 +348,32 @@ fn main() {
     let use_colors = !no_color_flag;
 
     let config_path: PathBuf = match get_config_path() {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error getting config path: {}", e);
-            exit(1);
+        Ok(path) if path.exists() => path,
+        _ => {
+            let fallback_path = Path::new(file!())
+                .parent()
+                .map(|p| Path::new(p).join("..").join("config.json"))
+                .map(|p| fs::canonicalize(&p).unwrap_or(p))
+                .unwrap_or_else(|| {
+                    eprintln!("Failed to determine fallback config path");
+                    exit(1);
+                });
+    
+            if let Some(parent) = fallback_path.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    eprintln!("Failed to create fallback config directory {}: {}", parent.display(), e);
+                    exit(1);
+                }
+            }
+
+            if !fallback_path.exists() {
+                if let Err(e) = fs::write(&fallback_path, b"{}") {
+                    eprintln!("Failed to create fallback config file {}: {}", fallback_path.display(), e);
+                    exit(1);
+                }
+            }
+    
+            fallback_path
         }
     };
 
@@ -364,7 +386,14 @@ fn main() {
                     eprintln!("Failed to activate environment: {}", err);
                     exit(1);
                 }
-                load_config(&config_path).unwrap()
+                match load_config(&config_path) {
+                    Ok(config) => config,
+                    Err(e) => {
+                        eprintln!("Failed to load config file again after activation: {}", e);
+                        eprintln!("Please rerun the program to try again after fixing the config file.");
+                        exit(0);
+                    }
+                }
             }
         }
     } else {
@@ -373,8 +402,16 @@ fn main() {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
-        load_config(&config_path).unwrap()
+        match load_config(&config_path) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to load config file after activation: {}", e);
+                eprintln!("Please rerun the program to try again after fixing the config file.");
+                exit(0);
+            }
+        }
     };
+    
     if activate_flag {
         println!("{}", format!("Activating environment at: {}", env_path.display()).cyan().bold());
         if let Err(err) = activate_environment(&env_path) {
