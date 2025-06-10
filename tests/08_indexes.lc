@@ -1,5 +1,5 @@
 l: list = [0..10]
-m: str = "i love lucia"
+m: str = "i love lucia"  // its not what you think i swear
 
 // simple indexing
 print(l[0])        // 0

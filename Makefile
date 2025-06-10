@@ -133,7 +133,8 @@ endif
 %:
 	@:
 
-build-test:
+build-test: build-tests
+build-tests:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin run_tests && $(CARGO_ENV) build --release --bin run_benchmarks
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@if not exist tests mkdir tests

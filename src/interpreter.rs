@@ -23,7 +23,7 @@ use num_traits::{Zero, self};
 use crate::env::core::native;
 use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use std::cmp::Ordering;
 
 use crate::lexer::Lexer;
@@ -79,6 +79,10 @@ impl Interpreter {
         this.variables.insert(
             "help".to_string(),
             Variable::new("help".to_string(), Value::Function(native::help_fn()), "help".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "type".to_string(),
+            Variable::new("type".to_string(), Value::Function(native::type_fn()), "function".to_string(), false, true, true),
         );
 
         this
@@ -266,6 +270,28 @@ impl Interpreter {
     
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
+    
+        if !self.variables.contains_key("_") {
+            self.variables.insert(
+                "_".to_string(),
+                Variable::new("_".to_string(), NULL.clone(), "any".to_string(), false, true, true),
+            );
+        }
+        
+        if !self.variables.contains_key("_err") {
+            self.variables.insert(
+                "_err".to_string(),
+                Variable::new(
+                    "_err".to_string(),
+                    Value::Tuple(vec![]),
+                    "tuple".to_string(),
+                    false,
+                    true,
+                    true,
+                ),
+            );
+        }
+        
         if self.err.is_some() {
             return NULL;
         }
@@ -273,10 +299,10 @@ impl Interpreter {
         let Statement::Statement { keys, values, .. } = statement else {
             return self.raise("SyntaxError", "Expected a statement map");
         };
-        
+    
         let statement: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
-        match statement.get(&Value::String("type".to_string())) {
+        let result = match statement.get(&Value::String("type".to_string())) {
             Some(Value::String(t)) => match t.as_str() {
                 "NUMBER" => self.handle_number(statement.clone()),
                 "STRING" => self.handle_string(statement.clone()),
@@ -291,55 +317,207 @@ impl Interpreter {
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
+                "TRY_CATCH" => self.handle_try(statement.clone()),
                 "TRY" => self.handle_try(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
+        };
+        
+        if let Some(err) = self.err.clone() {
+            let tuple = Value::Tuple(vec![
+                Value::String(err.error_type),
+                Value::String(err.msg),
+                Value::String(err.help.unwrap_or_default()),
+            ]);
+    
+            if let Some(var) = self.variables.get_mut("_") {
+                var.set_value(tuple.clone());
+            }
+    
+            if let Some(var) = self.variables.get_mut("_err") {
+                var.set_value(tuple);
+            }
+    
+            return NULL;
         }
+        
+        if result != NULL {
+            if let Some(var) = self.variables.get_mut("_") {
+                var.set_value(result.clone());
+            }
+        }
+        
+        result
     }
 
     fn handle_try(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let stmt_type = match statement.get(&Value::String("type".to_string())) {
+            Some(Value::String(s)) => s.as_str(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in try statement"),
+        };
+    
         let body = match statement.get(&Value::String("body".to_string())) {
             Some(Value::List(body)) => body,
             _ => return self.raise("RuntimeError", "Expected a list for 'body' in try statement"),
         };
     
-        let catch_body = match statement.get(&Value::String("catch_body".to_string())) {
-            Some(Value::List(catch_body)) => catch_body,
-            _ => return self.raise("RuntimeError", "Expected a list for 'catch' in try statement"),
-        };
+        let mut catch_body = &vec![];
+        let mut exception_vars = &vec![];
     
-        let exception_vars = match statement.get(&Value::String("exception_vars".to_string())) {
-            Some(Value::List(vars)) => vars,
-            _ => return self.raise("RuntimeError", "Expected a list for 'exception_vars' in try statement"),
-        };
+        if stmt_type == "TRY_CATCH" {
+            catch_body = match statement.get(&Value::String("catch_body".to_string())) {
+                Some(Value::List(catch_body)) => catch_body,
+                _ => return self.raise("RuntimeError", "Expected a list for 'catch' in try-catch statement"),
+            };
     
-        if exception_vars.len() > 3 {
-            return self.raise("SyntaxError", "Too many exception variables (max is 3, err_msg, err_type, err_help)");
-        }
+            exception_vars = match statement.get(&Value::String("exception_vars".to_string())) {
+                Some(Value::List(vars)) => vars,
+                _ => return self.raise("RuntimeError", "Expected a list for 'exception_vars' in try-catch statement"),
+            };
     
-        if exception_vars.is_empty() {
-            return self.raise_with_help(
-                "SyntaxError",
-                "No exception variables provided",
-                &format!("Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'", 
-                    hex_to_ansi("#1CC58B", Some(self.use_colors)), 
-                    hex_to_ansi(&self.config.color_scheme.help, Some(self.use_colors)
-                ))
-            );
-        }
+            if exception_vars.len() > 3 {
+                return self.raise(
+                    "SyntaxError",
+                    "Too many exception variables (max is 3, err_type, err_msg, err_help)",
+                );
+            }
     
-        let mut seen = std::collections::HashSet::new();
-        for var in exception_vars {
-            if let Value::String(name) = var {
-                if !seen.insert(name) {
-                    return self.raise("NameError", &format!("Duplicate exception variable name '{}'", name));
+            if exception_vars.is_empty() {
+                return self.raise_with_help(
+                    "SyntaxError",
+                    "No exception variables provided",
+                    &format!(
+                        "Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'",
+                        hex_to_ansi("#1CC58B", Some(self.use_colors)),
+                        hex_to_ansi(&self.config.color_scheme.help, Some(self.use_colors)),
+                    ),
+                );
+            }
+    
+            let mut seen = std::collections::HashSet::new();
+            for var in exception_vars {
+                if let Value::String(name) = var {
+                    if !seen.insert(name) {
+                        return self.raise("NameError", &format!("Duplicate exception variable name '{}'", name));
+                    }
+                } else {
+                    return self.raise("RuntimeError", "Invalid exception variable type");
                 }
-            } else {
-                return self.raise("RuntimeError", "Invalid exception variable type");
             }
         }
-        NULL   
+    
+        for stmt in body {
+            if !stmt.is_statement() {
+                continue;
+            }
+    
+            let result = self.evaluate(stmt.convert_to_statement());
+            if self.err.is_some() {
+                if stmt_type != "TRY_CATCH" {
+                    return self.err.take().map_or(NULL, |_| NULL);
+                }
+    
+                let err = self.err.take().unwrap();
+                self.err = None;
+    
+                match exception_vars.len() {
+                    1 => {
+                        if let Value::String(name) = &exception_vars[0] {
+                            let tuple = Value::Tuple(vec![
+                                Value::String(err.error_type.clone()),
+                                Value::String(err.msg.clone()),
+                            ]);
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(name.clone(), tuple, "tuple".to_string(), false, true, true),
+                            );
+                        }
+                    }
+                    2 => {
+                        if let Value::String(name) = &exception_vars[0] {
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(
+                                    name.clone(),
+                                    Value::String(err.error_type.clone()),
+                                    "string".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ),
+                            );
+                        }
+                        if let Value::String(name) = &exception_vars[1] {
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(
+                                    name.clone(),
+                                    Value::String(err.msg.clone()),
+                                    "string".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ),
+                            );
+                        }
+                    }
+                    3 => {
+                        if let Value::String(name) = &exception_vars[0] {
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(
+                                    name.clone(),
+                                    Value::String(err.error_type.clone()),
+                                    "string".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ),
+                            );
+                        }
+                        if let Value::String(name) = &exception_vars[1] {
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(
+                                    name.clone(),
+                                    Value::String(err.msg.clone()),
+                                    "string".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ),
+                            );
+                        }
+                        if let Value::String(name) = &exception_vars[2] {
+                            self.variables.insert(
+                                name.clone(),
+                                Variable::new(
+                                    name.clone(),
+                                    Value::String(err.help.unwrap_or_default()),
+                                    "string".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+    
+                for catch_stmt in catch_body {
+                    if !catch_stmt.is_statement() {
+                        continue;
+                    }
+                    let _ = self.evaluate(catch_stmt.convert_to_statement());
+                }
+    
+                return NULL;
+            }
+        }
+    
+        NULL
     }
 
     fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -435,7 +613,7 @@ impl Interpreter {
                 
                 let var = self.variables.get_mut(name).unwrap();
                 var.set_value(right_value);
-                NULL
+                var.value.clone()
             }
             "INDEX_ACCESS" => {
                 let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
@@ -885,9 +1063,9 @@ impl Interpreter {
                     let diff = &end_int.value - &nums.last().unwrap().value;
 
                     let step_sign_int = match step.sign() {
-                        num_bigint::Sign::Plus => BigInt::from(1),
-                        num_bigint::Sign::Minus => BigInt::from(-1),
-                        num_bigint::Sign::NoSign => BigInt::from(0),
+                        Sign::Plus => BigInt::from(1),
+                        Sign::Minus => BigInt::from(-1),
+                        Sign::NoSign => BigInt::from(0),
                     };
                     
                     if (&diff * &step_sign_int) < BigInt::zero() {
@@ -1680,38 +1858,33 @@ impl Interpreter {
         }
     }
     
-
     fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let left_opt = statement.get(&Value::String("left".to_string()));
-        let left = match left_opt {
+        let left = match statement.get(&Value::String("left".to_string())) {
             Some(val_left) => self.evaluate(val_left.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'left' key in the statement.");
                 return NULL;
             }
         };
-
+    
         if self.err.is_some() {
             return NULL;
         }
-
-        let right_opt = statement.get(&Value::String("right".to_string()));
-        let right = match right_opt {
+    
+        let right = match statement.get(&Value::String("right".to_string())) {
             Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
                 return NULL;
             }
         };
-
+    
         let operator = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s,
             _ => return self.raise("TypeError", "Expected a string for operator"),
         };
-
-        let mut left = left;
-        let mut right = right;
-
+    
+        // Prepare precision for floats
         let mut precision = 0;
         if let Value::Float(l) = &left {
             precision = l.to_string().len();
@@ -1719,56 +1892,57 @@ impl Interpreter {
         if let Value::Float(r) = &right {
             precision = std::cmp::max(precision, r.to_string().len());
         }
-
         let prec = precision + 2;
-
-        if let Value::Float(l) = left {
+    
+        // Round floats to precision
+        let left = if let Value::Float(l) = left {
             let factor = Float::new(10f64.powi(prec as i32));
-            left = Value::Float((l * factor.clone()).round() / factor);
-        }
-        if let Value::Float(r) = right {
+            Value::Float((l * factor.clone()).round() / factor)
+        } else {
+            left
+        };
+        let right = if let Value::Float(r) = right {
             let factor = Float::new(10f64.powi(prec as i32));
-            right = Value::Float((r * factor.clone()).round() / factor);
-        }
-
-        if let Value::List(ref list) = left {
-            left = Value::List(list.clone());
-        }
-        if let Value::List(ref list) = right {
-            right = Value::List(list.clone());
-        }
-
-        if let Value::Boolean(b) = left {
-            left = Value::Float(if b { 1.0.into() } else { 0.0.into() });
-        }
-        if let Value::Boolean(b) = right {
-            right = Value::Float(if b { 1.0.into() } else { 0.0.into() });
-        }
-
-        self.make_operation(left, right, &operator)
+            Value::Float((r * factor.clone()).round() / factor)
+        } else {
+            right
+        };
+    
+        // Convert Boolean to Float
+        let left = if let Value::Boolean(b) = left {
+            Value::Float(if b { 1.0.into() } else { 0.0.into() })
+        } else {
+            left
+        };
+        let right = if let Value::Boolean(b) = right {
+            Value::Float(if b { 1.0.into() } else { 0.0.into() })
+        } else {
+            right
+        };
+    
+        self.make_operation(left, right, operator)
     }
-
+    
     fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let operand_opt = statement.get(&Value::String("operand".to_string()));
-        let operand = match operand_opt {
+        let operand = match statement.get(&Value::String("operand".to_string())) {
             Some(val) => self.evaluate(val.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'operand' key in the statement.");
                 return NULL;
             }
         };
-
+    
         let operator = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s,
             _ => return self.raise("TypeError", "Expected a string for operator"),
         };
-
+    
         debug_log(
             &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
             &self.config,
             Some(self.use_colors.clone()),
         );
-
+    
         match operator.as_str() {
             "-" => match operand {
                 Value::Int(n) => Value::Int(-n),
@@ -1784,62 +1958,44 @@ impl Interpreter {
             _ => self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
         }
     }
-
+    
     fn make_operation(&mut self, left: Value, right: Value, mut operator: &str) -> Value {
         operator = match operator {
-            "isnt" => "!=",
-            "isn't" => "!=",
+            "isnt" | "isn't" | "nein" => "!=",
             "or" => "||",
             "and" => "&&",
             "is" => "==",
             "not" => "!",
-            "nein" => "!=",
-            _ => operator,
+            other => other,
         };
-
-        // Handle if both left and right are zero for division or modulo
-        if left.is_zero() && right.is_zero() {
-            match operator {
-                "/" => {
-                    return self.raise("MathError", "Division by zero: 0 / 0 is undefined");
-                }
-                "%" => {
-                    return self.raise("MathError", "Modulo by zero: 0 % 0 is undefined");
-                }
-                _ => {}
-            }
+    
+        // Division/modulo zero check
+        if (operator == "/" || operator == "%") && right.is_zero() {
+            return self.raise("ZeroDivisionError", format!("{} by zero.", if operator == "/" { "Division" } else { "Modulo" }).as_str());
         }
-
+    
         if left.is_nan() || right.is_nan() {
             return self.raise("MathError", "Operation with NaN is not allowed");
         }
-
+    
         if left.is_infinity() || right.is_infinity() {
             return self.raise("MathError", "Operation with Infinity is not allowed");
         }
-
+    
         if operator == "abs" {
             debug_log(
-                &format!(
-                    "<Operation: |{}|>",
-                    format_value(&right),
-                ),
+                &format!("<Operation: |{}|>", format_value(&right)),
                 &self.config,
                 Some(self.use_colors.clone()),
             );
         } else {
             debug_log(
-                &format!(
-                    "<Operation: {} {} {}>",
-                    format_value(&left),
-                    operator,
-                    format_value(&right)
-                ),
+                &format!("<Operation: {} {} {}>", format_value(&left), operator, format_value(&right)),
                 &self.config,
                 Some(self.use_colors.clone()),
             );
         }
-
+    
         match operator {
             "+" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
@@ -1849,7 +2005,6 @@ impl Interpreter {
                 (Value::String(a), Value::String(b)) => Value::String(a + &b),
                 (a, b) => self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
             },
-
             "-" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
@@ -1857,78 +2012,57 @@ impl Interpreter {
                 (Value::Float(a), Value::Int(b)) => Value::Float(a - Float::from_int(b)),
                 (a, b) => self.raise("TypeError", &format!("Cannot subtract {} and {}", a.type_name(), b.type_name())),
             },
-
             "*" => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => {
-                    let result = Float::from(a.clone()) * Float::from(b.clone());
-                    Value::Float(result)
-                }
+                (Value::Int(a), Value::Int(b)) => Value::Float(Float::from(a) * Float::from(b)),
                 (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
                 (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) * b),
                 (Value::Float(a), Value::Int(b)) => Value::Float(a * Float::from_int(b)),
-                (Value::String(a), Value::Int(b)) => {
-                    let count = b.to_usize().unwrap_or(0);
-                    Value::String(a.repeat(count))
-                }
+                (Value::String(a), Value::Int(b)) => Value::String(a.repeat(b.to_usize().unwrap_or(0))),
                 (a, b) => self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
             },
-
-            "/" => match &right {
-                Value::Int(val) if val.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
-                Value::Float(f) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Division by zero."),
+            "/" => match right {
+                Value::Int(ref val) if val.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
+                Value::Float(ref f) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Division by zero."),
                 _ => match (left, right) {
                     (Value::Int(a), Value::Int(b)) => Value::Float(Float::from(a) / Float::from(b)),
                     (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(Float::from(a) / b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a / Float::from(b)),
+                    (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) / b),
+                    (Value::Float(a), Value::Int(b)) => Value::Float(a / Float::from_int(b)),
                     (a, b) => self.raise("TypeError", &format!("Cannot divide {} by {}", a.type_name(), b.type_name())),
                 }
-            },        
-
+            },
             "%" => match (left, right) {
-                (_, Value::Int(val)) if val == 0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
-                (_, Value::Float(f)) if f == 0.0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
-
+                (_, Value::Int(ref val)) if val.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
+                (_, Value::Float(ref f)) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
                 (Value::Int(a), Value::Int(b)) => Value::Float((a % b).into()),
                 (Value::Float(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
                 (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
                 (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
-
-                (a, b) => self.raise("TypeError", &format!(
-                    "Cannot modulo {} and {}", a.type_name(), b.type_name()
-                )),
-            }
-
+                (a, b) => self.raise("TypeError", &format!("Cannot modulo {} and {}", a.type_name(), b.type_name())),
+            },
             "^" => match (&left, &right) {
                 (_, Value::Int(b)) if b.value.is_zero() => Value::Float(1.0.into()),
                 (_, Value::Float(b)) if b.value.is_zero() => Value::Float(1.0.into()),
-
                 (Value::Int(a), Value::Int(b)) => {
-                    if b.value.sign() == num_bigint::Sign::Minus {
+                    if b.value.sign() == Sign::Minus {
                         let base = Float::from_int(a.clone());
                         let exp = Float::from_int(b.clone());
                         Value::Float(base.powf(exp))
-                    } else {
-                        match b.to_u32() {
-                            Some(exp_u32) => match a.checked_pow(exp_u32) {
-                                Some(result) => Value::Float(result.into()),
-                                None => {
-                                    let base = Float::from_int(a.clone());
-                                    let exp = Float::from_int(b.clone());
-                                    Value::Float(base.powf(exp))
-                                }
-                            },
-                            None => {
-                                let base = Float::from_int(a.clone());
-                                let exp = Float::from_int(b.clone());
-                                Value::Float(base.powf(exp))
-                            }
+                    } else if let Some(exp_u32) = b.to_u32() {
+                        if let Some(result) = a.checked_pow(exp_u32) {
+                            Value::Float(result.into())
+                        } else {
+                            let base = Float::from_int(a.clone());
+                            let exp = Float::from_int(b.clone());
+                            Value::Float(base.powf(exp))
                         }
+                    } else {
+                        let base = Float::from_int(a.clone());
+                        let exp = Float::from_int(b.clone());
+                        Value::Float(base.powf(exp))
                     }
                 }
-
                 (Value::Float(a), Value::Float(b)) => Value::Float(a.powf(b.clone())),
-
                 (Value::Int(a), Value::Float(b)) => {
                     let base = Float::from_int(a.clone());
                     Value::Float(base.powf(b.clone()))
@@ -1942,44 +2076,47 @@ impl Interpreter {
                     a.type_name(),
                     b.type_name()
                 )),
-            }
-
+            },
             "==" => Value::Boolean(left == right),
             "!=" => Value::Boolean(left != right),
-            ">"  => Value::Boolean(left > right),
-            "<"  => Value::Boolean(left < right),
-            ">=" => Value::Boolean(left >= right),
-            "<=" => Value::Boolean(left <= right),
-
+            ">" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Value::Boolean(a > b),
+                (Value::Float(a), Value::Float(b)) => Value::Boolean(a > b),
+                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) > b),
+                (Value::Float(a), Value::Int(b)) => Value::Boolean(a > Float::from_int(b)),
+                (Value::String(a), Value::String(b)) => Value::Boolean(a > b),
+                (a, b) => self.raise("TypeError", &format!("Cannot compare {} > {}", a.type_name(), b.type_name())),
+            },
+            "<" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Value::Boolean(a < b),
+                (Value::Float(a), Value::Float(b)) => Value::Boolean(a < b),
+                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) < b),
+                (Value::Float(a), Value::Int(b)) => Value::Boolean(a < Float::from_int(b)),
+                (Value::String(a), Value::String(b)) => Value::Boolean(a < b),
+                (a, b) => self.raise("TypeError", &format!("Cannot compare {} < {}", a.type_name(), b.type_name())),
+            },
+            ">=" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Value::Boolean(a >= b),
+                (Value::Float(a), Value::Float(b)) => Value::Boolean(a >= b),
+                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) >= b),
+                (Value::Float(a), Value::Int(b)) => Value::Boolean(a >= Float::from_int(b)),
+                (Value::String(a), Value::String(b)) => Value::Boolean(a >= b),
+                (a, b) => self.raise("TypeError", &format!("Cannot compare {} >= {}", a.type_name(), b.type_name())),
+            },
+            "<=" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Value::Boolean(a <= b),
+                (Value::Float(a), Value::Float(b)) => Value::Boolean(a <= b),
+                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) <= b),
+                (Value::Float(a), Value::Int(b)) => Value::Boolean(a <= Float::from_int(b)),
+                (Value::String(a), Value::String(b)) => Value::Boolean(a <= b),
+                (a, b) => self.raise("TypeError", &format!("Cannot compare {} <= {}", a.type_name(), b.type_name())),
+            },
             "&&" => Value::Boolean(left.is_truthy() && right.is_truthy()),
             "||" => Value::Boolean(left.is_truthy() || right.is_truthy()),
-            "!"  => Value::Boolean(!right.is_truthy()),
-
-            "~" | "in" => match &right {
-                Value::List(list) => Value::Boolean(list.contains(&left)),
-                Value::Map { keys, .. } => Value::Boolean(keys.contains(&left)),
-                _ => self.raise("TypeError", &format!(
-                    "Expected iterable (List or Map) on right side of '{}', got '{}'",
-                    operator,
-                    right.type_name()
-                )),
-            },
-
-            "abs" => match right {
-                Value::Int(n) => Value::Float(n.abs().into()),
-                Value::Float(f) => Value::Float(f.abs()),
-                _ => self.raise("TypeError", "Operator 'abs' requires a numeric operand."),
-            },
-
-            "xor" => Value::Boolean(
-                (left.is_truthy() && !right.is_truthy()) || (!left.is_truthy() && right.is_truthy())
-            ),
-            "xnor" => Value::Boolean(
-                (left.is_truthy() && right.is_truthy()) || (!left.is_truthy() && !right.is_truthy())
-            ),
-            _ => self.raise("SyntaxError", &format!("Unexpected operator: '{}'", operator)),
+            _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
         }
     }
+    
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {

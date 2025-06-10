@@ -1,0 +1,63 @@
+# .github/workflows/test-windows.yml
+name: Lucia Rust Test Suite - Windows
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-windows:
+    name: Test (Windows) - ${{ matrix.rust }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            windows-${{ matrix.rust }}-
+            windows-
+
+      - name: Install system dependencies
+        run: choco install make --no-progress
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Activate build environment
+        run: make activate
+
+      - name: Build test binaries
+        run: make build-test
+
+      - name: Run test suite
+        run: make test

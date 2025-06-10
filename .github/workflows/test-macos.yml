@@ -1,0 +1,63 @@
+# .github/workflows/test-macos.yml
+name: Lucia Rust Test Suite - macOS
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+      - 'LICENSE'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-macos:
+    name: Test (macOS) - ${{ matrix.rust }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            macos-${{ matrix.rust }}-
+            macos-
+
+      - name: Install system dependencies
+        run: brew install make
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Activate build environment
+        run: make activate
+
+      - name: Build test binaries
+        run: make build-test
+
+      - name: Run test suite
+        run: make test

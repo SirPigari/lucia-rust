@@ -56,33 +56,50 @@ impl<'a> Lexer<'a> {
 
         let mut tokens = Vec::new();
 
-        let prefixes = [
-            "rfb", "rfb", "rbf", "rbf", "frb", "fbr", "brf", "bfr",
-            "rf", "rb", "fr", "fb", "br", "bf",
-            "r", "f", "b"
-        ];
+        let mut prev_token: Option<(String, String)> = None;
+
+        let capture_names: Vec<&str> = full_regex.capture_names().flatten().collect();
 
         for cap in full_regex.captures_iter(self.code) {
-            for capture_name in full_regex.capture_names() {
-                if let Some(capture_name) = capture_name {
-                    if let Some(value) = cap.name(capture_name) {
-                        if (capture_name == "COMMENT_SINGLE" || capture_name == "COMMENT_MULTI" || capture_name == "COMMENT_INLINE") && !include_comments {
-                            continue;
-                        }
-
-                        let mut value = value.as_str().to_string();
-
-                        if capture_name == "COMMENT_SINGLE" || capture_name == "COMMENT_MULTI" || capture_name == "COMMENT_INLINE" {
-                            value = value.replace("    ", "\\t")
-                                         .replace("\t", "\t")
-                                         .replace("  ", "\t")
-                                         .replace(" ", "\t");
-                        } else if capture_name == "NUMBER" {
-                            value = value.replace("_", "");
-                        }
-
-                        tokens.push((capture_name.to_string(), value));
+            for &name in &capture_names {
+                if let Some(value) = cap.name(name) {
+                    if (name == "COMMENT_SINGLE" || name == "COMMENT_MULTI" || name == "COMMENT_INLINE") && !include_comments {
+                        break;
                     }
+
+                    let mut value = value.as_str().to_string();
+
+                    if name == "COMMENT_SINGLE" || name == "COMMENT_MULTI" || name == "COMMENT_INLINE" {
+                        value = value.replace("    ", "\t")
+                                     .replace("\t", "\t")
+                                     .replace("  ", "\t")
+                                     .replace(" ", "\t");
+                    } else if name == "NUMBER" {
+                        value = value.replace("_", "");
+                    }
+
+                    if name == "NUMBER" && value.starts_with('-') && value.len() > 1 {
+                        if let Some((ref prev_type, ref prev_val)) = prev_token {
+                            let allowed_prev = match prev_type.as_str() {
+                                "SEPARATOR" => matches!(prev_val.as_str(), "(" | "[" | "{" | "," | ":" | ";"),
+                                "OPERATOR" => true,
+                                "EOF" => true,
+                                _ => false,
+                            };
+
+                            if !allowed_prev {
+                                tokens.push(("OPERATOR".to_string(), "-".to_string()));
+                                tokens.push(("NUMBER".to_string(), value[1..].to_string()));
+                                prev_token = Some(("NUMBER".to_string(), value[1..].to_string()));
+                                continue;
+                            }
+                        }
+                    }
+
+                    tokens.push((name.to_string(), value.clone()));
+                    prev_token = Some((name.to_string(), value));
+
+                    break;
                 }
             }
         }

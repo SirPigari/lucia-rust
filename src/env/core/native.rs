@@ -166,7 +166,7 @@ fn len(args: &HashMap<String, Value>) -> Value {
 }
 
 // i need that rn 
-pub fn help(args: &HashMap<String, Value>) -> Value {
+fn help(args: &HashMap<String, Value>) -> Value {
     let info = json!({
         "print": {
             "type": "function",
@@ -245,7 +245,12 @@ Happy coding!"#, version);
     Value::Null
 }
 
-
+fn type_name(args: &HashMap<String, Value>) -> Value {
+    if let Some(value) = args.get("obj") {
+        return Value::String(value.type_name().to_string());
+    }
+    Value::Error("TypeError", "No value provided for type_name()")
+}
 
 
 // -------------------------------
@@ -278,6 +283,14 @@ fn format_value(value: &Value) -> String {
             } else {
                 let formatted_values: Vec<String> = values.iter().map(utils::format_value).collect();
                 format!("[{}]", formatted_values.join(", "))
+            }
+        }
+        Value::Tuple(values) => {
+            if values.is_empty() {
+                "()".to_string()
+            } else {
+                let formatted_values: Vec<String> = values.iter().map(utils::format_value).collect();
+                format!("({})", formatted_values.join(", "))
             }
         }
         Value::Bytes(bytes) => {
@@ -384,6 +397,19 @@ pub fn help_fn() -> Function {
             Parameter::positional_optional("object", "any", Value::Null),
         ],
         "void",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn type_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "type",
+        type_name,
+        vec![
+            Parameter::positional("obj", "any"),
+        ],
+        "str",
         true, true, true,
         None,
     )))

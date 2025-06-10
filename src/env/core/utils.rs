@@ -136,6 +136,11 @@ pub fn format_value(value: &Value) -> String {
             format!("[{}]", formatted_values.join(", "))
         }
 
+        Value::Tuple (values) => {
+            let formatted_values: Vec<String> = values.iter().map(format_value).collect();
+            format!("({})", formatted_values.join(", "))
+        }
+
         Value::Bytes(bytes) => {
             let formatted_bytes: Vec<String> = bytes.iter().map(|b| format!("{:02x}", b)).collect();
             format!("b\"{}\"", formatted_bytes.join(" "))

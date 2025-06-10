@@ -120,6 +120,14 @@ impl Parser {
         (vec![], vec![])
     }
 
+    fn is_token(&mut self, kind: &str, value: &str) -> bool {
+        if let Some(token) = self.token() {
+            token.0 == kind && token.1 == value
+        } else {
+            false
+        }
+    }
+
     fn get_next(&mut self) -> Option<&Token> {
         self.next();
         self.token()
@@ -558,12 +566,13 @@ impl Parser {
                     self.next();
                     let line = self.current_line();
                     let column = self.get_line_column();
+
                     self.check_for("SEPARATOR", ":");
                     self.next();
 
                     let mut body = vec![];
                     while let Some(tok) = self.token() {
-                        if (tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "catch")) || tok.0.is_empty() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
                             break;
                         }
                         let stmt = self.parse_expression();
@@ -573,26 +582,27 @@ impl Parser {
                         body.push(stmt);
                     }
 
-                    if let Some(tok) = self.token() {
-                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
-                            self.next();
-                        }
-                    }
+                    self.check_for("IDENTIFIER", "end");
+                    self.next();
 
                     let mut exception_vars = vec![];
                     let mut catch_body = vec![];
+                    let mut has_catch = false;
+
                     if let Some(tok) = self.token() {
                         if tok.0 == "IDENTIFIER" && tok.1 == "catch" {
+                            has_catch = true;
                             self.next();
+
                             self.check_for("SEPARATOR", "(");
                             self.next();
-                    
+
                             loop {
                                 if let Some(tok) = self.token() {
                                     if tok.0 == "IDENTIFIER" {
                                         exception_vars.push(tok.1.clone());
                                         self.next();
-                    
+
                                         if let Some(tok) = self.token() {
                                             if tok.0 == "SEPARATOR" && tok.1 == "," {
                                                 self.next();
@@ -600,26 +610,33 @@ impl Parser {
                                             } else if tok.0 == "SEPARATOR" && tok.1 == ")" {
                                                 break;
                                             } else {
+                                                self.raise_with_help("SyntaxError", "Expected ',' or ')' in exception var list", "Separate variables with commas, and close with ')'");
                                                 return Statement::Null;
                                             }
                                         } else {
+                                            self.raise("SyntaxError", "Unexpected end of input in exception var list");
                                             return Statement::Null;
                                         }
                                     } else if tok.0 == "SEPARATOR" && tok.1 == ")" {
                                         break;
                                     } else {
+                                        self.raise("SyntaxError", "Invalid token in exception var list");
                                         return Statement::Null;
                                     }
                                 } else {
+                                    self.raise("SyntaxError", "Unterminated exception var list");
                                     return Statement::Null;
                                 }
                             }
-                    
+
                             self.next(); // consume ')'
-                    
-                            self.check_for("SEPARATOR", ":");
+
+                            if !self.is_token("SEPARATOR", ":") {
+                                self.raise_with_help("SyntaxError", "Expected ':' after exception vars", "Did you forget to add ':'?");
+                                return Statement::Null;
+                            }
                             self.next();
-                    
+
                             while let Some(tok) = self.token() {
                                 if tok.0 == "IDENTIFIER" && tok.1 == "end" {
                                     break;
@@ -630,7 +647,7 @@ impl Parser {
                                 }
                                 catch_body.push(stmt);
                             }
-                    
+
                             self.check_for("IDENTIFIER", "end");
                             self.next();
                         }
@@ -644,7 +661,7 @@ impl Parser {
                             Value::String("catch_body".to_string()),
                         ],
                         values: vec![
-                            Value::String("TRY".to_string()),
+                            Value::String(if has_catch { "TRY_CATCH" } else { "TRY" }.to_string()),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                             Value::List(exception_vars.into_iter().map(Value::String).collect()),
                             Value::List(catch_body.into_iter().map(|s| s.convert_to_map()).collect()),
@@ -653,7 +670,6 @@ impl Parser {
                         column,
                     }
                 }
-
 
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();

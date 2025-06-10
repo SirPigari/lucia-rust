@@ -7,9 +7,11 @@ use std::ops::{Add, Sub, Mul, Div, Rem, Neg, Not, BitAnd, BitOr};
 use std::str::FromStr;
 use crate::env::core::value::Value;
 use once_cell::sync::Lazy;
+use std::fmt::{Binary, Octal, LowerHex};
+
 
 pub const VALID_TYPES: &[&str] = &[
-    "void", "any", "null", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes"
+    "void", "any", "null", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes", "tuple"
 ];
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Debug)]
@@ -99,6 +101,25 @@ impl Hash for Float {
         self.value.to_string().hash(state);
     }
 }
+
+impl Binary for Int {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Binary::fmt(&self.value, f)
+    }
+}
+
+impl Octal for Int {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Octal::fmt(&self.value, f)
+    }
+}
+
+impl LowerHex for Int {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LowerHex::fmt(&self.value, f)
+    }
+}
+
 
 // === Arithmetic Ops for Int ===
 impl Add for Int {

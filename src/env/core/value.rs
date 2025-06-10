@@ -17,6 +17,7 @@ pub enum Value {
         keys: Vec<Value>,
         values: Vec<Value>,
     },
+    Tuple(Vec<Value>),
     List(Vec<Value>),
     Bytes(Vec<u8>),
     Function(Function),
@@ -66,6 +67,10 @@ impl Hash for Value {
                 err_type.hash(state);
                 err_msg.hash(state);
             }
+            Value::Tuple(tuple) => {
+                3u8.hash(state);
+                tuple.hash(state);
+            }
         }
     }
 }
@@ -81,6 +86,10 @@ impl Add for Value {
             (Value::Int(a), Value::Float(b)) => Value::Float((a + b.into()).into()),
             (Value::Float(a), Value::Int(b)) => Value::Float(a + b.into()),
             (Value::String(a), Value::String(b)) => Value::String(a + &b),
+            (Value::Tuple(mut a), Value::Tuple(b)) => {
+                a.extend(b);
+                Value::Tuple(a)
+            }
             (Value::Bytes(mut a), Value::Bytes(b)) => {
                 a.extend(b);
                 Value::Bytes(a)
@@ -240,6 +249,7 @@ impl Value {
             Value::List(_) | Value::Map { .. } => true,
             Value::String(s) if !s.is_empty() => true,
             Value::Bytes(b) if !b.is_empty() => true,
+            Value::Tuple(items) if !items.is_empty() => true,
             Value::Map { keys, values } if !keys.is_empty() && !values.is_empty() => true,
             _ => false,
         }
@@ -253,6 +263,8 @@ impl Value {
             Value::String(s) => Box::new(s.chars().map(|c| Value::String(c.to_string()))),
 
             Value::Bytes(b) => Box::new(b.clone().into_iter().map(|byte| Value::Int(Int::from(byte as i32)))),
+
+            Value::Tuple(items) => Box::new(items.clone().into_iter()),
 
             _ => Box::new(std::iter::empty()),
         }
@@ -273,6 +285,7 @@ impl Value {
             Value::Null => "null",
             Value::Map { .. } => "map",
             Value::List(_) => "list",
+            Value::Tuple(_) => "tuple",
             Value::Bytes(_) => "bytes",
             Value::Function(_) => "function",
             Value::Error(_, _) => "error",
@@ -287,6 +300,7 @@ impl Value {
             Value::Null => "null".to_string(),
             Value::Map { .. } => "map".to_string(),
             Value::List(_) => "list".to_string(),
+            Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(func) => func.get_return_type().to_string(),
             Value::Error(err_type, _) => err_type.to_string(),
@@ -299,7 +313,8 @@ impl Value {
             Value::Float(f) => *f != 0.0.into(),
             Value::String(s) => !s.is_empty(),
             Value::List(l) => !l.is_empty(),
-            Value::Map { keys, .. } => !keys.is_empty(), // If no keys, assume empty
+            Value::Map { keys, .. } => !keys.is_empty(),
+            Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Function(_) => true,
             Value::Error(_, _) => true,
@@ -335,6 +350,10 @@ impl Value {
                     .collect();
                 format!("{{{}}}", pairs.join(", "))
             }
+            Value::Tuple(items) => {
+                let items: Vec<String> = items.iter().map(|item| item.to_string()).collect();
+                format!("({})", items.join(", "))
+            }
             Value::List(v) => {
                 let items: Vec<String> = v.iter().map(|item| item.to_string()).collect();
                 format!("[{}]", items.join(", "))
@@ -364,32 +383,9 @@ impl Value {
     
             Value::Null => Some(vec![]),
     
-            Value::Map { keys, values } => {
-                let mut out = String::new();
-                out.push('{');
-                for (i, (k, v)) in keys.iter().zip(values.iter()).enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    let k_str = k.to_string();
-                    let v_str = v.to_string();
-                    out.push_str(&format!("{}: {}", k_str, v_str));
-                }
-                out.push('}');
-                Some(out.into_bytes())
-            }
-    
-            Value::List(vs) => {
-                let mut out = String::new();
-                out.push('[');
-                for (i, v) in vs.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    out.push_str(&v.to_string());
-                }
-                out.push(']');
-                Some(out.into_bytes())
+            Value::Map { keys: _, values: _ } | Value::List(_) | Value::Tuple(_) => {
+                let description = format!("<{}>", self.type_name());
+                Some(description.into_bytes())
             }
     
             Value::Function(func) => {
@@ -414,6 +410,13 @@ impl Value {
         match self {
             Value::Float(f) => f.value.is_nan(),
             Value::Int(i) => Value::Float(Float::from(i.value.clone())).is_nan(),
+            _ => false,
+        }
+    }
+    pub fn is_statement(&self) -> bool {
+        match self {
+            Value::Map { keys, .. } => { keys.iter().any(|k| matches!(k, Value::String(s) if s == "type"))},
+            Value::Null => true,
             _ => false,
         }
     }
