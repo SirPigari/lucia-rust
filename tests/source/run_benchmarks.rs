@@ -14,14 +14,18 @@ use chrono::{DateTime, Utc, Local, TimeZone};
 use sys_info;
 
 #[derive(Deserialize, Serialize)]
-struct BuildInfo {
-    name: String,
-    version: String,
-    rustc_version: String,
-    repository: String,
-    git_hash: String,
-    file_hash: String,
-    profile: String,
+pub struct BuildInfo {
+    pub name: String,
+    pub version: String,
+    pub rustc_version: String,
+    pub rustc_channel: String,
+    pub target: String,
+    pub repository: String,
+    pub git_hash: String,
+    pub file_hash: String,
+    pub profile: String,
+    pub ci: String,
+    pub dependencies: String,
 }
 
 fn main() {
@@ -108,7 +112,7 @@ fn main() {
 
     println!("{}\n", "─────────────────────────────────────────".dimmed());
 
-    let is_debug = info.profile == "debug";
+    let is_debug = info.profile == "debug" || info.profile == "dev";
 
     let all_entries: Vec<_> = entries.filter_map(Result::ok).collect();
     if all_entries.is_empty() {
@@ -170,7 +174,17 @@ fn main() {
 
             if success {
                 let avg_duration = durations.iter().sum::<u128>() / durations.len() as u128;
-                println!("{}", format!("{} ms", avg_duration).green());
+                let color = if avg_duration < 100 {
+                    "green"
+                } else if avg_duration < 250 {
+                    "yellow"
+                } else if avg_duration < 500 {
+                    "orange"
+                } else {
+                    "red"
+                };
+                
+                println!("{}", format!("{} ms", avg_duration).color(color));                
                 total_time += avg_duration;
                 times.push(avg_duration);
                 times_map.insert(file_name.to_string(), durations);

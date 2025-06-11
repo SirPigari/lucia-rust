@@ -67,8 +67,8 @@ where
 
 #[derive(Clone)]
 pub struct NativeFunction {
-    func: Arc<dyn NativeCallable>,
-    meta: FunctionMetadata,
+    pub func: Arc<dyn NativeCallable>,
+    pub meta: FunctionMetadata,
 }
 
 impl NativeFunction {

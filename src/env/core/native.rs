@@ -134,18 +134,6 @@ fn input(args: &HashMap<String, Value>) -> Value {
     }
 }
 
-fn exit(args: &HashMap<String, Value>) -> Value {
-    let code = args.get("code").map_or(0, |val| match val {
-        Value::Int(n) => n.to_i64().unwrap_or(0),
-        Value::Float(f) => f.round().to_i64().unwrap_or(0),
-        Value::String(s) => s.parse::<i64>().unwrap_or(0),
-        _ => 0,
-    });
-
-    std::process::exit(code as i32);
-    Value::Int(code.into())
-}
-
 fn len(args: &HashMap<String, Value>) -> Value {
     match args.get("v") {
         Some(Value::List(list)) => Value::Int(list.len().into()),
@@ -358,19 +346,6 @@ pub fn input_fn() -> Function {
             Parameter::positional_optional("prompt", "str", Value::String("".to_string())),
         ],
         "str",
-        true, true, true,
-        None,
-    )))
-}
-
-pub fn exit_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
-        "exit",
-        exit,
-        vec![
-            Parameter::keyword_variadic_optional("code", "int", Value::Int(0.into())),
-        ],
-        "void",
         true, true, true,
         None,
     )))

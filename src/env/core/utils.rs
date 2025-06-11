@@ -13,7 +13,7 @@ use crate::env::core::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use std::cmp::Ordering;
-use crate::env::core::functions::{Parameter, NativeMethod, FunctionMetadata};
+use crate::env::core::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata};
 use crate::env::core::statements::Statement;
 use crate::env::core::types::{Int, Float, Boolean};
 use crate::env::core::value::{Value};
@@ -345,6 +345,36 @@ where
     };
 
     Value::Function(Function::NativeMethod(Arc::new(method)))
+}
+
+pub fn make_native_function<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &str,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>,
+) -> Value
+where
+    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    let method = NativeFunction {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: return_type.to_string(),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+        },
+    };
+
+    Value::Function(Function::Native(Arc::new(method)))
 }
 
 pub fn get_operator_precedence(op: &str) -> u8 {

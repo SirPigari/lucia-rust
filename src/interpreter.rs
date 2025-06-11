@@ -10,7 +10,8 @@ use crate::env::core::utils::{
     check_ansi,
     unescape_string,
     to_static,
-
+    make_native_method,
+    make_native_function,
 };
 use crate::env::core::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::core::types::{Int, Float, VALID_TYPES};
@@ -25,15 +26,18 @@ use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Pa
 use std::sync::Arc;
 use num_bigint::{BigInt, Sign};
 use std::cmp::Ordering;
+use std::sync::Mutex;
 
 use crate::lexer::Lexer;
 use crate::parser::{Parser, Token};
 
 
+#[derive(Debug, Clone)]
 pub struct Interpreter {
     config: Config,
     err: Option<Error>,
     is_returning: bool,
+    is_stopped: bool,
     return_value: Value,
     source: String,
     stack: Vec<(String, HashMap<String, Value>, HashMap<String, Variable>)>,
@@ -49,6 +53,7 @@ impl Interpreter {
             err: None,
             return_value: NULL,
             is_returning: false,
+            is_stopped: false,
             source: String::new(),
             stack: vec![],
             use_colors,
@@ -69,10 +74,6 @@ impl Interpreter {
             Variable::new("input".to_string(), Value::Function(native::input_fn()), "function".to_string(), false, true, true),
         );
         this.variables.insert(
-            "exit".to_string(),
-            Variable::new("exit".to_string(), Value::Function(native::exit_fn()), "function".to_string(), false, true, true),
-        );
-        this.variables.insert(
             "len".to_string(),
             Variable::new("len".to_string(), Value::Function(native::len_fn()), "function".to_string(), false, true, true),
         );
@@ -86,6 +87,10 @@ impl Interpreter {
         );
 
         this
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.is_stopped
     }
 
     fn check_type(
@@ -146,6 +151,20 @@ impl Interpreter {
         }
     
         true
+    }
+
+    pub fn exit_with_code(&mut self, code: Value) -> Value {
+        self.is_returning = true;
+        self.return_value = match code {
+            Value::Int(i) => Value::Int(i),
+            Value::Float(f) => Value::Float(f),
+            Value::String(s) => Value::String(s),
+            _ => {
+                self.raise("TypeError", "Exit code must be an int, float or string");
+                NULL
+            }
+        };
+        return self.return_value.clone();
     }
     
     
@@ -1560,6 +1579,20 @@ impl Interpreter {
         pos_args: Vec<Value>,
         named_args: HashMap<String, Value>,
     ) -> Value {
+        if function_name == "exit" {
+            let code = if let Some(code) = named_args.get("code") {
+                code.clone()
+            } else if !pos_args.is_empty() {
+                pos_args[0].clone()
+            } else {
+                Value::Int(Int::new(0))
+            };
+            self.is_returning = true;
+            self.is_stopped = true;
+            self.return_value = code.clone();
+            return code;
+        }
+
         let var = match self.variables.get(function_name) {
             Some(v) => v.clone(),
             None => {

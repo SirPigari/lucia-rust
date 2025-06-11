@@ -597,6 +597,7 @@ fn main() {
                 println!("Use 'exit()' to exit.");
                 continue;
             }
+
             if input == "clear" || input == "cls" || input == "cls()" {
                 println!("Use 'clear()' to clear.");
                 continue;
@@ -675,7 +676,12 @@ fn main() {
                 Some(use_colors),
             );
             let out: Value = match interpreter.interpret(statements, input.clone()) {
-                Ok(out) => out,
+                Ok(out) => {
+                    if interpreter.is_stopped() {
+                        exit(0);
+                    }
+                    out
+                },
                 Err(error) => {
                     debug_log(
                         "Error while interpreting:",
