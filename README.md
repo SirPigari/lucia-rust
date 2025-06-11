@@ -57,7 +57,7 @@ Runs on:
 
 ## Community
 
-Join us on Discord: [discord.gg/your-link-here]()
+Join us on Discord: [discord.gg/placeholder-rn]()
 
 ---
 
