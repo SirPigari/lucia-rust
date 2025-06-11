@@ -221,7 +221,7 @@ fn load_config(path: &Path) -> Result<Config, String> {
     }
 }
 
-fn activate_environment(env_path: &Path) -> io::Result<()> {
+fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Result<()> {
     if !env_path.exists() {
         fs::create_dir_all(env_path)?;
     }
@@ -233,7 +233,24 @@ fn activate_environment(env_path: &Path) -> io::Result<()> {
     if env_path_str.starts_with("\\\\?\\") {
         env_path_str = env_path_str[4..].to_string();
     }
-    
+
+    let config_path = env_path.join("config.json");
+
+    if respect_existing_moded && config_path.exists() {
+        let config_data = fs::read_to_string(&config_path)?;
+        let mut config: Config = serde_json::from_str(&config_data)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to deserialize config"))?;
+
+        if config.moded {
+            config.home_dir = env_path_str;
+            let config_str = serde_json::to_string_pretty(&config)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
+            fs::write(&config_path, config_str)
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write config file"))?;
+            return Ok(());
+        }
+    }
+
     let default_config = Config {
         version: VERSION.to_string(),
         moded: false,
@@ -270,8 +287,6 @@ fn activate_environment(env_path: &Path) -> io::Result<()> {
             info: "#9209B3".to_string(),
         },
     };
-
-    let config_path = env_path.join("config.json");
 
     let config_str = serde_json::to_string_pretty(&default_config)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
@@ -382,7 +397,7 @@ fn main() {
             Ok(config) => config,
             Err(_) => {
                 eprintln!("Failed to read config file, activating environment...");
-                if let Err(err) = activate_environment(&env_path) {
+                if let Err(err) = activate_environment(&env_path, true) {
                     eprintln!("Failed to activate environment: {}", err);
                     exit(1);
                 }
@@ -398,7 +413,7 @@ fn main() {
         }
     } else {
         eprintln!("Config file not found, activating environment...");
-        if let Err(err) = activate_environment(&env_path) {
+        if let Err(err) = activate_environment(&env_path, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
@@ -414,7 +429,7 @@ fn main() {
     
     if activate_flag {
         println!("{}", format!("Activating environment at: {}", env_path.display()).cyan().bold());
-        if let Err(err) = activate_environment(&env_path) {
+        if let Err(err) = activate_environment(&env_path, false) {
             eprintln!("{}", format!("Failed to activate environment: {}", err).red().bold());
             exit(1);
         }
@@ -428,7 +443,7 @@ fn main() {
     let home_dir_path = PathBuf::from(home_dir.clone());
 
     if let Err(e) = std_env::set_current_dir(&home_dir_path) {
-        if let Err(err) = activate_environment(&env_path) {
+        if let Err(err) = activate_environment(&env_path, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
