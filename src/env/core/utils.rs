@@ -146,7 +146,10 @@ pub fn format_value(value: &Value) -> String {
             format!("b\"{}\"", formatted_bytes.join(" "))
         }
 
-        Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func),
+        Value::Function(func) => {
+            format!("<function '{}' at {:p}>", func.get_name(), func.ptr())
+        }
+        
 
         Value::Error(err_type, err_msg) => format!("<{}: {}>", err_type, err_msg),
     }

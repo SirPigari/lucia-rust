@@ -87,36 +87,50 @@ impl Parser {
         if let Some(token) = self.token() {
             let (token_type, token_value) = (token.0.clone(), token.1.clone());
             let value_matches = expected_value.is_empty() || token_value == expected_value;
-    
-            if token_type != expected_type || !value_matches {
-                self.raise("UEFError", &format!(
-                    "Expected token '{}' but found: {}",
-                    if expected_value.is_empty() { expected_type } else { expected_value },
-                    token_value
-                ));
-            }
-        } else {
-            if expected_type == "SEPARATOR" && [")", "]", "}", "end"].contains(&expected_value) {
-                let mut opening = "".to_string();
-                match expected_value {
-                    ")" => opening = "(".to_string(),
-                    "]" => opening = "[".to_string(),
-                    "}" => opening = "{".to_string(),
-                    "end" => opening = ":".to_string(),
-                    _ => {}
+
+            if !(token_type == "EOF" && expected_type != "EOF") {
+                if token_type != expected_type || !value_matches {
+                    self.raise("UEFError", &format!(
+                        "Expected token '{}' but found: {}",
+                        if expected_value.is_empty() { expected_type } else { expected_value },
+                        token_value
+                    ));
                 }
-                self.raise_with_help("SyntaxError", &format!(
-                    "\"{}\" was never closed",
-                    opening
-                ),
-                &format!("Maybe you forgot '{}'?", expected_value));
                 return (vec![], vec![]);
             }
-            self.raise("UEFError", &format!(
-                "Expected token '{}' but found end of input",
-                if expected_value.is_empty() { expected_type } else { expected_value }
-            ));
         }
+        if expected_type == "SEPARATOR" && [")", "]", "}", "end"].contains(&expected_value) {
+            let mut opening = "".to_string();
+            match expected_value {
+                ")" => opening = "(".to_string(),
+                "]" => opening = "[".to_string(),
+                "}" => opening = "{".to_string(),
+                "end" => opening = ":".to_string(),
+                _ => {}
+            }
+            self.raise_with_help("SyntaxError", &format!(
+                "\"{}\" was never closed",
+                opening
+            ),
+            &format!("Maybe you forgot '{}'?", expected_value));
+            return (vec![], vec![]);
+        } else if expected_type == "OPERATOR" && ["|"].contains(&expected_value) {
+            let mut opening = "".to_string();
+            match expected_value {
+                "|" => opening = "|".to_string(),
+                _ => {}
+            }
+            self.raise_with_help("SyntaxError", &format!(
+                "\"{}\" is missing its closing pair",
+                opening
+            ),
+            &format!("Maybe you forgot '{}'?", expected_value));
+            return (vec![], vec![]);
+        }
+        self.raise("UEFError", &format!(
+            "Expected token '{}' but found end of input",
+            if expected_value.is_empty() { expected_type } else { expected_value }
+        ));
         (vec![], vec![])
     }
 
@@ -191,8 +205,9 @@ impl Parser {
                 byte_index += token.1.len();
             }
         }
-    
-        // find line start
+        if byte_index > self.source.len() {
+            return 0;
+        }
         let mut line_start = 0;
         for (i, ch) in self.source[..byte_index].char_indices().rev() {
             if ch == '\n' {
@@ -699,17 +714,60 @@ impl Parser {
 
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();
-                    let mut expr = Statement::Null;
-                    while let Some(next_token) = self.token() {
+                    let mut values = vec![];
+
+                    if let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == ")" {
-                            break;
+                            self.next();
+                            return Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("values".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("TUPLE".to_string()),
+                                    Value::List(vec![]),
+                                ],
+                                line,
+                                column,
+                            };
                         }
-                        expr = self.parse_expression();
-                        break;
                     }
+
+                    let first_expr = self.parse_expression();
+                    values.push(first_expr);
+
+                    let mut is_tuple = false;
+                    while let Some(next_token) = self.token() {
+                        if next_token.0 == "SEPARATOR" && next_token.1 == "," {
+                            is_tuple = true;
+                            self.next();
+                            let expr_item = self.parse_expression();
+                            values.push(expr_item);
+                        } else {
+                            break;  // break here when next token isn’t a comma
+                        }
+                    }
+
                     self.check_for("SEPARATOR", ")");
                     self.next();
-                    expr
+
+                    if is_tuple || values.len() != 1 {
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("values".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("TUPLE".to_string()),
+                                Value::List(values.into_iter().map(|s| s.convert_to_map()).collect()),
+                            ],
+                            line,
+                            column,
+                        }
+                    } else {
+                        values.remove(0)
+                    }
                 }
 
                 "SEPARATOR" if token.1 == "[" => {

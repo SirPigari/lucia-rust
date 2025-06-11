@@ -338,6 +338,7 @@ impl Interpreter {
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
                 "TRY_CATCH" => self.handle_try(statement.clone()),
                 "TRY" => self.handle_try(statement.clone()),
+                "TUPLE" => self.handle_tuple(statement.clone()),
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
@@ -368,6 +369,24 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_tuple(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let items = match statement.get(&Value::String("items".to_string())) {
+            Some(Value::List(items)) => items,
+            _ => return Value::Tuple(vec![]),
+        };
+    
+        let mut values = Vec::new();
+        for item in items {
+            let value = self.evaluate(item.convert_to_statement());
+            if self.err.is_some() {
+                return NULL;
+            }
+            values.push(value);
+        }
+    
+        Value::Tuple(values)
     }
 
     fn handle_try(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -550,6 +569,10 @@ impl Interpreter {
         };
     
         let right_value = self.evaluate(right.convert_to_statement());
+
+        if self.err.is_some() {
+            return NULL;
+        }
     
         let left_hashmap = match left {
             Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
@@ -2189,7 +2212,6 @@ impl Interpreter {
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
         }
     }
-    
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {

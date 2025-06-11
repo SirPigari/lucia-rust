@@ -239,6 +239,15 @@ impl Function {
         }
     }
 
+    pub fn ptr(&self) -> *const () {
+        match self {
+            Function::Native(arc) => Arc::as_ptr(arc) as *const (),
+            Function::Custom(arc) => Arc::as_ptr(arc) as *const (),
+            Function::NativeMethod(arc) => Arc::as_ptr(arc) as *const (),
+            Function::CustomMethod(arc) => Arc::as_ptr(arc) as *const (),
+        }
+    }
+    
     pub fn metadata(&self) -> &FunctionMetadata {
         match self {
             Function::Native(f) => f.metadata(),

@@ -1,5 +1,5 @@
 {
-  "moded": false,
+  "moded": true,
   "debug": true,
   "debug_mode": "full",
   "supports_color": true,
@@ -19,7 +19,7 @@
     ".lc",
     ".l"
   ],
-  "home_dir": "C:\\Users\\Ja\\Desktop\\lucia-rust\\src\\env",
+  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
   "recursion_limit": 9999,
   "version": "2.0.0-rust",
   "color_scheme": {
