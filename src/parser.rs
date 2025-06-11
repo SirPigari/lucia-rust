@@ -145,39 +145,65 @@ impl Parser {
     }
 
     pub fn current_line(&self) -> usize {
-        // Count newlines up to the nth token's occurrence in the source
-        let binding = "".to_string();
-        let token_slice = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&binding);
-        if let Some(byte_index) = self.source.find(token_slice) {
-            self.source[..byte_index].chars().filter(|&c| c == '\n').count() + 1
-        } else {
-            1
-        }
-    }
+        let empty = String::new();
+        let target_token = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&empty);
     
-
-    pub fn get_line_column(&self) -> usize {
-        let binding = "".to_string();
-        let token_slice = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&binding);
+        let mut byte_index = 0;
+        let mut count = 0;
     
-        if let Some(byte_index) = self.source.find(token_slice) {
-            // Walk backwards to find the start of the line
-            let mut line_start = 0;
-            for (i, ch) in self.source[..byte_index].char_indices().rev() {
-                if ch == '\n' {
-                    line_start = i + ch.len_utf8();
-                    break;
+        for token in &self.tokens {
+            if &token.1 == target_token {
+                if count == self.pos {
+                    if let Some(found_index) = self.source[byte_index..].find(target_token) {
+                        byte_index += found_index;
+                        break;
+                    }
                 }
+                count += 1;
+            } else {
+                byte_index += token.1.len();
             }
-    
-            self.source[line_start..byte_index].chars().count() + 1
-        } else {
-            1
         }
+    
+        if byte_index > self.source.len() {
+            return 0;
+        }
+    
+        self.source[..byte_index].chars().filter(|&c| c == '\n').count() + 1
     }
     
+    pub fn get_line_column(&self) -> usize {
+        let empty = String::new();
+        let target_token = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&empty);
     
-
+        let mut byte_index = 0;
+        let mut count = 0;
+        for token in &self.tokens {
+            if &token.1 == target_token {
+                if count == self.pos {
+                    if let Some(found_index) = self.source[byte_index..].find(target_token) {
+                        byte_index += found_index;
+                        break;
+                    }
+                }
+                count += 1;
+            } else {
+                byte_index += token.1.len();
+            }
+        }
+    
+        // find line start
+        let mut line_start = 0;
+        for (i, ch) in self.source[..byte_index].char_indices().rev() {
+            if ch == '\n' {
+                line_start = i + ch.len_utf8();
+                break;
+            }
+        }
+    
+        self.source[line_start..byte_index].chars().count() + 1
+    }
+    
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
         while let Some(_) = self.token().cloned() {
