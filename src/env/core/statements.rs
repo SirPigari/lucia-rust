@@ -65,4 +65,11 @@ impl Statement {
             },
         }
     }
+    pub fn get_type(&self) -> String {
+        let map = self.convert_to_hashmap();
+        match map.get(&Value::String("type".to_string())) {
+            Some(Value::String(s)) => s.clone(),
+            _ => "any".to_string(),
+        }
+    }    
 }

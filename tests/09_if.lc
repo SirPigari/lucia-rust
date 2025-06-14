@@ -1,0 +1,55 @@
+// 1. Just if
+if (1):
+    print(1)
+end
+
+// 2. If with else
+if (2):
+    print(2)
+else:
+    print("else for 2")
+end
+
+// 3. If with else if
+if (3):
+    print(3)
+else if (4):
+    print(4)
+end
+
+// 4. If with else if and else
+if (5):
+    print(5)
+else if (6):
+    print(6)
+else:
+    print("else for 5 and 6")
+end
+
+// 5. If with multiple else ifs
+if (7):
+    print(7)
+else if (8):
+    print(8)
+else if (9):
+    print(9)
+end
+
+// 6. If with multiple else ifs and else
+if (10):
+    print(10)
+else if (11):
+    print(11)
+else if (12):
+    print(12)
+else:
+    print("else for 10, 11, 12")
+end
+
+// 7. Two separate if statements (not chained)
+if (13):
+    print(13)
+end
+if (14):
+    print(14)
+end

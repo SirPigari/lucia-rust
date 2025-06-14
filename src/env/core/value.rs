@@ -75,7 +75,6 @@ impl Hash for Value {
     }
 }
 
-
 impl Add for Value {
     type Output = Value;
 
@@ -282,7 +281,7 @@ impl Value {
             Value::Int(_) => "int",
             Value::String(_) => "str",
             Value::Boolean(_) => "bool",
-            Value::Null => "null",
+            Value::Null => "void",
             Value::Map { .. } => "map",
             Value::List(_) => "list",
             Value::Tuple(_) => "tuple",
@@ -297,7 +296,7 @@ impl Value {
             Value::Int(_) => "int".to_string(),
             Value::String(_) => "str".to_string(),
             Value::Boolean(_) => "bool".to_string(),
-            Value::Null => "null".to_string(),
+            Value::Null => "void".to_string(),
             Value::Map { .. } => "map".to_string(),
             Value::List(_) => "list".to_string(),
             Value::Tuple(_) => "tuple".to_string(),

@@ -109,12 +109,15 @@ fn main() {
         println!("  {}", test.green());
     }
 
-    println!("\n{} {}", "Failed:".red(), failed.len());
+    println!("\n{}", "Failed:".red());
     for (test, stderr) in &failed {
-        println!("  {}", test.red());
-        println!("{}", "\n--- stderr output ---".dimmed());
+        println!("{}", test.red());
+    }
+    for (test, stderr) in &failed {
+        println!("\n{}", format!("--- {} stderr ---", test).dimmed());
         println!("{}", stderr.yellow());
     }
+    
 
     println!("{}", "──────────────────────────────────────".dimmed());
 

@@ -11,7 +11,7 @@ use std::fmt::{Binary, Octal, LowerHex};
 
 
 pub const VALID_TYPES: &[&str] = &[
-    "void", "any", "null", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes", "tuple"
+    "void", "any", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes", "tuple"
 ];
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Debug)]

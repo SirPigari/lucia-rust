@@ -102,9 +102,8 @@ impl Interpreter {
     ) -> bool {
         let valid_types = VALID_TYPES.to_vec();
         let mut types_mapping = std::collections::HashMap::new();
-        types_mapping.insert("void", "null");
+        types_mapping.insert("void", "void");
         types_mapping.insert("any", "any");
-        types_mapping.insert("null", "null");
         types_mapping.insert("Decimal", "float");
         types_mapping.insert("method", "function");
         types_mapping.insert("int", "int");
@@ -323,22 +322,37 @@ impl Interpreter {
     
         let result = match statement.get(&Value::String("type".to_string())) {
             Some(Value::String(t)) => match t.as_str() {
+                // Primitive types
                 "NUMBER" => self.handle_number(statement.clone()),
                 "STRING" => self.handle_string(statement.clone()),
                 "BOOLEAN" => self.handle_boolean(statement.clone()),
+        
+                // Collections and data structures
                 "ITERABLE" => self.handle_iterable(statement.clone()),
+                "TUPLE" => self.handle_tuple(statement.clone()),
+        
+                // Operations
                 "OPERATION" => self.handle_operation(statement.clone()),
                 "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
+        
+                // Calls and access
                 "CALL" => self.handle_call(statement.clone()),
                 "METHOD_CALL" => self.handle_method_call(statement.clone()),
+                "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
+        
+                // Control flow
                 "FOR" => self.handle_for_loop(statement.clone()),
+                "IF" => self.handle_if(statement.clone()),
+                "TRY_CATCH" | "TRY" => self.handle_try(statement.clone()),
+        
+                // Variables and assignment
                 "VARIABLE" => self.handle_variable(statement.clone()),
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
-                "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
-                "TRY_CATCH" => self.handle_try(statement.clone()),
-                "TRY" => self.handle_try(statement.clone()),
-                "TUPLE" => self.handle_tuple(statement.clone()),
+        
+                // Type
+                "TYPE" => self.handle_type(statement.clone()),
+        
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
@@ -369,6 +383,72 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let binding = statement;
+        let default = Value::String("any".to_string());
+    
+        let type_name = binding.get(&Value::String("value".to_string())).unwrap_or(&default);
+    
+        if let Value::String(s) = type_name {
+            if VALID_TYPES.contains(&s.as_str()) {
+                return Value::String(s.clone());
+            }
+    
+            self.raise(
+                "TypeError",
+                &format!(
+                    "Invalid type '{}'. Valid types are: {}",
+                    s,
+                    VALID_TYPES.join(", ")
+                ),
+            );
+        } else {
+            self.raise("TypeError", "Type value is not a string");
+        }
+        NULL
+    }
+
+    fn handle_if(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let condition = match statement.get(&Value::String("condition".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'condition' in if statement"),
+        };
+    
+        let condition_value = self.evaluate(condition.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
+    
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(body)) => body,
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in if statement"),
+        };
+    
+        let else_body = match statement.get(&Value::String("else_body".to_string())) {
+            Some(Value::List(body)) => Some(body),
+            _ => None,
+        };
+    
+        let stmts_to_run = if condition_value.is_truthy() { Some(body) } else { else_body };
+    
+        if let Some(stmts) = stmts_to_run {
+            for stmt in stmts {
+                if !stmt.is_statement() {
+                    continue;
+                }
+                let result = self.evaluate(stmt.convert_to_statement());
+                if self.err.is_some() {
+                    return NULL;
+                }
+                if result != NULL {
+                    return result;
+                }
+            }
+        }
+    
+        NULL
     }
 
     fn handle_tuple(&mut self, statement: HashMap<Value, Value>) -> Value {

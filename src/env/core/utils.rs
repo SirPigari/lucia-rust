@@ -402,6 +402,8 @@ pub fn get_type_default(type_: &str) -> Value {
         "map" => Value::Map { keys: vec![], values: vec![] },
         "list" => Value::List(vec![]),
         "bytes" => Value::Bytes(vec![]),
+        "tuple" => Value::Tuple(vec![]),
+        "void" => Value::Null,
         _ => Value::Null,
     }
 }
@@ -464,8 +466,8 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("value".to_string())
             ],
             values: vec![
-                Value::String("NULL".to_string()),
-                Value::Null,
+                Value::String("BOOLEAN".to_string()),
+                Value::String("null".to_string()),
             ],
             line: 0,
             column: 0,
@@ -512,6 +514,30 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
             line: 0,
             column: 0,
         },
+        "tuple" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("elements".to_string())
+            ],
+            values: vec![
+                Value::String("TUPLE".to_string()),
+                Value::List(vec![])
+            ],
+            line: 0,
+            column: 0,
+        },
+        "void" => Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("value".to_string())
+            ],
+            values: vec![
+                Value::String("BOOLEAN".to_string()),
+                Value::String("null".to_string()),
+            ],
+            line: 0,
+            column: 0,
+        },
         _ => Statement::Statement {
             keys: vec![
                 Value::String("type".to_string()),
@@ -526,6 +552,13 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
         },
     }
 }
+
+pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statement {
+    let type_name = type_.get_type();
+    get_type_default_as_statement(&type_name)
+}
+
+
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

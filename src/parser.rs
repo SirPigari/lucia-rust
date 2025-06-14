@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement};
+use crate::env::core::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement};
 use crate::env::core::value::Value;
 use crate::env::core::errors::Error;
 use crate::env::core::statements::Statement;
@@ -251,6 +251,10 @@ impl Parser {
         if self.err.is_some() {
             return Statement::Null;
         }
+
+        if expr.get_type() == "TYPE" {
+            return expr;
+        }
     
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
@@ -449,7 +453,6 @@ impl Parser {
                 _ => break,
             }
         }
-        
     
         expr
     }
@@ -460,6 +463,22 @@ impl Parser {
 
         match self.token().cloned() {
             Some(token) => match token.0.as_str() {
+                "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_str()) => {
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TYPE".to_string()),
+                            Value::String(token.1.clone()),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
                 "OPERATOR" if token.1 == "|" => {
                     self.next();
                     let expr = self.parse_expression();
@@ -570,13 +589,14 @@ impl Parser {
                     }
                     self.check_for("SEPARATOR", ")");
                     self.next();
-                    line = self.current_line();
-                    column = self.get_line_column();
+                    let line = self.current_line();
+                    let column = self.get_line_column();
                     self.check_for("SEPARATOR", ":");
                     self.next();
+
                     let mut body = vec![];
                     while let Some(tok) = self.token() {
-                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                        if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "else") {
                             break;
                         }
                         let stmt = self.parse_expression();
@@ -585,18 +605,72 @@ impl Parser {
                         }
                         body.push(stmt);
                     }
-                    self.check_for("IDENTIFIER", "end");
-                    self.next();
+
+                    let mut else_body = None;
+
+                    if self.token_is("IDENTIFIER", "end") {
+                        self.next();
+                        else_body = Some(vec![]);
+                    } else if let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "else" {
+                            self.next();
+                    
+                            if let Some(next_tok) = self.token() {
+                                if next_tok.0 == "IDENTIFIER" && next_tok.1 == "if" {
+                                    else_body = Some(vec![self.parse_expression()]);
+                                } else {
+                                    self.check_for("SEPARATOR", ":");
+                                    self.next();
+                    
+                                    let mut else_stmts = vec![];
+                                    while let Some(tok) = self.token() {
+                                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                            break;
+                                        }
+                                        let stmt = self.parse_expression();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                        else_stmts.push(stmt);
+                                    }
+                                    else_body = Some(else_stmts);
+                    
+                                    // consume the `end` token after else block
+                                    if self.token_is("IDENTIFIER", "end") {
+                                        self.next();
+                                    } else {
+                                        self.raise("SyntaxError", "Expected 'end' after else block");
+                                        return Statement::Null;
+                                    }
+                                }
+                            } else {
+                                self.raise("SyntaxError", "Unexpected end after 'else'");
+                                return Statement::Null;
+                            }
+                        } else {
+                            self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
+                            return Statement::Null;
+                        }
+                    } else {
+                        self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
+                        return Statement::Null;
+                    }
+
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
                             Value::String("condition".to_string()),
                             Value::String("body".to_string()),
+                            Value::String("else_body".to_string()),
                         ],
                         values: vec![
                             Value::String("IF".to_string()),
                             condition.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                            Value::List(match else_body {
+                                Some(stmts) => stmts.into_iter().map(|s| s.convert_to_map()).collect(),
+                                None => vec![],
+                            })                            
                         ],
                         line,
                         column,
@@ -860,13 +934,8 @@ impl Parser {
                     self.raise("SyntaxError", "Expected type after ':'");
                     return Statement::Null;
                 }
-                let type_ = type_token.1.clone();
-                self.next();
-                if !VALID_TYPES.contains(&type_.as_str()) {
-                    self.raise("TypeError", &format!("Invalid type '{}'", type_));
-                    return Statement::Null;
-                }
-                let mut value = get_type_default_as_statement(&type_).convert_to_map();
+                let type_ = self.parse_expression();
+                let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
                 if self.err.is_some() {
                     return Statement::Null;
                 }
@@ -887,7 +956,7 @@ impl Parser {
                     values: vec![
                         Value::String("VARIABLE_DECLARATION".to_string()),
                         Value::String(name),
-                        Value::String(type_.clone()),
+                        type_.clone().convert_to_map(),
                         value,
                     ],
                     line,
