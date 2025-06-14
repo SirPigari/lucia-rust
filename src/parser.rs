@@ -134,14 +134,6 @@ impl Parser {
         (vec![], vec![])
     }
 
-    fn is_token(&mut self, kind: &str, value: &str) -> bool {
-        if let Some(token) = self.token() {
-            token.0 == kind && token.1 == value
-        } else {
-            false
-        }
-    }
-
     fn get_next(&mut self) -> Option<&Token> {
         self.next();
         self.token()
@@ -752,7 +744,7 @@ impl Parser {
 
                     let mut body = vec![];
                     while let Some(tok) = self.token() {
-                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                        if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "catch") {
                             break;
                         }
                         let stmt = self.parse_expression();
@@ -762,9 +754,11 @@ impl Parser {
                         body.push(stmt);
                     }
 
-                    self.check_for("IDENTIFIER", "end");
-                    self.next();
-
+                    if !self.token_is("IDENTIFIER", "catch") {
+                        self.check_for("IDENTIFIER", "end");
+                        self.next();
+                    }
+                    
                     let mut exception_vars = vec![];
                     let mut catch_body = vec![];
                     let mut has_catch = false;
@@ -811,7 +805,7 @@ impl Parser {
 
                             self.next(); // consume ')'
 
-                            if !self.is_token("SEPARATOR", ":") {
+                            if !self.token_is("SEPARATOR", ":") {
                                 self.raise_with_help("SyntaxError", "Expected ':' after exception vars", "Did you forget to add ':'?");
                                 return Statement::Null;
                             }

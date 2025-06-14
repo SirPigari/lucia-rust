@@ -1,0 +1,30 @@
+// setup
+a: list = [0..5]
+
+// forget stmt
+forget a[2..4]
+print(a)  // [0, 1, 4, 5]
+forget a
+
+// throw & try stmt
+try:
+    throw "This should throw an error" from "ExpectedError"
+catch (e):
+    print(e)
+end
+
+try:
+    0 / 0
+end
+
+try:
+    0 / 0
+end catch (err_type, err_msg):
+    print(err_type, err_msg)
+end
+
+try:
+    i = 10
+end catch (err_type, err_msg, err_help):
+    print(err_type, err_msg, err_help)
+end

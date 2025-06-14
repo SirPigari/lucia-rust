@@ -2,14 +2,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
-
 use crate::env::runtime::errors::Error;
 
 pub struct Preprocessor {
     lib_dir: PathBuf,
     config_path: PathBuf,
     defines: HashMap<String, (String, String)>, // IDENTIFIER -> (TOKEN_TYPE, TOKEN_VALUE)
-    aliases: HashMap<(String, String), (String, String)>, // (type,value) -> (type,value)
+    aliases: HashMap<(String, String), (String, String)>, // (TOKEN_TYPE, TOKEN_VALUE) -> (TOKEN_TYPE, TOKEN_VALUE)
 }
 
 impl Preprocessor {
@@ -230,7 +229,6 @@ impl Preprocessor {
                         let included_path: PathBuf;
 
                         if tokens[i].0 == "OPERATOR" && tokens[i].1 == "<" {
-                            // Parse <lib> path as sequence of tokens until >
                             i += 1;
                             let mut path_parts = Vec::new();
 
@@ -249,13 +247,12 @@ impl Preprocessor {
                                 });
                             }
 
-                            i += 1; // Skip '>'
+                            i += 1;
 
                             let combined_path = path_parts.join("");
                             let lib_base = self.lib_dir.join(&combined_path);
 
                             if lib_base.is_dir() {
-                                // Include all .lc and .lucia files in sorted order
                                 let mut entries: Vec<_> = fs::read_dir(&lib_base)
                                     .map_err(|e| Error {
                                         error_type: "PreprocessorIOError".to_string(),
