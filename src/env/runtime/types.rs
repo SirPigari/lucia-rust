@@ -5,7 +5,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg, Not, BitAnd, BitOr};
 use std::str::FromStr;
-use crate::env::core::value::Value;
+use crate::env::runtime::value::Value;
 use once_cell::sync::Lazy;
 use std::fmt::{Binary, Octal, LowerHex};
 

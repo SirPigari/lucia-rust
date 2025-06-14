@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement};
-use crate::env::core::value::Value;
-use crate::env::core::errors::Error;
-use crate::env::core::statements::Statement;
-use crate::env::core::types::{Float, Int, VALID_TYPES};
+use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::runtime::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement};
+use crate::env::runtime::value::Value;
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::statements::Statement;
+use crate::env::runtime::types::{Float, Int, VALID_TYPES};
 use once_cell::sync::Lazy;
 
 static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(|| Token("".to_string(), "".to_string()));

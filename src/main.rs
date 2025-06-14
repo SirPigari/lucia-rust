@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use colored::*;
 
 mod env {
-    pub mod core {
+    pub mod runtime {
         pub mod utils;
         pub mod config;
         pub mod types;
@@ -28,14 +28,14 @@ mod interpreter;
 mod parser;
 mod lexer;
 
-use crate::env::core::utils;
-use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::runtime::utils;
+use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
 use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static};
-use crate::env::core::types::{Int, Float, Boolean};
-use crate::env::core::errors::Error;
-use crate::env::core::value::Value;
-use crate::env::core::build::{BuildInfo, get_build_info};
-use crate::env::core::preprocessor::Preprocessor;
+use crate::env::runtime::types::{Int, Float, Boolean};
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::value::Value;
+use crate::env::runtime::build::{BuildInfo, get_build_info};
+use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;

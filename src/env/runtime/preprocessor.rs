@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 
-use crate::env::core::errors::Error;
+use crate::env::runtime::errors::Error;
 
 pub struct Preprocessor {
     lib_dir: PathBuf,

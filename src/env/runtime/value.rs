@@ -1,6 +1,6 @@
-use crate::env::core::types::{Float, Int};
-use crate::env::core::functions::Function;
-use crate::env::core::statements::Statement;
+use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::functions::Function;
+use crate::env::runtime::statements::Statement;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;

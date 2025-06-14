@@ -3,22 +3,22 @@ use std::fmt::{self, Write as FmtWrite};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
-use crate::env::core::config::{Config};
+use crate::env::runtime::config::{Config};
 use std::any::Any;
 use num_bigint::BigInt;
 use num_bigfloat::BigFloat;
 use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
 use std::str::FromStr;
-use crate::env::core::functions::Function;
+use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use std::cmp::Ordering;
-use crate::env::core::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata};
-use crate::env::core::statements::Statement;
-use crate::env::core::types::{Int, Float, Boolean};
-use crate::env::core::value::{Value};
-use crate::env::core::errors::Error;
-use crate::env::core::variables::Variable;
+use crate::env::runtime::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata};
+use crate::env::runtime::statements::Statement;
+use crate::env::runtime::types::{Int, Float, Boolean};
+use crate::env::runtime::value::{Value};
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::variables::Variable;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},

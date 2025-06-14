@@ -2,9 +2,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-use crate::env::core::value::Value;
-use crate::env::core::errors::Error;
-use crate::env::core::statements::Statement;
+use crate::env::runtime::value::Value;
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::statements::Statement;
 use std::collections::HashMap;
 
 // -------------------------------

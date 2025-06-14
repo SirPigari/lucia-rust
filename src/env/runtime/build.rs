@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::{env, fs, path::PathBuf, process::Command};
-use crate::env::core::utils::to_static;
+use crate::env::runtime::utils::to_static;
 use sha2::{Sha256, Digest};
 use rustc_version::{self, Channel};
 

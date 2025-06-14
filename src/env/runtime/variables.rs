@@ -1,12 +1,12 @@
-use crate::env::core::value::Value;
-use crate::env::core::utils::make_native_method;
-use crate::env::core::functions::Parameter;
+use crate::env::runtime::value::Value;
+use crate::env::runtime::utils::make_native_method;
+use crate::env::runtime::functions::Parameter;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 use num_bigint::BigInt;
 use num_bigfloat::BigFloat;
-use crate::env::core::types::{Float, Int};
+use crate::env::runtime::types::{Float, Int};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {

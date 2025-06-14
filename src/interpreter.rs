@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use crate::env::core::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::core::utils::{
+use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::runtime::utils::{
     print_colored,
     hex_to_ansi,
     format_value,
@@ -13,16 +13,16 @@ use crate::env::core::utils::{
     make_native_method,
     make_native_function,
 };
-use crate::env::core::pattern_reg::{extract_seed_end, predict_sequence};
-use crate::env::core::types::{Int, Float, VALID_TYPES};
-use crate::env::core::value::Value;
-use crate::env::core::errors::Error;
-use crate::env::core::variables::Variable;
-use crate::env::core::statements::Statement;
+use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
+use crate::env::runtime::types::{Int, Float, VALID_TYPES};
+use crate::env::runtime::value::Value;
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::variables::Variable;
+use crate::env::runtime::statements::Statement;
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use num_traits::{Zero, self};
-use crate::env::core::native;
-use crate::env::core::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
+use crate::env::runtime::native;
+use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
 use num_bigint::{BigInt, Sign};
 use std::cmp::Ordering;
