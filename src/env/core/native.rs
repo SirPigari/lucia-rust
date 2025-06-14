@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
 use std::str::FromStr;
+use num_bigfloat::BigFloat;
+use num_traits::ToPrimitive;
+
 
 
 // -------------------------------
@@ -240,6 +243,36 @@ fn type_name(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "No value provided for type_name()")
 }
 
+fn sum(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::List(values)) = args.get("args") {
+        let mut total = BigFloat::from(0);
+        let mut stack = values.iter().collect::<Vec<_>>();
+
+        while let Some(value) = stack.pop() {
+            match value {
+                Value::Int(i) => {
+                    if let Some(int_as_f64) = i.value.to_f64() {
+                        total += BigFloat::from(int_as_f64);
+                    } else {
+                        return Value::Error("TypeError", "Failed to convert BigInt to f64");
+                    }
+                }
+                Value::Float(f) => {
+                    total += f.value.clone();
+                }
+                Value::List(ls) | Value::Tuple(ls) => {
+                    for v in ls {
+                        stack.push(v);
+                    }
+                }
+                _ => return Value::Error("TypeError", "Value is not summable"),
+            }
+        }
+        Value::Float(Float { value: total })
+    } else {
+        Value::Error("TypeError", "Expected a list of numeric values")
+    }
+}
 
 // -------------------------------
 // Utility Functions
@@ -385,6 +418,20 @@ pub fn type_fn() -> Function {
             Parameter::positional("obj", "any"),
         ],
         "str",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn sum_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "sum",
+        sum,
+        vec![
+            Parameter::variadic_optional("args", "any", Value::Int(0.into())), 
+            Parameter::keyword_optional("start", "any", Value::Int(0.into())),
+        ],
+        "float",
         true, true, true,
         None,
     )))

@@ -1,0 +1,18 @@
+#include "04_variables.lc"
+
+#define PI 3.14
+#define HELLO "world"
+
+#alias add sum
+print(add(2, 3))
+#unalias add
+
+#ifdef PI
+print(PI)
+#endif
+
+#ifndef UNDEFINED
+print(HELLO)
+#endif
+
+print(sum(2, 3))

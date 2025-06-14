@@ -554,10 +554,16 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
 }
 
 pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statement {
-    let type_name = type_.get_type();
-    get_type_default_as_statement(&type_name)
-}
+    let binding = type_.convert_to_hashmap();
+    let default = Value::String("any".to_string());
 
+    let type_name = binding.get(&Value::String("value".to_string())).unwrap_or(&default);
+
+    match type_name {
+        Value::String(type_str) => get_type_default_as_statement(&type_str),
+        _ => get_type_default_as_statement("any"),
+    }
+}
 
 
 pub const NULL: Value = Value::Null;

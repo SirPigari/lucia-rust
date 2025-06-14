@@ -85,6 +85,10 @@ impl Interpreter {
             "type".to_string(),
             Variable::new("type".to_string(), Value::Function(native::type_fn()), "function".to_string(), false, true, true),
         );
+        this.variables.insert(
+            "sum".to_string(),
+            Variable::new("sum".to_string(), Value::Function(native::sum_fn()), "function".to_string(), false, true, true),
+        );
 
         this
     }

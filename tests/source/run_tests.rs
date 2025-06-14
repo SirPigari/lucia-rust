@@ -109,7 +109,8 @@ fn main() {
         println!("  {}", test.green());
     }
 
-    println!("\n{}", "Failed:".red());
+    println!("\n{} {}", "Failed:".red(), failed.len());
+
     for (test, stderr) in &failed {
         println!("{}", test.red());
     }
@@ -118,7 +119,6 @@ fn main() {
         println!("{}", stderr.yellow());
     }
     
-
     println!("{}", "──────────────────────────────────────".dimmed());
 
     if failed.is_empty() {

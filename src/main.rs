@@ -20,6 +20,7 @@ mod env {
         pub mod statements;
         pub mod build;
         pub mod pattern_reg;
+        pub mod preprocessor;
     }
 }
 
@@ -34,6 +35,7 @@ use crate::env::core::types::{Int, Float, Boolean};
 use crate::env::core::errors::Error;
 use crate::env::core::value::Value;
 use crate::env::core::build::{BuildInfo, get_build_info};
+use crate::env::core::preprocessor::Preprocessor;
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
@@ -259,7 +261,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         supports_color: true,
         use_lucia_traceback: true,
         warnings: true,
-        use_predefs: true,
+        use_preprocessor: true,
         print_comments: false,
         allow_fetch: true,
         execute_code_blocks: CodeBlocks {
@@ -332,6 +334,31 @@ fn main() {
     let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
     let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
     let exit_flag = args.contains(&"--exit".to_string()) || args.contains(&"-e".to_string());
+    let help_flag = args.contains(&"--help".to_string()) || args.contains(&"-h".to_string());
+    let version_flag = args.contains(&"--version".to_string()) || args.contains(&"-v".to_string());
+    let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
+
+    if help_flag {
+        println!("Usage: lucia [options] [files...]\n");
+        println!("Options:");
+        println!("  --activate, -a       Activate the environment");
+        println!("  --no-color           Disable colored output");
+        println!("  --quiet, -q          Suppress debug and warning messages");
+        println!("  --debug, -d          Enable debug mode");
+        println!("  --debug-mode=<mode>  Set debug mode (full, normal, minimal)");
+        println!("  --exit, -e           Exit after executing files");
+        println!("  --help, -h           Show this help message");
+        println!("  --version, -v        Show version information");
+        println!("  --build-info         Show build information");
+        exit(0);
+    }
+
+    if version_flag {
+        println!("Lucia-{}", VERSION);
+        exit(0);
+    }
+
+    
 
     if args.contains(&"--build-info".to_string()) {
         let info = get_build_info();
@@ -517,11 +544,36 @@ fn main() {
 
                 let file_content = fs::read_to_string(path).expect("Failed to read file");
                 let lexer = Lexer::new(&file_content);
+                let lexer = Lexer::new(&file_content);
                 let raw_tokens = lexer.tokenize(config.print_comments);
+                
+                let processed_tokens = if !disable_preprocessor {
+                    let mut preprocessor = Preprocessor::new(
+                        home_dir_path.join("libs"),
+                        config_path.clone(),
+                    );
+                    match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+                        Ok(tokens) => tokens,
+                        Err(e) => {
+                            handle_error(
+                                &e.clone(),
+                                &file_content,
+                                (0, "".to_string()),
+                                &config,
+                                use_colors,
+                                Some(file_path.as_str()),
+                            );
+                            exit(1);
+                        }
+                    }
+                } else {
+                    raw_tokens
+                };
+                
                 debug_log(
                     &format!(
                         "Tokens: {:?}",
-                        raw_tokens
+                        processed_tokens
                             .iter()
                             .filter(|token| token.0 != "WHITESPACE")
                             .collect::<Vec<_>>()
@@ -529,9 +581,11 @@ fn main() {
                     &config,
                     Some(use_colors),
                 );
-                let tokens: Vec<Token> = raw_tokens.into_iter()
+                
+                let tokens: Vec<Token> = processed_tokens
+                    .into_iter()
                     .map(|(t, v)| Token(t, v))
-                    .collect();
+                    .collect();                
                 let mut parser = Parser::new(tokens, config.clone(), file_content.to_string());
                 let statements = match parser.parse_safe() {
                     Ok(stmts) => stmts,
@@ -582,6 +636,10 @@ fn main() {
             hex_to_ansi("reset", Some(use_colors))
         );
         let mut interpreter = Interpreter::new(config.clone(), use_colors);
+        let mut preprocessor = Preprocessor::new(
+            home_dir_path.join("libs"),
+            config_path.clone(),
+        );
         loop {
             print!("{}{}{} ", 
                 hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
@@ -634,22 +692,50 @@ fn main() {
     
             let lexer = Lexer::new(&input);
             let raw_tokens = lexer.tokenize(config.print_comments);
+            
+            let current_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+            let processed_tokens = if !disable_preprocessor {
+                match preprocessor.process(raw_tokens, &current_dir) {
+                    Ok(toks) => toks,
+                    Err(e) => {
+                        handle_error(
+                            &e.clone(),
+                            &input,
+                            (0, "".to_string()),
+                            &config,
+                            use_colors,
+                            Some("<stdin>"),
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                raw_tokens
+            };
+            
             debug_log(
                 &format!(
                     "Tokens: {:?}",
-                    raw_tokens
+                    processed_tokens
                         .iter()
-                        .filter(|token| token.0 != "WHITESPACE" && token.0 != "COMMENT_INLINE" && token.0 != "COMMENT_SINGLE" && token.0 != "COMMENT_MULTI" && token.0 != "EOF")
+                        .filter(|token| {
+                            token.0 != "WHITESPACE"
+                            && token.0 != "COMMENT_INLINE"
+                            && token.0 != "COMMENT_SINGLE"
+                            && token.0 != "COMMENT_MULTI"
+                            && token.0 != "EOF"
+                        })
                         .collect::<Vec<_>>()
                 ),
                 &config,
                 Some(use_colors),
             );
-            let tokens: Vec<Token> = raw_tokens
+            
+            let tokens: Vec<Token> = processed_tokens
                 .into_iter()
                 .map(|(t, v)| Token(t, v))
-                .collect();
-            
+                .collect();            
             let mut parser = Parser::new(tokens, config.clone(), input.to_string());
             let statements = match parser.parse_safe() {
                 Ok(stmts) => stmts,

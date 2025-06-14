@@ -11,7 +11,7 @@ pub struct Config {
     pub supports_color: bool,
     pub use_lucia_traceback: bool,
     pub warnings: bool,
-    pub use_predefs: bool,
+    pub use_preprocessor: bool,
     pub print_comments: bool,
     pub allow_fetch: bool,
     pub execute_code_blocks: CodeBlocks,

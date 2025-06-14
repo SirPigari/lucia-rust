@@ -5,7 +5,7 @@
   "supports_color": true,
   "use_lucia_traceback": true,
   "warnings": true,
-  "use_predefs": true,
+  "use_preprocessor": true,
   "print_comments": false,
   "allow_fetch": true,
   "execute_code_blocks": {
