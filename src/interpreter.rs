@@ -348,11 +348,13 @@ impl Interpreter {
                 "FOR" => self.handle_for_loop(statement.clone()),
                 "IF" => self.handle_if(statement.clone()),
                 "TRY_CATCH" | "TRY" => self.handle_try(statement.clone()),
-        
+                "THROW" => self.handle_throw(statement.clone()),
+
                 // Variables and assignment
                 "VARIABLE" => self.handle_variable(statement.clone()),
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
+                "FORGET" => self.handle_forget(statement.clone()),
         
                 // Type
                 "TYPE" => self.handle_type(statement.clone()),
@@ -388,6 +390,193 @@ impl Interpreter {
         
         result
     }
+
+    fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let error_type_val = match statement.get(&Value::String("from".to_string())) {
+            Some(v) => self.evaluate(Value::convert_to_statement(v)),
+            None => return self.raise("RuntimeError", "Missing 'from' in throw statement"),
+        };
+        
+        let error_msg_val = match statement.get(&Value::String("message".to_string())) {
+            Some(v) => self.evaluate(Value::convert_to_statement(v)),
+            None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
+        };
+        
+        self.raise(
+            to_static(error_type_val.to_string()),
+            to_static(error_msg_val.to_string()),
+        )
+    }
+
+    fn handle_forget(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let value = match statement.get(&Value::String("value".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'value' in forget statement"),
+        };
+    
+        let value_map = match value {
+            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+            _ => return self.raise("RuntimeError", "Expected a map for forget value"),
+        };
+    
+        let value_type = match value_map.get(&Value::String("type".to_string())) {
+            Some(Value::String(t)) => t.as_str(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in forget value"),
+        };
+    
+        match value_type {
+            "VARIABLE" => {
+                let name = match value_map.get(&Value::String("name".to_string())) {
+                    Some(Value::String(n)) => n,
+                    _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable forget"),
+                };
+    
+                if self.variables.remove(name).is_some() {
+                    NULL
+                } else {
+                    self.raise("NameError", &format!("Variable '{}' not found for forget", name))
+                }
+            }
+
+            "INDEX_ACCESS" => {
+                let object_val = match value_map.get(&Value::String("object".to_string())) {
+                    Some(v) => self.evaluate(Value::convert_to_statement(v)),
+                    None => return self.raise("RuntimeError", "Missing 'object' in index access forget"),
+                };
+                let variable_name = match value_map.get(&Value::String("object".to_string())) {
+                    Some(Value::Map { keys, values }) => {
+                        let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                        match obj_map.get(&Value::String("type".to_string())) {
+                            Some(Value::String(t)) if t == "VARIABLE" => {
+                                match obj_map.get(&Value::String("name".to_string())) {
+                                    Some(Value::String(name)) => Some(name.clone()),
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+
+                let access_val = match value_map.get(&Value::String("access".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'access' in index access forget"),
+                };
+                let access_hashmap = match access_val {
+                    Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+                    _ => return self.raise("RuntimeError", "Expected a map for index access forget"),
+                };
+                let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
+                let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
+
+                let len = match &object_val {
+                    Value::String(s) => s.chars().count(),
+                    Value::List(l) => l.len(),
+                    Value::Bytes(b) => b.len(),
+                    Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten."),
+                    _ => return self.raise("TypeError", "Object not indexable"),
+                };
+
+                let start_val = match start_val_opt {
+                    Some(v) => self.evaluate(v.convert_to_statement()),
+                    None => NULL,
+                };
+                let end_val = match end_val_opt {
+                    Some(v) => self.evaluate(v.convert_to_statement()),
+                    None => NULL,
+                };
+
+                fn to_index(val: &Value, len: usize) -> Result<usize, String> {
+                    match val {
+                        Value::Int(i) => {
+                            let idx = i.to_isize().ok_or("Failed to convert Int to isize")?;
+                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                            if adjusted >= 0 && (adjusted as usize) < len {
+                                Ok(adjusted as usize)
+                            } else {
+                                Err("Index out of range".to_string())
+                            }
+                        }
+                        Value::String(s) => {
+                            let idx: isize = s.parse().map_err(|_| "Failed to parse string to int")?;
+                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                            if adjusted >= 0 && (adjusted as usize) < len {
+                                Ok(adjusted as usize)
+                            } else {
+                                Err("Index out of range".to_string())
+                            }
+                        }
+                        Value::Float(f) => {
+                            if f.fract() != 0.0.into() {
+                                return Err("Float index must have zero fractional part".to_string());
+                            }
+                            let idx = f.to_isize().ok_or("Failed to convert Float to isize")?;
+                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                            if adjusted >= 0 && (adjusted as usize) < len {
+                                Ok(adjusted as usize)
+                            } else {
+                                Err("Index out of range".to_string())
+                            }
+                        }
+                        _ => Err("Index must be Int, String or Float with no fraction".to_string()),
+                    }
+                }
+
+                let start_idx = if start_val == NULL {
+                    0
+                } else {
+                    match to_index(&start_val, len) {
+                        Ok(i) => i,
+                        Err(e) => return self.raise("IndexError", &e),
+                    }
+                };
+
+                let end_idx = if end_val == NULL {
+                    start_idx + 1
+                } else {
+                    match to_index(&end_val, len) {
+                        Ok(i) => i,
+                        Err(e) => return self.raise("IndexError", &e),
+                    }
+                };                
+
+                if start_idx > end_idx || end_idx > len {
+                    return self.raise("IndexError", "Invalid slice indices");
+                }
+
+                let changed_value = match &object_val {
+                    Value::List(l) => {
+                        let mut new_list = l.clone();
+                        new_list.drain(start_idx..end_idx);
+                        Value::List(new_list)
+                    }
+                    Value::Bytes(b) => {
+                        let mut new_bytes = b.clone();
+                        new_bytes.drain(start_idx..end_idx);
+                        Value::Bytes(new_bytes)
+                    }
+                    Value::String(_) => {
+                        return self.raise("TypeError", "Cannot forget slice on immutable string");
+                    }
+                    Value::Tuple(_) => {
+                        return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten.");
+                    }
+                    _ => return self.raise("TypeError", "Object not indexable for forget"),
+                };
+
+                if let Some(var_name) = variable_name {
+                    if let Some(var) = self.variables.get_mut(&var_name) {
+                        var.set_value(changed_value.clone());
+                    }
+                }
+
+                changed_value
+            }
+
+            _ => self.raise("RuntimeError", &format!("Unsupported forget value type: {}", value_type)),
+        }
+    }    
 
     fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
         let binding = statement;
@@ -972,10 +1161,6 @@ impl Interpreter {
             Some(Value::String(s)) => s,
             _ => return self.raise("SyntaxError", "Expected a string for variable name"),
         };
-    
-        if self.variables.contains_key(name) {
-            return self.raise("NameError", &format!("Variable '{}' is already declared", name));
-        }
     
         let value = match statement.get(&Value::String("value".to_string())) {
             Some(v) => v,

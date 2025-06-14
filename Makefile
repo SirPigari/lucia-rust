@@ -24,7 +24,7 @@ else
 	TEST_FILE := $$f
 endif
 
-.PHONY: all deps build release run activate test test-all clean
+.PHONY: all build release run activate test benchmark benchmark-save build-tests clean deps help
 
 all: deps build run
 
@@ -148,3 +148,18 @@ endif
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
+
+help:
+	@echo Available targets:
+	@echo all             - deps + build + run
+	@echo activate        - Activate the environment
+	@echo build           - Build debug binary
+	@echo release         - Build release binary
+	@echo run             - Run the program
+	@echo test            - Run tests
+	@echo benchmark       - Run benchmarks
+	@echo benchmark-save  - Run benchmarks ^& save results
+	@echo build-tests     - Build test/benchmark binaries
+	@echo clean           - Clean cargo artifacts
+	@echo deps            - Install dependencies (Unix only)
+	@echo help            - Show this help message

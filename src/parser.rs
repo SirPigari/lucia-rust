@@ -579,6 +579,71 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if token.1 == "forget" => {
+                    self.next();
+                    let value = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("FORGET".to_string()),
+                            value.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "throw" => {
+                    self.next();
+                    let message = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    let mut from = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                            Value::String("mods".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("STRING".to_string()),
+                            Value::String("\"LuciaError\"".to_string()),
+                            Value::List(vec![]),
+                        ],
+                        line,
+                        column,
+                    };
+                    if self.token_is("IDENTIFIER", "from") {
+                        self.next();
+                        from = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                    }
+                    line = self.current_line();
+                    column = self.get_line_column();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("message".to_string()),
+                            Value::String("from".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("THROW".to_string()),
+                            message.convert_to_map(),
+                            from.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }                    
+                }
+
                 "IDENTIFIER" if token.1 == "if" => {
                     self.next();
                     self.check_for("SEPARATOR", "(");
