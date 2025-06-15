@@ -1,30 +1,41 @@
-// setup
-a: list = [0..5]
+// === Setup ===
+a: list = [0..5]  // creates a list: [0, 1, 2, 3, 4, 5]
 
-// forget stmt
+
+// === Forget ===
+
+// forgets values in the inclusive range a[2..4] => removes [2, 3, 4]
 forget a[2..4]
-print(a)  // [0, 1, 4, 5]
+print(a)  // [0, 1, 5]
+
+// forgets the entire variable 'a' from scope
 forget a
 
-// throw & try stmt
+
+// === Throw & Try ===
+
+// try-catch block that throws an error with a type/tag
 try:
     throw "This should throw an error" from "ExpectedError"
 catch (e):
-    print(e)
+    print(e)  // prints the error value
 end
 
+// try block without catch — error is caught but ignored silently
 try:
-    0 / 0
+    0 / 0  // division by zero, caught and discarded
 end
 
+// try with 2-part catch: error type and message
 try:
     0 / 0
 end catch (err_type, err_msg):
     print(err_type, err_msg)
 end
 
+// try with 3-part catch: error type, message, and help/hint
 try:
-    i = 10
+    i = 10  // no error, catch block doesn't run
 end catch (err_type, err_msg, err_help):
     print(err_type, err_msg, err_help)
 end

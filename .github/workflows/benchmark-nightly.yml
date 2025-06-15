@@ -62,11 +62,16 @@ jobs:
       - name: Run benchmark-save
         run: make benchmark-save
 
+      - name: Move result to unified name
+        run: |
+          mkdir -p ./upload
+          cp ./tests/benchmark-results/*.json ./upload/${{ matrix.os }}.json
+
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: lucia-benchmark-${{ matrix.os }}
-          path: ./tests/benchmark-results/*.json
+          path: ./upload/${{ matrix.os }}.json
 
   benchmark-arch:
     name: Benchmark on arch-linux
@@ -106,8 +111,40 @@ jobs:
       - name: Run benchmark-save
         run: make benchmark-save
 
+      - name: Move result to unified name
+        run: |
+          mkdir -p ./upload
+          cp ./tests/benchmark-results/*.json ./upload/arch-linux.json
+
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: lucia-benchmark-archlinux
-          path: ./tests/benchmark-results/*.json
+          path: ./upload/arch-linux.json
+
+  combine-results:
+    name: Combine Benchmark Results
+    runs-on: ubuntu-latest
+    needs:
+      - benchmark-other
+      - benchmark-arch
+
+    steps:
+      - name: Download all benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./downloads
+
+      - name: Organize into lucia-benchmarks/
+        run: |
+          mkdir -p lucia-benchmarks
+          cp ./downloads/lucia-benchmark-ubuntu-latest/ubuntu-latest.json lucia-benchmarks/
+          cp ./downloads/lucia-benchmark-macos-latest/macos-latest.json lucia-benchmarks/
+          cp ./downloads/lucia-benchmark-windows-latest/windows-latest.json lucia-benchmarks/
+          cp ./downloads/lucia-benchmark-archlinux/arch-linux.json lucia-benchmarks/
+
+      - name: Upload combined benchmarks dir
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-benchmarks
+          path: ./lucia-benchmarks/
