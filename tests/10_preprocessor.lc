@@ -1,5 +1,8 @@
 #include "04_variables.lc"
 
+// 'i' is defined in the included file "04_variables.lc"
+print(i)
+
 #define PI 3.14
 #define HELLO "world"
 

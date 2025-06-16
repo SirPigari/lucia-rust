@@ -1,19 +1,49 @@
 use std::{
     fs,
     env,
+    io::Write,
     process::Command,
-    path::{Path, PathBuf}
+    path::{Path, PathBuf},
+    collections::HashSet,
 };
 
 use colored::*;
+use regex::Regex;
+
+fn remove_ansi_codes(s: &str) -> String {
+    let re = Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    re.replace_all(s, "").to_string()
+}
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let filter_prefixes: Vec<String> = if args.len() > 1 {
-        args[1..].to_vec()
-    } else {
-        vec![]
-    };
+
+    let mut filter_prefixes = vec![];
+    let mut stdout_dir: Option<PathBuf> = None;
+
+    for arg in &args[1..] {
+        if let Some(stripped) = arg.strip_prefix("--stdout=") {
+            stdout_dir = Some(PathBuf::from(stripped));
+        } else {
+            filter_prefixes.push(arg.to_string());
+        }
+    }
+
+    stdout_dir = stdout_dir.map(|p| {
+        if p.is_relative() {
+            env::current_dir().unwrap().join(p)
+        } else {
+            p
+        }
+    });
+
+    if let Some(ref dir) = stdout_dir {
+        if let Err(e) = fs::create_dir_all(dir) {
+            eprintln!("{}", format!("Failed to create stdout directory '{}': {}", dir.display(), e).red());
+            std::process::exit(1);
+        }
+    }
 
     if let Ok(exe_path) = env::current_exe() {
         if let Some(parent_dir) = exe_path.parent() {
@@ -44,7 +74,7 @@ fn main() {
 
     let mut passed = vec![];
     let mut failed = vec![];
-    let mut found_prefixes = std::collections::HashSet::new();
+    let mut found_prefixes = HashSet::new();
 
     println!("{}", "Lucia Test Runner".bold().underline().cyan());
 
@@ -69,22 +99,67 @@ fn main() {
                 .arg("-q")
                 .output();
 
+            let mut test_stdout_file = stdout_dir.as_ref().and_then(|dir| {
+                let mut file_path = dir.clone();
+                file_path.push(format!("{}.stdout", path.file_stem().unwrap().to_string_lossy()));
+                match fs::File::create(&file_path) {
+                    Ok(f) => Some(f),
+                    Err(e) => {
+                        eprintln!("{}", format!("Failed to create stdout file '{}': {}", file_path.display(), e).red());
+                        None
+                    }
+                }
+            });
+
             match output {
                 Ok(out) if out.status.success() => {
                     println!("{}", "PASSED".green());
                     passed.push(file_name.to_string());
+
+                    if let Some(file) = test_stdout_file.as_mut() {
+                        writeln!(file, "--- {} stdout ---", file_name).ok();
+                        let clean_stdout = remove_ansi_codes(&String::from_utf8_lossy(&out.stdout));
+                        writeln!(file, "{}", clean_stdout).ok();
+                        writeln!(file).ok();
+                        file.flush().unwrap_or_else(|e| {
+                            eprintln!("{}", format!("Failed to flush stdout file: {}", e).red());
+                        });
+                    }
                 }
                 Ok(out) => {
                     println!("{}", "FAILED".red());
                     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
                     failed.push((file_name.to_string(), stderr));
+
+                    if let Some(file) = test_stdout_file.as_mut() {
+                        writeln!(file, "--- {} stdout ---", file_name).ok();
+                        let clean_stdout = remove_ansi_codes(&String::from_utf8_lossy(&out.stdout));
+                        writeln!(file, "{}", clean_stdout).ok();
+                        writeln!(file).ok();
+                        file.flush().unwrap_or_else(|e| {
+                            eprintln!("{}", format!("Failed to flush stdout file: {}", e).red());
+                        });
+                    }
                 }
                 Err(err) => {
                     println!("{}", format!("ERROR ({})", err).yellow());
                     failed.push((file_name.to_string(), format!("Failed to execute: {}", err)));
+
+                    if let Some(file) = test_stdout_file.as_mut() {
+                        writeln!(file, "--- {} stdout ---", file_name).ok();
+                        writeln!(file, "<Failed to execute command>").ok();
+                        writeln!(file).ok();
+                        file.flush().unwrap_or_else(|e| {
+                            eprintln!("{}", format!("Failed to flush stdout file: {}", e).red());
+                        });
+                    }
                 }
             }
         }
+    }
+
+    if let Some(dir) = stdout_dir {
+        println!("{}", format!("Output written to directory: {}", dir.display()).dimmed());
     }
 
     if !filter_prefixes.is_empty() {
@@ -96,7 +171,7 @@ fn main() {
             eprintln!("{}", format!("No tests found starting with prefix: {}", nf).yellow());
         }
 
-        if passed.is_empty() && failed.is_empty() && !&not_found.is_empty() {
+        if passed.is_empty() && failed.is_empty() && !not_found.is_empty() {
             std::process::exit(1);
         }
     }
@@ -111,14 +186,14 @@ fn main() {
 
     println!("\n{} {}", "Failed:".red(), failed.len());
 
-    for (test, stderr) in &failed {
+    for (test, _) in &failed {
         println!("{}", test.red());
     }
     for (test, stderr) in &failed {
         println!("\n{}", format!("--- {} stderr ---", test).dimmed());
         println!("{}", stderr.yellow());
     }
-    
+
     println!("{}", "──────────────────────────────────────".dimmed());
 
     if failed.is_empty() {

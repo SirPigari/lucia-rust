@@ -67,6 +67,29 @@ else
 	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) --activate -e
 endif
 
+test-stdout:
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MKDIR)
+	@if not exist .\tests\stdout mkdir .\tests\stdout
+	@if exist .\tests\run_tests.exe ( \
+		.\tests\run_tests.exe $(filter-out $@,$(MAKECMDGOALS)) --stdout=.\tests\stdout\ \
+	) else if exist .\tests\run_tests ( \
+		.\tests\run_tests $(filter-out $@,$(MAKECMDGOALS)) --stdout=.\tests\stdout\ \
+	) else ( \
+		echo Error: run_tests executable not found in .\tests && exit /b 1 \
+	)
+else
+	@$(MKDIR)
+	@mkdir -p ./tests/stdout
+	@if [ -x ./tests/run_tests ]; then \
+		./tests/run_tests $(filter-out $@,$(MAKECMDGOALS)) --stdout=./tests/stdout/ ; \
+	elif [ -x ./tests/run_tests.exe ]; then \
+		./tests/run_tests.exe $(filter-out $@,$(MAKECMDGOALS)) --stdout=./tests/stdout/ ; \
+	else \
+		echo "Error: run_tests executable not found in ./tests" && exit 1; \
+	fi
+endif
+
 test:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MKDIR)
@@ -148,6 +171,13 @@ endif
 
 clean:
 	@cd $(LUCIA_DIR) && cargo clean
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@cmd /c "if exist benchmark-results rmdir /s /q benchmark-results"
+	@cmd /c "if exist tests\stdout rmdir /s /q tests\stdout"
+	@cmd /c "if exist temp rmdir /s /q temp"
+else
+	@rm -rf "$(LUCIA_DIR)/tests/stdout" "$(LUCIA_DIR)/temp" "$(LUCIA_DIR)/benchmark-results"
+endif
 
 help:
 	@echo Available targets:
