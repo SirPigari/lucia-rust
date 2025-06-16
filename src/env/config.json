@@ -1,6 +1,6 @@
 {
   "moded": true,
-  "debug": true,
+  "debug": false,
   "debug_mode": "full",
   "supports_color": true,
   "use_lucia_traceback": true,

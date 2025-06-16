@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{to_static, capitalize, format_bigfloat, format_bigint, self};
+use crate::env::runtime::utils::{to_static, capitalize, format_float, format_int, self};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter};
@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
 use std::str::FromStr;
-use num_bigfloat::BigFloat;
-use num_traits::ToPrimitive;
 
 
 
@@ -245,20 +243,23 @@ fn type_name(args: &HashMap<String, Value>) -> Value {
 
 fn sum(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::List(values)) = args.get("args") {
-        let mut total = BigFloat::from(0);
+        let mut total = Float::from_f64(0.0);
         let mut stack = values.iter().collect::<Vec<_>>();
 
         while let Some(value) = stack.pop() {
             match value {
                 Value::Int(i) => {
-                    if let Some(int_as_f64) = i.value.to_f64() {
-                        total += BigFloat::from(int_as_f64);
-                    } else {
-                        return Value::Error("TypeError", "Failed to convert BigInt to f64");
+                    match i.to_i64() {
+                        Ok(n) => {
+                            total += Float::from_f64(n as f64);
+                        }
+                        Err(_) => {
+                            return Value::Error("TypeError", "Failed to convert BigInt to f64");
+                        }
                     }
                 }
                 Value::Float(f) => {
-                    total += f.value.clone();
+                    total += f.clone();
                 }
                 Value::List(ls) | Value::Tuple(ls) => {
                     for v in ls {
@@ -268,7 +269,8 @@ fn sum(args: &HashMap<String, Value>) -> Value {
                 _ => return Value::Error("TypeError", "Value is not summable"),
             }
         }
-        Value::Float(Float { value: total })
+
+        Value::Float(total)
     } else {
         Value::Error("TypeError", "Expected a list of numeric values")
     }
@@ -278,8 +280,8 @@ fn sum(args: &HashMap<String, Value>) -> Value {
 // Utility Functions
 fn format_value(value: &Value) -> String {
     match value {
-        Value::Float(n) => format_bigfloat(&n.value.clone()),
-        Value::Int(n) => format_bigint(&n.value.clone()),
+        Value::Float(n) => format_float(&n.clone()),
+        Value::Int(n) => format_int(&n.clone()),
         Value::String(s) => s.clone(),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),

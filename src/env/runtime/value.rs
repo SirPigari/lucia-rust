@@ -4,7 +4,6 @@ use crate::env::runtime::statements::Statement;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
-use num_traits::{Float as NumFloat, Zero, ToPrimitive, FromPrimitive};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -31,13 +30,13 @@ impl Hash for Value {
         match self {
             Value::Float(n) => {
                 0u8.hash(state);
-                let canonical = n.value.to_string();
+                let canonical = n.to_string();
                 canonical.hash(state);
             }
 
             Value::Int(n) => {
                 1u8.hash(state);
-                let canonical = n.value.to_str_radix(10);
+                let canonical = n.to_string();
                 canonical.hash(state);
             }
 
@@ -75,121 +74,6 @@ impl Hash for Value {
     }
 }
 
-impl Add for Value {
-    type Output = Value;
-
-    fn add(self, other: Value) -> Value {
-        match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
-            (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-            (Value::Int(a), Value::Float(b)) => Value::Float((a + b.into()).into()),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a + b.into()),
-            (Value::String(a), Value::String(b)) => Value::String(a + &b),
-            (Value::Tuple(mut a), Value::Tuple(b)) => {
-                a.extend(b);
-                Value::Tuple(a)
-            }
-            (Value::Bytes(mut a), Value::Bytes(b)) => {
-                a.extend(b);
-                Value::Bytes(a)
-            }
-            _ => Value::Null,
-        }
-    }
-}
-
-impl Sub for Value {
-    type Output = Value;
-
-    fn sub(self, other: Value) -> Value {
-        match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
-            (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-            (Value::Int(a), Value::Float(b)) => Value::Float((a - b.into()).into()),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a - b.into()),
-            _ => Value::Null,
-        }
-    }
-}
-
-impl Mul for Value {
-    type Output = Value;
-
-    fn mul(self, other: Value) -> Value {
-        match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
-            (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-            (Value::Int(a), Value::Float(b)) => Value::Float((a * b.into()).into()),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a * b.into()),
-            (Value::String(a), Value::Int(b)) if b >= 0.into() => {
-                let mut result = String::new();
-                for _ in 0..b.to_usize().unwrap() {
-                    result.push_str(&a);
-                }
-                Value::String(result)
-            }
-            _ => Value::Null,
-        }
-    }
-}
-
-impl Div for Value {
-    type Output = Value;
-
-    fn div(self, other: Value) -> Value {
-        match (self, other) {
-            (Value::Int(_), Value::Int(b)) if b.is_zero() => Value::Null,
-            (Value::Float(_), Value::Float(b)) if b == 0.0.into() => Value::Null,
-            (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
-            (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-            (Value::Int(a), Value::Float(b)) => {
-                if b == 0.0.into() {
-                    Value::Null
-                } else {
-                    Value::Float((a / b.into()).into())
-                }
-            }
-            (Value::Float(a), Value::Int(b)) => {
-                if b == 0.into() {
-                    Value::Null
-                } else {
-                    Value::Float(a / b.into())
-                }
-            }
-            _ => Value::Null,
-        }
-    }
-}
-
-impl Rem for Value {
-    type Output = Value;
-
-    fn rem(self, other: Value) -> Value {
-        match (self, other) {
-            (_, Value::Int(b)) if b == 0.into() => Value::Null,
-            (_, Value::Float(b)) if b == 0.0.into() => Value::Null,
-
-            (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
-            (Value::Float(a), Value::Float(b)) => Value::Float(a % b),
-            (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
-            (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
-            _ => Value::Null,
-        }
-    }
-}
-
-impl Neg for Value {
-    type Output = Value;
-
-    fn neg(self) -> Value {
-        match self {
-            Value::Int(a) => Value::Int(-a),
-            Value::Float(a) => Value::Float(-a),
-            _ => Value::Null,
-        }
-    }
-}
-
 impl Value {
     pub fn convert_to_statement(&self) -> Statement {
         match self {
@@ -204,13 +88,13 @@ impl Value {
                     if let Value::String(s) = key {
                         if s == "_line" {
                             if let Some(Value::Int(val)) = values.get(i) {
-                                line = val.to_u32().unwrap() as usize;
+                                line = val.to_usize().unwrap_or(0);;
                                 continue;
                             }
                         }
                         if s == "_column" {
                             if let Some(Value::Int(val)) = values.get(i) {
-                                column = val.to_u32().unwrap() as usize;
+                                column = val.to_usize().unwrap_or(0);;
                                 continue;
                             }
                         }
@@ -270,7 +154,7 @@ impl Value {
     }
     pub fn is_zero(&self) -> bool {
         match self {
-            Value::Int(val) if val == &Int::new(0) => true,
+            Value::Int(val) if val == &Int::from_i64(0) => true,
             Value::Float(f) if *f == 0.0.into() => true,
             _ => false,
         }
@@ -331,14 +215,7 @@ impl Value {
                 }
             }
             Value::Int(i) => {
-                let s = i.value.to_str_radix(10);
-                if s.starts_with("-0") {
-                    "0".to_string()
-                } else if s.trim_start_matches('0').is_empty() {
-                    "0".to_string()
-                } else {
-                    s
-                }
+                i.to_string()
             }
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
@@ -400,15 +277,22 @@ impl Value {
     }
     pub fn is_infinity(&self) -> bool {
         match self {
-            Value::Float(f) => !f.value.is_finite(),
-            Value::Int(i) => Value::Float(Float::from(i.value.clone())).is_infinity(),
+            Value::Float(f) => f.is_infinity(),
+            Value::Int(i) => match Float::from_int(&i.clone()) {
+                Ok(f) => f.is_infinity(),
+                Err(_) => false,
+            },
             _ => false,
         }
     }
+    
     pub fn is_nan(&self) -> bool {
         match self {
-            Value::Float(f) => f.value.is_nan(),
-            Value::Int(i) => Value::Float(Float::from(i.value.clone())).is_nan(),
+            Value::Float(f) => f.is_nan(),
+            Value::Int(i) => match Float::from_int(&i.clone()) {
+                Ok(f) => f.is_nan(),
+                Err(_) => false,
+            },
             _ => false,
         }
     }

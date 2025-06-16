@@ -5,9 +5,6 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::config::{Config};
 use std::any::Any;
-use num_bigint::BigInt;
-use num_bigfloat::BigFloat;
-use num_traits::{ToPrimitive, FromPrimitive, Zero, One, Signed};
 use std::str::FromStr;
 use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
@@ -24,6 +21,16 @@ use crossterm::{
     terminal::{Clear, ClearType},
     cursor::MoveTo,
 };
+use imagnum::math::{
+    ERR_UNIMPLEMENTED,
+    ERR_INVALID_FORMAT,
+    ERR_DIV_BY_ZERO,
+    ERR_NEGATIVE_RESULT,
+    ERR_NEGATIVE_SQRT,
+    ERR_NUMBER_TOO_LARGE,
+    ERR_INFINITE_RESULT,
+};
+
 
 static ERROR_CACHE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -112,8 +119,8 @@ pub fn read_input(prompt: &str) -> String {
 
 pub fn format_value(value: &Value) -> String {
     match value {
-        Value::Float(n) => format_bigfloat(&n.value),
-        Value::Int(n) => format_bigint(&n.value),
+        Value::Float(n) => format_float(&n),
+        Value::Int(n) => format_int(&n),
         Value::String(s) => format!("\"{}\"", s),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
@@ -155,85 +162,12 @@ pub fn format_value(value: &Value) -> String {
     }
 }
 
-pub fn format_bigfloat(n: &BigFloat) -> String {
-    let s = n.to_string();
-    if let Some(e_index) = s.find('e') {
-        let (mantissa, exp_str) = s.split_at(e_index);
-        let exponent: i32 = exp_str[1..].parse().unwrap_or(0);
-
-        let mut parts = mantissa.split('.');
-        let int_part = parts.next().unwrap_or("0");
-        let frac_part = parts.next().unwrap_or("");
-
-        let digits = format!("{}{}", int_part, frac_part);
-        let total_len = digits.len() as i32;
-
-        if exponent >= 0 {
-            let moved = exponent as usize;
-            let padded = format!("{:0<1$}", digits, int_part.len() + moved);
-            if moved >= frac_part.len() {
-                padded
-            } else {
-                let split = int_part.len() + exponent as usize;
-                let (whole, frac) = padded.split_at(split);
-                let mut result = format!("{}.{}", whole, frac);
-                result = result.trim_end_matches('0').to_string();
-                if result.ends_with('.') {
-                    result.pop();
-                }
-                result
-            }
-        } else {
-            let exp_abs = exponent.abs() as usize;
-            let zeros = exp_abs.saturating_sub(int_part.len());
-            let padded = format!("{:0>width$}", digits, width = digits.len() + zeros);
-
-            let split_index = padded.len() - digits.len() - zeros;
-            let (whole, frac) = padded.split_at(split_index);
-            let mut result = format!("{}.{}", whole, frac);
-            result = result.trim_end_matches('0').to_string();
-            if result.ends_with('.') {
-                result.pop();
-            }
-            if result.starts_with('.') {
-                result = format!("0{}", result);
-            }
-            result
-        }
-    } else {
-        let mut cleaned = s.trim_end_matches('0').to_string();
-        if cleaned.ends_with('.') {
-            cleaned.pop();
-        }
-        if cleaned.starts_with('.') {
-            cleaned = format!("0{}", cleaned);
-        }
-        cleaned
-    }
+pub fn format_float(f: &Float) -> String {
+    f.to_string()
 }
 
-pub fn format_bigint(n: &BigInt) -> String {
-    let s = n.to_string();
-
-    if s == "-0" || s.trim_start_matches('0').is_empty() {
-        "0".to_string()
-    } else {
-        if s.starts_with('-') {
-            let trimmed = s[1..].trim_start_matches('0');
-            if trimmed.is_empty() {
-                "0".to_string()
-            } else {
-                format!("-{}", trimmed)
-            }
-        } else {
-            let trimmed = s.trim_start_matches('0');
-            if trimmed.is_empty() {
-                "0".to_string()
-            } else {
-                trimmed.to_string()
-            }
-        }
-    }
+pub fn format_int(n: &Int) -> String {
+    n.to_string()
 }
 
 pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a str> {
@@ -562,6 +496,20 @@ pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statem
     match type_name {
         Value::String(type_str) => get_type_default_as_statement(&type_str),
         _ => get_type_default_as_statement("any"),
+    }
+}
+
+
+pub fn get_imagnum_error_message(err: i16) -> String {
+    match err {
+        ERR_DIV_BY_ZERO => "Division by zero.".to_string(),
+        ERR_NEGATIVE_RESULT => "Negative result.".to_string(),
+        ERR_NEGATIVE_SQRT => "Square root of a negative number.".to_string(),
+        ERR_NUMBER_TOO_LARGE => "Number too large to convert.".to_string(),
+        ERR_INFINITE_RESULT => "Result is infinite.".to_string(),
+        ERR_UNIMPLEMENTED => "This operation is not implemented.".to_string(),
+        ERR_INVALID_FORMAT => "Invalid format.".to_string(),
+        _ => "Unknown error.".to_string(),
     }
 }
 

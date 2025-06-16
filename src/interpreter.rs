@@ -12,6 +12,7 @@ use crate::env::runtime::utils::{
     to_static,
     make_native_method,
     make_native_function,
+    get_imagnum_error_message,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -20,11 +21,9 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
-use num_traits::{Zero, self};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
-use num_bigint::{BigInt, Sign};
 use std::cmp::Ordering;
 use std::sync::Mutex;
 
@@ -95,6 +94,43 @@ impl Interpreter {
 
     pub fn is_stopped(&self) -> bool {
         self.is_stopped
+    }
+
+    fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
+        match val {
+            Value::Int(i) => {
+                let idx = i.to_i64().map_err(|_| { self.raise("ConversionError", "Failed to convert Int to isize") })? as isize;
+                let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                if adjusted >= 0 && (adjusted as usize) < len {
+                    Ok(adjusted as usize)
+                } else {
+                    Err(Value::Error("IndexError", "Index out of range"))
+                }
+            }
+            Value::String(s) => {
+                let idx: isize = s.parse()
+                    .map_err(|_| self.raise("ConversionError", "Failed to parse string to int"))?;
+                let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                if adjusted >= 0 && (adjusted as usize) < len {
+                    Ok(adjusted as usize)
+                } else {
+                    Err(self.raise("IndexError", "Index out of range"))
+                }
+            }            
+            Value::Float(f) => {
+                if !f.is_integer_like() {
+                    return Err(Value::Error("IndexError", "Float index must have zero fractional part"));
+                }
+                let idx = f.to_f64().map_err(|_| { self.raise("ConversionError", "Failed to convert Float to isize") })? as isize;
+                let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                if adjusted >= 0 && (adjusted as usize) < len {
+                    Ok(adjusted as usize)
+                } else {
+                    Err(Value::Error("IndexError", "Index out of range"))
+                }
+            }
+            _ => Err(Value::Error("IndexError", "Index must be Int, String or Float with no fraction")),
+        }
     }
 
     fn check_type(
@@ -487,57 +523,21 @@ impl Interpreter {
                     None => NULL,
                 };
 
-                fn to_index(val: &Value, len: usize) -> Result<usize, String> {
-                    match val {
-                        Value::Int(i) => {
-                            let idx = i.to_isize().ok_or("Failed to convert Int to isize")?;
-                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                            if adjusted >= 0 && (adjusted as usize) < len {
-                                Ok(adjusted as usize)
-                            } else {
-                                Err("Index out of range".to_string())
-                            }
-                        }
-                        Value::String(s) => {
-                            let idx: isize = s.parse().map_err(|_| "Failed to parse string to int")?;
-                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                            if adjusted >= 0 && (adjusted as usize) < len {
-                                Ok(adjusted as usize)
-                            } else {
-                                Err("Index out of range".to_string())
-                            }
-                        }
-                        Value::Float(f) => {
-                            if f.fract() != 0.0.into() {
-                                return Err("Float index must have zero fractional part".to_string());
-                            }
-                            let idx = f.to_isize().ok_or("Failed to convert Float to isize")?;
-                            let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                            if adjusted >= 0 && (adjusted as usize) < len {
-                                Ok(adjusted as usize)
-                            } else {
-                                Err("Index out of range".to_string())
-                            }
-                        }
-                        _ => Err("Index must be Int, String or Float with no fraction".to_string()),
-                    }
-                }
-
                 let start_idx = if start_val == NULL {
                     0
                 } else {
-                    match to_index(&start_val, len) {
+                    match self.to_index(&start_val, len) {
                         Ok(i) => i,
-                        Err(e) => return self.raise("IndexError", &e),
+                        Err(e) => return e,
                     }
                 };
 
                 let end_idx = if end_val == NULL {
                     start_idx + 1
                 } else {
-                    match to_index(&end_val, len) {
+                    match self.to_index(&end_val, len) {
                         Ok(i) => i,
-                        Err(e) => return self.raise("IndexError", &e),
+                        Err(e) => return e,
                     }
                 };                
 
@@ -867,43 +867,7 @@ impl Interpreter {
             Some(Value::String(t)) => t,
             _ => return self.raise("RuntimeError", "Missing or invalid 'type' in assignment left"),
         };
-    
-        fn to_index(val: &Value, len: usize) -> Result<usize, String> {
-            match val {
-                Value::Int(i) => {
-                    let idx = i.to_isize().ok_or("Failed to convert Int to isize")?;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) < len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err("Index out of range".to_string())
-                    }
-                }
-                Value::String(s) => {
-                    let idx: isize = s.parse().map_err(|_| "Failed to parse string to int")?;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) < len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err("Index out of range".to_string())
-                    }
-                }
-                Value::Float(f) => {
-                    if f.fract() != 0.0.into() {
-                        return Err("Float index must have zero fractional part".to_string());
-                    }
-                    let idx = f.to_isize().ok_or("Failed to convert Float to isize")?;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) < len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err("Index out of range".to_string())
-                    }
-                }
-                _ => Err("Index must be Int, String or Float with no fraction".to_string()),
-            }
-        }
-    
+
         match left_type.as_str() {
             "VARIABLE" => {
                 let name = match left_hashmap.get(&Value::String("name".to_string())) {
@@ -961,20 +925,21 @@ impl Interpreter {
                     let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
     
                     let start_idx = match start_val_opt {
-                        Some(v) => match to_index(v, len) {
+                        Some(v) => match self.to_index(v, len) {
                             Ok(i) => i,
-                            Err(e) => return self.raise("IndexError", &e),
+                            Err(e) => return e,
                         },
                         None => 0,
                     };
-    
+                    
                     let end_idx = match end_val_opt {
-                        Some(v) => match to_index(v, len) {
+                        Some(v) => match self.to_index(v, len) {
                             Ok(i) => i,
-                            Err(e) => return self.raise("IndexError", &e),
+                            Err(e) => return e,
                         },
                         None => len,
                     };
+                    
     
                     if let Some(var) = self.variables.get_mut(name) {
                         match &mut var.value {
@@ -1063,7 +1028,7 @@ impl Interpreter {
         let mut to_index = |val: &Value| -> Result<usize, Value> {
             match val {
                 Value::Int(i) => {
-                    let idx = i.to_isize().ok_or_else(|| self.raise("ConversionError", "Failed to convert Int to isize"))?;
+                    let idx = i.to_i64().map_err(|_| self.raise("ConversionError", "Failed to convert Int to isize"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
                     if adjusted >= 0 && (adjusted as usize) <= len {
                         Ok(adjusted as usize)
@@ -1081,10 +1046,10 @@ impl Interpreter {
                     }
                 }
                 Value::Float(f) => {
-                    if f.fract() != 0.0.into() {
+                    if !f.is_integer_like() {
                         return Err(self.raise("ConversionError", "Float index must have zero fractional part"));
                     }
-                    let idx = f.to_isize().ok_or_else(|| self.raise("ConversionError", "Failed to convert Float to isize"))?;
+                    let idx = f.to_f64().map_err(|_| self.raise("ConversionError", "Failed to convert Float to isize"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
                     if adjusted >= 0 && (adjusted as usize) <= len {
                         Ok(adjusted as usize)
@@ -1099,7 +1064,7 @@ impl Interpreter {
         match (start_eval_opt, end_eval_opt) {
             (Some(start_val), None) => match &object_val {
                 Value::String(_) | Value::List(_) | Value::Bytes(_) => {
-                    let start_idx = match to_index(&start_val) {
+                    let start_idx = match self.to_index(&start_val, len) {
                         Ok(i) => i,
                         Err(e) => return e,
                     };
@@ -1124,7 +1089,7 @@ impl Interpreter {
             },
             (start_opt, end_opt) => {
                 let start_idx = match start_opt {
-                    Some(ref v) => match to_index(v) {
+                    Some(ref v) => match self.to_index(v, len) {
                         Ok(i) => i,
                         Err(e) => return e,
                     },
@@ -1132,7 +1097,7 @@ impl Interpreter {
                 };
     
                 let end_idx = match end_opt {
-                    Some(ref v) => match to_index(v) {
+                    Some(ref v) => match self.to_index(v, len) {
                         Ok(i) => i,
                         Err(e) => return e,
                     },
@@ -1309,107 +1274,95 @@ impl Interpreter {
                 };
 
                 if !pattern_flag_bool {
-                    if evaluated_seed.is_empty() {
+                    let len = evaluated_seed.len();
+                    if len == 0 {
                         self.raise("ValueError", "Seed list cannot be empty");
                         return Value::Null;
                     }
-
+                
                     for v in &evaluated_seed {
-                        if let Value::Int(_) = v {} else {
+                        if !matches!(v, Value::Int(_)) {
                             self.raise("TypeError", "Seed elements must be Int");
-                            if self.err.is_some() {
+                            return Value::Null;
+                        }
+                    }
+                
+                    // Convert BigInt seed elements to i64 or raise error and return early
+                    let nums_i64: Vec<i64> = {
+                        let mut temp = Vec::with_capacity(evaluated_seed.len());
+                        for v in &evaluated_seed {
+                            if let Value::Int(i) = v {
+                                match i.to_i64() {
+                                    Ok(n) => temp.push(n),
+                                    Err(_) => {
+                                        self.raise("OverflowError", "Seed element out of i64 range");
+                                        return Value::Null;
+                                    }
+                                }                                
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                        temp
+                    };
+                
+                    if len >= 2 {
+                        let initial_step = nums_i64[1] - nums_i64[0];
+                        for i in 1..(len - 1) {
+                            if nums_i64[i + 1] - nums_i64[i] != initial_step {
+                                self.raise("PatternCompletionError", "Seed values do not have consistent step");
                                 return Value::Null;
                             }
                         }
                     }
-
-                    let nums: Vec<&Int> = evaluated_seed.iter().map(|v| {
-                        if let Value::Int(i) = v {
-                            i
-                        } else {
-                            unreachable!()
-                        }
-                    }).collect();
-
-                    if self.err.is_some() {
-                        return Value::Null;
-                    }
-
-                    if nums.len() >= 2 {
-                        let initial_step = &nums[1].value - &nums[0].value;
-
-                        for i in 1..(nums.len() - 1) {
-                            let current_step = &nums[i + 1].value - &nums[i].value;
-                            if current_step != initial_step {
-                                self.raise("PatternCompletionError", "Seed values do not have consistent step");
-                                if self.err.is_some() {
-                                    return Value::Null;
-                                }
-                            }
-                        }
-                    }
-
-                    let end_int = match &end {
-                        Value::Int(i) => i,
+                
+                    let end_i64 = match &end {
+                        Value::Int(i) => i.to_i64().unwrap_or_else(|_| {
+                            self.raise("OverflowError", "End value out of i64 range");
+                            0
+                        }),
                         _ => {
                             self.raise("TypeError", "End value must be Int");
                             return Value::Null;
                         }
                     };
-
-                    let step = if nums.len() == 1 {
-                        match nums[0].value.cmp(&end_int.value) {
-                            std::cmp::Ordering::Less | std::cmp::Ordering::Equal => BigInt::from(1),
-                            std::cmp::Ordering::Greater => BigInt::from(-1),
-                        }
+                
+                    let step = if len == 1 {
+                        if nums_i64[0] <= end_i64 { 1 } else { -1 }
                     } else {
-                        &nums[1].value - &nums[0].value
+                        nums_i64[1] - nums_i64[0]
                     };
-
-                    if step.is_zero() {
+                
+                    if step == 0 {
                         self.raise("ValueError", "Step cannot be zero");
                         return Value::Null;
                     }
-
-                    let diff = &end_int.value - &nums.last().unwrap().value;
-
-                    let step_sign_int = match step.sign() {
-                        Sign::Plus => BigInt::from(1),
-                        Sign::Minus => BigInt::from(-1),
-                        Sign::NoSign => BigInt::from(0),
-                    };
-                    
-                    if (&diff * &step_sign_int) < BigInt::zero() {
+                
+                    let last_val = nums_i64[len - 1];
+                    let diff = end_i64 - last_val;
+                
+                    if (step > 0 && diff < 0) || (step < 0 && diff > 0) {
                         self.raise("PatternCompletionError", "End value is unreachable with given seed and step");
                         return Value::Null;
                     }
-                    
-
-                    if &diff % &step != BigInt::zero() {
+                
+                    if diff % step != 0 {
                         self.raise("PatternCompletionError", "Pattern does not fit into range defined by end");
                         return Value::Null;
                     }
-
-                    let mut result_list: Vec<Value> = evaluated_seed.clone();
-
-                    let mut current = nums.last().unwrap().value.clone();
-
-                    loop {
-                        current = current + &step;
-
-                        let done = if step > BigInt::from(0) {
-                            current > end_int.value
-                        } else {
-                            current < end_int.value
-                        };
-
-                        if done {
-                            break;
-                        }
-
-                        result_list.push(Value::Int(Int { value: current.clone() }));
+                
+                    let total_steps = (diff / step).abs() as usize;
+                
+                    let mut result_list = Vec::with_capacity(len + total_steps);
+                
+                    result_list.extend_from_slice(&evaluated_seed);
+                
+                    let mut current = last_val;
+                    for _ in 0..total_steps {
+                        current += step;
+                        result_list.push(Value::Int(Int::from_i64(current)));
                     }
-
+                
                     return Value::List(result_list);
                 }
 
@@ -1428,11 +1381,11 @@ impl Interpreter {
 
                 let result_list: Vec<Value> = if contains_float {
                     vec_f64.into_iter()
-                        .map(|v| Value::Float(Float { value: v.into() }))
+                        .map(|v| Value::Float(Float::from_f64(v)))
                         .collect()
                 } else {
                     vec_f64.into_iter()
-                        .map(|v| Value::Int(Int::new(v as i64)))
+                        .map(|v| Value::Int(Int::from_i64(v as i64)))
                         .collect()
                 };
 
@@ -1877,7 +1830,7 @@ impl Interpreter {
             } else if !pos_args.is_empty() {
                 pos_args[0].clone()
             } else {
-                Value::Int(Int::new(0))
+                Value::Int(Int::from_i64(0))
             };
             self.is_returning = true;
             self.is_stopped = true;
@@ -2209,30 +2162,6 @@ impl Interpreter {
             _ => return self.raise("TypeError", "Expected a string for operator"),
         };
     
-        // Prepare precision for floats
-        let mut precision = 0;
-        if let Value::Float(l) = &left {
-            precision = l.to_string().len();
-        }
-        if let Value::Float(r) = &right {
-            precision = std::cmp::max(precision, r.to_string().len());
-        }
-        let prec = precision + 2;
-    
-        // Round floats to precision
-        let left = if let Value::Float(l) = left {
-            let factor = Float::new(10f64.powi(prec as i32));
-            Value::Float((l * factor.clone()).round() / factor)
-        } else {
-            left
-        };
-        let right = if let Value::Float(r) = right {
-            let factor = Float::new(10f64.powi(prec as i32));
-            Value::Float((r * factor.clone()).round() / factor)
-        } else {
-            right
-        };
-    
         // Convert Boolean to Float
         let left = if let Value::Boolean(b) = left {
             Value::Float(if b { 1.0.into() } else { 0.0.into() })
@@ -2323,78 +2252,197 @@ impl Interpreter {
     
         match operator {
             "+" => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
-                (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) + b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a + Float::from_int(b)),
+                (Value::Int(a), Value::Int(b)) => match a + b {
+                    Ok(res) => Value::Int(res),
+                    Err(_) => return self.raise("TypeError", "Int addition overflow"),
+                },
+                (Value::Float(a), Value::Float(b)) => match a + b {
+                    Ok(res) => Value::Float(res),
+                    Err(_) => return self.raise("TypeError", "Float addition failed"),
+                },
+                (Value::Int(a), Value::Float(b)) => {
+                    let fa = match Float::from_int(&a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match fa + b {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float addition failed"),
+                    }
+                }
+                (Value::Float(a), Value::Int(b)) => {
+                    let fb = match Float::from_int(&b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match a + fb {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float addition failed"),
+                    }
+                }
                 (Value::String(a), Value::String(b)) => Value::String(a + &b),
-                (a, b) => self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
+                (a, b) => return self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
             },
             "-" => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
-                (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) - b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a - Float::from_int(b)),
-                (a, b) => self.raise("TypeError", &format!("Cannot subtract {} and {}", a.type_name(), b.type_name())),
+                (Value::Int(a), Value::Int(b)) => match a - b {
+                    Ok(res) => Value::Int(res),
+                    Err(_) => return self.raise("TypeError", "Int subtraction overflow"),
+                },
+                (Value::Float(a), Value::Float(b)) => match a - b {
+                    Ok(res) => Value::Float(res),
+                    Err(_) => return self.raise("TypeError", "Float subtraction failed"),
+                },
+                (Value::Int(a), Value::Float(b)) => {
+                    let fa = match Float::from_int(&a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match fa - b {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float subtraction failed"),
+                    }
+                }
+                (Value::Float(a), Value::Int(b)) => {
+                    let fb = match Float::from_int(&b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match a - fb {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float subtraction failed"),
+                    }
+                }
+                (a, b) => return self.raise("TypeError", &format!("Cannot subtract {} and {}", a.type_name(), b.type_name())),
             },
             "*" => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Value::Float(Float::from(a) * Float::from(b)),
-                (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) * b),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a * Float::from_int(b)),
-                (Value::String(a), Value::Int(b)) => Value::String(a.repeat(b.to_usize().unwrap_or(0))),
-                (a, b) => self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
+                (Value::Int(a), Value::Int(b)) => {
+                    let fa = match Float::from_int(&a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    let fb = match Float::from_int(&b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match fa * fb {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float multiplication failed"),
+                    }
+                }
+                (Value::Float(a), Value::Float(b)) => match a * b {
+                    Ok(res) => Value::Float(res),
+                    Err(_) => return self.raise("TypeError", "Float multiplication failed"),
+                },
+                (Value::Int(a), Value::Float(b)) => {
+                    let fa = match Float::from_int(&a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match fa * b {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float multiplication failed"),
+                    }
+                }
+                (Value::Float(a), Value::Int(b)) => {
+                    let fb = match Float::from_int(&b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match a * fb {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float multiplication failed"),
+                    }
+                }
+                (Value::String(s), Value::Int(i)) => match i.to_usize() {
+                    Ok(times) => Value::String(s.repeat(times)),
+                    Err(_) => return self.raise("TypeError", "Invalid repeat count in string multiplication"),
+                },
+                (a, b) => return self.raise("TypeError", &format!("Cannot multiply {} and {}", a.type_name(), b.type_name())),
             },
             "/" => match right {
                 Value::Int(ref val) if val.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
-                Value::Float(ref f) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Division by zero."),
-                _ => match (left, right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Float(Float::from(a) / Float::from(b)),
-                    (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(Float::from_int(a) / b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a / Float::from_int(b)),
-                    (a, b) => self.raise("TypeError", &format!("Cannot divide {} by {}", a.type_name(), b.type_name())),
+                Value::Float(ref f) if f.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
+                _ => {
+                    let base = match left {
+                        Value::Int(ref i) => match Float::from_int(i) {
+                            Ok(f) => f,
+                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                        },
+                        Value::Float(ref f) => f.clone(),
+                        _ => return self.raise("TypeError", &format!("Cannot divide {} by {}", left.type_name(), right.type_name())),
+                    };
+                    let divisor = match right {
+                        Value::Int(ref i) => match Float::from_int(i) {
+                            Ok(f) => f,
+                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                        },
+                        Value::Float(ref f) => f.clone(),
+                        _ => return self.raise("TypeError", &format!("Cannot divide {} by {}", left.type_name(), right.type_name())),
+                    };
+                    match base / divisor {
+                        Ok(result) => Value::Float(result),
+                        Err(_) => self.raise("TypeError", "Failed to perform division"),
+                    }
                 }
             },
             "%" => match (left, right) {
                 (_, Value::Int(ref val)) if val.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
-                (_, Value::Float(ref f)) if *f == 0.0.into() => self.raise("ZeroDivisionError", "Modulo by zero."),
-                (Value::Int(a), Value::Int(b)) => Value::Float((a % b).into()),
-                (Value::Float(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
-                (Value::Int(a), Value::Float(b)) => Value::Float((a % b.into()).into()),
-                (Value::Float(a), Value::Int(b)) => Value::Float(a % b.into()),
-                (a, b) => self.raise("TypeError", &format!("Cannot modulo {} and {}", a.type_name(), b.type_name())),
-            },
-            "^" => match (&left, &right) {
-                (_, Value::Int(b)) if b.value.is_zero() => Value::Float(1.0.into()),
-                (_, Value::Float(b)) if b.value.is_zero() => Value::Float(1.0.into()),
-                (Value::Int(a), Value::Int(b)) => {
-                    if b.value.sign() == Sign::Minus {
-                        let base = Float::from_int(a.clone());
-                        let exp = Float::from_int(b.clone());
-                        Value::Float(base.powf(exp))
-                    } else if let Some(exp_u32) = b.to_u32() {
-                        if let Some(result) = a.checked_pow(exp_u32) {
-                            Value::Float(result.into())
-                        } else {
-                            let base = Float::from_int(a.clone());
-                            let exp = Float::from_int(b.clone());
-                            Value::Float(base.powf(exp))
-                        }
-                    } else {
-                        let base = Float::from_int(a.clone());
-                        let exp = Float::from_int(b.clone());
-                        Value::Float(base.powf(exp))
+                (_, Value::Float(ref f)) if f.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
+                (a, b) => {
+                    let base = match a {
+                        Value::Int(ref i) => match Float::from_int(&i) {
+                            Ok(f) => f,
+                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                        },
+                        Value::Float(ref f) => f.clone(),
+                        _ => return self.raise("TypeError", &format!("Cannot modulo {} and {}", a.type_name(), b.type_name())),
+                    };
+                    let divisor = match b {
+                        Value::Int(i) => match Float::from_int(&i) {
+                            Ok(f) => f,
+                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                        },
+                        Value::Float(f) => f.clone(),
+                        _ => return self.raise("TypeError", &format!("Cannot modulo {} and {}", a.type_name(), b.type_name())),
+                    };
+                    match base % divisor {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => self.raise("TypeError", "Float modulo failed"),
                     }
                 }
-                (Value::Float(a), Value::Float(b)) => Value::Float(a.powf(b.clone())),
+            },
+            "^" => match (&left, &right) {
+                (_, Value::Int(b)) if b.is_zero() => Value::Float(1.0.into()),
+                (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
+                (Value::Int(a), Value::Int(b)) => {
+                    match a.pow(b) {  // directly pass &Int here
+                        Ok(res) => Value::Int(res),
+                        Err(_) => return self.raise("TypeError", "Int pow failed"),
+                    }
+                }
+                (Value::Float(a), Value::Float(b)) => match a.pow(b) {
+                    Ok(res) => Value::Float(res),
+                    Err(_) => return self.raise("TypeError", "Float pow failed"),
+                },
                 (Value::Int(a), Value::Float(b)) => {
-                    let base = Float::from_int(a.clone());
-                    Value::Float(base.powf(b.clone()))
+                    let base = match Float::from_int(a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match base.pow(b) {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float pow failed"),
+                    }
                 }
                 (Value::Float(a), Value::Int(b)) => {
-                    let exp = b.clone();
-                    Value::Float(a.powf(exp.into()))
+                    let exp = match Float::from_int(b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match a.pow(&exp) {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float pow failed"),
+                    }
                 }
                 (a, b) => self.raise("TypeError", &format!(
                     "Operator '^' requires numeric operands, got '{}' and '{}'",
@@ -2407,33 +2455,61 @@ impl Interpreter {
             ">" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Boolean(a > b),
                 (Value::Float(a), Value::Float(b)) => Value::Boolean(a > b),
-                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) > b),
-                (Value::Float(a), Value::Int(b)) => Value::Boolean(a > Float::from_int(b)),
+                (Value::Int(a), Value::Float(b)) => match Float::from_int(&a) {
+                    Ok(a_float) => Value::Boolean(a_float > b),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
+                (Value::Float(a), Value::Int(b)) => match Float::from_int(&b) {
+                    Ok(b_float) => Value::Boolean(a > b_float),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
                 (Value::String(a), Value::String(b)) => Value::Boolean(a > b),
                 (a, b) => self.raise("TypeError", &format!("Cannot compare {} > {}", a.type_name(), b.type_name())),
             },
             "<" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Boolean(a < b),
                 (Value::Float(a), Value::Float(b)) => Value::Boolean(a < b),
-                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) < b),
-                (Value::Float(a), Value::Int(b)) => Value::Boolean(a < Float::from_int(b)),
+                (Value::Int(a), Value::Float(b)) => match Float::from_int(&a) {
+                    Ok(a_float) => Value::Boolean(a_float < b),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
+                (Value::Float(a), Value::Int(b)) => match Float::from_int(&b) {
+                    Ok(b_float) => Value::Boolean(a < b_float),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
                 (Value::String(a), Value::String(b)) => Value::Boolean(a < b),
                 (a, b) => self.raise("TypeError", &format!("Cannot compare {} < {}", a.type_name(), b.type_name())),
             },
             ">=" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Boolean(a >= b),
                 (Value::Float(a), Value::Float(b)) => Value::Boolean(a >= b),
-                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) >= b),
-                (Value::Float(a), Value::Int(b)) => Value::Boolean(a >= Float::from_int(b)),
+                (Value::Int(a), Value::Float(b)) => match Float::from_int(&a) {
+                    Ok(a_float) => Value::Boolean(a_float >= b),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
+                (Value::Float(a), Value::Int(b)) => match Float::from_int(&b) {
+                    Ok(b_float) => Value::Boolean(a >= b_float),
+                    Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                },
                 (Value::String(a), Value::String(b)) => Value::Boolean(a >= b),
                 (a, b) => self.raise("TypeError", &format!("Cannot compare {} >= {}", a.type_name(), b.type_name())),
             },
             "<=" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Boolean(a <= b),
                 (Value::Float(a), Value::Float(b)) => Value::Boolean(a <= b),
-                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(a) <= b),
-                (Value::Float(a), Value::Int(b)) => Value::Boolean(a <= Float::from_int(b)),
-                (Value::String(a), Value::String(b)) => Value::Boolean(a <= b),
+                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(&a) <= Ok(b)),
+                (Value::Float(a), Value::Int(b)) => {
+                    match Float::from_int(&b) {
+                        Ok(b_float) => Value::Boolean(a <= b_float),
+                        Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                    }
+                }                
+                (Value::Int(a), Value::Float(b)) => {
+                    match Float::from_int(&a) {
+                        Ok(a_float) => Value::Boolean(a_float <= b),
+                        Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                    }
+                }                
                 (a, b) => self.raise("TypeError", &format!("Cannot compare {} <= {}", a.type_name(), b.type_name())),
             },
             "&&" => Value::Boolean(left.is_truthy() && right.is_truthy()),
@@ -2485,20 +2561,20 @@ impl Interpreter {
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             if s.contains('.') {
-                match s.parse::<f64>() {
-                    Ok(num) => Value::Float(Float::from(num)),
+                match Float::from_str(s) {
+                    Ok(num) => Value::Float(num),
                     Err(_) => self.raise("RuntimeError", "Invalid float format"),
                 }
             } else {
-                match s.parse::<i64>() {
-                    Ok(num) => Value::Int(Int::from(num)),
+                match Int::from_str(s) {
+                    Ok(num) => Value::Int(num),
                     Err(_) => self.raise("RuntimeError", "Invalid integer format"),
                 }
             }
         } else {
             self.raise("RuntimeError", "Missing 'value' in number statement")
         }
-    }
+    }    
 
     fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {

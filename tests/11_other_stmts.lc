@@ -14,7 +14,7 @@ forget a
 
 // === Throw & Try ===
 
-// try-catch block that throws an error with a type/tag
+// try-catch block that throws an error with a type
 try:
     throw "This should throw an error" from "ExpectedError"
 catch (e):
@@ -33,9 +33,9 @@ end catch (err_type, err_msg):
     print(err_type, err_msg)
 end
 
-// try with 3-part catch: error type, message, and help/hint
+// try with 3-part catch: error type, message, and help
 try:
-    i = 10  // no error, catch block doesn't run
+    i = 10  // 'i' is not defined, will throw an error
 end catch (err_type, err_msg, err_help):
     print(err_type, err_msg, err_help)
 end

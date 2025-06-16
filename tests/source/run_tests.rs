@@ -159,7 +159,8 @@ fn main() {
     }
 
     if let Some(dir) = stdout_dir {
-        println!("{}", format!("Output written to directory: {}", dir.display()).dimmed());
+        println!("\n{}", "──────────────────────────────────────".dimmed());
+        println!("\n{}", format!("Outputs written to directory: {}", dir.display()).dimmed());
     }
 
     if !filter_prefixes.is_empty() {

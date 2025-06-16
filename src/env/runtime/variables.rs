@@ -4,9 +4,8 @@ use crate::env::runtime::functions::Parameter;
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::str::FromStr;
-use num_bigint::BigInt;
-use num_bigfloat::BigFloat;
 use crate::env::runtime::types::{Float, Int};
+use imagnum::{create_int, create_float};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
@@ -131,9 +130,7 @@ impl Variable {
                         "toInt",
                         move |_args| {
                             match &val_clone {
-                                Value::String(s) => Value::Int( Int {
-                                    value: BigInt::parse_bytes(&s.clone().into_bytes().as_slice(), 10).unwrap_or_else(|| BigInt::from(0))
-                                }),
+                                Value::String(s) => Value::Int(create_int(s)),
                                 _ => Value::Null,
                             }
                         },
@@ -149,17 +146,7 @@ impl Variable {
                         "toFloat",
                         move |_args| {
                             match &val_clone {
-                                Value::String(s) => {
-                                    if let Ok(f) = BigFloat::from_str(s) {
-                                        Value::Float(
-                                            Float {
-                                                value: f
-                                            }
-                                        )
-                                    } else {
-                                        Value::Null
-                                    }
-                                },
+                                Value::String(s) => Value::Float(create_float(s)),
                                 _ => Value::Null,
                             }
                         },
@@ -169,7 +156,6 @@ impl Variable {
                         None,
                     )
                 };
-                
 
                 self.properties.insert(
                     "toBytes".to_string(),
@@ -234,9 +220,12 @@ impl Variable {
                         "toFloat",
                         move |_args| {
                             match &val_clone {
-                                Value::Int(i) => Value::Float(i.to_float()),
+                                Value::Int(i) => match i.to_float() {
+                                    Ok(f) => Value::Float(f),
+                                    Err(_) => Value::Error("TypeError", "Failed to convert Int to Float"),
+                                },
                                 Value::Float(f) => Value::Float(f.clone()),
-                                _ => Value::Float(0.0.into()),
+                                _ => Value::Float(Float::from_f64(0.0)),
                             }
                         },
                         vec![],
@@ -244,7 +233,7 @@ impl Variable {
                         true, true, true,
                         None,
                     )
-                };
+                };                
             
                 let format = {
                     let val_clone = self.value.clone();
@@ -302,7 +291,7 @@ impl Variable {
                                 };
                 
                                 if abbreviate {
-                                    let mut f = val.to_f64().unwrap_or(0.0);
+                                    let mut f = val.to_i64().unwrap_or(0) as f64;
                                     let units = ["", "K", "M", "B", "T"];
                                     let mut idx = 0;
                                     while f.abs() >= 1000.0 && idx < units.len() as i64 - 1 {
@@ -394,9 +383,12 @@ impl Variable {
                         "toInt",
                         move |_args| {
                             match &val_clone {
-                                Value::Float(f) => Value::Int(f.to_int()),
+                                Value::Float(f) => match f.to_int() {
+                                    Ok(i) => Value::Int(i),
+                                    Err(_) => Value::Error("TypeError", "Failed to convert Float to Int"),
+                                },
                                 Value::Int(i) => Value::Int(i.clone()),
-                                _ => Value::Int(0.into()),
+                                _ => Value::Int(0i64.into()),
                             }
                         },
                         vec![],
@@ -404,7 +396,7 @@ impl Variable {
                         true, true, true,
                         None,
                     )
-                };
+                };                
             
                 let format = {
                     let val_clone = self.value.clone();

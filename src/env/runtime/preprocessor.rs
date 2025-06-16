@@ -285,8 +285,18 @@ impl Preprocessor {
 
                                     let lexer = Lexer::new(&content);
                                     let mut toks = lexer.tokenize(false);
-                                    if toks.last().map_or(false, |t| t.0 == "EOF") {
-                                        toks.pop();
+                                    if let Some(last_token) = toks.last() {
+                                        if last_token.0 != "EOF" {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: format!("File '{}' not closed properly", file_path.display()),
+                                                help: Some("Propably corrupted.".to_string()),
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                            });
+                                        } else {
+                                            toks.pop();
+                                        }
                                     }
 
                                     let included = self._process(toks, file_path.parent().unwrap_or(current_dir))?;
@@ -372,8 +382,15 @@ impl Preprocessor {
                             column: 0,
                         });
                     }
-
-                    _ => {}
+                    _ => {
+                        return Err(Error {
+                            error_type: "PreprocessorError".to_string(),
+                            msg: format!("Unknown preprocessor directive: {}", directive),
+                            help: Some("Valid directives are: define, undef, ifdef, ifndef, endif, alias, unalias, include, config".to_string()),
+                            line: (0, "".to_string()),
+                            column: 0,
+                        });
+                    }
                 }
             } else {
                 if !skipping {
