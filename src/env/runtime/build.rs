@@ -1,8 +1,7 @@
-use serde::Serialize;
 use std::{env, fs, path::PathBuf, process::Command};
-use crate::env::runtime::utils::to_static;
 use sha2::{Sha256, Digest};
-use rustc_version::{self, Channel};
+use serde::Serialize;
+use crate::env::runtime::utils::to_static;
 
 #[derive(Serialize)]
 pub struct BuildInfo {
@@ -19,28 +18,48 @@ pub struct BuildInfo {
     pub dependencies: &'static str,
 }
 
-pub fn get_build_info() -> BuildInfo {
-    let rustc_version = to_static(
-        rustc_version::version()
-            .map(|v| v.to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    );
+fn parse_rustc_version_and_channel() -> (String, String) {
+    let output = Command::new("rustc")
+        .arg("-vV")
+        .output();
 
-    let rustc_channel = to_static(
-        rustc_version::version_meta()
-            .map(|meta| match meta.channel {
-                Channel::Stable => "stable",
-                Channel::Beta => "beta",
-                Channel::Nightly => "nightly",
-                Channel::Dev => "dev",
-            }.to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    );
+    if let Ok(output) = output {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut version = "unknown".to_string();
+            let mut channel = "unknown".to_string();
+
+            for line in stdout.lines() {
+                if line.starts_with("rustc ") {
+                    // example: rustc 1.70.0-nightly (0e4f7e2d1 2023-05-25)
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() > 1 {
+                        version = parts[1].to_string();
+                        if version.contains("nightly") {
+                            channel = "nightly".to_string();
+                        } else if version.contains("beta") {
+                            channel = "beta".to_string();
+                        } else {
+                            channel = "stable".to_string();
+                        }
+                    }
+                }
+            }
+            return (version, channel);
+        }
+    }
+    ("unknown".to_string(), "unknown".to_string())
+}
+
+pub fn get_build_info() -> BuildInfo {
+    let (rustc_version, rustc_channel) = parse_rustc_version_and_channel();
+
+    let rustc_version = to_static(rustc_version);
+    let rustc_channel = to_static(rustc_channel);
 
     let target = to_static(
         env::var("TARGET")
             .or_else(|_| {
-                // fallback to rustc -vV to extract target
                 Command::new("rustc")
                     .arg("-vV")
                     .output()
