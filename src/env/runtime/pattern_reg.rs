@@ -2,7 +2,10 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{
     Float, Int,
 };
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{
+    to_static,
+    get_imagnum_error_message,
+};
 
 
 pub fn extract_seed_end(
@@ -13,18 +16,26 @@ pub fn extract_seed_end(
 
     for v in &seed {
         let f = match v {
-            Value::Float(f) => f.to_f64().map_err(|_| ("ConversionError", "float too big to convert to f64", ""))?,
-            Value::Int(i) => i.to_i64().map_err(|_| ("ConversionError", "int too big to convert to f64", ""))? as f64,
+            Value::Float(f) => f
+                .to_f64()
+                .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
+            Value::Int(i) => i
+                .to_i64()
+                .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
             _ => return Err(("TypeError", "value is not a Float or Int", "")),
         };
         seed_f64.push(f);
-    }    
-
+    }
+    
     let end_f64 = match &end {
-        Value::Float(f) => f.to_f64().map_err(|_| ("ConversionError", "float too big to convert to f64", ""))?,
-        Value::Int(i) => i.to_i64().map_err(|_| ("ConversionError", "int too big to convert to f64", ""))? as f64,
+        Value::Float(f) => f
+            .to_f64()
+            .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
+        Value::Int(i) => i
+            .to_i64()
+            .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
         _ => return Err(("TypeError", "end value is not a Float or Int", "")),
-    };    
+    };       
 
     Ok((seed_f64, end_f64))
 }
