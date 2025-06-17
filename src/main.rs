@@ -341,15 +341,16 @@ fn main() {
     if help_flag {
         println!("Usage: lucia [options] [files...]\n");
         println!("Options:");
-        println!("  --activate, -a       Activate the environment");
-        println!("  --no-color           Disable colored output");
-        println!("  --quiet, -q          Suppress debug and warning messages");
-        println!("  --debug, -d          Enable debug mode");
-        println!("  --debug-mode=<mode>  Set debug mode (full, normal, minimal)");
-        println!("  --exit, -e           Exit after executing files");
-        println!("  --help, -h           Show this help message");
-        println!("  --version, -v        Show version information");
-        println!("  --build-info         Show build information");
+        println!("  --activate, -a                  Activate the environment");
+        println!("  --no-color                      Disable colored output");
+        println!("  --quiet, -q                     Suppress debug and warning messages");
+        println!("  --debug, -d                     Enable debug mode");
+        println!("  --debug-mode=<mode>             Set debug mode (full, normal, minimal)");
+        println!("  --exit, -e                      Exit after executing files");
+        println!("  --help, -h                      Show this help message");
+        println!("  --version, -v                   Show version information");
+        println!("  --build-info                    Show build information");
+        println!("  --disable-preprocessor, -dp     Disable preprocessor");
         exit(0);
     }
 

@@ -239,6 +239,15 @@ impl Function {
         }
     }
 
+    pub fn get_body(&self) -> Vec<Statement> {
+        match self {
+            Function::Native(_) => vec![],
+            Function::Custom(f) => f.body.clone(),
+            Function::NativeMethod(_) => vec![],
+            Function::CustomMethod(f) => f.body.clone(),
+        }
+    }
+
     pub fn ptr(&self) -> *const () {
         match self {
             Function::Native(arc) => Arc::as_ptr(arc) as *const (),

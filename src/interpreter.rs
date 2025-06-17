@@ -13,6 +13,7 @@ use crate::env::runtime::utils::{
     make_native_method,
     make_native_function,
     get_imagnum_error_message,
+    create_function,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -355,13 +356,17 @@ impl Interpreter {
         }
     
         let Statement::Statement { keys, values, .. } = statement else {
-            return self.raise("SyntaxError", "Expected a statement map");
+            return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
         };
     
         let statement: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
         let result = match statement.get(&Value::String("type".to_string())) {
             Some(Value::String(t)) => match t.as_str() {
+                // Function declaration & return
+                "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
+                "RETURN" => self.handle_return(statement.clone()),
+
                 // Primitive types
                 "NUMBER" => self.handle_number(statement.clone()),
                 "STRING" => self.handle_string(statement.clone()),
@@ -425,6 +430,186 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let value = match statement.get(&Value::String("value".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'value' in return statement"),
+        };
+    
+        let evaluated_value = self.evaluate(value.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
+    
+        self.is_returning = true;
+        self.return_value = evaluated_value.clone();
+        evaluated_value
+    }
+
+    fn handle_function_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in function declaration"),
+        };
+    
+        let pos_args = match statement.get(&Value::String("pos_args".to_string())) {
+            Some(Value::List(p)) => p,
+            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in function declaration"),
+        };
+
+        let named_args = match statement.get(&Value::String("named_args".to_string())) {
+            Some(Value::Map { keys, values }) => {
+                Value::Map {
+                    keys: keys.clone(),
+                    values: values.clone(),
+                }
+            }
+            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in function declaration"),
+        };
+    
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b,
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in function declaration"),
+        };
+
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(m)) => m,
+            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in function declaration"),
+        };
+    
+        let return_type = match statement.get(&Value::String("return_type".to_string())) {
+            Some(Value::Map { keys, values } ) => Value::Map {
+                keys: keys.clone(),
+                values: values.clone(),
+            },
+            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in function declaration"),
+        };
+
+        let return_type_str = self.evaluate(return_type.convert_to_statement());
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let mut is_public = false;
+        let mut is_static = false;
+        let mut is_final = false;
+
+        for modifier in modifiers {
+            if let Value::String(modifier_str) = modifier {
+                match modifier_str.as_str() {
+                    "public" => is_public = true,
+                    "static" => is_static = true,
+                    "final" => is_final = true,
+                    "private" => is_public = false,
+                    "non-static" => is_static = false,
+                    "mutable" => is_final = false,
+                    _ => return self.raise("SyntaxError", &format!("Unknown function modifier: {}", modifier_str)),
+                }
+            } else {
+                return self.raise("TypeError", "Function modifiers must be strings");
+            }
+        }
+
+        let mut parameters = Vec::new();
+
+        for arg in pos_args {
+            if let Value::Map { keys, values } = arg {
+                let name = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::String(n) => n,
+                        _ => return self.raise("RuntimeError", "'name' must be a string in function parameter"),
+                    },
+                    None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
+                };
+                
+                let type_str = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                    Some(pos) => {
+                        let type_val = &values[pos];
+                        self.evaluate(type_val.convert_to_statement()).to_string()
+                    }
+                    None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
+                };
+        
+                parameters.push(Parameter::positional(name.as_str(), type_str.as_str()));
+            } else {
+                return self.raise("TypeError", "Expected a map for function parameter");
+            }
+        }
+        
+        let named_args_hashmap = named_args.convert_to_hashmap().unwrap_or_else(|| {
+            self.raise("TypeError", "Expected a map for named arguments");
+            HashMap::new()
+        });
+        
+        for (name_str, info) in named_args_hashmap {
+            if let Value::Map { keys, values } = info {
+                let type_str = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                    Some(pos) => {
+                        let type_val = &values[pos];
+                        self.evaluate(type_val.convert_to_statement()).to_string()
+                    }
+                    None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
+                };
+        
+                let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
+                    Some(pos) => {
+                        let val = &values[pos];
+                        let stmt = val.convert_to_statement();
+                        self.evaluate(stmt)
+                    }
+                    None => Value::Null,
+                };
+        
+                parameters.push(Parameter::positional_optional(
+                    name_str.as_str(),
+                    type_str.as_str(),
+                    value,
+                ));
+            } else {
+                return self.raise("TypeError", "Expected a map for named argument");
+            }
+        }
+
+        let body_formatted: Vec<Statement> = body.iter().map(|v| v.convert_to_statement()).collect();
+
+        let metadata = FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: return_type_str.to_string(),
+            is_public,
+            is_static,
+            is_final,
+            is_native: false,
+            state: None,
+        };
+
+        if self.variables.contains_key(name) {
+            if let Some(var) = self.variables.get(name) {
+                if var.is_final() {
+                    return self.raise("RuntimeError", &format!("Cannot redefine final function '{}'", name));
+                }
+            }
+        }
+
+        self.variables.insert(
+            name.to_string(),
+            Variable::new(
+                name.to_string(),
+                create_function(
+                    metadata.clone(),
+                    body_formatted,
+                ),
+                "function".to_string(),
+                is_public,
+                is_static,
+                is_final,
+            ),
+        );
+        self.variables.get(name)
+            .map_or(NULL, |var| var.value.clone())
     }
 
     fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2108,20 +2293,46 @@ impl Interpreter {
     
                 self.stack.push((function_name.to_string(), final_args.clone(), self.variables.clone()));
 
-                let result = func.call(&final_args);  // func.call(&final_args, &mut self.stack);
+                let mut result = NULL;
+
+                let final_args_variables = final_args
+                    .iter()
+                    .map(|(k, v)| {
+                        let name = k.clone();
+                        let variable = Variable::new(name.clone(), v.clone(), "any".to_string(), false, true, true);
+                        (name, variable)
+                    })
+                    .collect::<HashMap<String, Variable<>>>();            
+            
+                if !metadata.is_native {
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        self.use_colors.clone(),
+                    );
+                    let mut merged_variables = self.variables.clone();
+                    merged_variables.extend(final_args_variables);
+                    new_interpreter.variables = merged_variables;
+                    new_interpreter.stack = self.stack.clone();
+                    let body = func.get_body();
+                    new_interpreter.interpret(body, self.source.clone());
+                    result = new_interpreter.return_value.clone();
+                    self.stack = new_interpreter.stack;
+                } else {
+                    result = func.call(&final_args);
+                }
                 self.stack.pop();
+                debug_log(
+                    &format!("<Function '{}' returned: {}>", function_name, format_value(&result)),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
                 if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), Some(false)) {
-                    return self.raise_with_help(
+                    return self.raise(
                         "TypeError",
-                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
-                        &format!(
-                            "Expected: '{}', but got: '{}'",
-                            metadata.return_type,
-                            result.type_name()
-                        ),
+                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name())
                     );
                 }
                 return result
@@ -2281,7 +2492,12 @@ impl Interpreter {
                     }
                 }
                 (Value::String(a), Value::String(b)) => Value::String(a + &b),
-                (a, b) => return self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name())),
+                (Value::String(a), b) => Value::String(a + &b.to_string()),
+                (a, Value::String(b)) => Value::String(a.to_string() + &b),
+                (a, b) => {
+                    return self.raise("TypeError", &format!("Cannot add {} and {}", a.type_name(), b.type_name()));
+                }
+                
             },
             "-" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => match a - b {

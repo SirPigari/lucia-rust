@@ -285,7 +285,6 @@ impl Value {
             _ => false,
         }
     }
-    
     pub fn is_nan(&self) -> bool {
         match self {
             Value::Float(f) => f.is_nan(),
@@ -301,6 +300,25 @@ impl Value {
             Value::Map { keys, .. } => { keys.iter().any(|k| matches!(k, Value::String(s) if s == "type"))},
             Value::Null => true,
             _ => false,
+        }
+    }
+    pub fn convert_to_hashmap(&self) -> Option<std::collections::HashMap<String, Value>> {
+        match self {
+            Value::Map { keys, values } => {
+                if keys.len() != values.len() {
+                    return None;
+                }
+                let mut map = std::collections::HashMap::new();
+                for (key, value) in keys.iter().zip(values.iter()) {
+                    if let Value::String(s) = key {
+                        map.insert(s.clone(), value.clone());
+                    } else {
+                        return None;
+                    }
+                }
+                Some(map)
+            }
+            _ => None,
         }
     }
 }

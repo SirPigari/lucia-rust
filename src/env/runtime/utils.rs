@@ -10,7 +10,7 @@ use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use std::cmp::Ordering;
-use crate::env::runtime::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata};
+use crate::env::runtime::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata, UserFunction};
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::value::{Value};
@@ -511,6 +511,13 @@ pub fn get_imagnum_error_message(err: i16) -> String {
         ERR_INVALID_FORMAT => "Invalid format.".to_string(),
         _ => "Unknown error.".to_string(),
     }
+}
+
+pub fn create_function(metadata: FunctionMetadata, body: Vec<Statement>) -> Value {
+    Value::Function(Function::Custom(UserFunction {
+        meta: metadata,
+        body,
+    }.into()))
 }
 
 
