@@ -38,7 +38,7 @@ pub struct ColorScheme {
     pub debug: String,
     pub comment: String,
     pub input_arrows: String,
-    pub input_text: String,
+    pub note: String,
     pub output_text: String,
     pub info: String,
 }

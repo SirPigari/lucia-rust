@@ -1,5 +1,6 @@
 public static final fun voidFunction() -> void:
     print("This is a void function")
+    return  // null
 end
 
 public static final fun intFunction() -> int:
@@ -45,9 +46,15 @@ public static final fun recursiveFunction(n: int) -> int:
     end
 end
 
-public static final fun higherOrderFunction(func: function, value: int) -> int:
+public static final fun higherOrderFunction(func: function[int], value: int) -> int:
+    print(func, value)
     print("This function takes another function as a parameter")
     return func(value)
+end
+
+private static mutable fun lowerOrderFunction(value: int) -> int:
+    print("This is a lower-order function")
+    return value * 2
 end
 
 voidFunction()
@@ -61,6 +68,5 @@ combinedFunction(15)
 combinedFunction(25, "override")
 recursiveResult: int = recursiveFunction(5)
 print("Result of recursive function:", recursiveResult)
-// Commented for now because interpreter does not support function types yet
-// higherOrderResult: int = higherOrderFunction(intFunction, 10)
-// print("Result of higher-order function:", higherOrderResult)
+higherOrderResult: int = higherOrderFunction(lowerOrderFunction, value=10)
+print("Result of higher-order function:", higherOrderResult)

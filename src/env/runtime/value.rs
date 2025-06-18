@@ -185,8 +185,8 @@ impl Value {
             Value::List(_) => "list".to_string(),
             Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
-            Value::Function(func) => func.get_return_type().to_string(),
-            Value::Error(err_type, _) => err_type.to_string(),
+            Value::Function(func) => "function".to_string(),
+            Value::Error(err_type, _) => "error".to_string(),
         }
     }
     pub fn is_truthy(&self) -> bool {

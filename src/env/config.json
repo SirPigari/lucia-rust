@@ -19,7 +19,7 @@
     ".lc",
     ".l"
   ],
-  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
+  "home_dir": "C:\\Users\\Ja\\Desktop\\lucia-rust\\src\\env",
   "recursion_limit": 9999,
   "version": "2.0.0-rust",
   "color_scheme": {
@@ -29,7 +29,7 @@
     "debug": "#434343",
     "comment": "#757575",
     "input_arrows": "#136163",
-    "input_text": "#BCBEC4",
+    "note": "#1CC58B",
     "output_text": "#BCBEC4",
     "info": "#9209B3"
   }

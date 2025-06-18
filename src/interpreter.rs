@@ -14,6 +14,8 @@ use crate::env::runtime::utils::{
     make_native_function,
     get_imagnum_error_message,
     create_function,
+    create_note,
+    format_type,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -134,18 +136,12 @@ impl Interpreter {
         }
     }
 
-    fn check_type(
-        &mut self,
-        type_: &str,
-        expected: Option<&str>,
-        return_value: Option<Value>,
-        error: Option<bool>,
-    ) -> bool {
+    fn check_type(&mut self, value: &Value, expected: &Value, error: bool) -> bool {
         let valid_types = VALID_TYPES.to_vec();
-        let mut types_mapping = std::collections::HashMap::new();
+        let mut types_mapping = HashMap::new();
         types_mapping.insert("void", "void");
         types_mapping.insert("any", "any");
-        types_mapping.insert("Decimal", "float");
+        types_mapping.insert("float", "float");
         types_mapping.insert("method", "function");
         types_mapping.insert("int", "int");
         types_mapping.insert("float", "float");
@@ -154,43 +150,116 @@ impl Interpreter {
         types_mapping.insert("list", "list");
         types_mapping.insert("map", "map");
         types_mapping.insert("function", "function");
-        let normalized_type = types_mapping.get(type_).unwrap_or(&type_);
-        let expected_type = expected
-            .and_then(|e| types_mapping.get(e))
-            .map_or(expected.unwrap_or(""), |v| *v);
-    
-        let normalized_type = *normalized_type;
-        let expected_type = expected_type;
-    
-        if normalized_type == "bool" && expected_type == "null" && return_value == Some(NULL) {
-            return true;
-        }
-    
-        if expected_type == "any" || normalized_type == "any" {
-            return true;
-        }
-    
-        if !valid_types.contains(&normalized_type) || !valid_types.contains(&expected_type) {
-            return self._handle_invalid_type(expected_type, valid_types);
-        }
-    
-        if normalized_type == "int" && expected_type == "float" {
-            return true;
-        }
-    
-        if normalized_type != expected_type {
-            if error.unwrap_or(true) {
-                self.raise(
-                    "TypeError",
-                    &format!("Expected type '{}', but got '{}'", expected_type, normalized_type),
-                );
-                return false;
-            } else {
-                return false;
+
+        fn is_type_equal(type_: Value, expected: Value) -> bool {
+            match (type_, expected) {
+                (Value::String(t), Value::String(e)) => {
+                    if e == "any" || t == "any" {
+                        return true;
+                    }
+                    if t == "null" && e == "bool" {
+                        return true;
+                    }
+                    dbg!(&t, &e);
+                    e == t
+                },
+                _ => false,
             }
         }
-    
-        true
+
+        if let Value::String(type_str) = expected {
+            let type_type = value.type_name();
+            let type_type_str = type_type.as_str();
+            let type_str_str = type_str.as_str();
+
+            let normalized_type = types_mapping.get(type_type_str).unwrap_or(&type_type_str);
+            let expected_type = type_str.as_str();
+        
+            let normalized_type = *normalized_type;
+            let expected_type = expected_type;
+        
+            if normalized_type == "bool" && expected_type == "null" {
+                return true;
+            }
+        
+            if expected_type == "any" || normalized_type == "any" {
+                return true;
+            }
+        
+            if !valid_types.contains(&normalized_type) || !valid_types.contains(&expected_type) {
+                return self._handle_invalid_type(expected_type, valid_types);
+            }
+        
+            if normalized_type == "int" && expected_type == "float" {
+                return true;
+            }
+        
+            if normalized_type != expected_type {
+                if error {
+                    self.raise(
+                        "TypeError",
+                        &format!("Expected type '{}', but got '{}'", expected_type, normalized_type),
+                    );
+                    return false;
+                } else {
+                    return false;
+                }
+            }
+        
+            return true;
+        } else if let Value::Map { keys, values } = expected {
+            let expected_hashmap: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+            
+            let type_kind = expected_hashmap.get(&Value::String("type_kind".to_string()));
+            match type_kind {
+                Some(Value::String(kind)) if kind == "function" => {
+                    if let Value::Function(func) = value {
+                        let metadata = func.metadata();
+                        if metadata.is_native {
+                            return true;
+                        }
+                        let elements = expected_hashmap.get(&Value::String("elements".to_string()));
+                        let return_type = expected_hashmap.get(&Value::String("return_type".to_string()));
+                        let variadic = expected_hashmap.get(&Value::String("variadic".to_string()));
+                        let variadic_type = expected_hashmap.get(&Value::String("variadic_type".to_string()));
+
+                        let elements_vec = match elements {
+                            Some(Value::List(e)) => e,
+                            _ => {self.raise("TypeError", "Expected a list for 'elements' in function type"); return false; },
+                        };
+
+                        if elements_vec.len() == 1 {
+                            let element_type = elements_vec.get(0).unwrap();
+                            for param in metadata.parameters.iter() {
+                                if !is_type_equal(param.ty.clone(), element_type.clone()) {
+                                    if error {
+                                        self.raise("TypeError", &format!("Parameter '{}' expected type '{}', got '{}'", param.name, element_type.to_string(), param.ty.to_string()));
+                                    }
+                                    return false;
+                                }
+                            }
+                            return true;
+                        }
+                        return false;
+                    } else {
+                        if error {
+                            self.raise("TypeError", &format!("Expected type 'function', got '{}'", value.to_string()));
+                        }
+                        return false;
+                    }
+                }
+                Some(Value::String(kind)) if kind == "indexed" => {
+                    if let Value::List(_) | Value::String(_) | Value::Bytes(_) = value {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if error {
+            self.raise("TypeError", &format!("Expected type '{}', got '{}'", expected.to_string(), value.to_string()));
+        }
+        false
     }
 
     pub fn exit_with_code(&mut self, code: Value) -> Value {
@@ -207,7 +276,6 @@ impl Interpreter {
         return self.return_value.clone();
     }
     
-    
     fn _handle_invalid_type(&mut self, type_: &str, valid_types: Vec<&str>) -> bool {
         let valid_types_owned: Vec<String> = valid_types.into_iter().map(|s| s.to_string()).collect();
         let valid_types_slice: &[String] = &valid_types_owned;
@@ -223,7 +291,6 @@ impl Interpreter {
     
         false
     }
-    
 
     pub fn interpret(&mut self, statements: Vec<Statement>, source: String) -> Result<Value, Error> {
         self.source = String::new();
@@ -524,16 +591,24 @@ impl Interpreter {
                     },
                     None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
                 };
-                
-                let type_str = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+        
+                let type_str_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
                     Some(pos) => {
                         let type_val = &values[pos];
-                        self.evaluate(type_val.convert_to_statement()).to_string()
+                        self.evaluate(type_val.convert_to_statement())
                     }
                     None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
                 };
         
-                parameters.push(Parameter::positional(name.as_str(), type_str.as_str()));
+                match &type_str_value {
+                    Value::Map { .. } => {
+                        parameters.push(Parameter::positional_pt(name.as_str(), &type_str_value));
+                    }
+                    Value::String(s) => {
+                        parameters.push(Parameter::positional(name.as_str(), s.as_str()));
+                    }
+                    _ => return self.raise("RuntimeError", "Invalid type for function parameter 'type'"),
+                }
             } else {
                 return self.raise("TypeError", "Expected a map for function parameter");
             }
@@ -546,39 +621,49 @@ impl Interpreter {
         
         for (name_str, info) in named_args_hashmap {
             if let Value::Map { keys, values } = info {
-                let type_str = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                    Some(pos) => {
-                        let type_val = &values[pos];
-                        self.evaluate(type_val.convert_to_statement()).to_string()
-                    }
+                let type_val = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                    Some(pos) => &values[pos],
                     None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
                 };
+        
+                let type_eval = self.evaluate(type_val.convert_to_statement());
         
                 let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
                     Some(pos) => {
                         let val = &values[pos];
-                        let stmt = val.convert_to_statement();
-                        self.evaluate(stmt)
+                        self.evaluate(val.convert_to_statement())
                     }
                     None => Value::Null,
                 };
         
-                parameters.push(Parameter::positional_optional(
-                    name_str.as_str(),
-                    type_str.as_str(),
-                    value,
-                ));
+                match &type_eval {
+                    Value::Map { .. } => {
+                        parameters.push(Parameter::positional_optional_pt(
+                            name_str.as_str(),
+                            &type_eval,
+                            value,
+                        ));
+                    }
+                    Value::String(s) => {
+                        parameters.push(Parameter::positional_optional(
+                            name_str.as_str(),
+                            s.as_str(),
+                            value,
+                        ));
+                    }
+                    _ => return self.raise("RuntimeError", "Invalid type for named argument 'type'"),
+                }
             } else {
                 return self.raise("TypeError", "Expected a map for named argument");
             }
-        }
+        }        
 
         let body_formatted: Vec<Statement> = body.iter().map(|v| v.convert_to_statement()).collect();
 
         let metadata = FunctionMetadata {
             name: name.to_string(),
             parameters,
-            return_type: return_type_str.to_string(),
+            return_type: return_type_str,
             is_public,
             is_static,
             is_final,
@@ -764,29 +849,71 @@ impl Interpreter {
     }    
 
     fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let binding = statement;
-        let default = Value::String("any".to_string());
+        let default_type = Value::String("any".to_string());
     
-        let type_name = binding.get(&Value::String("value".to_string())).unwrap_or(&default);
-    
-        if let Value::String(s) = type_name {
-            if VALID_TYPES.contains(&s.as_str()) {
-                return Value::String(s.clone());
+        let type_kind = match statement.get(&Value::String("type_kind".to_string())) {
+            Some(kind) => kind,
+            None => {
+                self.raise("RuntimeError", "missing 'type_kind' in statement");
+                return NULL;
             }
-    
-            self.raise(
-                "TypeError",
-                &format!(
-                    "Invalid type '{}'. Valid types are: {}",
-                    s,
-                    VALID_TYPES.join(", ")
-                ),
-            );
-        } else {
-            self.raise("TypeError", "Type value is not a string");
+        };
+        
+        let kind_str = match type_kind {
+            Value::String(s) => s.as_str(),
+            _ => {
+                self.raise("RuntimeError", "Invalid 'kind' for type statement");
+                return NULL;
+            }
+        };
+        
+        match kind_str {
+            "simple" => {
+                let type_name = statement.get(&Value::String("value".to_string())).unwrap_or(&default_type);
+        
+                if let Value::String(s) = type_name {
+                    if VALID_TYPES.contains(&s.as_str()) {
+                        return Value::String(s.clone());
+                    }
+        
+                    self.raise(
+                        "TypeError",
+                        &format!(
+                            "Invalid type '{}'. Valid types are: {}",
+                            s,
+                            VALID_TYPES.join(", ")
+                        ),
+                    );
+                    return NULL;
+                } else {
+                    self.raise("TypeError", "Type value is not a string");
+                    return NULL;
+                }
+            }
+            "function" | "indexed" => {
+                let mut keys = vec![Value::String("_note".to_string())];
+                let mut values = vec![Value::String(create_note(
+                    "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
+                    Some(self.use_colors),
+                    &self.config.color_scheme.note,
+                ))];                
+
+                keys.extend(statement.keys().cloned());
+                values.extend(statement.values().cloned());
+
+                return Value::Map {
+                    keys,
+                    values,
+                }
+            }
+            _ => {
+                self.raise("RuntimeError", "Invalid 'kind' for type statement");
+                return NULL;
+            }
         }
+        
         NULL
-    }
+    }    
 
     fn handle_if(&mut self, statement: HashMap<Value, Value>) -> Value {
         let condition = match statement.get(&Value::String("condition".to_string())) {
@@ -1068,7 +1195,7 @@ impl Interpreter {
                     var.type_name().to_owned()
                 };
 
-                if !self.check_type(&expected_type, Some(&right_value.type_name().clone()), Some(right_value.clone()), Some(true)) {
+                if !self.check_type(&right_value.clone(), &Value::String(expected_type.clone()), true) {
                     return self.raise("TypeError", &format!(
                         "Invalid type for variable '{}': expected '{}', got '{}'",
                         name, expected_type, right_value.type_name()
@@ -1320,12 +1447,16 @@ impl Interpreter {
         let value = self.evaluate(value.convert_to_statement());
     
         let declared_type = match statement.get(&Value::String("var_type".to_string())) {
-            Some(Value::String(t)) => t,
-            _ => "any",
+            Some(t) => self.evaluate(t.convert_to_statement()),
+            _ => Value::String("any".to_string()),
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
     
-        if !self.check_type(declared_type, Some(&value.type_name().clone()), Some(value.clone()), Some(true)) {
-            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type, value.type_name()));
+        if !self.check_type(&value.clone(), &declared_type, false) {
+            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, format_type(&declared_type), value.type_name()));
         }
     
         let variable = Variable::new(name.to_string(), value, declared_type.to_string(), false, true, true);
@@ -1776,17 +1907,17 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), Some(false)) {
+                                if self.check_type(&arg_value, param_type, true) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
-                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, arg_value.type_name()),
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), arg_value.type_name()),
                                         &format!(
                                             "Try using: '{}{}={}({}){}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
                                             param_name,
-                                            param_type,
+                                            format_type(param_type),
                                             format_value(&positional[pos_index]).to_string(),
                                             check_ansi("\x1b[24m", &self.use_colors)
                                         ),
@@ -1794,17 +1925,17 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
+                                if self.check_type(&named_value, param_type, false) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
-                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, named_value.type_name()),
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), named_value.type_name()),
                                         &format!(
                                             "Try using: '{}{}={}({}){}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
                                             param_name,
-                                            param_type,
+                                            format_type(param_type),
                                             check_ansi("\x1b[24m", &self.use_colors),
                                             named_value.to_string()
                                         ),
@@ -1820,10 +1951,10 @@ impl Interpreter {
                             let mut variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), Some(false)) {
+                                if !self.check_type(&arg, param_type, false) {
                                     return self.raise(
                                         "TypeError",
-                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
+                                        &format!("Variadic argument #{} does not match expected type '{}'", i, format_type(param_type)),
                                     );
                                 }
                             }
@@ -1835,12 +1966,12 @@ impl Interpreter {
                         ParameterKind::KeywordVariadic => {
                             let mut keyword_args = HashMap::new();
                             for (key, value) in &named_map {
-                                if self.check_type(param_type, Some(&value.type_name()), Some(value.clone()), Some(false)) {
+                                if self.check_type(&value, param_type, false) {
                                     keyword_args.insert(key.clone(), value.clone());
                                 } else {
                                     return self.raise(
                                         "TypeError",
-                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, param_type),
+                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, format_type(param_type)),
                                     );
                                 }
                             }
@@ -1914,15 +2045,10 @@ impl Interpreter {
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), Some(false)) {
-                    return self.raise_with_help(
+                if !self.check_type(&result, &metadata.return_type, false) {
+                    return self.raise(
                         "TypeError",
-                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name()),
-                        &format!(
-                            "Expected: '{}', but got: '{}'",
-                            metadata.return_type,
-                            result.type_name()
-                        ),
+                        &format!("Return value does not match expected type '{}', got '{}'", format_type(&metadata.return_type), result.type_name())
                     );
                 }
                 return result;
@@ -2124,8 +2250,10 @@ impl Interpreter {
                         ),
                     );
                 }
+
+                let has_variadic = metadata.parameters.iter().any(|p| p.kind == ParameterKind::Variadic);
                 
-                if passed_args_count > expected_args_count {
+                if !has_variadic && passed_args_count > expected_args_count {
                     return self.raise(
                         "TypeError",
                         &format!(
@@ -2135,7 +2263,7 @@ impl Interpreter {
                             passed_args_count
                         ),
                     );
-                }                
+                }
 
                 let mut pos_index = 0;
                 let required_positional_count = metadata.parameters
@@ -2145,7 +2273,16 @@ impl Interpreter {
             
                 let provided_positional_count = positional.len();
                 
-                if provided_positional_count < required_positional_count {
+                let mut matched_positional_count = 0;
+                for param in &metadata.parameters {
+                    if param.kind == ParameterKind::Positional && param.default.is_none() {
+                        if pos_index < positional.len() || named_map.contains_key(&param.name) {
+                            matched_positional_count += 1;
+                        }
+                    }
+                }
+                
+                if matched_positional_count < required_positional_count {
                     return self.raise(
                         "TypeError",
                         &format!(
@@ -2153,10 +2290,10 @@ impl Interpreter {
                             if required_positional_count == 1 { "" } else { "s" },
                             function_name,
                             required_positional_count,
-                            provided_positional_count
+                            matched_positional_count
                         ),
                     );
-                }            
+                }                     
     
                 for param in &metadata.parameters {
                     let param_name = &param.name;
@@ -2167,17 +2304,17 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(param_type, Some(&arg_value.type_name()), Some(NULL), Some(false)) {
+                                if self.check_type(&arg_value, param_type, false) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
-                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, arg_value.type_name()),
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), arg_value.type_name()),
                                         &format!(
                                             "Try using: '{}{}={}({}){}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
                                             param_name,
-                                            param_type,
+                                            format_type(param_type),
                                             format_value(&positional[pos_index]).to_string(),
                                             check_ansi("\x1b[24m", &self.use_colors)
                                         ),
@@ -2185,17 +2322,17 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
+                                if self.check_type(&named_value, param_type, false) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
-                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type, named_value.type_name()),
+                                        &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), named_value.type_name()),
                                         &format!(
                                             "Try using: '{}{}={}({}){}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
                                             param_name,
-                                            param_type,
+                                            format_type(param_type),
                                             check_ansi("\x1b[24m", &self.use_colors),
                                             named_value.to_string()
                                         ),
@@ -2211,10 +2348,10 @@ impl Interpreter {
                             let mut variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(param_type, Some(&arg.type_name()), Some(arg.clone()), Some(false)) {
+                                if !self.check_type(&arg, param_type, false) {
                                     return self.raise(
                                         "TypeError",
-                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type),
+                                        &format!("Variadic argument #{} does not match expected type '{}'", i, format_type(param_type)),
                                     );
                                 }
                             }
@@ -2226,7 +2363,7 @@ impl Interpreter {
                         }
                         ParameterKind::KeywordVariadic => {
                             if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(param_type, Some(&named_value.type_name()), Some(named_value.clone()), Some(false)) {
+                                if self.check_type(&named_value, &param_type, false) {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise(
@@ -2234,7 +2371,7 @@ impl Interpreter {
                                         &format!(
                                             "Keyword argument '{}' does not match expected type '{}', got '{}'",
                                             param_name,
-                                            param_type,
+                                            format_type(param_type),
                                             named_value.type_name()
                                         ),
                                     );
@@ -2315,6 +2452,10 @@ impl Interpreter {
                     new_interpreter.stack = self.stack.clone();
                     let body = func.get_body();
                     new_interpreter.interpret(body, self.source.clone());
+                    if new_interpreter.err.is_some() {
+                        self.err = new_interpreter.err.clone();
+                        return NULL;
+                    }
                     result = new_interpreter.return_value.clone();
                     self.stack = new_interpreter.stack;
                 } else {
@@ -2329,10 +2470,10 @@ impl Interpreter {
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&metadata.return_type, Some(&result.type_name()), Some(result.clone()), Some(false)) {
+                if !self.check_type(&result, &metadata.return_type, false) {
                     return self.raise(
                         "TypeError",
-                        &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type, result.type_name())
+                        &format!("Return value does not match expected type '{}', got '{}'", format_type(&metadata.return_type), result.type_name())
                     );
                 }
                 return result
@@ -2532,17 +2673,9 @@ impl Interpreter {
             },
             "*" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    let fa = match Float::from_int(&a) {
-                        Ok(f) => f,
-                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
-                    };
-                    let fb = match Float::from_int(&b) {
-                        Ok(f) => f,
-                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
-                    };
-                    match fa * fb {
-                        Ok(res) => Value::Float(res),
-                        Err(_) => return self.raise("TypeError", "Float multiplication failed"),
+                    match a * b {
+                        Ok(res) => Value::Int(res),
+                        Err(_) => return self.raise("TypeError", "Int multiplication failed"),
                     }
                 }
                 (Value::Float(a), Value::Float(b)) => match a * b {

@@ -272,7 +272,7 @@ where
         meta: FunctionMetadata {
             name: name.to_string(),
             parameters,
-            return_type: return_type.to_string(),
+            return_type: Value::String(return_type.to_string()),
             is_public,
             is_static,
             is_final,
@@ -302,7 +302,7 @@ where
         meta: FunctionMetadata {
             name: name.to_string(),
             parameters,
-            return_type: return_type.to_string(),
+            return_type: Value::String(return_type.to_string()),
             is_public,
             is_static,
             is_final,
@@ -518,6 +518,125 @@ pub fn create_function(metadata: FunctionMetadata, body: Vec<Statement>) -> Valu
         meta: metadata,
         body,
     }.into()))
+}
+
+pub fn create_note(text: &str, use_colors: Option<bool>, note_color: &str) -> String {
+    let use_colors = use_colors.unwrap_or(false);
+    format!(
+        "{}{}Note:{} {}{}",
+        hex_to_ansi(note_color, Some(use_colors)),
+        check_ansi("\x1b[1m", &use_colors),
+        check_ansi("\x1b[22m", &use_colors),
+        text,
+        hex_to_ansi("reset", Some(use_colors))
+    )
+}
+
+pub fn format_type(value: &Value) -> String {
+    fn as_str(v: &Value) -> Option<&str> {
+        if let Value::String(s) = v {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Map { keys, values } => {
+            let mut map = HashMap::new();
+
+            for (k, v) in keys.iter().zip(values.iter()) {
+                if let Some(key_str) = as_str(k) {
+                    map.insert(key_str, v);
+                }
+            }
+
+            let type_kind = map.get("type_kind").and_then(|v| as_str(*v));
+
+            let elements = match map.get("elements") {
+                Some(Value::Map { .. }) => vec![],
+                Some(Value::String(_)) => vec![map.get("elements").and_then(|v| as_str(*v)).unwrap().to_string()],
+                Some(_) => vec![],
+                None => vec![],
+            };
+
+            let base = map.get("base").and_then(|v| as_str(*v));
+            let variadic = map.get("variadic").and_then(|v| {
+                if let Value::String(s) = v {
+                    Some(s == "true")
+                } else {
+                    None
+                }
+            }).unwrap_or(false);
+
+            let return_type = map.get("return_type");
+
+            match type_kind {
+                Some("indexed") => {
+                    if let Some(base) = base {
+                        if !elements.is_empty() {
+                            format!("{}[{}]", base, elements.join(","))
+                        } else {
+                            base.to_string()
+                        }
+                    } else {
+                        "unknown".to_string()
+                    }
+                }
+
+                Some("function") => {
+                    let elems = if !elements.is_empty() {
+                        format!("[{}]", elements.join(","))
+                    } else {
+                        "".to_string()
+                    };
+
+                    let ret_str = if let Some(Value::Map { keys: rt_keys, values: rt_values }) = return_type {
+                        let mut rt_map = std::collections::HashMap::new();
+                        for (k, v) in rt_keys.iter().zip(rt_values.iter()) {
+                            if let Some(key_str) = as_str(k) {
+                                rt_map.insert(key_str, v);
+                            }
+                        }
+
+                        if rt_map.get("type_kind").and_then(|v| as_str(*v)) == Some("simple") {
+                            if let Some(Value::String(val)) = rt_map.get("value") {
+                                if !(val == "any" || val == "void") {
+                                    return format!(" -> {}", val);
+                                };
+                                "".to_string()
+                            } else {
+                                "".to_string()
+                            }
+                        } else {
+                            "".to_string()
+                        }
+                    } else {
+                        "".to_string()
+                    };
+
+                    format!("function{}{}", elems, ret_str)
+                }
+
+                Some("simple") => {
+                    if let Some(Value::String(val)) = map.get("value") {
+                        val.to_string()
+                    } else {
+                        "unknown".to_string()
+                    }
+                }
+
+                _ => {
+                    map.get("type").and_then(|v| as_str(*v)).unwrap_or("unknown").to_string()
+                }
+            }
+        }
+        Value::Null => "void".to_string(),
+        _ => {
+            "unknown".to_string()
+        }
+    }
 }
 
 

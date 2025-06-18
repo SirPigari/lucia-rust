@@ -284,7 +284,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
             debug: "#434343".to_string(),
             comment: "#757575".to_string(),
             input_arrows: "#136163".to_string(),
-            input_text: "#BCBEC4".to_string(),
+            note: "#1CC58B".to_string(),
             output_text: "#BCBEC4".to_string(),
             info: "#9209B3".to_string(),
         },
@@ -645,7 +645,7 @@ fn main() {
             print!("{}{}{} ", 
                 hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
                 ">>>", 
-                hex_to_ansi(&config.color_scheme.input_text, Some(use_colors))
+                hex_to_ansi("reset", Some(use_colors))
             );
             let input = utils::read_input("");
             if input.is_empty() {

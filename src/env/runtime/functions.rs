@@ -21,7 +21,7 @@ pub enum ParameterKind {
 #[derive(Clone, Debug, PartialEq, Hash, PartialOrd)]
 pub struct Parameter {
     pub name: String,
-    pub ty: String,
+    pub ty: Value,
     pub default: Option<Value>,
     pub kind: ParameterKind,
 }
@@ -31,7 +31,7 @@ pub struct Parameter {
 pub struct FunctionMetadata {
     pub name: String,
     pub parameters: Vec<Parameter>,
-    pub return_type: String,
+    pub return_type: Value,
     pub is_public: bool,
     pub is_static: bool,
     pub is_final: bool,
@@ -90,7 +90,7 @@ impl NativeFunction {
             meta: FunctionMetadata {
                 name: name.to_string(),
                 parameters,
-                return_type: return_type.to_string(),
+                return_type: Value::String(return_type.to_string()),
                 is_public,
                 is_static,
                 is_final,
@@ -178,7 +178,7 @@ impl NativeMethod {
             meta: FunctionMetadata {
                 name: name.to_string(),
                 parameters,
-                return_type: return_type.to_string(),
+                return_type: Value::String(return_type.to_string()),
                 is_public,
                 is_static,
                 is_final,
@@ -267,12 +267,12 @@ impl Function {
     }
 
     pub fn get_name(&self) -> &str {
-        self.metadata().name.as_str()
+        &self.metadata().name
     }
 
-    pub fn get_return_type(&self) -> &str {
-        self.metadata().return_type.as_str()
-    }
+    pub fn get_return_type(&self) -> Value {
+        self.metadata().return_type.clone()
+    }    
 
     pub fn get_parameters(&self) -> &[Parameter] {
         &self.metadata().parameters
@@ -319,15 +319,34 @@ impl Parameter {
     pub fn positional(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::Positional,
         }
     }
+    
+    pub fn positional_pt(name: &str, ty: &Value) -> Self {
+        Self {
+            name: name.to_string(),
+            ty: ty.clone(),
+            default: None,
+            kind: ParameterKind::Positional,
+        }
+    }
+
     pub fn positional_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
+            default: Some(default),
+            kind: ParameterKind::Positional,
+        }
+    }
+    
+    pub fn positional_optional_pt(name: &str, ty: &Value, default: Value) -> Self {
+        Self {
+            name: name.to_string(),
+            ty: ty.clone(),
             default: Some(default),
             kind: ParameterKind::Positional,
         }
@@ -336,7 +355,7 @@ impl Parameter {
     pub fn variadic(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::Variadic,
         }
@@ -345,7 +364,7 @@ impl Parameter {
     pub fn variadic_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::Variadic,
         }
@@ -354,7 +373,7 @@ impl Parameter {
     pub fn keyword_variadic(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::KeywordVariadic,
         }
@@ -363,7 +382,7 @@ impl Parameter {
     pub fn keyword_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
         }
@@ -372,7 +391,7 @@ impl Parameter {
     pub fn keyword_variadic_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: ty.to_string(),
+            ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
         }
@@ -381,7 +400,7 @@ impl Parameter {
     pub fn instance() -> Self {
         Self {
             name: "self".to_string(),
-            ty: "any".to_string(),
+            ty: Value::String("any".to_string()),
             default: None,
             kind: ParameterKind::Positional,
         }
