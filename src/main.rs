@@ -288,14 +288,13 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
 
 fn main() {
     let cwd = std_env::current_dir()
-        .and_then(|p| p.canonicalize())
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to get canonicalized current directory: {}", e);
-            exit(1);
-        })
-        .display()
-        .to_string()
-        .replace("\\", "/");
+    .and_then(|p| p.canonicalize())
+    .unwrap_or_else(|e| {
+        eprintln!("Failed to get canonicalized current directory: {}", e);
+        exit(1);
+    });
+
+    let cwd_str = cwd.to_string_lossy().replace('\\', "/");
 
     let exe_path = std_env::current_exe()
         .and_then(|p| p.canonicalize())
@@ -436,7 +435,6 @@ fn main() {
         }))
         .unwrap();
 
-    let cwd_dir = PathBuf::from(cwd.clone());
 
     let use_colors = !no_color_flag;
 
@@ -564,15 +562,12 @@ fn main() {
             let mut path: PathBuf = PathBuf::from(&arg);
 
             if path.is_relative() {
-                path = cwd_dir.join(path);
+                path = cwd.join(path);
             }
 
-            path = match path.canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Error: File '{}' does not exist or is not a valid file", path.display());
-                    exit(1);
-                }
+            if !path.exists() {
+                eprintln!("Error: File '{}' does not exist or is not a valid file", path.display());
+                exit(1);
             };
 
             Some(path.display().to_string())
@@ -591,7 +586,7 @@ fn main() {
             let path = Path::new(&file_path);
 
             let debug_mode_some = if config.debug {
-                Some(debug_mode.clone())
+                Some(config.debug_mode.clone())
             } else {
                 None
             };
@@ -600,7 +595,7 @@ fn main() {
         }
     } else {
         let debug_mode_some = if config.debug {
-            Some(debug_mode.clone())
+            Some(config.debug_mode.clone())
         } else {
             None
         };
