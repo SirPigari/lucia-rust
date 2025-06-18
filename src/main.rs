@@ -192,19 +192,6 @@ fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Con
     eprintln!("{}", trace);
 }
 
-fn get_config_path() -> std::io::Result<PathBuf> {
-    let exe_path = std_env::current_exe()?;
-
-    let exe_dir = exe_path.parent()
-        .expect("Executable must be in a directory");
-
-    let config_path = exe_dir.join("../").join("config.json");
-
-    let config_path = config_path.canonicalize()?;
-
-    Ok(config_path)
-}
-
 fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
     if config.debug {
@@ -300,34 +287,43 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
 }
 
 fn main() {
-    if let Ok(exec_path) = std_env::current_exe() {
-        if let Some(ext) = exec_path.extension() {
-            if ext == "exe" {
-                if !exec_path.components().any(|comp| comp.as_os_str() == "bin") {
-                    eprintln!("Executable is not located in a 'bin' directory. Exiting.");
-                    exit(1);
-                }
-            }
-        }
-    }
-    let working_dir = std_env::current_dir()
-    .unwrap_or_else(|_| PathBuf::from("."))
-    .display()
-    .to_string()
-    .replace("\\", "/");
+    let cwd = std_env::current_dir()
+        .and_then(|p| p.canonicalize())
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to get canonicalized current directory: {}", e);
+            exit(1);
+        })
+        .display()
+        .to_string()
+        .replace("\\", "/");
 
-    let working_dir_path = PathBuf::from(working_dir.clone());
-    if let Err(e) = std_env::set_current_dir(&working_dir_path) {
-        eprintln!("Failed to change the directory: {}", e);
-        exit(1);
-    }
+    let exe_path = std_env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to get canonicalized path to executable: {}", e);
+            exit(1);
+        });
 
-    if working_dir.ends_with(".exe") && !working_dir_path.components().any(|comp| comp.as_os_str() == "bin") {
-        eprintln!("Executable is not located in a 'bin' directory. Exiting.");
-        exit(1);
-    }
-    let env_path = working_dir_path.join("..").canonicalize().unwrap_or_else(|_| working_dir_path.clone());
+    let exe_file = exe_path
+        .display()
+        .to_string()
+        .replace("\\", "/");
 
+    let mut config_path = exe_path
+        .parent()
+        .map(|p| p.join("..").join("config.json"))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .and_then(|p| p.canonicalize().or_else(|e| {
+            eprintln!("Failed to canonicalize config path: {}", e);
+            exit(1);
+        }))
+        .unwrap();
+
+
+    
     let args: Vec<String> = std_env::args().collect();
     let activate_flag = args.contains(&"--activate".to_string());
     let no_color_flag = args.contains(&"--no-color".to_string());
@@ -337,29 +333,75 @@ fn main() {
     let help_flag = args.contains(&"--help".to_string()) || args.contains(&"-h".to_string());
     let version_flag = args.contains(&"--version".to_string()) || args.contains(&"-v".to_string());
     let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
-
-    if help_flag {
-        println!("Usage: lucia [options] [files...]\n");
-        println!("Options:");
-        println!("  --activate, -a                  Activate the environment");
-        println!("  --no-color                      Disable colored output");
-        println!("  --quiet, -q                     Suppress debug and warning messages");
-        println!("  --debug, -d                     Enable debug mode");
-        println!("  --debug-mode=<mode>             Set debug mode (full, normal, minimal)");
-        println!("  --exit, -e                      Exit after executing files");
-        println!("  --help, -h                      Show this help message");
-        println!("  --version, -v                   Show version information");
-        println!("  --build-info                    Show build information");
-        println!("  --disable-preprocessor, -dp     Disable preprocessor");
-        exit(0);
-    }
+    let config_arg = args.iter().find(|arg| arg.starts_with("--config="));
 
     if version_flag {
         println!("Lucia-{}", VERSION);
         exit(0);
     }
 
+    if help_flag {
+        println!("{}", "Usage:".bold());
+        println!("  lucia [options] [files...]\n");
     
+        println!("{}", "Options:".bold());
+        println!(
+            "  {:<32} {}",
+            "--activate, -a".cyan(),
+            "Activate the environment"
+        );
+        println!(
+            "  {:<32} {}",
+            "--no-color".cyan(),
+            "Disable colored output"
+        );
+        println!(
+            "  {:<32} {}",
+            "--quiet, -q".cyan(),
+            "Suppress debug and warning messages"
+        );
+        println!(
+            "  {:<32} {}",
+            "--debug, -d".cyan(),
+            "Enable debug mode"
+        );
+        println!(
+            "  {:<32} {}",
+            "--debug-mode=<mode>".cyan(),
+            "Set debug mode (full, normal, minimal)"
+        );
+        println!(
+            "  {:<32} {}",
+            "--exit, -e".cyan(),
+            "Exit after executing files"
+        );
+        println!(
+            "  {:<32} {}",
+            "--help, -h".cyan(),
+            "Show this help message"
+        );
+        println!(
+            "  {:<32} {}",
+            "--version, -v".cyan(),
+            "Show version information"
+        );
+        println!(
+            "  {:<32} {}",
+            "--build-info".cyan(),
+            "Show build information"
+        );
+        println!(
+            "  {:<32} {}",
+            "--disable-preprocessor, -dp".cyan(),
+            "Disable preprocessor"
+        );
+        println!(
+            "  {:<32} {}",
+            "--config=<path>".cyan(),
+            "Specify a custom config file path"
+        );
+        exit(0);
+    }
 
     if args.contains(&"--build-info".to_string()) {
         let info = get_build_info();
@@ -367,65 +409,43 @@ fn main() {
         println!("{}", serde_json::to_string_pretty(&info).unwrap());
         exit(0);
     }
-    
-    let debug_mode = if debug_flag {
-        if let Some(arg) = args.iter().find(|arg| arg.starts_with("--debug-mode=")) {
-            if let Some(mode) = arg.split('=').nth(1) {
-                if ["full", "normal", "minimal"].contains(&mode) {
-                    mode.to_string()
-                } else {
-                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', or 'minimal'. Defaulting to 'normal'.", mode);
-                    exit(1);
-                    "normal".to_string()
-                }
-            } else {
-                "normal".to_string()
-            }
-        } else {
-            "normal".to_string()
+
+    if config_arg.is_some() {
+        let config_path_str = config_arg.unwrap().split('=').nth(1).unwrap_or("");
+        if config_path_str.is_empty() {
+            eprintln!("No config path provided. Use --config=<path> to specify a config file.");
+            exit(1);
         }
-    } else {
-        "normal".to_string()
-    };
+        config_path = PathBuf::from(config_path_str);
+        if !config_path.exists() {
+            eprintln!("Config file does not exist: {}", config_path.display());
+            exit(1);
+        }
+    }
+
+    let enviroment_dir = exe_path
+        .parent()
+        .map(|p| p.join(".."))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .and_then(|p| p.canonicalize().or_else(|e| {
+            eprintln!("Failed to canonicalize environment path: {}", e);
+            exit(1);
+        }))
+        .unwrap();
+
+    let cwd_dir = PathBuf::from(cwd.clone());
 
     let use_colors = !no_color_flag;
-
-    let config_path: PathBuf = match get_config_path() {
-        Ok(path) if path.exists() => path,
-        _ => {
-            let fallback_path = Path::new(file!())
-                .parent()
-                .map(|p| Path::new(p).join("..").join("config.json"))
-                .map(|p| fs::canonicalize(&p).unwrap_or(p))
-                .unwrap_or_else(|| {
-                    eprintln!("Failed to determine fallback config path");
-                    exit(1);
-                });
-    
-            if let Some(parent) = fallback_path.parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    eprintln!("Failed to create fallback config directory {}: {}", parent.display(), e);
-                    exit(1);
-                }
-            }
-
-            if !fallback_path.exists() {
-                if let Err(e) = fs::write(&fallback_path, b"{}") {
-                    eprintln!("Failed to create fallback config file {}: {}", fallback_path.display(), e);
-                    exit(1);
-                }
-            }
-    
-            fallback_path
-        }
-    };
 
     let mut config = if config_path.exists() {
         match load_config(&config_path) {
             Ok(config) => config,
             Err(_) => {
                 eprintln!("Failed to read config file, activating environment...");
-                if let Err(err) = activate_environment(&env_path, true) {
+                if let Err(err) = activate_environment(&config_path, true) {
                     eprintln!("Failed to activate environment: {}", err);
                     exit(1);
                 }
@@ -433,15 +453,22 @@ fn main() {
                     Ok(config) => config,
                     Err(e) => {
                         eprintln!("Failed to load config file again after activation: {}", e);
-                        eprintln!("Please rerun the program to try again after fixing the config file.");
-                        exit(0);
+                        eprintln!("Creating new empty config file at {}", config_path.display());
+                        if let Err(err) = fs::write(&config_path, b"{}") {
+                            eprintln!("Failed to create new config file: {}", err);
+                            exit(1);
+                        }
+                        load_config(&config_path).unwrap_or_else(|e| {
+                            eprintln!("Failed to load new config file: {}", e);
+                            exit(1);
+                        })
                     }
                 }
             }
         }
     } else {
         eprintln!("Config file not found, activating environment...");
-        if let Err(err) = activate_environment(&env_path, true) {
+        if let Err(err) = activate_environment(&config_path, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
@@ -449,15 +476,22 @@ fn main() {
             Ok(config) => config,
             Err(e) => {
                 eprintln!("Failed to load config file after activation: {}", e);
-                eprintln!("Please rerun the program to try again after fixing the config file.");
-                exit(0);
+                eprintln!("Creating new empty config file at {}", config_path.display());
+                if let Err(err) = fs::write(&config_path, b"{}") {
+                    eprintln!("Failed to create new config file: {}", err);
+                    exit(1);
+                }
+                load_config(&config_path).unwrap_or_else(|e| {
+                    eprintln!("Failed to load new config file: {}", e);
+                    exit(1);
+                })
             }
         }
-    };
+    };    
     
     if activate_flag {
-        println!("{}", format!("Activating environment at: {}", env_path.display()).cyan().bold());
-        if let Err(err) = activate_environment(&env_path, false) {
+        println!("{}", format!("Activating environment at: {}", enviroment_dir.display()).cyan().bold());
+        if let Err(err) = activate_environment(&enviroment_dir, false) {
             eprintln!("{}", format!("Failed to activate environment: {}", err).red().bold());
             exit(1);
         }
@@ -471,7 +505,7 @@ fn main() {
     let home_dir_path = PathBuf::from(home_dir.clone());
 
     if let Err(e) = std_env::set_current_dir(&home_dir_path) {
-        if let Err(err) = activate_environment(&env_path, true) {
+        if let Err(err) = activate_environment(&enviroment_dir, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
@@ -483,6 +517,22 @@ fn main() {
     .replace("\\", "/");
 
     let home_dir_path = PathBuf::from(home_dir.clone());
+
+    let debug_mode: String = if debug_flag {
+        args.iter()
+            .find(|arg| arg.starts_with("--debug-mode="))
+            .and_then(|arg| arg.split('=').nth(1))
+            .map(|mode| match mode {
+                "full" | "normal" | "minimal" => mode.into(),
+                _ => {
+                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', or 'minimal'.", mode);
+                    exit(1);
+                }
+            })
+            .unwrap_or("normal".into())
+    } else {
+        config.debug_mode.clone()
+    };
 
     if let Err(e) = std_env::set_current_dir(&home_dir_path) {
         eprintln!("Failed to change the directory: {}", e);
@@ -496,7 +546,7 @@ fn main() {
 
     if debug_flag {
         config.debug = true;
-        config.debug_mode = debug_mode;
+        config.debug_mode = "full".to_string();
     }
     if quiet_flag {
         config.debug = false;
@@ -514,7 +564,7 @@ fn main() {
             let mut path: PathBuf = PathBuf::from(&arg);
 
             if path.is_relative() {
-                path = working_dir_path.join(path);
+                path = cwd_dir.join(path);
             }
 
             path = match path.canonicalize() {
@@ -539,182 +589,233 @@ fn main() {
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
             let path = Path::new(&file_path);
-    
-            if path.exists() && path.is_file() {
-                debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
-                let file_content = fs::read_to_string(path).expect("Failed to read file");
-                let lexer = Lexer::new(&file_content);
-                let lexer = Lexer::new(&file_content);
-                let raw_tokens = lexer.tokenize(config.print_comments);
-                
-                let processed_tokens = if !disable_preprocessor {
-                    let mut preprocessor = Preprocessor::new(
-                        home_dir_path.join("libs"),
-                        config_path.clone(),
-                    );
-                    match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
-                        Ok(tokens) => tokens,
-                        Err(e) => {
-                            handle_error(
-                                &e.clone(),
-                                &file_content,
-                                (0, "".to_string()),
-                                &config,
-                                use_colors,
-                                Some(file_path.as_str()),
-                            );
-                            exit(1);
-                        }
-                    }
-                } else {
-                    raw_tokens
-                };
-                
-                debug_log(
-                    &format!(
-                        "Tokens: {:?}",
-                        processed_tokens
-                            .iter()
-                            .filter(|token| token.0 != "WHITESPACE")
-                            .collect::<Vec<_>>()
-                    ),
-                    &config,
-                    Some(use_colors),
-                );
-                
-                let tokens: Vec<Token> = processed_tokens
-                    .into_iter()
-                    .map(|(t, v)| Token(t, v))
-                    .collect();                
-                let mut parser = Parser::new(tokens, config.clone(), file_content.to_string());
-                let statements = match parser.parse_safe() {
-                    Ok(stmts) => stmts,
-                    Err(error) => {
-                        debug_log(
-                            "Error while parsing:",
-                            &config,
-                            Some(use_colors),
-                        );
-                        handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
-                        exit(1);
-                    }
-                };
-                debug_log(
-                    &format!(
-                        "Statements: [{}]",
-                        statements
-                            .iter()
-                            .map(|stmt| format_value(&stmt.convert_to_map()))
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    ),
-                    &config,
-                    Some(use_colors),
-                );
-                let mut interpreter = Interpreter::new(config.clone(), use_colors);
-                let out: Value = match interpreter.interpret(statements, file_content.clone()) {
-                    Ok(out) => out,
-                    Err(error) => {
-                        debug_log(
-                            "Error while interpreting:",
-                            &config,
-                            Some(use_colors),
-                        );
-                        handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
-                        exit(1);
-                    }
-                };
+            let debug_mode_some = if config.debug {
+                Some(debug_mode.clone())
             } else {
-                eprintln!("Error: File '{}' does not exist or is not a valid file", file_path);
-            }
+                None
+            };
+            
+            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some);
         }
     } else {
-        println!(
-            "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
-            hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
-            config.version, 
+        let debug_mode_some = if config.debug {
+            Some(debug_mode.clone())
+        } else {
+            None
+        };
+
+        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some);
+    }
+}
+
+fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>) {
+    if path.exists() && path.is_file() {
+        debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
+
+        let file_content = fs::read_to_string(path).expect("Failed to read file");
+        let lexer = Lexer::new(&file_content);
+        let lexer = Lexer::new(&file_content);
+        let raw_tokens = lexer.tokenize(config.print_comments);
+
+        let print_start_debug = debug_mode
+            .as_ref()
+            .map_or(false, |mode| mode == "full" || mode == "minimal");
+
+        let print_intime_debug = debug_mode
+            .as_ref()
+            .map_or(false, |mode| mode == "full" || mode == "normal");
+        
+        let processed_tokens = if !disable_preprocessor {
+            let mut preprocessor = Preprocessor::new(
+                home_dir_path.join("libs"),
+                config_path.clone(),
+            );
+            match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    handle_error(
+                        &e.clone(),
+                        &file_content,
+                        (0, "".to_string()),
+                        &config,
+                        use_colors,
+                        Some(file_path.as_str()),
+                    );
+                    exit(1);
+                }
+            }
+        } else {
+            raw_tokens
+        };
+        
+        if print_start_debug {
+            debug_log(
+                &format!(
+                    "Raw Tokens: {:?}",
+                    processed_tokens
+                        .iter()
+                        .filter(|token| {
+                            token.0 != "WHITESPACE"
+                            && token.0 != "COMMENT_INLINE"
+                            && token.0 != "COMMENT_SINGLE"
+                            && token.0 != "COMMENT_MULTI"
+                            && token.0 != "EOF"
+                        })
+                        .collect::<Vec<_>>()
+                ),
+                &config,
+                Some(use_colors),
+            );
+        }
+        
+        let tokens: Vec<Token> = processed_tokens
+            .into_iter()
+            .map(|(t, v)| Token(t, v))
+            .collect();                
+        let mut parser = Parser::new(tokens, config.clone(), file_content.to_string(), use_colors);
+        let statements = match parser.parse_safe() {
+            Ok(stmts) => stmts,
+            Err(error) => {
+                debug_log(
+                    "Error while parsing:",
+                    &config,
+                    Some(use_colors),
+                );
+                handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                exit(1);
+            }
+        };
+
+        if print_start_debug {
+            debug_log(
+                &format!(
+                    "Parsed Statements: [{}]",
+                    statements
+                        .iter()
+                        .map(|stmt| format_value(&stmt.convert_to_map()))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ),
+                &config,
+                Some(use_colors),
+            );
+        }
+
+        let mut interpreter = Interpreter::new(config.clone(), use_colors);
+        let out: Value = match interpreter.interpret(statements, file_content.clone()) {
+            Ok(out) => out,
+            Err(error) => {
+                debug_log(
+                    "Error while interpreting:",
+                    &config,
+                    Some(use_colors),
+                );
+                handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                exit(1);
+            }
+        };
+    } else {
+        eprintln!("Error: File '{}' does not exist or is not a valid file", file_path);
+    }
+}
+
+fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>) {
+    println!(
+        "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
+        hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
+        config.version, 
+        hex_to_ansi("reset", Some(use_colors))
+    );
+    let mut interpreter = Interpreter::new(config.clone(), use_colors);
+    let mut preprocessor = Preprocessor::new(
+        home_dir_path.join("libs"),
+        config_path.clone(),
+    );
+
+    let print_start_debug = debug_mode
+        .as_ref()
+        .map_or(false, |mode| mode == "full" || mode == "minimal");
+
+    let print_intime_debug = debug_mode
+        .as_ref()
+        .map_or(false, |mode| mode == "full" || mode == "normal");
+
+    loop {
+        print!("{}{}{} ", 
+            hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
+            ">>>", 
             hex_to_ansi("reset", Some(use_colors))
         );
-        let mut interpreter = Interpreter::new(config.clone(), use_colors);
-        let mut preprocessor = Preprocessor::new(
-            home_dir_path.join("libs"),
-            config_path.clone(),
-        );
-        loop {
-            print!("{}{}{} ", 
-                hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
-                ">>>", 
+        let input = utils::read_input("");
+        if input.is_empty() {
+            continue;
+        }
+        
+        if input == "exit" {
+            println!("Use 'exit()' to exit.");
+            continue;
+        }
+
+        if input == "clear" || input == "cls" || input == "cls()" {
+            println!("Use 'clear()' to clear.");
+            continue;
+        }
+
+        if input == "help" || input == "?" {
+            println!("Use 'help()' for help.");
+            continue;
+        }
+
+        if input == "\x03" {
+            exit(0);
+        }
+
+        if input == "clear()" || input == "\x11" || input == "\x0F" {
+            if let Err(e) =  clear_terminal() {
+                handle_error(
+                    &Error::new("IOError", "Failed to clear screen"),
+                    &input,
+                    (0, "".to_string()),
+                    &config,
+                    use_colors,
+                    Some("<stdin>"),
+                );
+            }
+            println!(
+                "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
+                hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
+                config.version, 
                 hex_to_ansi("reset", Some(use_colors))
             );
-            let input = utils::read_input("");
-            if input.is_empty() {
-                continue;
-            }
-            
-            if input == "exit" {
-                println!("Use 'exit()' to exit.");
-                continue;
-            }
+            continue;
+        }
 
-            if input == "clear" || input == "cls" || input == "cls()" {
-                println!("Use 'clear()' to clear.");
-                continue;
-            }
+        let lexer = Lexer::new(&input);
+        let raw_tokens = lexer.tokenize(config.print_comments);
+        
+        let current_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-            if input == "help" || input == "?" {
-                println!("Use 'help()' for help.");
-                continue;
-            }
-
-            if input == "\x03" {
-                exit(0);
-            }
-
-            if input == "clear()" || input == "\x11" || input == "\x0F" {
-                if let Err(e) =  clear_terminal() {
+        let processed_tokens = if !disable_preprocessor {
+            match preprocessor.process(raw_tokens, &current_dir) {
+                Ok(toks) => toks,
+                Err(e) => {
                     handle_error(
-                        &Error::new("IOError", "Failed to clear screen"),
+                        &e.clone(),
                         &input,
                         (0, "".to_string()),
                         &config,
                         use_colors,
                         Some("<stdin>"),
                     );
+                    continue;
                 }
-                println!(
-                    "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
-                    hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
-                    config.version, 
-                    hex_to_ansi("reset", Some(use_colors))
-                );
-                continue;
             }
-    
-            let lexer = Lexer::new(&input);
-            let raw_tokens = lexer.tokenize(config.print_comments);
-            
-            let current_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-            let processed_tokens = if !disable_preprocessor {
-                match preprocessor.process(raw_tokens, &current_dir) {
-                    Ok(toks) => toks,
-                    Err(e) => {
-                        handle_error(
-                            &e.clone(),
-                            &input,
-                            (0, "".to_string()),
-                            &config,
-                            use_colors,
-                            Some("<stdin>"),
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                raw_tokens
-            };
-            
+        } else {
+            raw_tokens
+        };
+        
+        if print_start_debug {
             debug_log(
                 &format!(
                     "Tokens: {:?}",
@@ -732,24 +833,28 @@ fn main() {
                 &config,
                 Some(use_colors),
             );
-            
-            let tokens: Vec<Token> = processed_tokens
-                .into_iter()
-                .map(|(t, v)| Token(t, v))
-                .collect();            
-            let mut parser = Parser::new(tokens, config.clone(), input.to_string());
-            let statements = match parser.parse_safe() {
-                Ok(stmts) => stmts,
-                Err(error) => {
+        }
+        
+        let tokens: Vec<Token> = processed_tokens
+            .into_iter()
+            .map(|(t, v)| Token(t, v))
+            .collect();            
+        let mut parser = Parser::new(tokens, config.clone(), input.to_string(), use_colors);
+        let statements = match parser.parse_safe() {
+            Ok(stmts) => stmts,
+            Err(error) => {
+                if print_intime_debug {
                     debug_log(
-                        "Error while parsing:",
+                        &format!("Error while parsing: {}", error.msg()),
                         &config,
                         Some(use_colors),
                     );
-                    handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
-                    continue;
                 }
-            };
+                handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                continue;
+            }
+        };
+        if print_start_debug {
             debug_log(
                 &format!(
                     "Statements: [{}]",
@@ -762,29 +867,31 @@ fn main() {
                 &config,
                 Some(use_colors),
             );
-            let out: Value = match interpreter.interpret(statements, input.clone()) {
-                Ok(out) => {
-                    if interpreter.is_stopped() {
-                        exit(0);
-                    }
-                    out
-                },
-                Err(error) => {
+        }
+        let out: Value = match interpreter.interpret(statements, input.clone()) {
+            Ok(out) => {
+                if interpreter.is_stopped() {
+                    exit(0);
+                }
+                out
+            },
+            Err(error) => {
+                if print_intime_debug {
                     debug_log(
                         "Error while interpreting:",
                         &config,
                         Some(use_colors),
                     );
-                    handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
-                    continue;
                 }
-            };
-            if !matches!(out, Value::Null) {
-                println!(
-                        "{}",
-                        format_value(&out)
-                );
+                handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                continue;
             }
+        };
+        if !matches!(out, Value::Null) {
+            println!(
+                    "{}",
+                    format_value(&out)
+            );
         }
     }
 }

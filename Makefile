@@ -24,7 +24,7 @@ else
 	TEST_FILE := $$f
 endif
 
-.PHONY: all build release run activate test benchmark benchmark-save build-tests clean deps help
+.PHONY: all build release run activate test benchmark benchmark-save build-tests clean deps help lucia
 
 all: deps build run
 
@@ -177,6 +177,16 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@cmd /c "if exist temp rmdir /s /q temp"
 else
 	@rm -rf "$(LUCIA_DIR)/tests/stdout" "$(LUCIA_DIR)/temp" "$(LUCIA_DIR)/benchmark-results"
+endif
+
+LUCIA_FLAGS := $(filter-out lucia,$(MAKECMDGOALS))
+
+lucia:
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@cd $(subst /,\\,$(TARGET_DIR)) && $(RUN) $(LUCIA_FLAGS)
+else
+	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) $(LUCIA_FLAGS)
 endif
 
 help:

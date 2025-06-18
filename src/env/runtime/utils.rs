@@ -328,8 +328,8 @@ pub fn get_operator_precedence(op: &str) -> u8 {
 
 pub fn get_type_default(type_: &str) -> Value {
     match type_ {
-        "int" => Value::Float(0.0.into()),
-        "float" => Value::Int(0.into()),
+        "float" => Value::Float(0.0.into()),
+        "int" => Value::Int(0.into()),
         "string" => Value::String(String::new()),
         "bool" => Value::Boolean(false),
         "any" => Value::Null,
@@ -602,10 +602,11 @@ pub fn format_type(value: &Value) -> String {
 
                         if rt_map.get("type_kind").and_then(|v| as_str(*v)) == Some("simple") {
                             if let Some(Value::String(val)) = rt_map.get("value") {
+                                let mut o = "".to_string();
                                 if !(val == "any" || val == "void") {
-                                    return format!(" -> {}", val);
+                                    o = format!(" -> {}", val);
                                 };
-                                "".to_string()
+                                o
                             } else {
                                 "".to_string()
                             }

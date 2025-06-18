@@ -1,0 +1,10 @@
+i: int = 10
+
+fun f(f: function[int] -> int, a: int): f(a) end 
+fun g(a: int) -> int: return a end
+
+print(f(g, i))
+
+l: list[int] = [1, 2, 3]
+fun h(l: list[int]) -> int: return l[0] end
+print(h(l))

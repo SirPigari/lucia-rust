@@ -16,6 +16,7 @@ use crate::env::runtime::utils::{
     create_function,
     create_note,
     format_type,
+    get_type_default,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -160,7 +161,6 @@ impl Interpreter {
                     if t == "null" && e == "bool" {
                         return true;
                     }
-                    dbg!(&t, &e);
                     e == t
                 },
                 _ => false,
@@ -223,6 +223,8 @@ impl Interpreter {
                         let variadic = expected_hashmap.get(&Value::String("variadic".to_string()));
                         let variadic_type = expected_hashmap.get(&Value::String("variadic_type".to_string()));
 
+                        let mut status = true;
+
                         let elements_vec = match elements {
                             Some(Value::List(e)) => e,
                             _ => {self.raise("TypeError", "Expected a list for 'elements' in function type"); return false; },
@@ -235,12 +237,42 @@ impl Interpreter {
                                     if error {
                                         self.raise("TypeError", &format!("Parameter '{}' expected type '{}', got '{}'", param.name, element_type.to_string(), param.ty.to_string()));
                                     }
-                                    return false;
+                                    status = false;
                                 }
                             }
-                            return true;
+                            status = true;
                         }
-                        return false;
+
+                        if let Some(expected_ret_type) = return_type {
+                            let matches = match metadata.return_type.clone() {
+                                Value::String(s) => {
+                                    let expected = get_type_default(&s);
+                                    self.check_type(&expected, &Value::String(s.clone()), false)
+                                }
+                                _ => self.check_type(expected_ret_type, &metadata.return_type, false),
+                            };
+                        
+                            if !matches {
+                                if error {
+                                    self.raise(
+                                        "TypeError",
+                                        &format!(
+                                            "Function '{}' expected return type '{}', got '{}'",
+                                            metadata.name,
+                                            expected_ret_type.to_string(),
+                                            metadata.return_type.to_string()
+                                        ),
+                                    );
+                                }
+                                status = false;
+                            }
+                        } else {
+                            if error {
+                                self.raise("TypeError", "Missing 'return_type' in expected function type");
+                            }
+                            status = false;
+                        }                     
+                        return status;
                     } else {
                         if error {
                             self.raise("TypeError", &format!("Expected type 'function', got '{}'", value.to_string()));
@@ -2986,7 +3018,7 @@ impl Interpreter {
                                         let tokens: Vec<Token> = raw_tokens.into_iter()
                                             .map(|(t, v)| Token(t, v))
                                             .collect();
-                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone()).parse_safe() {
+                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone(), self.use_colors).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
                                                 return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));

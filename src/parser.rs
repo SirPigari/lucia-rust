@@ -25,14 +25,14 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>, config: Config, source: String) -> Self {
+    pub fn new(tokens: Vec<Token>, config: Config, source: String, use_colors: bool) -> Self {
         Self {
             tokens,
             pos: 0,
             statements: vec![],
             aliases: HashMap::new(),
             config: config.clone(),
-            use_colors: config.supports_color,
+            use_colors,
             include_whitespace: false,
             source,
             err: None,
