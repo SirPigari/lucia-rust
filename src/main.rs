@@ -21,6 +21,7 @@ mod env {
         pub mod build;
         pub mod pattern_reg;
         pub mod preprocessor;
+        pub mod objects;
     }
 }
 
@@ -256,12 +257,6 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
             ASM: true,
             PY: true,
         },
-        lucia_file_extensions: vec![
-            ".lucia".to_string(),
-            ".luc".to_string(),
-            ".lc".to_string(),
-            ".l".to_string(),
-        ],
         home_dir: env_path_str,
         recursion_limit: 9999,
         color_scheme: ColorScheme {
@@ -443,7 +438,7 @@ fn main() {
             Ok(config) => config,
             Err(_) => {
                 eprintln!("Failed to read config file, activating environment...");
-                if let Err(err) = activate_environment(&config_path, true) {
+                if let Err(err) = activate_environment(&enviroment_dir, true) {
                     eprintln!("Failed to activate environment: {}", err);
                     exit(1);
                 }
@@ -466,7 +461,7 @@ fn main() {
         }
     } else {
         eprintln!("Config file not found, activating environment...");
-        if let Err(err) = activate_environment(&config_path, true) {
+        if let Err(err) = activate_environment(&enviroment_dir, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
         }
@@ -833,7 +828,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         let tokens: Vec<Token> = processed_tokens
             .into_iter()
             .map(|(t, v)| Token(t, v))
-            .collect();            
+            .collect();
         let mut parser = Parser::new(tokens, config.clone(), input.to_string(), use_colors);
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,

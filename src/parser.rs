@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
-use crate::env::runtime::utils::{print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
+use crate::env::runtime::utils::{unescape_string_literal, print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
@@ -16,7 +16,6 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     statements: Vec<Statement>,
-    aliases: HashMap<Token, Option<Token>>,
     config: Config,
     use_colors: bool,
     include_whitespace: bool,
@@ -30,7 +29,6 @@ impl Parser {
             tokens,
             pos: 0,
             statements: vec![],
-            aliases: HashMap::new(),
             config: config.clone(),
             use_colors,
             include_whitespace: false,
@@ -43,15 +41,11 @@ impl Parser {
         while self.pos < self.tokens.len() {
             let token = &self.tokens[self.pos];
             if self.include_whitespace || token.0 != "WHITESPACE" {
-                return Some(self.apply_aliases(token));
+                return Some(token);
             }
             self.pos += 1;
         }
         None
-    }
-
-    fn apply_aliases<'a>(&'a self, token: &'a Token) -> &'a Token {
-        self.aliases.get(token).and_then(|v| v.as_ref()).unwrap_or(token)
     }
 
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Statement {
@@ -145,7 +139,7 @@ impl Parser {
         let mut offset = 1;
         while self.pos + offset < self.tokens.len() {
             if self.tokens[self.pos + offset].0 != "WHITESPACE" || self.include_whitespace {
-                return Some(self.apply_aliases(&self.tokens[self.pos + offset]));
+                return Some(&self.tokens[self.pos + offset]);
             }
             offset += 1;
         }
@@ -153,24 +147,14 @@ impl Parser {
     }
 
     pub fn current_line(&self) -> usize {
-        let empty = String::new();
-        let target_token = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&empty);
-    
         let mut byte_index = 0;
-        let mut count = 0;
     
-        for token in &self.tokens {
-            if &token.1 == target_token {
-                if count == self.pos {
-                    if let Some(found_index) = self.source[byte_index..].find(target_token) {
-                        byte_index += found_index;
-                        break;
-                    }
-                }
-                count += 1;
-            } else {
-                byte_index += token.1.len();
+        for (i, token) in self.tokens.iter().enumerate() {
+            if i == self.pos {
+                break;
             }
+    
+            byte_index += token.1.len();
         }
     
         if byte_index > self.source.len() {
@@ -181,28 +165,22 @@ impl Parser {
     }
     
     pub fn get_line_column(&self) -> usize {
-        let empty = String::new();
-        let target_token = self.tokens.get(self.pos).map(|t| &t.1).unwrap_or(&empty);
-    
         let mut byte_index = 0;
-        let mut count = 0;
-        for token in &self.tokens {
-            if &token.1 == target_token {
-                if count == self.pos {
-                    if let Some(found_index) = self.source[byte_index..].find(target_token) {
-                        byte_index += found_index;
-                        break;
-                    }
-                }
-                count += 1;
-            } else {
-                byte_index += token.1.len();
+    
+        for (i, token) in self.tokens.iter().enumerate() {
+            if i == self.pos {
+                break;
             }
+    
+            byte_index += token.1.len();
         }
+    
         if byte_index > self.source.len() {
             return 0;
         }
+    
         let mut line_start = 0;
+    
         for (i, ch) in self.source[..byte_index].char_indices().rev() {
             if ch == '\n' {
                 line_start = i + ch.len_utf8();
@@ -212,6 +190,7 @@ impl Parser {
     
         self.source[line_start..byte_index].chars().count() + 1
     }
+    
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
@@ -508,6 +487,94 @@ impl Parser {
                 "SEPARATOR" | "IDENTIFIER" if token.1 == "..." || token.1 == "pass" => {
                     self.next();
                     Statement::Null
+                }
+
+                "IDENTIFIER" if token.1 == "import" => {
+                    self.next();
+                    let mut module_parts = vec![];
+
+                    let first = self.token().cloned().unwrap_or_else(|| {
+                        self.raise("SyntaxError", "Expected module name after 'import'");
+                        DEFAULT_TOKEN.clone()
+                    });
+                    
+                    let module_name = if first.0 == "IDENTIFIER" {
+                        module_parts.push(first.1);
+                        self.next();
+                    
+                        while self.token_is("SEPARATOR", ".") {
+                            self.next();
+                            let next_ident = self.token().cloned().unwrap_or_else(|| {
+                                self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                DEFAULT_TOKEN.clone()
+                            });
+                            if next_ident.0 != "IDENTIFIER" {
+                                self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                return Statement::Null;
+                            }
+                            module_parts.push(next_ident.1);
+                            self.next();
+                        }
+                    
+                        module_parts.join(".")
+                    } else if first.0 == "STRING" {
+                        let raw = &first.1;
+                        let unescaped = unescape_string_literal(raw);
+                        match unescaped {
+                            Ok(inner) => {
+                                self.next();
+                                inner
+                            }
+                            Err(_) => {
+                                self.raise("SyntaxError", "Malformed string literal for module name");
+                                return Statement::Null;
+                            }
+                        }
+                    } else {
+                        self.raise("SyntaxError", "Expected identifier or string after 'import'");
+                        return Statement::Null;
+                    };
+
+                    let mut path = None;
+                    let mut alias: Option<Token> = None;
+                    if self.token_is("IDENTIFIER", "from") {
+                        self.next();
+                        path = Some(self.parse_expression());
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                    }
+                    if self.token_is("IDENTIFIER", "as") {
+                        self.next();
+                        let next_token = self.token().cloned().unwrap_or_else(|| {
+                            self.raise("SyntaxError", "Expected alias after 'as'");
+                            DEFAULT_TOKEN.clone()
+                        });
+                        if next_token.0 != "IDENTIFIER" {
+                            self.raise("SyntaxError", "Expected identifier after 'as'");
+                            return Statement::Null;
+                        }
+                        alias = Some(next_token);
+                        self.next();
+                    }
+                    line = self.current_line();
+                    column = self.get_line_column();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("module_name".to_string()),
+                            Value::String("path".to_string()),
+                            Value::String("alias".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("IMPORT".to_string()),
+                            Value::String(module_name),
+                            path.map_or(Value::Null, |p| p.convert_to_map()),
+                            alias.map_or(Value::Null, |a| Value::String(a.1)),
+                        ],
+                        line,
+                        column,
+                    }
                 }
 
                 "IDENTIFIER" if token.1 == "for" => {

@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg, Not, BitAnd, BitOr};
 use std::str::FromStr;
 use crate::env::runtime::value::Value;
+use crate::env::runtime::variables::Variable;
 use once_cell::sync::Lazy;
 
 pub use imagnum::{

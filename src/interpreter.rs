@@ -17,6 +17,7 @@ use crate::env::runtime::utils::{
     create_note,
     format_type,
     get_type_default,
+    get_type_from_token_name,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -24,12 +25,15 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::objects::{Object, ObjectMetadata};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
 use std::cmp::Ordering;
 use std::sync::Mutex;
+use std::path::PathBuf;
+use std::fs;
 
 use crate::lexer::Lexer;
 use crate::parser::{Parser, Token};
@@ -324,6 +328,59 @@ impl Interpreter {
         false
     }
 
+    fn get_properties_from_file(&self, path: &PathBuf) -> Result<HashMap<String, Variable>, String> {
+        if !path.exists() || !path.is_file() {
+            return Err(format!("File '{}' does not exist or is not a file", path.display()));
+        }
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file '{}': {}", path.display(), e))?;
+    
+        let lexer = Lexer::new(&content);
+        let raw_tokens = lexer.tokenize(false);
+        let tokens: Vec<Token> = raw_tokens
+            .into_iter()
+            .map(|(t, v)| Token(t, v))
+            .collect();
+        let mut parser = Parser::new(tokens, self.config.clone(), content.clone(), self.use_colors);
+        let statements = parser.parse();
+    
+        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors);
+        let result = interpreter.interpret(statements, content);
+    
+        let properties = interpreter.variables.clone();
+
+        if let Some(err) = interpreter.err {
+            let mut pos = String::new();
+            let line = err.line.0;
+            if line != 0 {
+                let column = err.column;
+                if column > 0 {
+                    pos = format!(":{}:{}", line, column);
+                } else {
+                    pos = line.to_string();
+                }
+            }
+            return Err(format!("Error interpreting file '{}{}': {}: {}", path.display(), pos, err.error_type, err.msg))
+        }
+    
+        match result {
+            Ok(_) => Ok(properties),
+            Err(e) => {
+                let mut pos = String::new();
+                let line = e.line.0;
+                if line != 0 {
+                    let column = e.column;
+                    if column > 0 {
+                        pos = format!(":{}:{}", line, column);
+                    } else {
+                        pos = line.to_string();
+                    }
+                }
+                Err(format!("Error interpreting file '{}{}': {}: {}", path.display(), pos, e.error_type, e.msg))
+            },
+        }
+    }
+
     pub fn interpret(&mut self, statements: Vec<Statement>, source: String) -> Result<Value, Error> {
         self.source = String::new();
         self.is_returning = false;
@@ -466,6 +523,9 @@ impl Interpreter {
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
                 "RETURN" => self.handle_return(statement.clone()),
 
+                // Imports
+                "IMPORT" => self.handle_import(statement.clone()),
+
                 // Primitive types
                 "NUMBER" => self.handle_number(statement.clone()),
                 "STRING" => self.handle_string(statement.clone()),
@@ -529,6 +589,132 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_import(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let module_name = match statement.get(&Value::String("module_name".to_string())) {
+            Some(Value::String(name)) => {
+                let parts: Vec<&str> = name.split('.').collect();
+                if parts.len() == 1 {
+                    name.clone()
+                } else {
+                    let mut new_name = parts[0].to_string();
+                    for part in &parts[1..] {
+                        if *part == "lc" || *part == "lucia" {
+                            new_name.push('.');
+                        } else {
+                            new_name.push('/');
+                        }
+                        new_name.push_str(part);
+                    }
+                    new_name
+                }
+            }
+            _ => return self.raise("RuntimeError", "Missing or invalid 'module_name' in import statement"),
+        };        
+    
+        let module_path_opt = statement.get(&Value::String("path".to_string()));
+    
+        let module_path = match module_path_opt {
+            Some(Value::Map { keys, values }) => {
+                let map_statement = Value::Map {
+                    keys: keys.clone(),
+                    values: values.clone(),
+                }.convert_to_statement();
+                let path_eval = self.evaluate(map_statement);
+                let path_str = path_eval.to_string();
+                if path_str.is_empty() {
+                    self.raise("RuntimeError", "Empty 'path' in import statement");
+                    return NULL;
+                } else {
+                    PathBuf::from(path_str).join(&module_name)
+                }
+            }
+            Some(Value::Null) | None => PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name),
+            _ => return self.raise("RuntimeError", "Invalid 'path' in import statement"),
+        };
+
+        if !module_path.exists() {
+            let path_str = module_path.to_string_lossy().replace('\\', "/");
+            return self.raise("ImportError", &format!("Module '{}' not found at path '{}'", &module_name, path_str));
+        }        
+    
+        let alias = match statement.get(&Value::String("alias".to_string())) {
+            Some(Value::String(a)) => a,
+            Some(Value::Null) => &module_name,
+            _ => {
+                self.raise("RuntimeError", "Missing or invalid 'alias' in import statement");
+                return NULL;
+            },
+        };
+    
+        if self.variables.contains_key(alias) {
+            if module_name == *alias {
+                return self.raise("ImportError", &format!("Module '{}' already imported", module_name));
+            }
+            return self.raise("ImportError", &format!("Module '{}' already imported as '{}'", module_name, alias));
+        }
+
+        let mut properties = HashMap::new();
+
+        if module_path.is_file() {
+            if let Some(ext) = module_path.extension().and_then(|e| e.to_str()) {
+                if ext == "lc" || ext == "lucia" {
+                    let properties_result = self.get_properties_from_file(&module_path);
+                    match properties_result {
+                        Ok(props) => {
+                            properties.extend(props);
+                        }
+                        Err(e) => return self.raise("ImportError", &e),
+                    }
+                } else {
+                    return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                }
+            } else {
+                return self.raise("ImportError", "Module file has no extension");
+            }
+        } else if module_path.is_dir() {
+            let init_path = module_path.join("__init__.lc");
+            if init_path.exists() && init_path.is_file() {
+            }
+            
+            if let Ok(entries) = fs::read_dir(&module_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                            if (ext == "lc" || ext == "lucia") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lc") {
+                                let properties_result = self.get_properties_from_file(&path);
+                                match properties_result {
+                                    Ok(props) => {
+                                        properties.extend(props);
+                                    }
+                                    Err(e) => return self.raise("ImportError", &e),
+                                }
+                            } else if ext != "lc" && ext != "lucia" {
+                                return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            return self.raise("ImportError", &format!("Module path '{}' is neither file nor directory", module_path.display()));
+        }
+
+        dbg!(&module_name, &module_path, &properties);
+    
+        let mut module_meta = ObjectMetadata {
+            name: module_name.clone(),
+            properties,
+            parameters: Vec::new(),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            state: None,
+        };
+    
+        NULL
     }
 
     fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -706,7 +892,7 @@ impl Interpreter {
         if self.variables.contains_key(name) {
             if let Some(var) = self.variables.get(name) {
                 if var.is_final() {
-                    return self.raise("RuntimeError", &format!("Cannot redefine final function '{}'", name));
+                    return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
                 }
             }
         }
@@ -1186,7 +1372,7 @@ impl Interpreter {
         };
     
         let right_value = self.evaluate(right.convert_to_statement());
-
+    
         if self.err.is_some() {
             return NULL;
         }
@@ -1207,34 +1393,57 @@ impl Interpreter {
             }.convert_to_hashmap(),
             _ => return self.raise("RuntimeError", "Expected a map for assignment"),
         };
+    
         let left_type = match left_hashmap.get(&Value::String("type".to_string())) {
             Some(Value::String(t)) => t,
             _ => return self.raise("RuntimeError", "Missing or invalid 'type' in assignment left"),
         };
-
+    
         match left_type.as_str() {
             "VARIABLE" => {
                 let name = match left_hashmap.get(&Value::String("name".to_string())) {
                     Some(Value::String(n)) => n,
                     _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable assignment"),
                 };
-
+    
                 let expected_type = {
                     let var = match self.variables.get(name) {
                         Some(v) => v,
-                        None => return self.raise_with_help("NameError", &format!("Variable '{}' is not defined", name), &format!("Use this instead: '{}{}: {} = {}{}'", check_ansi("\x1b[4m", &self.use_colors), name, right_value.type_name(), format_value(&right_value), check_ansi("\x1b[24m", &self.use_colors),)),
+                        None => return self.raise_with_help(
+                            "NameError",
+                            &format!("Variable '{}' is not defined", name),
+                            &format!(
+                                "Use this instead: '{}{}: {} = {}{}'",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                name,
+                                right_value.type_name(),
+                                format_value(&right_value),
+                                check_ansi("\x1b[24m", &self.use_colors),
+                            ),
+                        ),
                     };
                     var.type_name().to_owned()
                 };
-
-                if !self.check_type(&right_value.clone(), &Value::String(expected_type.clone()), true) {
-                    return self.raise("TypeError", &format!(
-                        "Invalid type for variable '{}': expected '{}', got '{}'",
-                        name, expected_type, right_value.type_name()
-                    ));
+    
+                if !self.check_type(&right_value, &Value::String(expected_type.clone()), true) {
+                    return self.raise(
+                        "TypeError",
+                        &format!(
+                            "Invalid type for variable '{}': expected '{}', got '{}'",
+                            name, expected_type, right_value.type_name()
+                        ),
+                    );
                 }
-                
+    
                 let var = self.variables.get_mut(name).unwrap();
+    
+                if var.is_final() {
+                    return self.raise(
+                        "AssignmentError",
+                        &format!("Cannot assign to final variable '{}'", name),
+                    );
+                }
+    
                 var.set_value(right_value);
                 var.value.clone()
             }
@@ -1275,7 +1484,7 @@ impl Interpreter {
                         },
                         None => 0,
                     };
-                    
+    
                     let end_idx = match end_val_opt {
                         Some(v) => match self.to_index(v, len) {
                             Ok(i) => i,
@@ -1283,9 +1492,14 @@ impl Interpreter {
                         },
                         None => len,
                     };
-                    
     
                     if let Some(var) = self.variables.get_mut(name) {
+                        if var.is_final() {
+                            return self.raise("AssignmentError", &format!(
+                                "Cannot assign to final variable '{}'", name
+                            ));
+                        }
+    
                         match &mut var.value {
                             Value::String(_) => {
                                 return self.raise("TypeError", "Cannot assign to string index (immutable)");
@@ -1328,9 +1542,9 @@ impl Interpreter {
                     self.raise("RuntimeError", "Expected variable name for index assignment object")
                 }
             }
-            _ => self.raise("RuntimeError", &format!("Unsupported left type: {}", left_type)),
+            _ => self.raise("TypeError", &format!("Cannot modify type '{}'", get_type_from_token_name(left_type))),
         }
-    }
+    }    
     
     fn handle_index_access(&mut self, statement: HashMap<Value, Value>) -> Value {
         let object_val = match statement.get(&Value::String("object".to_string())) {
@@ -1483,6 +1697,15 @@ impl Interpreter {
             _ => Value::String("any".to_string()),
         };
 
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(mods)) => mods,
+            _ => &vec![],
+        };
+
+        let is_public = modifiers.iter().any(|m| m == &Value::String("public".to_string()));
+        let is_final = modifiers.iter().any(|m| m == &Value::String("final".to_string()));
+        let is_static = modifiers.iter().any(|m| m == &Value::String("static".to_string()));
+
         if self.err.is_some() {
             return NULL;
         }
@@ -1491,7 +1714,7 @@ impl Interpreter {
             return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, format_type(&declared_type), value.type_name()));
         }
     
-        let variable = Variable::new(name.to_string(), value, declared_type.to_string(), false, true, true);
+        let variable = Variable::new(name.to_string(), value, declared_type.to_string(), is_static, is_public, is_final);
         self.variables.insert(name.to_string(), variable);
     
         NULL

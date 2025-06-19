@@ -15,7 +15,6 @@ pub struct Config {
     pub print_comments: bool,
     pub allow_fetch: bool,
     pub execute_code_blocks: CodeBlocks,
-    pub lucia_file_extensions: Vec<String>,
     pub home_dir: String,
     pub recursion_limit: usize,
     pub version: String,

@@ -640,6 +640,28 @@ pub fn format_type(value: &Value) -> String {
     }
 }
 
+pub fn get_type_from_token_name(token_name: &str) -> String {
+    match token_name {
+        "NUMBER" => "int".to_string(),
+        "FLOAT" => "float".to_string(),
+        "STRING" => "string".to_string(),
+        "BOOLEAN" => "bool".to_string(),
+        "MAP" => "map".to_string(),
+        "LIST" => "list".to_string(),
+        "TUPLE" => "tuple".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+pub fn unescape_string_literal(s: &str) -> Result<String, String> {
+    let quote_start = s.find(|c| c == '"' || c == '\'')
+        .ok_or_else(|| "No starting quote found".to_string())?;
+
+    let sliced = &s[quote_start..];
+    unescape_string(sliced)
+}
+
+
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
