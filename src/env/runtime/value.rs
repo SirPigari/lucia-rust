@@ -1,9 +1,12 @@
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::objects::Object;
+use crate::env::runtime::utils::to_static;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -20,6 +23,7 @@ pub enum Value {
     List(Vec<Value>),
     Bytes(Vec<u8>),
     Function(Function),
+    Object(Object),
     Error(&'static str, &'static str),
 }
 
@@ -62,6 +66,17 @@ impl Hash for Value {
                 func.get_parameters().hash(state);
                 func.get_return_type().hash(state);
             }
+
+            Value::Object(obj) => {
+                obj.name().hash(state);
+                if let Some(props) = obj.get_properties() {
+                    for var in props.values() {
+                        var.value.hash(state);
+                    }
+                }                
+                obj.get_parameters().hash(state);
+            }
+
             Value::Error(err_type, err_msg) => {
                 err_type.hash(state);
                 err_msg.hash(state);
@@ -171,6 +186,7 @@ impl Value {
             Value::Tuple(_) => "tuple",
             Value::Bytes(_) => "bytes",
             Value::Function(_) => "function",
+            Value::Object(obj) => to_static(obj.name().to_string()),
             Value::Error(_, _) => "error",
         }
     }
@@ -186,6 +202,7 @@ impl Value {
             Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(func) => "function".to_string(),
+            Value::Object(obj) => obj.name().to_string(),
             Value::Error(err_type, _) => "error".to_string(),
         }
     }
@@ -200,6 +217,7 @@ impl Value {
             Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Function(_) => true,
+            Value::Object(_) => true,
             Value::Error(_, _) => true,
             Value::Null => false,
         }
@@ -240,7 +258,8 @@ impl Value {
                     Err(_) => "<invalid utf-8>".to_string(),
                 }
             }
-            Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func),
+            Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
+            Value::Object(obj) => format!("<object '{}' at {:p}>", obj.name(), obj.ptr()),
             Value::Error(err_type, err_msg) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
@@ -265,7 +284,12 @@ impl Value {
             }
     
             Value::Function(func) => {
-                let description = format!("<function '{}' at {:p}>", func.get_name(), func);
+                let description = format!("<function '{}' at {:p}>", func.get_name(), func.ptr());
+                Some(description.into_bytes())
+            }
+
+            Value::Object(obj) => {
+                let description = format!("<object '{}' at {:p}>", obj.name(), obj.ptr());
                 Some(description.into_bytes())
             }
     

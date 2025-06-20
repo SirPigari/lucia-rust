@@ -3,6 +3,7 @@ use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::value::Value;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
     pub name: String,
     pub properties: HashMap<String, Variable>,
@@ -13,7 +14,8 @@ pub struct ObjectMetadata {
     pub state: Option<String>,
 }
 
-struct Class {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Class {
     pub name: String,
     pub meta: ObjectMetadata,
 }
@@ -32,9 +34,16 @@ impl Class {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Object {
     Class(Class),
     Instance(Class, HashMap<String, Variable>),
+}
+
+impl PartialOrd for Object {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.name().cmp(other.name()))
+    }
 }
 
 impl Object {
@@ -71,10 +80,25 @@ impl Object {
         matches!(self, Object::Class(..))
     }
 
+    pub fn get_parent_name(&self) -> Option<&str> {
+        match self {
+            Object::Class(c) => Some(&c.meta.name),
+            Object::Instance(c, _) => Some(&c.meta.name),
+        }
+    }
+
     pub fn get_properties(&self) -> Option<&HashMap<String, Variable>> {
         match self {
             Object::Instance(_, props) => Some(props),
+            Object::Class(c) => Some(&c.meta.properties),
             _ => None,
+        }
+    }
+
+    pub fn get_parameters(&self) -> Option<&[Parameter]> {
+        match self {
+            Object::Class(c) => Some(&c.meta.parameters),
+            Object::Instance(c, _) => Some(&c.meta.parameters),
         }
     }
 

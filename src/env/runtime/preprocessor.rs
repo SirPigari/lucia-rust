@@ -9,15 +9,17 @@ pub struct Preprocessor {
     config_path: PathBuf,
     defines: HashMap<String, (String, String)>, // IDENTIFIER -> (TOKEN_TYPE, TOKEN_VALUE)
     aliases: HashMap<(String, String), (String, String)>, // (TOKEN_TYPE, TOKEN_VALUE) -> (TOKEN_TYPE, TOKEN_VALUE)
+    file_path: String,
 }
 
 impl Preprocessor {
-    pub fn new<P: Into<PathBuf>>(lib_dir: P, config_path: P) -> Self {
+    pub fn new<P: Into<PathBuf>>(lib_dir: P, config_path: P, file_path: &str) -> Self {
         Self {
             lib_dir: lib_dir.into(),
             config_path: config_path.into(),
             defines: HashMap::new(),
             aliases: HashMap::new(),
+            file_path: file_path.to_string(),
         }
     }
 
@@ -56,6 +58,8 @@ impl Preprocessor {
                         help: None,
                         line: (0, "".to_string()),
                         column: 0,
+                        file: self.file_path.clone(),
+                        ref_err: None,
                     });
                 }
                 let directive = &tokens[i].1;
@@ -70,6 +74,8 @@ impl Preprocessor {
                                 help: Some("Expected an identifier after #define".to_string()),
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let (name_type, name_val) = &tokens[i];
@@ -82,6 +88,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -92,6 +100,8 @@ impl Preprocessor {
                                 help: Some("Expected token after #define NAME".to_string()),
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -109,6 +119,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let (name_type, name_val) = &tokens[i];
@@ -120,6 +132,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         self.defines.remove(name_val);
@@ -133,6 +147,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let (name_type, name_val) = &tokens[i];
@@ -144,6 +160,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let cond = self.defines.contains_key(name_val);
@@ -159,6 +177,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let (name_type, name_val) = &tokens[i];
@@ -170,6 +190,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let cond = !self.defines.contains_key(name_val);
@@ -189,6 +211,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let from_token = tokens[i].clone();
@@ -207,6 +231,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
                         let token = tokens[i].clone();
@@ -223,6 +249,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -244,6 +272,8 @@ impl Preprocessor {
                                     help: Some("Expected '>' after path".to_string()),
                                     line: (0, "".to_string()),
                                     column: 0,
+                                    file: self.file_path.clone(),
+                                    ref_err: None,
                                 });
                             }
 
@@ -260,6 +290,8 @@ impl Preprocessor {
                                         help: None,
                                         line: (0, "".to_string()),
                                         column: 0,
+                                        file: self.file_path.clone(),
+                                        ref_err: None,
                                     })?
                                     .filter_map(Result::ok)
                                     .filter(|e| {
@@ -281,6 +313,8 @@ impl Preprocessor {
                                         help: None,
                                         line: (0, "".to_string()),
                                         column: 0,
+                                        file: self.file_path.clone(),
+                                        ref_err: None,
                                     })?;
 
                                     let lexer = Lexer::new(&content);
@@ -293,6 +327,8 @@ impl Preprocessor {
                                                 help: Some("Propably corrupted.".to_string()),
                                                 line: (0, "".to_string()),
                                                 column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
                                             });
                                         } else {
                                             toks.pop();
@@ -318,6 +354,8 @@ impl Preprocessor {
                                 help: Some("Use either <lib> or \"relative/path\" syntax".to_string()),
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -328,6 +366,8 @@ impl Preprocessor {
                                 help: None,
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -337,6 +377,8 @@ impl Preprocessor {
                             help: None,
                             line: (0, "".to_string()),
                             column: 0,
+                            file: self.file_path.clone(),
+                            ref_err: None,
                         })?;
 
                         let lexer = Lexer::new(&content);
@@ -357,6 +399,8 @@ impl Preprocessor {
                                 help: Some("Use like: #config KEY VALUE".to_string()),
                                 line: (0, "".to_string()),
                                 column: 0,
+                                file: self.file_path.clone(),
+                                ref_err: None,
                             });
                         }
 
@@ -380,6 +424,8 @@ impl Preprocessor {
                             help: Some("This feature will be added later".to_string()),
                             line: (0, "".to_string()),
                             column: 0,
+                            file: self.file_path.clone(),
+                            ref_err: None,
                         });
                     }
                     _ => {
@@ -389,6 +435,8 @@ impl Preprocessor {
                             help: Some("Valid directives are: define, undef, ifdef, ifndef, endif, alias, unalias, include, config".to_string()),
                             line: (0, "".to_string()),
                             column: 0,
+                            file: self.file_path.clone(),
+                            ref_err: None,
                         });
                     }
                 }

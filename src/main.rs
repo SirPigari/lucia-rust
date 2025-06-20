@@ -23,6 +23,11 @@ mod env {
         pub mod preprocessor;
         pub mod objects;
     }
+    pub mod libs {
+        pub mod math {
+            pub mod __init__;
+        }
+    }
 }
 
 mod interpreter;
@@ -43,152 +48,188 @@ use crate::interpreter::Interpreter;
 
 const VERSION: &str = "2.0.0-rust";
 
-fn handle_error(error: &Error, source: &str, line: (usize, String), config: &Config, use_colors: bool, file_name: Option<&str>) {
-    let mut file_name: &str = file_name.unwrap_or("<stdin>");
+fn handle_error(
+    error: &Error,
+    source: &str,
+    line: (usize, String),
+    config: &Config,
+    use_colors: bool,
+) {
+    let line_number = error.line.0;
 
-    if file_name.starts_with("\\\\?\\") {
-        file_name = &file_name[4..];
+    let error_type = &error.error_type;
+    let error_msg = &error.msg;
+
+    let mut suffix = "";
+    let mut antisuffix = "\n";
+
+    if error.file != "<stdin>" {
+        suffix = "\n";
+        antisuffix = "";
     }
-
-    let line_number = line.0;
-    let error_type = error.error_type();
-    let error_msg = error.msg();
-    let error_help = error.help();
 
     let use_lucia_traceback = config.use_lucia_traceback;
 
-    let current_line = get_line_info(source, line_number).unwrap_or_else(|| "".to_string());
+    let current_line = get_line_info(source, line_number).unwrap_or_default();
     let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
     let next_line = get_line_info(source, line_number + 1);
 
     let indent = " ".repeat(line_number.to_string().len());
 
-    let mut arrows_under = String::new();
-
     let lexer = Lexer::new(&current_line);
-    let line_tokens = lexer.tokenize(true);
 
-    let mut trace = String::new();
+    let mut print_single_error = |err: &Error| {
+        let mut trace = String::new();
+        let mut arrows_under = String::new();
+
+        let file_name = err.file.strip_prefix(r"\\?\").unwrap_or(&err.file);
+
+        if !(err.column == 0 && err.line.0 == 0) {
+            let mut current_pos = 1;
+            let mut found = false;
+
+            for (token_type, token_value) in lexer.tokenize(true) {
+                let token_len = token_value.len();
+
+                if token_type.starts_with("COMMENT") {
+                    continue;
+                }
+
+                if !found && current_pos >= err.column {
+                    arrows_under.push_str(&"^".repeat(token_len));
+                    found = true;
+                } else {
+                    arrows_under.push_str(&"~".repeat(token_len));
+                }
+
+                current_pos += token_len;
+            }
+
+            if !found {
+                arrows_under = " ".repeat(err.column.saturating_sub(1)) + "^";
+            }
+
+            trace.push_str(&format!(
+                "{}-> File '{}:{}:{}' got error:\n",
+                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                file_name,
+                err.line.0,
+                err.column
+            ));
+
+            if prev_line.is_some() {
+                trace.push_str(&format!("\t{} ...\n", indent));
+            }
+
+            trace.push_str(&format!("\t{} | {}\n", err.line.0, current_line));
+            trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
+
+            if next_line.is_some() {
+                trace.push_str(&format!("\t{} ...\n", indent));
+            }
+        } else {
+            if err.line.0 > 0 {
+                trace.push_str(&format!(
+                    "{}-> File '{}:{}' got error:\n",
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    file_name,
+                    err.line.0
+                ));
+            } else {
+                trace.push_str(&format!(
+                    "{}-> File '{}' got error:\n",
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    file_name
+                ));
+            }
+        }
+
+        trace.push_str(&format!("\t{} | {}: {}", indent, err.error_type, err.msg));
+
+        if let Some(help) = &err.help {
+            if !help.is_empty() {
+                trace.push_str(&format!(
+                    "\n\t{} ...\n\t{}{} | {}Help:{} {}{}",
+                    indent,
+                    indent,
+                    hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                    check_ansi("\x1b[1m", &use_colors),
+                    check_ansi("\x1b[22m", &use_colors),
+                    help,
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+                ));
+            }
+        }
+
+        trace.push_str(suffix);
+        trace.push_str(&hex_to_ansi("reset", Some(use_colors)));
+        trace
+    };
 
     if !use_lucia_traceback {
-        let location = match (line_number, error.column) {
-            (0, 0) => format!("{}", file_name),
+        let mut depth = 0;
+        let mut current = error;
+        while let Some(ref_ref) = &current.ref_err {
+            depth += 1;
+            current = ref_ref;
+        }
+
+        let deepest_error = current;
+        let file_name = deepest_error.file.strip_prefix(r"\\?\").unwrap_or(&deepest_error.file);
+
+        let location = match (deepest_error.line.0, deepest_error.column) {
+            (0, 0) => file_name.to_string(),
             (line, 0) => format!("{}:{}", file_name, line),
-            (0, col) => format!("{}", file_name),
+            (0, col) => format!("{}:{}", file_name, col),
             (line, col) => format!("{}:{}:{}", file_name, line, col),
         };
-    
+
+        let depth_info = if depth > 0 {
+            format!(" (nested depth: {})", depth)
+        } else {
+            String::new()
+        };
+
         eprintln!(
-            "{}{} -> {}: {}{}{}{}",
+            "{}[err] {} -> {}: {}{}{}{}{}",
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
             location,
-            error_type,
-            error_msg,
+            deepest_error.error_type,
+            deepest_error.msg,
+            depth_info,
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            match error_help {
+            match &deepest_error.help {
                 Some(help) if !help.is_empty() => format!(
                     "   {}({}){}",
                     hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
                     help,
                     hex_to_ansi("reset", Some(use_colors))
                 ),
-                _ => "".to_string(),
+                _ => String::new(),
             },
             hex_to_ansi("reset", Some(use_colors))
         );
         return;
     }
-    
-    
-    if !(error.column == 0 && error.line.0 == 0) {
-        let mut current_pos = 1;
-        let mut found = false;
 
-        for (token_type, token_value) in line_tokens {
-            let token_len = token_value.len();
+    let mut trace = String::new();
+    let mut current_error = Some(error);
 
-            if token_type.starts_with("COMMENT") {
-                current_pos += token_len;
-                break;
-            }
-        
-            if !found && current_pos == error.column {
-                arrows_under.push_str(&"^".repeat(token_len));
-                found = true;
-            } else {
-                arrows_under.push_str(&"~".repeat(token_len));
-            }
-
-            current_pos += token_len;
-        }
-
-        if !found {
-            arrows_under = " ".repeat(error.column.saturating_sub(1)) + "^";
-        }
-
-        trace.push_str(&format!(
-            "{}-> File '{}:{}:{}' got error:\n",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            file_name,
-            line_number,
-            error.column
-        ));
-
-        if prev_line.is_some() {
-            trace.push_str(&format!("\t{} ...\n", indent));
-        }
-
-        trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
-
-        trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
-
-        if next_line.is_some() {
-            trace.push_str(&format!("\t{} ...\n", indent));
-        }
-    } else {
-        if line_number > 0 {
+    while let Some(err) = current_error {
+        trace.push_str(&print_single_error(err));
+        if let Some(ref_err) = &err.ref_err {
             trace.push_str(&format!(
-                "{}-> File '{}:{}' got error:\n",
+                "{}{}\t{}^-- caused by:\n{}",
+                antisuffix,
+                " ".repeat(indent.len() + 1),
                 hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                file_name,
-                line_number
+                hex_to_ansi("reset", Some(use_colors))
             ));
+            current_error = Some(ref_err);
         } else {
-            trace.push_str(&format!(
-                "{}-> File '{}' got error:\n",
-                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                file_name
-            ));
+            current_error = None;
         }
     }
-
-    trace.push_str(&format!(
-        "\t{} | {}: {}",
-        indent,
-        error_type,
-        error_msg,
-    ));
-
-    if let Some(help) = error_help {
-        if !help.is_empty() {
-            trace.push_str(&format!(
-                "\n\t{} ...\n\t{}{} | {}Help:{} {}{}",
-                indent,
-                indent,
-                hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
-                check_ansi("\x1b[1m", &use_colors),
-                check_ansi("\x1b[22m", &use_colors),
-                help,
-                hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
-            ));
-        }
-    }
- 
-    if !(file_name == "<stdin>") {
-        trace.push_str("\n");
-    }
-
-    trace.push_str(&format!("{}", hex_to_ansi("reset", Some(use_colors))));
 
     eprintln!("{}", trace);
 }
@@ -605,7 +646,6 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
 
         let file_content = fs::read_to_string(path).expect("Failed to read file");
         let lexer = Lexer::new(&file_content);
-        let lexer = Lexer::new(&file_content);
         let raw_tokens = lexer.tokenize(config.print_comments);
 
         let print_start_debug = debug_mode
@@ -620,6 +660,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             let mut preprocessor = Preprocessor::new(
                 home_dir_path.join("libs"),
                 config_path.clone(),
+                file_path.as_str()
             );
             match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
                 Ok(tokens) => tokens,
@@ -630,7 +671,6 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                         (0, "".to_string()),
                         &config,
                         use_colors,
-                        Some(file_path.as_str()),
                     );
                     exit(1);
                 }
@@ -662,8 +702,8 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         let tokens: Vec<Token> = processed_tokens
             .into_iter()
             .map(|(t, v)| Token(t, v))
-            .collect();                
-        let mut parser = Parser::new(tokens, config.clone(), file_content.to_string(), use_colors);
+            .collect();
+        let mut parser = Parser::new(tokens, config.clone(), file_content.to_string(), use_colors, file_path.as_str());
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -672,7 +712,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                     &config,
                     Some(use_colors),
                 );
-                handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                handle_error(&error.clone(), &file_content, error.line, &config, use_colors);
                 exit(1);
             }
         };
@@ -692,7 +732,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             );
         }
 
-        let mut interpreter = Interpreter::new(config.clone(), use_colors);
+        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
         let out: Value = match interpreter.interpret(statements, file_content.clone()) {
             Ok(out) => out,
             Err(error) => {
@@ -701,7 +741,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                     &config,
                     Some(use_colors),
                 );
-                handle_error(&error.clone(), &file_content, error.line, &config, use_colors, Some(file_path.as_str()));
+                handle_error(&error.clone(), &file_content, error.line, &config, use_colors);
                 exit(1);
             }
         };
@@ -717,10 +757,11 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         config.version, 
         hex_to_ansi("reset", Some(use_colors))
     );
-    let mut interpreter = Interpreter::new(config.clone(), use_colors);
+    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
         config_path.clone(),
+        "<stdin>",
     );
 
     let print_start_debug = debug_mode
@@ -764,12 +805,11 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         if input == "clear()" || input == "\x11" || input == "\x0F" {
             if let Err(e) =  clear_terminal() {
                 handle_error(
-                    &Error::new("IOError", "Failed to clear screen"),
+                    &Error::new("IOError", "Failed to clear screen", "<stdin>"),
                     &input,
                     (0, "".to_string()),
                     &config,
                     use_colors,
-                    Some("<stdin>"),
                 );
             }
             println!(
@@ -796,7 +836,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                         (0, "".to_string()),
                         &config,
                         use_colors,
-                        Some("<stdin>"),
                     );
                     continue;
                 }
@@ -829,7 +868,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             .into_iter()
             .map(|(t, v)| Token(t, v))
             .collect();
-        let mut parser = Parser::new(tokens, config.clone(), input.to_string(), use_colors);
+        let mut parser = Parser::new(tokens, config.clone(), input.to_string(), use_colors, "<stdin>");
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -840,7 +879,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                         Some(use_colors),
                     );
                 }
-                handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                handle_error(&error.clone(), &input, error.line, &config, use_colors);
                 continue;
             }
         };
@@ -873,7 +912,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                         Some(use_colors),
                     );
                 }
-                handle_error(&error.clone(), &input, error.line, &config, use_colors, Some("<stdin>"));
+                handle_error(&error.clone(), &input, error.line, &config, use_colors);
                 continue;
             }
         };

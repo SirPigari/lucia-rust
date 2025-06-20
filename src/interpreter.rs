@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
 use crate::env::runtime::utils::{
     print_colored,
@@ -18,6 +18,7 @@ use crate::env::runtime::utils::{
     format_type,
     get_type_default,
     get_type_from_token_name,
+    sanitize_alias,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -25,17 +26,19 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::objects::{Object, ObjectMetadata};
+use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
 use std::sync::Arc;
 use std::cmp::Ordering;
 use std::sync::Mutex;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::fs;
+use regex::Regex;
 
 use crate::lexer::Lexer;
+use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::{Parser, Token};
 
 
@@ -51,10 +54,12 @@ pub struct Interpreter {
     use_colors: bool,
     current_statement: Option<Statement>,
     variables: HashMap<String, Variable>,
+    file_path: String,
+    preprocessor_info: (PathBuf, PathBuf, bool),
 }
 
 impl Interpreter {
-    pub fn new(config: Config, use_colors: bool) -> Self {
+    pub fn new(config: Config, use_colors: bool, file_path: &str, preprocessor_info: (PathBuf, PathBuf, bool)) -> Self {
         let mut this = Self {
             config,
             err: None,
@@ -66,6 +71,8 @@ impl Interpreter {
             use_colors,
             current_statement: None,
             variables: HashMap::new(),
+            file_path: file_path.to_string(),
+            preprocessor_info,
         };
 
         this.variables.insert(
@@ -155,6 +162,13 @@ impl Interpreter {
         types_mapping.insert("list", "list");
         types_mapping.insert("map", "map");
         types_mapping.insert("function", "function");
+        types_mapping.insert("bytes", "bytes");
+        for obj in self.variables.values() {
+            if let Value::Object(obj) = &obj.value {
+                let name = obj.name();
+                types_mapping.insert(&name, "object");
+            }
+        }
 
         fn is_type_equal(type_: Value, expected: Value) -> bool {
             match (type_, expected) {
@@ -328,43 +342,85 @@ impl Interpreter {
         false
     }
 
-    fn get_properties_from_file(&self, path: &PathBuf) -> Result<HashMap<String, Variable>, String> {
+    fn get_properties_from_file(&mut self, path: &PathBuf) -> HashMap<String, Variable> {
         if !path.exists() || !path.is_file() {
-            return Err(format!("File '{}' does not exist or is not a file", path.display()));
+            self.raise("ImportError", to_static(format!("File '{}' does not exist or is not a file", path.display())));
+            return HashMap::new();
         }
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file '{}': {}", path.display(), e))?;
-    
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.raise("ImportError", &format!("Failed to read file '{}': {}", path.display(), e));
+                return HashMap::new();
+            }
+        };
+        
         let lexer = Lexer::new(&content);
         let raw_tokens = lexer.tokenize(false);
-        let tokens: Vec<Token> = raw_tokens
+
+        let (pr1, pr2, ep) = self.preprocessor_info.clone();
+        let processed_tokens = if ep {
+            let mut preprocessor = Preprocessor::new(
+                pr1,
+                pr2,
+                path.clone().display().to_string().as_str(),
+            );
+            match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    self.raise_with_ref(
+                        "ImportError",
+                        &format!("Error while preprocessing '{}'", path.display()),
+                        e,
+                    );
+                    return HashMap::new();
+                }
+            }
+        } else {
+            raw_tokens
+        };
+        let tokens: Vec<Token> = processed_tokens
             .into_iter()
             .map(|(t, v)| Token(t, v))
             .collect();
-        let mut parser = Parser::new(tokens, self.config.clone(), content.clone(), self.use_colors);
-        let statements = parser.parse();
+        let mut parser = Parser::new(tokens, self.config.clone(), content.clone(), self.use_colors, path.display().to_string().as_str());
+        let statements = match parser.parse_safe() {
+            Ok(stmts) => stmts,
+            Err(error) => {
+                self.raise_with_ref(
+                    "ImportError",
+                    &format!("Error while parsing '{}'", path.display()),
+                    error,
+                );
+                return HashMap::new();
+            }
+        };
     
-        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors);
+        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), self.preprocessor_info.clone());
+        interpreter.stack = self.stack.clone();
         let result = interpreter.interpret(statements, content);
+        self.stack = interpreter.stack.clone();
     
         let properties = interpreter.variables.clone();
 
         if let Some(err) = interpreter.err {
-            let mut pos = String::new();
-            let line = err.line.0;
-            if line != 0 {
-                let column = err.column;
-                if column > 0 {
-                    pos = format!(":{}:{}", line, column);
-                } else {
-                    pos = line.to_string();
-                }
+            self.raise_with_ref(
+                "ImportError",
+                &format!("Error while importing '{}'", path.display()),
+                err.clone(),
+            );
+            return HashMap::new();
+        }
+
+        let mut final_properties = HashMap::new();
+        for (var_name, var) in properties {
+            if var.is_public() && !var.is_native() {
+                final_properties.insert(var_name, var);
             }
-            return Err(format!("Error interpreting file '{}{}': {}: {}", path.display(), pos, err.error_type, err.msg))
         }
     
         match result {
-            Ok(_) => Ok(properties),
+            Ok(_) => final_properties,
             Err(e) => {
                 let mut pos = String::new();
                 let line = e.line.0;
@@ -376,7 +432,12 @@ impl Interpreter {
                         pos = line.to_string();
                     }
                 }
-                Err(format!("Error interpreting file '{}{}': {}: {}", path.display(), pos, e.error_type, e.msg))
+                self.raise_with_ref(
+                    "ImportError",
+                    &format!("Error while importing '{}'", path.display()),
+                    e.clone(),
+                );
+                return HashMap::new();
             },
         }
     }
@@ -413,6 +474,7 @@ impl Interpreter {
                 return Err(Error::new(
                     "InvalidStatement",
                     "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
+                    &self.file_path.to_string()
                 ));
             }
         }
@@ -429,6 +491,8 @@ impl Interpreter {
                     help: None,
                     line: (*line, "".to_string()),
                     column: *column,
+                    file: self.file_path.clone(),
+                    ref_err: None,
                 });
             } else {
                 self.err = Some(Error {
@@ -437,6 +501,8 @@ impl Interpreter {
                     help: None,
                     line: (0, "".to_string()),
                     column: 0,
+                    file: self.file_path.clone(),
+                    ref_err: None,
                 });
             }
         } else {
@@ -446,6 +512,8 @@ impl Interpreter {
                 help: None,
                 line: (0, "".to_string()),
                 column: 0,
+                file: self.file_path.clone(),
+                ref_err: None,
             });
         }
     
@@ -461,6 +529,8 @@ impl Interpreter {
                     help: Some(help.to_string()),
                     line: (*line, "".to_string()),
                     column: *column,
+                    file: self.file_path.clone(),
+                    ref_err: None,
                 });
             } else {
                 self.err = Some(Error {
@@ -469,6 +539,8 @@ impl Interpreter {
                     help: Some(help.to_string()),
                     line: (0, "".to_string()),
                     column: 0,
+                    file: self.file_path.clone(),
+                    ref_err: None,
                 });
             }
         } else {
@@ -478,6 +550,45 @@ impl Interpreter {
                 help: Some(help.to_string()),
                 line: (0, "".to_string()),
                 column: 0,
+                file: self.file_path.clone(),
+                ref_err: None,
+            });
+        }
+        NULL
+    }
+
+    pub fn raise_with_ref(&mut self, error_type: &str, msg: &str, ref_err: Error) -> Value {
+        if let Some(current_statement) = &self.current_statement {
+            if let Statement::Statement { line, column, .. } = current_statement {
+                self.err = Some(Error {
+                    error_type: error_type.to_string(),
+                    msg: msg.to_string(),
+                    help: None,
+                    line: (*line, "".to_string()),
+                    column: *column,
+                    file: self.file_path.clone(),
+                    ref_err: Some(Box::new(ref_err)),
+                });
+            } else {
+                self.err = Some(Error {
+                    error_type: error_type.to_string(),
+                    msg: msg.to_string(),
+                    help: None,
+                    line: (0, "".to_string()),
+                    column: 0,
+                    file: self.file_path.clone(),
+                    ref_err: Some(Box::new(ref_err)),
+                });
+            }
+        } else {
+            self.err = Some(Error {
+                error_type: error_type.to_string(),
+                msg: msg.to_string(),
+                help: None,
+                line: (0, "".to_string()),
+                column: 0,
+                file: self.file_path.clone(),
+                ref_err: Some(Box::new(ref_err)),
             });
         }
         NULL
@@ -485,6 +596,10 @@ impl Interpreter {
     
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
+
+        if self.stack.len() > self.config.recursion_limit {
+            return self.raise("RecursionError", "Maximum recursion depth exceeded");
+        }
     
         if !self.variables.contains_key("_") {
             self.variables.insert(
@@ -542,6 +657,7 @@ impl Interpreter {
                 // Calls and access
                 "CALL" => self.handle_call(statement.clone()),
                 "METHOD_CALL" => self.handle_method_call(statement.clone()),
+                "PROPERTY_ACCESS" => self.handle_property_access(statement.clone()),
                 "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
         
                 // Control flow
@@ -611,34 +727,8 @@ impl Interpreter {
                 }
             }
             _ => return self.raise("RuntimeError", "Missing or invalid 'module_name' in import statement"),
-        };        
-    
-        let module_path_opt = statement.get(&Value::String("path".to_string()));
-    
-        let module_path = match module_path_opt {
-            Some(Value::Map { keys, values }) => {
-                let map_statement = Value::Map {
-                    keys: keys.clone(),
-                    values: values.clone(),
-                }.convert_to_statement();
-                let path_eval = self.evaluate(map_statement);
-                let path_str = path_eval.to_string();
-                if path_str.is_empty() {
-                    self.raise("RuntimeError", "Empty 'path' in import statement");
-                    return NULL;
-                } else {
-                    PathBuf::from(path_str).join(&module_name)
-                }
-            }
-            Some(Value::Null) | None => PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name),
-            _ => return self.raise("RuntimeError", "Invalid 'path' in import statement"),
         };
 
-        if !module_path.exists() {
-            let path_str = module_path.to_string_lossy().replace('\\', "/");
-            return self.raise("ImportError", &format!("Module '{}' not found at path '{}'", &module_name, path_str));
-        }        
-    
         let alias = match statement.get(&Value::String("alias".to_string())) {
             Some(Value::String(a)) => a,
             Some(Value::Null) => &module_name,
@@ -648,63 +738,240 @@ impl Interpreter {
             },
         };
     
+        let valid_alias_re = Regex::new(r"^[a-zA-Z_]\w*$").unwrap();
+        if !valid_alias_re.is_match(alias) {
+            return self.raise_with_help(
+                "ImportError",
+                &format!("'{}' is an invalid name. Please use a different alias.", alias),
+                &format!("Use 'import ... as <valid_alias>'. Suggested alias: '{}'", sanitize_alias(alias)),
+            );            
+        }
+    
+        if self.stack.iter().any(|(name, _, _)| name == &module_name) {
+            return self.raise(
+                "RecursionError",
+                &format!("Recursive import detected for module '{}'", module_name),
+            );
+        }
+    
+        self.stack.push((
+            module_name.clone(),
+            statement.iter().filter_map(|(k, v)| {
+                if let Value::String(s) = k {
+                    Some((s.clone(), v.clone()))
+                } else {
+                    None
+                }
+            }).collect::<HashMap<String, Value>>(),
+            self.variables.clone(),
+        ));
+    
         if self.variables.contains_key(alias) {
+            self.stack.pop();
             if module_name == *alias {
                 return self.raise("ImportError", &format!("Module '{}' already imported", module_name));
             }
             return self.raise("ImportError", &format!("Module '{}' already imported as '{}'", module_name, alias));
         }
-
+    
         let mut properties = HashMap::new();
-
-        if module_path.is_file() {
-            if let Some(ext) = module_path.extension().and_then(|e| e.to_str()) {
-                if ext == "lc" || ext == "lucia" {
-                    let properties_result = self.get_properties_from_file(&module_path);
-                    match properties_result {
-                        Ok(props) => {
-                            properties.extend(props);
-                        }
-                        Err(e) => return self.raise("ImportError", &e),
+    
+        let std_libs: Vec<&str> = vec![
+            "math"
+        ];
+    
+        if std_libs.contains(&module_name.as_str()) {
+            match module_name.as_str() {
+                "math" => {
+                    use crate::env::libs::math::__init__ as math;
+                    let math_module_props = math::register();
+                    let result = math::init();
+                    for (name, var) in math_module_props {
+                        properties.insert(name, var);
                     }
-                } else {
-                    return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
                 }
+                _ => {
+                    self.stack.pop();
+                    return self.raise(
+                        "ImportError",
+                        &format!("Standard library module '{}' is not supported", module_name),
+                    );
+                }
+            }
+        } else {
+            let module_path_opt = statement.get(&Value::String("path".to_string()));
+    
+            let libs_dir = PathBuf::from(self.config.home_dir.clone()).join("libs");
+    
+            let base_module_path = match module_path_opt {
+                Some(Value::Map { keys, values }) => {
+                    let map_statement = Value::Map {
+                        keys: keys.clone(),
+                        values: values.clone(),
+                    }.convert_to_statement();
+                    let path_eval = self.evaluate(map_statement);
+                    let path_str = path_eval.to_string();
+                    if path_str.is_empty() {
+                        self.stack.pop();
+                        self.raise("RuntimeError", "Empty 'path' in import statement");
+                        return NULL;
+                    } else {
+                        PathBuf::from(path_str)
+                    }
+                }
+                Some(Value::Null) | None => libs_dir.clone(),
+                _ => {
+                    self.stack.pop();
+                    return self.raise("RuntimeError", "Invalid 'path' in import statement");
+                },
+            };
+    
+            let candidate_dir = base_module_path.join(&module_name);
+            let mut resolved_module_path: Option<PathBuf> = None;
+    
+            if candidate_dir.exists() && candidate_dir.is_dir() {
+                resolved_module_path = Some(candidate_dir);
             } else {
-                return self.raise("ImportError", "Module file has no extension");
+                let extensions = ["lc", "lucia", "rs"];
+                for ext in extensions.iter() {
+                    let candidate_file = base_module_path.join(format!("{}.{}", module_name, ext));
+                    if candidate_file.exists() && candidate_file.is_file() {
+                        resolved_module_path = Some(candidate_file);
+                        break;
+                    }
+                }
             }
-        } else if module_path.is_dir() {
-            let init_path = module_path.join("__init__.lc");
-            if init_path.exists() && init_path.is_file() {
-            }
-            
-            if let Ok(entries) = fs::read_dir(&module_path) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                            if (ext == "lc" || ext == "lucia") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lc") {
-                                let properties_result = self.get_properties_from_file(&path);
-                                match properties_result {
-                                    Ok(props) => {
-                                        properties.extend(props);
-                                    }
-                                    Err(e) => return self.raise("ImportError", &e),
-                                }
-                            } else if ext != "lc" && ext != "lucia" {
-                                return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+    
+            if resolved_module_path.is_none() {
+                let mut candidates = vec![];
+                if let Ok(entries) = fs::read_dir(&libs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let file_stem_opt = path.file_stem().and_then(|s| s.to_str());
+                        let is_valid_ext = path.is_file() && path.extension()
+                            .and_then(|e| e.to_str())
+                            .map_or(false, |ext| ext == "lc" || ext == "lucia" || ext == "rs");
+    
+                        let is_dir = path.is_dir();
+    
+                        if let Some(file_stem) = file_stem_opt {
+                            if is_valid_ext || is_dir {
+                                candidates.push(file_stem.to_string());
                             }
                         }
                     }
                 }
-            }
-        } else {
-            return self.raise("ImportError", &format!("Module path '{}' is neither file nor directory", module_path.display()));
-        }
-
-        dbg!(&module_name, &module_path, &properties);
     
-        let mut module_meta = ObjectMetadata {
+                if let Some(closest) = find_closest_match(&module_name, &candidates) {
+                    self.stack.pop();
+                    return self.raise_with_help(
+                        "ImportError",
+                        &format!("Module '{}' not found at path '{}'", &module_name, base_module_path.display()),
+                        &format!("Did you mean '{}{}{}'?",
+                            check_ansi("\x1b[4m", &self.use_colors),
+                            closest,
+                            check_ansi("\x1b[24m", &self.use_colors),
+                        ),
+                    );
+                }
+    
+                self.stack.pop();
+                return self.raise("ImportError", &format!("Module '{}' not found at path '{}'", &module_name, base_module_path.display()));
+            }
+    
+            let module_path = resolved_module_path.unwrap();
+    
+            if module_path.is_file() {
+                if let Some(ext) = module_path.extension().and_then(|e| e.to_str()) {
+                    if ext == "lc" || ext == "lucia" || ext == "rs" {
+                        let properties_result = self.get_properties_from_file(&module_path);
+                        if self.err.is_some() {
+                            self.stack.pop();
+                            return NULL;
+                        }
+                        properties.extend(properties_result);
+                    } else {
+                        self.stack.pop();
+                        return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                    }
+                } else {
+                    self.stack.pop();
+                    return self.raise("ImportError", "Module file has no extension");
+                }
+            } else if module_path.is_dir() {
+                let init_path_lc = module_path.join("__init__.lc");
+                let init_path_lucia = module_path.join("__init__.lucia");
+                if init_path_lc.exists() && init_path_lc.is_file() {
+                    let props = self.get_properties_from_file(&init_path_lc);
+                    if self.err.is_some() {
+                        self.stack.pop();
+                        return NULL;
+                    }
+                    properties.extend(props);
+                } else if init_path_lucia.exists() && init_path_lucia.is_file() {
+                    let props = self.get_properties_from_file(&init_path_lucia);
+                    if self.err.is_some() {
+                        self.stack.pop();
+                        return NULL;
+                    }
+                    properties.extend(props);
+                }
+    
+                if let Ok(entries) = fs::read_dir(&module_path) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() {
+                            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                                if (ext == "lc" || ext == "lucia") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lc") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lucia") {
+                                    let properties_result = self.get_properties_from_file(&path);
+                                    if self.err.is_some() {
+                                        self.stack.pop();
+                                        return NULL;
+                                    }
+                                    properties.extend(properties_result);
+                                } else if ext != "lc" && ext != "lucia" {
+                                    self.stack.pop();
+                                    return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                self.stack.pop();
+                return self.raise("ImportError", &format!("Module path '{}' is neither file nor directory", module_path.display()));
+            }
+        }
+    
+        let mut categorized: BTreeMap<&str, Vec<&String>> = BTreeMap::new();
+    
+        for (name, var) in properties.iter() {
+            let category = match &var.value {
+                Value::Object(_) => "object",
+                Value::Function(_) => "function",
+                _ if var.is_final() => "constant",
+                _ => "variable",
+            };
+            categorized.entry(category).or_default().push(name);
+        }
+    
+        let order = ["object", "function", "constant", "variable"];
+    
+        for &category in &order {
+            if let Some(names) = categorized.get(category) {
+                for name in names {
+                    debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                }
+            }
+        }
+        if self.err.is_some() {
+            self.stack.pop();
+            return NULL;
+        }
+    
+        debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config, Some(self.use_colors.clone()));
+    
+        let module_meta = ObjectMetadata {
             name: module_name.clone(),
             properties,
             parameters: Vec::new(),
@@ -714,7 +981,18 @@ impl Interpreter {
             state: None,
         };
     
-        NULL
+        let class = Class::new(module_name.clone(), module_meta.clone());
+        let object = Object::Class(class);
+    
+        let module = Value::Object(object);
+        self.variables.insert(
+            alias.to_string(),
+            Variable::new(alias.to_string(), module.clone(), "module".to_string(), false, true, true),
+        );
+    
+        self.stack.pop();
+    
+        module
     }
 
     fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1725,11 +2003,42 @@ impl Interpreter {
             Some(Value::String(s)) => s,
             _ => return self.raise("SyntaxError", "Expected a string for variable name"),
         };
-
+    
         if let Some(var) = self.variables.get(name) {
             return var.get_value().clone();
         } else {
-            return self.raise("NameError", &format!("Variable '{}' is not defined", name));
+            let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(name);
+            let extensions = ["lc", "lucia", "rs", ""];
+            for ext in extensions.iter() {
+                let candidate = lib_dir.with_extension(ext);
+                if candidate.exists() {
+                    return self.raise_with_help(
+                        "ImportError",
+                        &format!("Variable '{}' is not defined.", name),
+                        &format!("Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.", name, 
+                            check_ansi("\x1b[4m", &self.use_colors),
+                            name,
+                            candidate.display(),
+                            check_ansi("\x1b[24m", &self.use_colors),
+                        ),
+                    );
+                }
+            }
+    
+            let available_names: Vec<String> = self.variables.keys().cloned().collect();
+            if let Some(closest) = find_closest_match(name, &available_names) {
+                return self.raise_with_help(
+                    "NameError",
+                    &format!("Variable '{}' is not defined.", name),
+                    &format!("Did you mean '{}{}{}'?",
+                        check_ansi("\x1b[4m", &self.use_colors),
+                        closest,
+                        check_ansi("\x1b[24m", &self.use_colors),
+                    ),
+                );
+            } else {
+                return self.raise("NameError", &format!("Variable '{}' is not defined.", name));
+            }
         }
     }
 
@@ -1968,11 +2277,11 @@ impl Interpreter {
 
     fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
-            return Value::Error("MethodCallError", "Missing 'object' in method call");
+            return Value::Error("RuntimeError", "Missing 'object' in method call");
         };
     
         let Some(Value::String(method)) = statement.get(&Value::String("method".to_string())).cloned() else {
-            return Value::Error("MethodCallError", "Missing or invalid 'method' in method call");
+            return Value::Error("RuntimeError", "Missing or invalid 'method' in method call");
         };
     
         let (pos_args, named_args) = match self.translate_args(
@@ -1981,7 +2290,7 @@ impl Interpreter {
         ) {
             Ok(args) => args,
             Err(err) => {
-                return self.raise("MethodCallError", to_static(err.to_string()));
+                return self.raise("RuntimeError", to_static(err.to_string()));
             }
         };
         
@@ -1992,15 +2301,23 @@ impl Interpreter {
 
         let mut object_variable = Variable::new(
             "_".to_string(),
-            object_value,
+            object_value.clone(),
             object_type.clone(),
             false,
             true,
             true,
         );
-
-        if !object_variable.is_init() {
+        
+        if let Value::Object(ref o) = object_value {
+            if let Some(props) = o.get_properties() {
+                object_variable.properties = props.clone();
+            }
+        } else if !object_variable.is_init() {
             object_variable.init_properties();
+        }
+
+        if self.err.is_some() {
+            return Value::Null;
         }
 
         return self.call_method(
@@ -2113,24 +2430,26 @@ impl Interpreter {
                     return self.raise(
                         "TypeError",
                         &format!(
-                            "Method '{}' expects no arguments, but got {}.",
+                            "Function '{}' expects no arguments, but got {}.",
                             method_name,
                             passed_args_count
                         ),
                     );
                 }
+
+                let has_variadic = metadata.parameters.iter().any(|p| p.kind == ParameterKind::Variadic);
                 
-                if passed_args_count > expected_args_count {
+                if !has_variadic && passed_args_count > expected_args_count {
                     return self.raise(
                         "TypeError",
                         &format!(
-                            "Too many arguments for method '{}'. Expected at most {}, but got {}.",
+                            "Too many arguments for function '{}'. Expected at most {}, but got {}.",
                             method_name,
                             expected_args_count,
                             passed_args_count
                         ),
                     );
-                }                
+                }
 
                 let mut pos_index = 0;
                 let required_positional_count = metadata.parameters
@@ -2140,18 +2459,27 @@ impl Interpreter {
             
                 let provided_positional_count = positional.len();
                 
-                if provided_positional_count < required_positional_count {
+                let mut matched_positional_count = 0;
+                for param in &metadata.parameters {
+                    if param.kind == ParameterKind::Positional && param.default.is_none() {
+                        if pos_index < positional.len() || named_map.contains_key(&param.name) {
+                            matched_positional_count += 1;
+                        }
+                    }
+                }
+                
+                if matched_positional_count < required_positional_count {
                     return self.raise(
                         "TypeError",
                         &format!(
-                            "Missing required positional argument{} for method '{}'. Expected at least {}, but got {}.",
+                            "Missing required positional argument{} for function '{}'. Expected at least {}, but got {}.",
                             if required_positional_count == 1 { "" } else { "s" },
                             method_name,
                             required_positional_count,
-                            provided_positional_count
+                            matched_positional_count
                         ),
                     );
-                }            
+                }                     
     
                 for param in &metadata.parameters {
                     let param_name = &param.name;
@@ -2162,7 +2490,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(&arg_value, param_type, true) {
+                                if self.check_type(&arg_value, param_type, false) {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     return self.raise_with_help(
@@ -2217,33 +2545,27 @@ impl Interpreter {
                             final_args.insert(param_name.clone(), Value::List(variadic_args));
                     
                             pos_index = positional.len();
+                            named_map.remove(param_name);
                         }
                         ParameterKind::KeywordVariadic => {
-                            let mut keyword_args = HashMap::new();
-                            for (key, value) in &named_map {
-                                if self.check_type(&value, param_type, false) {
-                                    keyword_args.insert(key.clone(), value.clone());
+                            if let Some(named_value) = named_map.remove(param_name) {
+                                if self.check_type(&named_value, &param_type, false) {
+                                    final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise(
                                         "TypeError",
-                                        &format!("Keyword argument '{}' does not match expected type '{}'", key, format_type(param_type)),
+                                        &format!(
+                                            "Keyword argument '{}' does not match expected type '{}', got '{}'",
+                                            param_name,
+                                            format_type(param_type),
+                                            named_value.type_name()
+                                        ),
                                     );
                                 }
+                            } else if let Some(default) = param_default {
+                                final_args.insert(param_name.clone(), default.clone());
                             }
-                            let keys: Vec<Value> = keyword_args.keys()
-                            .cloned()
-                            .map(|k| Value::String(k))
-                            .collect();
-                        
-                            let values: Vec<Value> = keyword_args.values()
-                                .cloned()
-                                .collect();
-                            
-                            final_args.insert(
-                                param_name.clone(),
-                                Value::Map { keys, values },
-                            );
-                        }                        
+                        }
                     }
                 }
 
@@ -2280,8 +2602,7 @@ impl Interpreter {
 
                 debug_log(
                     &format!(
-                        "<Method call: {}.{}({})>",
-                        object_variable.type_name(),
+                        "<Call: {}({})>",
                         method_name,
                         final_args
                             .iter()
@@ -2292,11 +2613,48 @@ impl Interpreter {
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
+    
+                self.stack.push((method_name.to_string(), final_args.clone(), self.variables.clone()));
 
-                self.stack.push((format!("{}.{}", object_variable.type_name(), method_name).to_string(), final_args.clone(), self.variables.clone()));
+                let mut result = NULL;
 
-                let result = func.call(&final_args);  // func.call(&final_args, &mut self.stack);
+                let final_args_variables = final_args
+                    .iter()
+                    .map(|(k, v)| {
+                        let name = k.clone();
+                        let variable = Variable::new(name.clone(), v.clone(), "any".to_string(), false, true, true);
+                        (name, variable)
+                    })
+                    .collect::<HashMap<String, Variable<>>>();            
+            
+                if !metadata.is_native {
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        self.use_colors.clone(),
+                        &self.file_path.clone(),
+                        self.preprocessor_info.clone(),
+                    );
+                    let mut merged_variables = self.variables.clone();
+                    merged_variables.extend(final_args_variables);
+                    new_interpreter.variables = merged_variables;
+                    new_interpreter.stack = self.stack.clone();
+                    let body = func.get_body();
+                    new_interpreter.interpret(body, self.source.clone());
+                    if new_interpreter.err.is_some() {
+                        self.err = new_interpreter.err.clone();
+                        return NULL;
+                    }
+                    result = new_interpreter.return_value.clone();
+                    self.stack = new_interpreter.stack;
+                } else {
+                    result = func.call(&final_args);
+                }
                 self.stack.pop();
+                debug_log(
+                    &format!("<Function '{}' returned: {}>", method_name, format_value(&result)),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
                 if let Value::Error(err_type, err_msg) = &result {
                     return self.raise(err_type, err_msg);
                 }
@@ -2316,6 +2674,62 @@ impl Interpreter {
                 )
             }
         }
+    }
+
+    fn handle_property_access(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
+            return Value::Error("RuntimeError", "Missing 'object' in property access");
+        };
+    
+        let Some(Value::String(property)) = statement.get(&Value::String("property".to_string())).cloned() else {
+            return Value::Error("RuntimeError", "Missing or invalid 'property' in property access");
+        };
+    
+        let property_name = property.as_str();
+        let object_value = self.evaluate(object.convert_to_statement());
+        let object_type = object_value.type_name();
+
+        let mut object_variable = Variable::new(
+            "_".to_string(),
+            object_value.clone(),
+            object_type.clone(),
+            false,
+            true,
+            true,
+        );
+        
+        if let Value::Object(ref o) = object_value {
+            if let Some(props) = o.get_properties() {
+                object_variable.properties = props.clone();
+            }
+        } else if !object_variable.is_init() {
+            object_variable.init_properties();
+        }
+
+        if self.err.is_some() {
+            return Value::Null;
+        }
+        
+        let var = match object_variable.properties.get(property_name) {
+            Some(v) => v.clone(),
+            None => {
+                let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
+                if let Some(closest) = find_closest_match(property_name, &available_names) {
+                    return self.raise_with_help(
+                        "NameError",
+                        &format!("No property '{}' in '{}'", property_name, object_variable.type_name()),
+                        &format!("Did you mean '{}{}{}'?",
+                            check_ansi("\x1b[4m", &self.use_colors),
+                            closest,
+                            check_ansi("\x1b[24m", &self.use_colors),
+                        ),
+                    );
+                } else {
+                    return self.raise("NameError", &format!("No property '{}' in '{}'", property_name, object_variable.type_name()));
+                }
+            }
+        };
+        var.get_value().clone()
     }
 
     fn translate_args(
@@ -2700,6 +3114,8 @@ impl Interpreter {
                     let mut new_interpreter = Interpreter::new(
                         self.config.clone(),
                         self.use_colors.clone(),
+                        &self.file_path.clone(),
+                        self.preprocessor_info.clone(),
                     );
                     let mut merged_variables = self.variables.clone();
                     merged_variables.extend(final_args_variables);
@@ -3241,7 +3657,7 @@ impl Interpreter {
                                         let tokens: Vec<Token> = raw_tokens.into_iter()
                                             .map(|(t, v)| Token(t, v))
                                             .collect();
-                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone(), self.use_colors).parse_safe() {
+                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone(), self.use_colors, &self.file_path).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
                                                 return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));

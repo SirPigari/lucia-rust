@@ -21,10 +21,11 @@ pub struct Parser {
     include_whitespace: bool,
     source: String,
     err: Option<Error>,
+    file_path: String,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>, config: Config, source: String, use_colors: bool) -> Self {
+    pub fn new(tokens: Vec<Token>, config: Config, source: String, use_colors: bool, file_path: &str) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -34,6 +35,7 @@ impl Parser {
             include_whitespace: false,
             source,
             err: None,
+            file_path: file_path.to_string(),
         }
     }
 
@@ -55,6 +57,8 @@ impl Parser {
             help: None,
             line: (self.current_line(), self.source.clone()),
             column: self.get_line_column(),
+            file: self.file_path.to_string(),
+            ref_err: None,
         });
         Statement::Null
     }
@@ -70,6 +74,8 @@ impl Parser {
             help: Some(help.to_string()),
             line: (self.current_line(), self.source.clone()),
             column: self.get_line_column(),
+            file: self.file_path.to_string(),
+            ref_err: None,
         });
         Statement::Null
     }
@@ -188,7 +194,7 @@ impl Parser {
             }
         }
     
-        self.source[line_start..byte_index].chars().count() + 1
+        self.source[line_start..byte_index].chars().count()
     }
     
     
@@ -1901,7 +1907,14 @@ impl Parser {
     }
     
     fn parse_function_call(&mut self) -> Statement {
-        let name = self.token().ok_or_else(|| Error::new("SyntaxError", "Expected function name")).unwrap().1.clone();
+        let token = match self.token() {
+            Some(t) => t,
+            None => {
+                self.raise("SyntaxError", "Expected function name");
+                return Statement::Null;
+            }
+        };
+        let name = token.1.clone();
         if self.err.is_some() {
             return Statement::Null;
         }

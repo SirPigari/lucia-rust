@@ -531,7 +531,31 @@ impl Variable {
                         true, true, true,
                         None,
                     )
-                };                
+                };
+
+                let round = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "round",
+                        move |args| {
+                            let precision = if let Some(Value::Int(i)) = args.get("precision") {
+                                i.to_i64().unwrap_or(0)
+                            } else {
+                                0
+                            };
+                
+                            if let Value::Float(val) = &val_clone {
+                                return Value::Float(val.round(precision as usize));
+                            }
+                
+                            Value::Null
+                        },
+                        vec![Parameter::positional_optional("precision", "int", Value::Int(0.into()))],
+                        "float",
+                        true, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "toInt".to_string(),
@@ -549,6 +573,17 @@ impl Variable {
                     Variable::new(
                         "format".to_string(),
                         format,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "round".to_string(),
+                    Variable::new(
+                        "round".to_string(),
+                        round,
                         "function".to_string(),
                         false,
                         true,
@@ -610,5 +645,12 @@ impl Variable {
 
     pub fn set_name(&mut self, name: String) {
         self.name = name;
+    }
+
+    pub fn is_native(&self) -> bool {
+        match &self.value {
+            Value::Function(f) => f.is_native(),
+            _ => false,
+        }
     }
 }

@@ -277,6 +277,15 @@ impl Function {
     pub fn get_parameters(&self) -> &[Parameter] {
         &self.metadata().parameters
     }
+
+    pub fn is_native(&self) -> bool {
+        match self {
+            Function::Native(_) => true,
+            Function::Custom(_) => false,
+            Function::NativeMethod(_) => true,
+            Function::CustomMethod(_) => false,
+        }
+    }
 }
 
 impl fmt::Debug for Function {

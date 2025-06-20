@@ -16,6 +16,7 @@ use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::value::{Value};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
+use regex::Regex;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
@@ -157,6 +158,9 @@ pub fn format_value(value: &Value) -> String {
             format!("<function '{}' at {:p}>", func.get_name(), func.ptr())
         }
         
+        Value::Object(obj) => {
+            format!("<object '{}' at {:p}>", obj.name(), obj.ptr())
+        }
 
         Value::Error(err_type, err_msg) => format!("<{}: {}>", err_type, err_msg),
     }
@@ -182,9 +186,16 @@ pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a
             costs[0] = i + 1;
             for (j, cb) in b.chars().enumerate() {
                 let old = costs[j + 1];
+                let cost = if ca == cb {
+                    0
+                } else if ca.eq_ignore_ascii_case(&cb) {
+                    1
+                } else {
+                    2
+                };
                 costs[j + 1] = std::cmp::min(
                     std::cmp::min(costs[j] + 1, costs[j + 1] + 1),
-                    last + if ca == cb { 0 } else { 1 },
+                    last + cost,
                 );
                 last = old;
             }
@@ -202,10 +213,11 @@ pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a
     }
 
     match closest {
-        Some((s, dist)) if dist <= 2 && dist < target.len() => Some(s),
+        Some((s, dist)) if dist <= 2 => Some(s),
         _ => None,
     }
 }
+
 
 pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
     if !*use_colors {
@@ -659,6 +671,72 @@ pub fn unescape_string_literal(s: &str) -> Result<String, String> {
 
     let sliced = &s[quote_start..];
     unescape_string(sliced)
+}
+
+fn replace_accented(c: char) -> char {
+    match c {
+        'á' | 'à' | 'ä' | 'â' | 'ã' | 'å' | 'ā' => 'a',
+        'Á' | 'À' | 'Ä' | 'Â' | 'Ã' | 'Å' | 'Ā' => 'A',
+        'é' | 'è' | 'ë' | 'ê' | 'ē' => 'e',
+        'É' | 'È' | 'Ë' | 'Ê' | 'Ē' => 'E',
+        'í' | 'ì' | 'ï' | 'î' | 'ī' => 'i',
+        'Í' | 'Ì' | 'Ï' | 'Î' | 'Ī' => 'I',
+        'ó' | 'ò' | 'ö' | 'ô' | 'õ' | 'ō' => 'o',
+        'Ó' | 'Ò' | 'Ö' | 'Ô' | 'Õ' | 'Ō' => 'O',
+        'ú' | 'ù' | 'ü' | 'û' | 'ū' => 'u',
+        'Ú' | 'Ù' | 'Ü' | 'Û' | 'Ū' => 'U',
+        'ç' => 'c',
+        'Ç' => 'C',
+        'ñ' => 'n',
+        'Ñ' => 'N',
+        _ => c,
+    }
+}
+
+fn strip_extension(name: &str) -> &str {
+    if name.ends_with(".lc") {
+        &name[..name.len() - 3]
+    } else if name.ends_with(".lucia") {
+        &name[..name.len() - 6]
+    } else if name.ends_with(".rs") {
+        &name[..name.len() - 3]
+    } else {
+        name
+    }
+}
+
+pub fn sanitize_alias(alias: &str) -> String {
+    let alias = strip_extension(alias);
+
+    let mut result = String::new();
+    let mut chars = alias.chars();
+
+    if let Some(first) = chars.next() {
+        let first = replace_accented(first);
+        if first.is_ascii_alphabetic() || first == '_' {
+            result.push(first);
+        } else if first.is_ascii_digit() {
+            result.push('_');
+            result.push(first);
+        } else {
+            result.push('_');
+        }
+    }
+
+    for c in chars {
+        let c = replace_accented(c);
+        if c.is_ascii_alphanumeric() || c == '_' {
+            result.push(c);
+        } else {
+            result.push('_');
+        }
+    }
+
+    if result.is_empty() {
+        "_".to_string()
+    } else {
+        result
+    }
 }
 
 
