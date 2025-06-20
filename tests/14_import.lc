@@ -1,0 +1,15 @@
+import math
+
+try:
+    import a_non_existent_module
+catch (e):
+    print(e)
+end
+
+import "04_variables.lc" from "." as vars
+
+print(vars.i)
+
+import math as m
+print(m.sqrt(16))
+print(m.PI)

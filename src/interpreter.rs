@@ -1,4 +1,4 @@
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{HashMap, BTreeMap, HashSet};
 use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
 use crate::env::runtime::utils::{
     print_colored,
@@ -34,12 +34,19 @@ use std::sync::Arc;
 use std::cmp::Ordering;
 use std::sync::Mutex;
 use std::path::{PathBuf, Path};
+use once_cell::sync::Lazy;
 use std::fs;
 use regex::Regex;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::{Parser, Token};
+
+static STD_LIBS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+    HashSet::from([
+        "math",
+    ])
+});
 
 
 #[derive(Debug, Clone)]
@@ -776,11 +783,7 @@ impl Interpreter {
     
         let mut properties = HashMap::new();
     
-        let std_libs: Vec<&str> = vec![
-            "math"
-        ];
-    
-        if std_libs.contains(&module_name.as_str()) {
+        if STD_LIBS.contains(&module_name.as_str()) {
             match module_name.as_str() {
                 "math" => {
                     use crate::env::libs::math::__init__ as math;
@@ -811,12 +814,23 @@ impl Interpreter {
                     }.convert_to_statement();
                     let path_eval = self.evaluate(map_statement);
                     let path_str = path_eval.to_string();
+            
                     if path_str.is_empty() {
                         self.stack.pop();
                         self.raise("RuntimeError", "Empty 'path' in import statement");
                         return NULL;
+                    }
+            
+                    let path = PathBuf::from(path_str);
+                    if path.is_relative() {
+                        let current_file_path = PathBuf::from(&self.file_path);
+                        if let Some(parent_dir) = current_file_path.parent() {
+                            PathBuf::from(parent_dir)
+                        } else {
+                            path
+                        }
                     } else {
-                        PathBuf::from(path_str)
+                        path
                     }
                 }
                 Some(Value::Null) | None => libs_dir.clone(),
@@ -832,9 +846,9 @@ impl Interpreter {
             if candidate_dir.exists() && candidate_dir.is_dir() {
                 resolved_module_path = Some(candidate_dir);
             } else {
-                let extensions = ["lc", "lucia", "rs"];
+                let extensions = [".lc", ".lucia", ".rs", ""];
                 for ext in extensions.iter() {
-                    let candidate_file = base_module_path.join(format!("{}.{}", module_name, ext));
+                    let candidate_file = base_module_path.join(format!("{}{}", module_name, ext));
                     if candidate_file.exists() && candidate_file.is_file() {
                         resolved_module_path = Some(candidate_file);
                         break;
@@ -844,7 +858,7 @@ impl Interpreter {
     
             if resolved_module_path.is_none() {
                 let mut candidates = vec![];
-                if let Ok(entries) = fs::read_dir(&libs_dir) {
+                if let Ok(entries) = fs::read_dir(&base_module_path) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         let file_stem_opt = path.file_stem().and_then(|s| s.to_str());

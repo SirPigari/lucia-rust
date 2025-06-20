@@ -1,4 +1,4 @@
-i: int = 10
+public i: int = 10
 a: str
 b: bool
 
