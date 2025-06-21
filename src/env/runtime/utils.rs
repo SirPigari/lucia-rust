@@ -746,7 +746,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         "exit".to_string(),
         FunctionMetadata {
             name: "exit".to_string(),
-            parameters: vec![Parameter::positional("code", "int")],
+            parameters: vec![Parameter::positional_optional("code", "int", Value::Int(Int::from_i64(0 as i64)))],
             return_type: Value::String("void".to_string()),
             is_public: true,
             is_static: true,
