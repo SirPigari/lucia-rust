@@ -12,6 +12,8 @@ print(h(l))
 m: map = {"a": 1, "b": 2}
 fun i(m: map, k: str) -> int: return m[k] end
 print(i(m, "a"))
+m["c"] = 3
+print(i(m, "c"))
 
 f: float = 42.137
 f_str: str = f as str
@@ -20,3 +22,4 @@ fun j(s: str) -> float: return s as float end
 print(j(f_str))
 
 t: tuple = l as tuple
+print(t[0])
