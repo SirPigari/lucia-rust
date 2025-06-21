@@ -1,6 +1,6 @@
 # Lucia 2.0.0 (Rust Edition)
 
-**Lucia** is a simple and lightweight programming language, now being rewritten in [Rust](https://www.rust-lang.org/).  
+**Lucia** is a simple and lightweight programming language, now being rewritten in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>  
 Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ---

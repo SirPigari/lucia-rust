@@ -305,6 +305,33 @@ impl Parser {
                         }
                     }
                 }
+
+                ("IDENTIFIER", "as") => {
+                    self.next();
+            
+                    let type_conv = self.parse_type();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+            
+                    let line = self.current_line();
+                    let column = self.get_line_column();
+            
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                            Value::String("to".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TYPE_CONVERT".to_string()),
+                            expr.convert_to_map(),
+                            type_conv.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    };
+                }
         
                 ("SEPARATOR", "[") => {
                     self.check_for("SEPARATOR", "[");
@@ -490,6 +517,78 @@ impl Parser {
                     }
                 }
 
+                "SEPARATOR" if token.1 == "{" => {
+                    self.next();
+                    let mut keys = vec![];
+                    let mut values = vec![];
+                    while let Some(next_token) = self.token() {
+                        if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
+                            self.next();
+                            break;
+                        }
+                        let key = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+
+                        let key_map = key.convert_to_map();
+
+                        if keys.contains(&key_map) {
+                            self.raise("SyntaxError", "Duplicate key in map");
+                            return Statement::Null;
+                        }
+
+                        let value;
+                        if let Some(next_token) = self.token() {
+                            if next_token.0 == "SEPARATOR" && next_token.1 == ":" {
+                                self.next();
+                                value = self.parse_expression();
+                                if self.err.is_some() {
+                                    return Statement::Null;
+                                }
+                            } else {
+                                self.raise("SyntaxError", "Expected ':' after key in map");
+                                return Statement::Null;
+                            }
+                        } else {
+                            self.raise("SyntaxError", "Unexpected end of input in map");
+                            return Statement::Null;
+                        }
+
+                        keys.push(key_map);
+                        values.push(value.convert_to_map());
+
+                        if let Some(next_token) = self.token() {
+                            if next_token.0 == "SEPARATOR" && next_token.1 == "," {
+                                self.next();
+                            } else if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
+                                self.next();
+                                break;
+                            } else {
+                                self.raise("SyntaxError", "Expected ',' or '}' in map");
+                                return Statement::Null;
+                            }
+                        } else {
+                            self.raise("SyntaxError", "Unexpected end of input in map");
+                            return Statement::Null;
+                        }
+                    }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("keys".to_string()),
+                            Value::String("values".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("MAP".to_string()),
+                            Value::List(keys),
+                            Value::List(values),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
                 "SEPARATOR" | "IDENTIFIER" if token.1 == "..." || token.1 == "pass" => {
                     self.next();
                     Statement::Null
@@ -545,7 +644,7 @@ impl Parser {
                     let mut alias: Option<Token> = None;
                     if self.token_is("IDENTIFIER", "from") {
                         self.next();
-                        path = Some(self.parse_expression());
+                        path = Some(self.parse_primary());
                         if self.err.is_some() {
                             return Statement::Null;
                         }
@@ -1343,6 +1442,53 @@ impl Parser {
         }
         let base_str = base.1.clone();
         self.next();
+        if self.token_is("SEPARATOR", "(") {
+            let to_type = Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("type_kind".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE".to_string()),
+                    Value::String("simple".to_string()),
+                    Value::String(base_str.clone()),
+                ],
+            };
+            self.next();
+
+            let mut value;
+
+            if self.token_is("SEPARATOR", ")") {
+                value = get_type_default_as_statement(&base_str);
+            } else {
+                value = self.parse_expression();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+            }
+            if !self.token_is("SEPARATOR", ")") {
+                self.raise("SyntaxError", "Expected ')' after type conversion value");
+                return Statement::Null;
+            }
+            self.next();
+        
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("to".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE_CONVERT".to_string()),
+                    to_type,
+                    value.convert_to_map(),
+                ],
+                line,
+                column,
+            };
+        }        
+
         if self.token_is("SEPARATOR", "[") {
             self.next();
             let mut elements = vec![];

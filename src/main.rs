@@ -46,7 +46,7 @@ use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
-const VERSION: &str = "2.0.0-rust";
+const VERSION: &str = "2.0.0";
 
 fn handle_error(
     error: &Error,
@@ -636,7 +636,7 @@ fn main() {
             None
         };
 
-        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some);
+        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone());
     }
 }
 
@@ -732,7 +732,19 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             );
         }
 
-        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
+        let parent_dir = if file_path.is_empty() {
+            std_env::current_dir()
+                .and_then(|p| p.canonicalize())
+                .unwrap_or_else(|_| PathBuf::from("."))
+        } else {
+            PathBuf::from(file_path.clone())
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from("."))
+        };
+        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
         let out: Value = match interpreter.interpret(statements, file_content.clone()) {
             Ok(out) => out,
             Err(error) => {
@@ -750,14 +762,14 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
     }
 }
 
-fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>) {
+fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
         hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
         config.version, 
         hex_to_ansi("reset", Some(use_colors))
     );
-    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
+    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
         config_path.clone(),

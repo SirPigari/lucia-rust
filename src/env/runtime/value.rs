@@ -345,6 +345,9 @@ impl Value {
             _ => None,
         }
     }
+    pub fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
 }
 
 impl fmt::Display for Value {

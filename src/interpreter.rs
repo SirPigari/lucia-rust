@@ -62,11 +62,12 @@ pub struct Interpreter {
     current_statement: Option<Statement>,
     variables: HashMap<String, Variable>,
     file_path: String,
+    cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
 }
 
 impl Interpreter {
-    pub fn new(config: Config, use_colors: bool, file_path: &str, preprocessor_info: (PathBuf, PathBuf, bool)) -> Self {
+    pub fn new(config: Config, use_colors: bool, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool)) -> Self {
         let mut this = Self {
             config,
             err: None,
@@ -79,6 +80,7 @@ impl Interpreter {
             current_statement: None,
             variables: HashMap::new(),
             file_path: file_path.to_string(),
+            cwd: cwd.clone(),
             preprocessor_info,
         };
 
@@ -403,7 +405,12 @@ impl Interpreter {
             }
         };
     
-        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), self.preprocessor_info.clone());
+        let parent_dir = path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from("."));
+        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone());
         interpreter.stack = self.stack.clone();
         let result = interpreter.interpret(statements, content);
         self.stack = interpreter.stack.clone();
@@ -656,6 +663,7 @@ impl Interpreter {
                 // Collections and data structures
                 "ITERABLE" => self.handle_iterable(statement.clone()),
                 "TUPLE" => self.handle_tuple(statement.clone()),
+                "MAP" => self.handle_map(statement.clone()),
         
                 // Operations
                 "OPERATION" => self.handle_operation(statement.clone()),
@@ -679,8 +687,9 @@ impl Interpreter {
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
                 "FORGET" => self.handle_forget(statement.clone()),
         
-                // Type
+                // Types
                 "TYPE" => self.handle_type(statement.clone()),
+                "TYPE_CONVERT" => self.handle_type_conversion(statement.clone()),
         
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
@@ -712,6 +721,217 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_map(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let keys_opt = statement.get(&Value::String("keys".to_string())).unwrap_or_else(|| {
+            self.raise("RuntimeError", "Missing 'keys' in map statement");
+            &Value::Null
+        });
+        let values_opt = statement.get(&Value::String("values".to_string())).unwrap_or_else(|| {
+            self.raise("RuntimeError", "Missing 'values' in map statement");
+            &Value::Null
+        });
+        
+        let raw_keys = match keys_opt {
+            Value::List(v) => v,
+            _ => {
+                self.raise("TypeError", "Expected list for map keys");
+                return Value::Null;
+            }
+        };
+        
+        let raw_values = match values_opt {
+            Value::List(v) => v,
+            _ => {
+                self.raise("TypeError", "Expected list for map values");
+                return Value::Null;
+            }
+        };
+    
+        if raw_keys.len() != raw_values.len() {
+            self.raise("RuntimeError", "Keys and values lists must have the same length");
+            return Value::Null;
+        }
+    
+        let mut keys = Vec::with_capacity(raw_keys.len());
+        let mut values = Vec::with_capacity(raw_values.len());
+    
+        for key in raw_keys {
+            let evaluated_key = self.evaluate(key.convert_to_statement());
+            keys.push(evaluated_key);
+        }
+        for value in raw_values {
+            let evaluated_value = self.evaluate(value.convert_to_statement());
+            values.push(evaluated_value);
+        }
+    
+        let mut seen = std::collections::HashSet::new();
+        for key in &keys {
+            if !seen.insert(key) {
+                self.raise("SyntaxError", &format!("Duplicate key in map: {}", key));
+                return Value::Null;
+            }
+        }
+    
+        Value::Map { keys, values }
+    }
+
+    fn handle_type_conversion(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let value_opt = match statement.get(&Value::String("value".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'value' in type conversion statement"),
+        };
+
+        let value = self.evaluate(value_opt.convert_to_statement());
+
+        let target_type_opt = match statement.get(&Value::String("to".to_string())) {
+            Some(Value::Map { keys, values } ) => {
+                Value::Map {
+                    keys: keys.clone(),
+                    values: values.clone(),
+                }
+            },
+            _ => return self.raise("RuntimeError", "Missing or invalid 'to' in type conversion statement"),
+        };
+
+        let target_type = match self.evaluate(target_type_opt.convert_to_statement()) {
+            Value::String(s) => s,
+            _ => return self.raise("RuntimeError", "Invalid 'to' in type conversion statement"),
+        };
+
+        if !VALID_TYPES.contains(&target_type.as_str()) {
+            return self.raise("TypeError", &format!("Invalid target type '{}'", target_type));
+        }
+
+        match target_type.as_str() {
+            "str" => {
+                if let Value::String(s) = value {
+                    Value::String(s.clone())
+                } else {
+                    Value::String(value.to_string())
+                }
+            },
+            "int" => {
+                if let Value::Int(i) = value {
+                    Value::Int(i.clone())
+                } else if let Value::Float(f) = value {
+                    if f.is_integer_like() {
+                        f.to_int().map_or_else(
+                            |_| self.raise("ConversionError", "Failed to convert float to int"),
+                            |i| Value::Int(i),
+                        )
+                    } else {
+                        self.raise("ConversionError", "Float value has non-zero fractional part, cannot convert to int");
+                        NULL
+                    }
+                } else if let Value::String(s) = value {
+                    Value::Int(Int::from_str(&s).unwrap_or_else(|_| {
+                        self.raise("ConversionError", &format!("Failed to convert string '{}' to int", s));
+                        Int::from_i64(0)
+                    }))
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to int", value.type_name()))
+                }
+            },
+            "float" => {
+                if let Value::Float(f) = value {
+                    Value::Float(f.clone())
+                } else if let Value::Int(i) = value {
+                    i.to_float().map_or_else(
+                        |_| self.raise("ConversionError", "Failed to convert int to float"),
+                        |f| Value::Float(f),
+                    )
+                } else if let Value::String(s) = value {
+                    Float::from_str(&s).map_or_else(
+                        |_| self.raise("ConversionError", &format!("Failed to convert string '{}' to float", s)),
+                        |f| Value::Float(f),
+                    )
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to float", value.type_name()))
+                }
+            },
+            "bool" => {
+                if value.is_truthy() {
+                    Value::Boolean(true)
+                } else {
+                    Value::Boolean(false)
+                }
+            },
+            "void" => {
+                if value.is_null() {
+                    NULL
+                } else {
+                    self.raise("TypeError", "Cannot convert non-null value to 'void'");
+                    NULL
+                }
+            },
+            "any" => value.clone(),
+            "list" => {
+                if let Value::List(l) = value {
+                    Value::List(l.clone())
+                } else if let Value::Tuple(t) = value {
+                    Value::List(t.into_iter().map(|v| v.clone()).collect())
+                } else if let Value::String(s) = value {
+                    Value::List(s.chars().map(|c| Value::String(c.to_string())).collect())
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to list", value.type_name()))
+                }
+            },
+            "map" => {
+                if let Value::Map { keys, values } = value {
+                    Value::Map { keys: keys.clone(), values: values.clone() }
+                } else if let Value::Object(obj) = value {
+                    let mut keys = Vec::new();
+                    let mut values = Vec::new();
+                    for (name, var) in obj.get_properties().iter().flat_map(|map| map.iter()) {
+                        keys.push(Value::String(name.clone()));
+                        values.push(var.value.clone());
+                    }                    
+                    Value::Map { keys, values }                
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to map", value.type_name()))
+                }
+            },
+            "bytes" => {
+                if let Value::Bytes(b) = value {
+                    Value::Bytes(b.clone())
+                } else if let Value::String(s) = value {
+                    Value::Bytes(s.into_bytes())
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to bytes", value.type_name()))
+                }
+            },
+            "object" => {
+                if let Value::Object(obj) = value {
+                    Value::Object(obj.clone())
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to object", value.type_name()))
+                }
+            },
+            "function" => {
+                if let Value::Function(func) = value {
+                    Value::Function(func.clone())
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to function", value.type_name()))
+                }
+            },
+            "tuple" => {
+                if let Value::Tuple(t) = value {
+                    Value::Tuple(t.clone())
+                } else if let Value::List(l) = value {
+                    Value::Tuple(l.into_iter().map(|v| v.clone()).collect())
+                } else if let Value::String(s) = value {
+                    Value::Tuple(s.chars().map(|c| Value::String(c.to_string())).collect())
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to tuple", value.type_name()))
+                }
+            },
+            _ => {
+                self.raise("NotImplemented", &format!("Type conversion to '{}' is not implemented", target_type));
+                NULL
+            }
+        }
     }
 
     fn handle_import(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -812,6 +1032,7 @@ impl Interpreter {
                         keys: keys.clone(),
                         values: values.clone(),
                     }.convert_to_statement();
+            
                     let path_eval = self.evaluate(map_statement);
                     let path_str = path_eval.to_string();
             
@@ -821,19 +1042,23 @@ impl Interpreter {
                         return NULL;
                     }
             
-                    let path = PathBuf::from(path_str);
+                    let mut path = PathBuf::from(path_str);
                     if path.is_relative() {
-                        let current_file_path = PathBuf::from(&self.file_path);
-                        if let Some(parent_dir) = current_file_path.parent() {
-                            PathBuf::from(parent_dir)
-                        } else {
-                            path
-                        }
-                    } else {
-                        path
+                        path = self.cwd.join(path);
+                    }
+                    
+                    let path = match path.canonicalize() {
+                        Ok(p) => p,
+                        Err(_) => path.clone(),
+                    };
+                    path
+                }
+                Some(Value::Null) | None => {
+                    match libs_dir.canonicalize() {
+                        Ok(p) => p,
+                        Err(_) => libs_dir.clone(),
                     }
                 }
-                Some(Value::Null) | None => libs_dir.clone(),
                 _ => {
                     self.stack.pop();
                     return self.raise("RuntimeError", "Invalid 'path' in import statement");
@@ -889,8 +1114,18 @@ impl Interpreter {
                     );
                 }
     
+                let display_path = base_module_path
+                .display()
+                .to_string()
+                .trim_start_matches(r"\\?\")
+                .to_string();
+            
                 self.stack.pop();
-                return self.raise("ImportError", &format!("Module '{}' not found at path '{}'", &module_name, base_module_path.display()));
+                return self.raise("ImportError", &format!(
+                    "Module '{}' not found at path '{}'",
+                    &module_name,
+                    display_path
+                ));
             }
     
             let module_path = resolved_module_path.unwrap();
@@ -1291,6 +1526,12 @@ impl Interpreter {
                     Value::List(l) => l.len(),
                     Value::Bytes(b) => b.len(),
                     Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten."),
+                    Value::Map { keys, values } => {
+                        if keys.len() != values.len() {
+                            return self.raise("TypeError", "Map keys and values must have the same length");
+                        }
+                        keys.len()
+                    }
                     _ => return self.raise("TypeError", "Object not indexable"),
                 };
 
@@ -1341,6 +1582,15 @@ impl Interpreter {
                     }
                     Value::Tuple(_) => {
                         return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten.");
+                    }
+                    Value::Map { keys, values } => {
+                        let mut new_keys = keys.clone();
+                        let mut new_values = values.clone();
+                        if start_idx < new_keys.len() && end_idx <= new_keys.len() {
+                            new_keys.drain(start_idx..end_idx);
+                            new_values.drain(start_idx..end_idx);
+                        }
+                        Value::Map { keys: new_keys, values: new_values }
                     }
                     _ => return self.raise("TypeError", "Object not indexable for forget"),
                 };
@@ -1740,6 +1990,11 @@ impl Interpreter {
                 var.value.clone()
             }
             "INDEX_ACCESS" => {
+                let variable_name = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(n) => n,
+                    _ => return self.raise("RuntimeError", "Missing or invalid 'variable' in index access assignment"),
+                };
+
                 let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
                     Some(v) => self.evaluate(Value::convert_to_statement(v)),
                     None => return self.raise("RuntimeError", "Missing 'object' in index access"),
@@ -1755,12 +2010,19 @@ impl Interpreter {
                     _ => return self.raise("RuntimeError", "Expected a map for index access"),
                 };
     
-                if let Value::String(name) = &object_val {
+                if let Value::String(name) = &variable_name {
                     let len = match self.variables.get(name) {
                         Some(var) => match &var.value {
                             Value::String(s) => s.chars().count(),
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
+                            Value::Tuple(t) => t.len(),
+                            Value::Map { keys, values } => {
+                                if keys.len() != values.len() {
+                                    return self.raise("TypeError", "Map keys and values must have the same length");
+                                }
+                                keys.len()
+                            }
                             _ => return self.raise("TypeError", "Object not indexable"),
                         },
                         None => return self.raise("NameError", &format!("Variable '{}' not found for index assignment", name)),
@@ -1824,6 +2086,23 @@ impl Interpreter {
                                     return self.raise("TypeError", "Expected integer for byte assignment");
                                 }
                             }
+                            Value::Tuple(_) => {
+                                return self.raise("TypeError", "Tuples are immutable, their indexes cannot be assigned to.");
+                            }
+                            Value::Map { keys, values } => {
+                                if start_idx >= keys.len() || end_idx > keys.len() || start_idx > end_idx {
+                                    return self.raise("IndexError", "Invalid slice indices");
+                                }
+                                if start_idx + 1 == end_idx {
+                                    if let Some(pos) = keys.iter().position(|k| k == &Value::String(name.clone())) {
+                                        values[pos] = right_value;
+                                    } else {
+                                        return self.raise("KeyError", &format!("Key '{}' not found in map", name));
+                                    }
+                                } else {
+                                    return self.raise("NotImplementedError", "Slice assignment not supported for maps");
+                                }
+                            }
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }
                         NULL
@@ -1861,6 +2140,13 @@ impl Interpreter {
             Value::String(s) => s.chars().count(),
             Value::List(l) => l.len(),
             Value::Bytes(b) => b.len(),
+            Value::Tuple(t) => t.len(),
+            Value::Map { keys, values } => {
+                if keys.len() != values.len() {
+                    return self.raise("TypeError", "Map keys and values must have the same length");
+                }
+                keys.len()
+            }
             _ => return self.raise("TypeError", "Object not indexable"),
         };
     
@@ -2646,6 +2932,7 @@ impl Interpreter {
                         self.config.clone(),
                         self.use_colors.clone(),
                         &self.file_path.clone(),
+                        &self.cwd.clone(),
                         self.preprocessor_info.clone(),
                     );
                     let mut merged_variables = self.variables.clone();
@@ -3129,6 +3416,7 @@ impl Interpreter {
                         self.config.clone(),
                         self.use_colors.clone(),
                         &self.file_path.clone(),
+                        &self.cwd.clone(),
                         self.preprocessor_info.clone(),
                     );
                     let mut merged_variables = self.variables.clone();

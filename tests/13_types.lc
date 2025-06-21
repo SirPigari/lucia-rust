@@ -8,3 +8,15 @@ print(f(g, i))
 l: list[int] = [1, 2, 3]
 fun h(l: list[int]) -> int: return l[0] end
 print(h(l))
+
+m: map = {"a": 1, "b": 2}
+fun i(m: map, k: str) -> int: return m[k] end
+print(i(m, "a"))
+
+f: float = 42.137
+f_str: str = f as str
+print(f_str)
+fun j(s: str) -> float: return s as float end
+print(j(f_str))
+
+t: tuple = l as tuple
