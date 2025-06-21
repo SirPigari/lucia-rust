@@ -37,6 +37,9 @@ mod env {
         pub mod json {
             pub mod __init__;
         }
+        pub mod config {
+            pub mod __init__;
+        }
     }
 }
 
@@ -303,11 +306,6 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_preprocessor: true,
         print_comments: false,
         allow_fetch: true,
-        execute_code_blocks: CodeBlocks {
-            C: true,
-            ASM: true,
-            PY: true,
-        },
         home_dir: env_path_str,
         recursion_limit: 9999,
         color_scheme: ColorScheme {

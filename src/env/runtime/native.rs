@@ -276,6 +276,10 @@ fn sum(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn __placeholder__(args: &HashMap<String, Value>) -> Value {
+    Value::Error("PlaceholderError", "This is a placeholder function and should not be called.")
+}
+
 // -------------------------------
 // Utility Functions
 fn format_value(value: &Value) -> String {
@@ -434,6 +438,20 @@ pub fn sum_fn() -> Function {
             Parameter::keyword_optional("start", "any", Value::Int(0.into())),
         ],
         "float",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn placeholder_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "__placeholder__",
+        __placeholder__,
+        vec![
+            Parameter::variadic_optional("args", "any", Value::Null),
+            Parameter::keyword_optional("kwargs", "any", Value::Null),
+        ],
+        "void",
         true, true, true,
         None,
     )))

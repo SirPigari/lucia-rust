@@ -739,6 +739,44 @@ pub fn sanitize_alias(alias: &str) -> String {
     }
 }
 
+pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
+    let mut map = HashMap::new();
+
+    map.insert(
+        "exit".to_string(),
+        FunctionMetadata {
+            name: "exit".to_string(),
+            parameters: vec![Parameter::positional("code", "int")],
+            return_type: Value::String("void".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
+        "fetch".to_string(),
+        FunctionMetadata {
+            name: "fetch".to_string(),
+            parameters: vec![
+                Parameter::positional("url", "str"),
+                Parameter::positional_optional("method", "str", Value::String("GET".to_string())),
+                Parameter::positional_optional("headers", "map", Value::Map { keys: vec![], values: vec![] }),
+                Parameter::positional_optional("params", "map", Value::Map { keys: vec![], values: vec![] }),
+                Parameter::positional_optional("data", "map", Value::Map { keys: vec![], values: vec![] }),
+                Parameter::positional_optional("json", "any", NULL),
+            ],
+            return_type: Value::String("map".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        }
+    );
+    return map;
+}
 
 
 pub const NULL: Value = Value::Null;

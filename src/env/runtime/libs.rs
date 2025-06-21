@@ -37,9 +37,9 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         version: "1.0.82",
     });
 
-    m.insert("requests", LibInfo {
-        description: "HTTP requests handling.",
-        version: "0.11.14",
+    m.insert("config", LibInfo {
+        description: "Lucia configuration management.",
+        version: "0.2.6",
     });
 
     m.insert("regex", LibInfo {

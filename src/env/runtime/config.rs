@@ -2,6 +2,9 @@ use serde::{Serialize, Deserialize};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use crate::env::runtime::value::Value;
+use crate::env::runtime::types::Int;
+use crate::env::runtime::utils::to_static;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -14,7 +17,6 @@ pub struct Config {
     pub use_preprocessor: bool,
     pub print_comments: bool,
     pub allow_fetch: bool,
-    pub execute_code_blocks: CodeBlocks,
     pub home_dir: String,
     pub recursion_limit: usize,
     pub version: String,
@@ -40,6 +42,54 @@ pub struct ColorScheme {
     pub note: String,
     pub output_text: String,
     pub info: String,
+}
+
+pub fn get_from_config(config: &Config, key: &str) -> Value {
+    match key {
+        "moded" => Value::Boolean(config.moded),
+        "debug" => Value::Boolean(config.debug),
+        "debug_mode" => Value::String(config.debug_mode.clone()),
+        "supports_color" => Value::Boolean(config.supports_color),
+        "use_lucia_traceback" => Value::Boolean(config.use_lucia_traceback),
+        "warnings" => Value::Boolean(config.warnings),
+        "use_preprocessor" => Value::Boolean(config.use_preprocessor),
+        "print_comments" => Value::Boolean(config.print_comments),
+        "allow_fetch" => Value::Boolean(config.allow_fetch),
+        "home_dir" => Value::String(config.home_dir.clone()),
+        "recursion_limit" => Value::Int(Int::from_i64(config.recursion_limit as i64)),
+        "version" => Value::String(config.version.clone()),
+        "color_scheme" => {
+            let color_scheme = &config.color_scheme;
+            Value::Map {
+                keys: vec![
+                    Value::String("exception".to_string()),
+                    Value::String("warning".to_string()),
+                    Value::String("help".to_string()),
+                    Value::String("debug".to_string()),
+                    Value::String("comment".to_string()),
+                    Value::String("input_arrows".to_string()),
+                    Value::String("note".to_string()),
+                    Value::String("output_text".to_string()),
+                    Value::String("info".to_string()),
+                ],
+                values: vec![
+                    Value::String(color_scheme.exception.clone()),
+                    Value::String(color_scheme.warning.clone()),
+                    Value::String(color_scheme.help.clone()),
+                    Value::String(color_scheme.debug.clone()),
+                    Value::String(color_scheme.comment.clone()),
+                    Value::String(color_scheme.input_arrows.clone()),
+                    Value::String(color_scheme.note.clone()),
+                    Value::String(color_scheme.output_text.clone()),
+                    Value::String(color_scheme.info.clone()),
+                ],
+            }
+        }
+        _ => Value::Error(
+            "KeyError",
+            to_static(format!("Key '{}' not found in config", key)),
+        ),
+    }
 }
 
 pub fn get_config_path() -> String {

@@ -19,6 +19,7 @@ use crate::env::runtime::utils::{
     get_type_default,
     get_type_from_token_name,
     sanitize_alias,
+    special_function_meta,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -38,6 +39,9 @@ use std::path::{PathBuf, Path};
 use once_cell::sync::Lazy;
 use std::fs;
 use regex::Regex;
+use tokio::runtime::Runtime;
+use reqwest;
+use serde_urlencoded;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -105,6 +109,11 @@ impl Interpreter {
         this.variables.insert(
             "sum".to_string(),
             Variable::new("sum".to_string(), Value::Function(native::sum_fn()), "function".to_string(), false, true, true),
+        );
+        // 00 so user cant call it
+        this.variables.insert(
+            "00__placeholder__".to_string(),
+            Variable::new("__placeholder__".to_string(), Value::Function(native::placeholder_fn()), "function".to_string(), false, true, true),
         );
 
         this
@@ -328,7 +337,194 @@ impl Interpreter {
         };
         return self.return_value.clone();
     }
+
+    pub async fn fetch(
+        &self,
+        url: &str,
+        method: Option<&str>,
+        headers: Option<HashMap<String, String>>,
+        params: Option<HashMap<String, String>>,
+        data: Option<HashMap<String, String>>,
+        json_: Option<Value>,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        if !self.config.allow_fetch {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Fetching is not allowed in this context.",
+            )));
+        }
     
+        let mut parsed_url = reqwest::Url::parse(url).map_err(|_| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid URL",
+            )) as Box<dyn std::error::Error>
+        })?;
+    
+        if let Some(params) = &params {
+            if !params.is_empty() {
+                let mut pairs = parsed_url.query_pairs_mut();
+                for (k, v) in params {
+                    pairs.append_pair(k, v);
+                }
+                drop(pairs);
+            }
+        }
+    
+        let method = method.unwrap_or("GET");
+        let method = reqwest::Method::from_bytes(method.as_bytes())?;
+    
+        let client = reqwest::Client::new();
+    
+        let mut req_headers = reqwest::header::HeaderMap::new();
+        if let Some(hdrs) = headers {
+            for (k, v) in hdrs.into_iter() {
+                req_headers.insert(
+                    reqwest::header::HeaderName::from_bytes(k.as_bytes())?,
+                    reqwest::header::HeaderValue::from_str(&v)?,
+                );
+            }
+        }
+    
+        let (body, content_type) = if let Some(json) = json_ {
+            (Some(json.to_string()), Some("application/json"))
+        } else if let Some(data) = data {
+            let encoded = serde_urlencoded::to_string(data)?;
+            (Some(encoded), Some("application/x-www-form-urlencoded"))
+        } else {
+            (None, None)
+        };
+    
+        if let Some(ct) = content_type {
+            req_headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static(ct),
+            );
+        }
+    
+        debug_log(&format!(
+            "<Fetching {} {} with data: {}>",
+            method,
+            parsed_url.as_str(),
+            body.as_deref().unwrap_or("null")
+        ), &self.config.clone(), Some(self.use_colors));
+    
+        let req = client
+            .request(method, parsed_url)
+            .headers(req_headers);
+    
+        let req = if let Some(body_str) = body {
+            req.body(body_str)
+        } else {
+            req
+        };
+    
+        let resp = req.send().await?;
+    
+        debug_log(&format!("<Response status: {}>", resp.status()), &self.config.clone(), Some(self.use_colors));
+    
+        let status = resp.status().as_u16();
+        let headers = resp.headers().clone();
+        let body = resp.text().await?;
+    
+        let headers_map = headers.iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect::<HashMap<_, _>>();
+    
+        Ok(Value::Map {
+            keys: vec![
+                Value::String("status".to_string()),
+                Value::String("headers".to_string()),
+                Value::String("body".to_string()),
+            ],
+            values: vec![
+                Value::Int(Int::from_i64(status as i64)),
+                Value::Map {
+                    keys: headers_map.keys().cloned().map(Value::String).collect(),
+                    values: headers_map.values().cloned().map(Value::String).collect(),
+                },
+                Value::String(body),
+            ],
+        })
+    }
+    
+    fn fetch_fn(
+        &mut self,
+        args: &HashMap<String, Value>,
+    ) -> Value {
+        if !self.config.allow_fetch {
+            return self.raise("PermissionError", "Fetching is not allowed in this context");
+        }
+
+        let url = match args.get("url") {
+            Some(Value::String(s)) => s,
+            _ => return self.raise("TypeError", "Expected 'url' to be a string"),
+        };
+
+        let method = match args.get("method") {
+            Some(Value::String(s)) => Some(s.as_str()),
+            _ => None,
+        };
+
+        let headers = match args.get("headers") {
+            Some(Value::Map { keys, values }) => {
+                let mut map = HashMap::new();
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    if let Value::String(key) = k {
+                        if let Value::String(value) = v {
+                            map.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                Some(map)
+            }
+            _ => None,
+        };
+
+        let params = match args.get("params") {
+            Some(Value::Map { keys, values }) => {
+                let mut map = HashMap::new();
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    if let Value::String(key) = k {
+                        if let Value::String(value) = v {
+                            map.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                Some(map)
+            }
+            _ => None,
+        };
+
+        let data = match args.get("data") {
+            Some(Value::Map { keys, values }) => {
+                let mut map = HashMap::new();
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    if let Value::String(key) = k {
+                        if let Value::String(value) = v {
+                            map.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                Some(map)
+            }
+            _ => None,
+        };
+
+        let json_ = match args.get("json") {
+            Some(v) => Some(v.clone()),
+            _ => None,
+        };
+
+        let rt = Runtime::new().unwrap();
+        let result = rt.block_on(self.fetch(url, method, headers, params, data, json_));
+    
+        match result {
+            Ok(response) => response,
+            Err(e) => self.raise("FetchError", &format!("Failed to fetch: {}", e)),
+        }
+    }
+
     fn _handle_invalid_type(&mut self, type_: &str, valid_types: Vec<&str>) -> bool {
         let valid_types_owned: Vec<String> = valid_types.into_iter().map(|s| s.to_string()).collect();
         let valid_types_slice: &[String] = &valid_types_owned;
@@ -1030,6 +1226,15 @@ impl Interpreter {
                     let json_module_props = json::register();
                     let result = json::init();
                     for (name, var) in json_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "config" => {
+                    use crate::env::libs::config::__init__ as config;
+                    let arc_config = Arc::new(self.config.clone());
+                    let config_module_props = config::register(arc_config);
+                    let result = config::init();
+                    for (name, var) in config_module_props {
                         properties.insert(name, var);
                     }
                 }
@@ -3188,90 +3393,111 @@ impl Interpreter {
             return code;
         }
 
-        let var = match self.variables.get(function_name) {
-            Some(v) => v.clone(),
-            None => {
-                let available_names: Vec<String> = self.variables.keys().cloned().collect();
-                if let Some(closest) = find_closest_match(function_name, &available_names) {
-                    return self.raise_with_help(
-                        "NameError",
-                        &format!("Function '{}' is not defined", function_name),
-                        &format!("Did you mean '{}{}{}'?",
-                            check_ansi("\x1b[4m", &self.use_colors),
-                            closest,
-                            check_ansi("\x1b[24m", &self.use_colors),
-                        ),
-                    );
-                } else {
-                    return self.raise("NameError", &format!("Function '{}' is not defined", function_name));
+        let special_functions = [
+            "exit", "fetch"
+        ];
+        let special_functions_meta = special_function_meta();
+        let is_special_function = special_functions.contains(&function_name);
+
+        let mut value = Value::Null;
+
+        if !is_special_function {
+            let value = match self.variables.get(function_name) {
+                Some(v) => v.get_value().clone(),
+                None => {
+                    let available_names: Vec<String> = self.variables.keys().cloned().collect();
+                    if let Some(closest) = find_closest_match(function_name, &available_names) {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!("Function '{}' is not defined", function_name),
+                            &format!("Did you mean '{}{}{}'?",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                closest,
+                                check_ansi("\x1b[24m", &self.use_colors),
+                            ),
+                        );
+                    } else {
+                        return self.raise("NameError", &format!("Function '{}' is not defined", function_name));
+                    }
                 }
-            }
-        };
-    
-        let value = var.get_value();
+            };
+        } else {
+            value = match self.variables.get("00__placeholder__") {
+                Some(v) => v.get_value().clone(),
+                None => {
+                    return self.raise(
+                        "RuntimeError",
+                        &format!("'00__placeholder__' is not defined."),
+                    );
+                }
+            };
+        }
     
         match value {
             Value::Function(func) => {
-                if let Some(state) = func.metadata().state.as_ref() {
-                    if state == "deprecated" {
-                        println!("Warning: Function '{}' is deprecated", function_name);
-                    } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
-                        return self.raise_with_help(
-                            "NameError",
-                            &format!(
-                                "Function '{}' has been renamed to '{}'.",
-                                function_name, alt_name
-                            ),
-                            &format!(
-                                "Try using: '{}{}{}'",
-                                check_ansi("\x1b[4m", &self.use_colors),
-                                alt_name,
-                                check_ansi("\x1b[24m", &self.use_colors)
-                            ),
-                        );
-                    } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
-                        let mut parts = alt_info.splitn(2, ',').map(str::trim);
-                        let version = parts.next().unwrap_or("unknown");
-                        let alt_name = parts.next().unwrap_or("an alternative");
-                    
-                        return self.raise_with_help(
-                            "NameError",
-                            &format!(
-                                "Function '{}' has been removed in version {}.",
-                                function_name, version
-                            ),
-                            &format!(
-                                "Use '{}{}{}' instead.",
-                                check_ansi("\x1b[4m", &self.use_colors),
-                                alt_name,
-                                check_ansi("\x1b[24m", &self.use_colors)
-                            ),
-                        );                
-                    } else if let Some(alt_name) = state.strip_prefix("removed_in: ") {
-                        return self.raise(
-                            "NameError",
-                            &format!(
-                                "Function '{}' has been removed in version {}.",
-                                function_name, alt_name
-                            ),
-                        );
-                    } else if let Some(alt_name) = state.strip_prefix("removed: ") {
-                        return self.raise_with_help(
-                            "NameError",
-                            &format!(
-                                "Function '{}' has been removed.",
-                                function_name
-                            ),
-                            &format!(
-                                "Use '{}{}{}' instead.",
-                                check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
-                            ),
-                        );
-                    }
-                }
+                let mut metadata = &special_functions_meta
+                    .get(function_name)
+                    .cloned()
+                    .unwrap_or(func.metadata().clone());
 
-                let metadata = func.metadata();
-    
+                if let Some(state) = metadata.state.as_ref() {
+                        if state == "deprecated" {
+                            println!("Warning: Function '{}' is deprecated", function_name);
+                        } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
+                            return self.raise_with_help(
+                                "NameError",
+                                &format!(
+                                    "Function '{}' has been renamed to '{}'.",
+                                    function_name, alt_name
+                                ),
+                                &format!(
+                                    "Try using: '{}{}{}'",
+                                    check_ansi("\x1b[4m", &self.use_colors),
+                                    alt_name,
+                                    check_ansi("\x1b[24m", &self.use_colors)
+                                ),
+                            );
+                        } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
+                            let mut parts = alt_info.splitn(2, ',').map(str::trim);
+                            let version = parts.next().unwrap_or("unknown");
+                            let alt_name = parts.next().unwrap_or("an alternative");
+                        
+                            return self.raise_with_help(
+                                "NameError",
+                                &format!(
+                                    "Function '{}' has been removed in version {}.",
+                                    function_name, version
+                                ),
+                                &format!(
+                                    "Use '{}{}{}' instead.",
+                                    check_ansi("\x1b[4m", &self.use_colors),
+                                    alt_name,
+                                    check_ansi("\x1b[24m", &self.use_colors)
+                                ),
+                            );                
+                        } else if let Some(alt_name) = state.strip_prefix("removed_in: ") {
+                            return self.raise(
+                                "NameError",
+                                &format!(
+                                    "Function '{}' has been removed in version {}.",
+                                    function_name, alt_name
+                                ),
+                            );
+                        } else if let Some(alt_name) = state.strip_prefix("removed: ") {
+                            return self.raise_with_help(
+                                "NameError",
+                                &format!(
+                                    "Function '{}' has been removed.",
+                                    function_name
+                                ),
+                                &format!(
+                                    "Use '{}{}{}' instead.",
+                                    check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
+                                ),
+                            );
+                        }
+                }
+                
                 let positional: Vec<Value> = pos_args.clone();
                 let mut named_map: HashMap<String, Value> = named_args.clone();
                 let mut final_args: HashMap<String, Value> = HashMap::new();
@@ -3478,7 +3704,29 @@ impl Interpreter {
                         let variable = Variable::new(name.clone(), v.clone(), "any".to_string(), false, true, true);
                         (name, variable)
                     })
-                    .collect::<HashMap<String, Variable<>>>();            
+                    .collect::<HashMap<String, Variable<>>>();
+                    
+                if is_special_function {
+                    match function_name {
+                        "exit" => {
+                            let code = if let Some(code) = named_args.get("code") {
+                                code.clone()
+                            } else if !pos_args.is_empty() {
+                                pos_args[0].clone()
+                            } else {
+                                Value::Int(Int::from_i64(0))
+                            };
+                            self.is_returning = true;
+                            self.is_stopped = true;
+                            self.return_value = code.clone();
+                            return code;
+                        }
+                        "fetch" => {
+                            return self.fetch_fn(&final_args)
+                        }
+                        _ => {}
+                    }
+                }
             
                 if !metadata.is_native {
                     let mut new_interpreter = Interpreter::new(

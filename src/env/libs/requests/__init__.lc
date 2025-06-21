@@ -1,0 +1,137 @@
+// This module provides HTTP request functionality.
+// It includes functions to make GET and POST requests, handle headers, and manage request parameters.
+// Lucia version 2.0.0, module: requests@0.11.14
+
+public static final fun get(
+    url: str,
+    params: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_params: map = if (!params): {} else: params end
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="GET", params=effective_params, headers=effective_headers)
+end
+
+public static final fun post(
+    url: str,
+    data: any = null,
+    json_: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="POST", data=data, json_=json_, headers=effective_headers)
+end
+
+public static final fun put(
+    url: str,
+    data: any = null,
+    json_: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="PUT", data=data, json_=json_, headers=effective_headers)
+end
+
+public static final fun demutablee(
+    url: str,
+    data: any = null,
+    json_: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="DELETE", data=data, json_=json_, headers=effective_headers)
+end
+
+public static final fun patch(
+    url: str,
+    data: any = null,
+    json_: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="PATCH", data=data, json_=json_, headers=effective_headers)
+end
+
+public static final fun head(
+    url: str,
+    params: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_params: map = if (!params): {} else: params end
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="HEAD", params=effective_params, headers=effective_headers)
+end
+
+public static final fun options(
+    url: str,
+    params: any = null,
+    headers: map = null,
+) -> any:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_params: map = if (!params): {} else: params end
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    fetch(url, method="OPTIONS", params=effective_params, headers=effective_headers)
+end
+
+public static final fun ping(
+    url: str,
+    headers: map = null,
+) -> bool:
+    import config
+    if (!config.get("allow_fetch")):
+        throw "Fetching is not allowed in this environment." from "PermissionError"
+    end
+
+    mutable effective_headers: map = if (!headers): {} else: headers end
+
+    try:
+        _response = fetch(url, method="GET", headers=effective_headers)
+        if ((_response != null) && (_response["status"] == 200)):
+            return true
+        end
+        false
+    catch (e):
+        false
+    end
+end
