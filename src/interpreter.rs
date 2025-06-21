@@ -30,6 +30,7 @@ use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
+use crate::env::runtime::libs::STD_LIBS;
 use std::sync::Arc;
 use std::cmp::Ordering;
 use std::sync::Mutex;
@@ -41,13 +42,6 @@ use regex::Regex;
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::{Parser, Token};
-
-static STD_LIBS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-    HashSet::from([
-        "math",
-    ])
-});
-
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {
@@ -1003,7 +997,9 @@ impl Interpreter {
     
         let mut properties = HashMap::new();
     
-        if STD_LIBS.contains(&module_name.as_str()) {
+        if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
+            debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
+        
             match module_name.as_str() {
                 "math" => {
                     use crate::env::libs::math::__init__ as math;
@@ -1013,11 +1009,35 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                "os" => {
+                    use crate::env::libs::os::__init__ as os;
+                    let os_module_props = os::register();
+                    let result = os::init();
+                    for (name, var) in os_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "time" => {
+                    use crate::env::libs::time::__init__ as time;
+                    let time_module_props = time::register();
+                    let result = time::init();
+                    for (name, var) in time_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "json" => {
+                    use crate::env::libs::json::__init__ as json;
+                    let json_module_props = json::register();
+                    let result = json::init();
+                    for (name, var) in json_module_props {
+                        properties.insert(name, var);
+                    }
+                }
                 _ => {
                     self.stack.pop();
                     return self.raise(
                         "ImportError",
-                        &format!("Standard library module '{}' is not supported", module_name),
+                        &format!("Standard library module '{}' is not currently supported", module_name),
                     );
                 }
             }

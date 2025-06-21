@@ -31,7 +31,6 @@ fn parse_rustc_version_and_channel() -> (String, String) {
 
             for line in stdout.lines() {
                 if line.starts_with("rustc ") {
-                    // example: rustc 1.70.0-nightly (0e4f7e2d1 2023-05-25)
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() > 1 {
                         version = parts[1].to_string();

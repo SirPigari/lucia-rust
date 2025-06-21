@@ -22,9 +22,19 @@ mod env {
         pub mod pattern_reg;
         pub mod preprocessor;
         pub mod objects;
+        pub mod libs;
     }
     pub mod libs {
         pub mod math {
+            pub mod __init__;
+        }
+        pub mod os {
+            pub mod __init__;
+        }
+        pub mod time {
+            pub mod __init__;
+        }
+        pub mod json {
             pub mod __init__;
         }
     }

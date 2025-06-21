@@ -5,7 +5,13 @@ use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{get_imagnum_error_message, to_static};
 use crate::env::runtime::variables::Variable;
-use once_cell::sync::Lazy;
+
+use crate::{insert_native_fn, insert_native_var};
+
+// This module provides mathematical functions and constants.
+// It includes basic operations like sqrt, sin, cos, etc., and constants like PI, E, etc.
+// Lucia version 2.0.0, module: math@1.0.0
+
 
 const _E: &str =                "2.71828182845904523536028747135266249775724709369995957496696762772407663035354759457138217852516642742746639193200305992181741359662904357";
 const _PI: &str =               "3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651328230664709384460955058223";
@@ -31,20 +37,6 @@ fn create_float_constant(name: &str, value: &str) -> Variable {
             Err(_) => Value::Error("RuntimeError", "Invalid float format"),
         },
         "float".to_string(),
-        true,
-        true,
-        true,
-    )
-}
-
-fn create_int_constant(name: &str, value: &str) -> Variable {
-    Variable::new(
-        name.to_string(),
-        match Int::from_str(value) {
-            Ok(num) => Value::Int(num),
-            Err(_) => Value::Error("RuntimeError", "Invalid int format"),
-        },
-        "int".to_string(),
         true,
         true,
         true,
@@ -131,48 +123,25 @@ pub fn register() -> HashMap<String, Variable> {
         ("ceil", ceil),
         ("round", round),
     ];
-    
 
     for (name, func) in funcs {
-        map.insert(
-            name.to_string(),
-            Variable::new(
-                name.to_string(),
-                Value::Function(create_native_fn(
-                    name,
-                    func,
-                    vec![Parameter::positional("x", "float")],
-                    "float",
-                )),
-                "function".to_string(),
-                true,
-                true,
-                true,
-            ),
+        insert_native_fn!(
+            map,
+            name,
+            func,
+            vec![Parameter::positional("x", "float")],
+            "float"
         );
     }
 
-    map.insert(
-        "log_base".to_string(),
-        Variable::new(
-            "log_base".to_string(),
-            Value::Function(create_native_fn(
-                "log_base",
-                log_base,
-                vec![
-                    Parameter::positional("x", "float"),
-                    Parameter::positional("base", "float"),
-                ],
-                "float",
-            )),
-            "function".to_string(),
-            true,
-            true,
-            true,
-        ),
+    insert_native_fn!(
+        map,
+        "log_base",
+        log_base,
+        vec![Parameter::positional("x", "float"), Parameter::positional("base", "float")],
+        "float"
     );
 
-    // constants
     macro_rules! insert_irrational {
         ($map:expr, $name:expr, $val:expr) => {{
             let mut var = create_float_constant($name, $val);
@@ -180,7 +149,7 @@ pub fn register() -> HashMap<String, Variable> {
                 Value::Float(mut f) => Value::Float(f.make_irrational()),
                 v => v,
             };
-            $map.insert($name.to_string(), var);
+            insert_native_var!($map, $name, var.value, "float");
         }};
     }
 

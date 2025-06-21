@@ -2,11 +2,12 @@ use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::Object;
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, format_float, format_int};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
 use std::collections::HashMap;
+use serde::ser::{Serialize, Serializer, SerializeStruct};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -25,6 +26,50 @@ pub enum Value {
     Function(Function),
     Object(Object),
     Error(&'static str, &'static str),
+}
+
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Value::Float(f) => {
+                format_float(f).serialize(serializer)
+            }
+            Value::Int(i) => {
+                format_int(i).serialize(serializer)
+            }
+            Value::String(s) => serializer.serialize_str(s),
+            Value::Boolean(b) => serializer.serialize_bool(*b),
+            Value::Null => serializer.serialize_unit(),
+            Value::Map { keys, values } => {
+                use serde::ser::SerializeMap;
+
+                let mut map = serializer.serialize_map(Some(keys.len()))?;
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    map.serialize_entry(k, v)?;
+                }
+                map.end()
+            }
+            Value::Tuple(vec) | Value::List(vec) => {
+                serializer.collect_seq(vec)
+            }
+            Value::Bytes(b) => serializer.serialize_bytes(b),
+            Value::Function(_) => {
+                serializer.serialize_str("Function(opaque)")
+            }
+            Value::Object(_) => {
+                serializer.serialize_str("Object(opaque)")
+            }
+            Value::Error(kind, msg) => {
+                let mut s = serializer.serialize_struct("Error", 2)?;
+                s.serialize_field("kind", kind)?;
+                s.serialize_field("message", msg)?;
+                s.end()
+            }
+        }
+    }
 }
 
 impl Eq for Value {}
