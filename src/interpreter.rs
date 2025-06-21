@@ -3379,20 +3379,6 @@ impl Interpreter {
         pos_args: Vec<Value>,
         named_args: HashMap<String, Value>,
     ) -> Value {
-        if function_name == "exit" {
-            let code = if let Some(code) = named_args.get("code") {
-                code.clone()
-            } else if !pos_args.is_empty() {
-                pos_args[0].clone()
-            } else {
-                Value::Int(Int::from_i64(0))
-            };
-            self.is_returning = true;
-            self.is_stopped = true;
-            self.return_value = code.clone();
-            return code;
-        }
-
         let special_functions = [
             "exit", "fetch"
         ];
@@ -3402,7 +3388,7 @@ impl Interpreter {
         let mut value = Value::Null;
 
         if !is_special_function {
-            let value = match self.variables.get(function_name) {
+            value = match self.variables.get(function_name) {
                 Some(v) => v.get_value().clone(),
                 None => {
                     let available_names: Vec<String> = self.variables.keys().cloned().collect();
