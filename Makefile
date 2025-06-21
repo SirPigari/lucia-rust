@@ -10,7 +10,8 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	CARGO_ENV := set RUSTFLAGS=-Awarnings && cargo
 	MKDIR := if not exist "$(subst /,\,$(TARGET_DIR))" mkdir "$(subst /,\,$(TARGET_DIR))"
 	MOVE := move /Y
-	RUN := $(subst /,\\,$(TARGET_DIR))\\$(TARGET_EXE)
+	RUN := $(TARGET_EXE)
+	RUN_FULL := $(subst /,\,$(TARGET_DIR))\$(TARGET_EXE)
 	SHELL := cmd
 	.SHELLFLAGS := /C
 	TEST_LOOP := for %%f in (src\env\Docs\examples\tests\*.lc) do (
@@ -19,7 +20,8 @@ else
 	CARGO_ENV := RUSTFLAGS=-Awarnings cargo
 	MKDIR := mkdir -p $(TARGET_DIR)
 	MOVE := mv -f
-	RUN := $(TARGET_DIR)/$(TARGET_EXE)
+	RUN := ./$(TARGET_EXE)
+	RUN_FULL := $(TARGET_DIR)/$(TARGET_EXE)
 	TEST_LOOP := for f in src/env/Docs/examples/tests/*.lc; do
 	TEST_FILE := $$f
 endif
@@ -54,10 +56,10 @@ else
 	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_EXE)" "$(TARGET)"
 endif
 
+
 run: $(TARGET)
 	@$(MKDIR)
-	@$(RUN) $(filter-out $@,$(MAKECMDGOALS))
-
+	@$(RUN_FULL) $(filter-out $@,$(MAKECMDGOALS))
 
 activate:
 	@$(MKDIR)
