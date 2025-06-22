@@ -1257,6 +1257,30 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                "regex" => {
+                    use crate::env::libs::regex::__init__ as regex;
+                    let regex_module_props = regex::register();
+                    let result = regex::init();
+                    for (name, var) in regex_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "collections" => {
+                    use crate::env::libs::collections::__init__ as collections;
+                    let collections_module_props = collections::register();
+                    let result = collections::init();
+                    for (name, var) in collections_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "random" => {
+                    use crate::env::libs::random::__init__ as random;
+                    let random_module_props = random::register();
+                    let result = random::init();
+                    for (name, var) in random_module_props {
+                        properties.insert(name, var);
+                    }
+                }
                 _ => {
                     self.stack.pop();
                     return self.raise(

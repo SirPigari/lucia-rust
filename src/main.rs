@@ -44,6 +44,15 @@ mod env {
             pub mod __init__;
             pub mod _tcc;
         }
+        pub mod regex {
+            pub mod __init__;
+        }
+        pub mod collections {
+            pub mod __init__;
+        }
+        pub mod random {
+            pub mod __init__;
+        }
     }
 }
 

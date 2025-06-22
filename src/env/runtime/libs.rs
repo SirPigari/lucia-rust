@@ -44,16 +44,11 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
 
     m.insert("regex", LibInfo {
         description: "Regular expressions for pattern matching.",
-        version: "1.9.0",
+        version: "0.9.0",
     });
 
     m.insert("collections", LibInfo {
         description: "Collection of utilities.",
-        version: "1.0.0",
-    });
-
-    m.insert("threading", LibInfo {
-        description: "Thread management and concurrency primitives.",
         version: "1.0.0",
     });
     

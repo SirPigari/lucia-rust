@@ -45,25 +45,32 @@ pub fn to_static(s: String) -> &'static str {
     static_ref
 }
 
-pub fn levenshtein_distance(s1: &str, s2: &str) -> usize {
-    let (s1, s2) = if s1.len() > s2.len() { (s2, s1) } else { (s1, s2) };
-    let mut costs = (0..=s1.len()).collect::<Vec<_>>();
-    for (i, c2) in s2.char_indices() {
-        let mut last_value = i;
-        for (j, c1) in s1.char_indices() {
-            let new_value = if c1 == c2 {
-                costs[j]
+pub fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let mut costs = vec![0; b.len() + 1];
+    for j in 0..=b.len() {
+        costs[j] = j;
+    }
+
+    for (i, ca) in a.chars().enumerate() {
+        let mut last = i;
+        costs[0] = i + 1;
+        for (j, cb) in b.chars().enumerate() {
+            let old = costs[j + 1];
+            let cost = if ca == cb {
+                0
+            } else if ca.eq_ignore_ascii_case(&cb) {
+                1
             } else {
-                std::cmp::min(
-                    std::cmp::min(costs[j + 1], last_value),
-                    costs[j] + 1,
-                )
+                2
             };
-            costs[j] = last_value;
-            last_value = new_value;
+            costs[j + 1] = std::cmp::min(
+                std::cmp::min(costs[j] + 1, costs[j + 1] + 1),
+                last + cost,
+            );
+            last = old;
         }
     }
-    costs[s1.len()]
+    costs[b.len()]
 }
 
 pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
@@ -175,38 +182,10 @@ pub fn format_int(n: &Int) -> String {
 }
 
 pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a str> {
-    fn levenshtein(a: &str, b: &str) -> usize {
-        let mut costs = vec![0; b.len() + 1];
-        for j in 0..=b.len() {
-            costs[j] = j;
-        }
-
-        for (i, ca) in a.chars().enumerate() {
-            let mut last = i;
-            costs[0] = i + 1;
-            for (j, cb) in b.chars().enumerate() {
-                let old = costs[j + 1];
-                let cost = if ca == cb {
-                    0
-                } else if ca.eq_ignore_ascii_case(&cb) {
-                    1
-                } else {
-                    2
-                };
-                costs[j + 1] = std::cmp::min(
-                    std::cmp::min(costs[j] + 1, costs[j + 1] + 1),
-                    last + cost,
-                );
-                last = old;
-            }
-        }
-        costs[b.len()]
-    }
-
     let mut closest: Option<(&str, usize)> = None;
 
     for opt in options {
-        let dist = levenshtein(target, opt);
+        let dist = levenshtein_distance(target, opt);
         if closest.is_none() || dist < closest.unwrap().1 {
             closest = Some((opt.as_str(), dist));
         }
@@ -324,18 +303,6 @@ where
     };
 
     Value::Function(Function::Native(Arc::new(method)))
-}
-
-pub fn get_operator_precedence(op: &str) -> u8 {
-    match op {
-        "||" => 1,
-        "&&" => 2,
-        "==" | "!=" => 3,
-        "<" | ">" | "<=" | ">=" => 4,
-        "+" | "-" => 5,
-        "*" | "/" => 6,
-        _ => 0,
-    }
 }
 
 pub fn get_type_default(type_: &str) -> Value {
@@ -511,7 +478,6 @@ pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statem
     }
 }
 
-
 pub fn get_imagnum_error_message(err: i16) -> String {
     match err {
         ERR_DIV_BY_ZERO => "Division by zero.".to_string(),
@@ -673,7 +639,7 @@ pub fn unescape_string_literal(s: &str) -> Result<String, String> {
     unescape_string(sliced)
 }
 
-fn replace_accented(c: char) -> char {
+pub fn replace_accented(c: char) -> char {
     match c {
         'á' | 'à' | 'ä' | 'â' | 'ã' | 'å' | 'ā' => 'a',
         'Á' | 'À' | 'Ä' | 'Â' | 'Ã' | 'Å' | 'Ā' => 'A',
