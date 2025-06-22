@@ -56,17 +56,25 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         description: "Thread management and concurrency primitives.",
         version: "1.0.0",
     });
+    
     m.insert("random", LibInfo {
         description: "Random number generation utilities.",
         version: "0.7.42",
     });
+
     m.insert("fs", LibInfo {
         description: "File system operations and utilities.",
         version: "0.4.0",
     });
+
     m.insert("io", LibInfo {
         description: "Input/Output operations and utilities.",
         version: "0.2.0",
+    });
+
+    m.insert("clib", LibInfo {
+        description: "C standard library bindings for Lucia using TCC.",
+        version: "0.1.69",
     });
 
     m

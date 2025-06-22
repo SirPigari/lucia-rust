@@ -40,6 +40,10 @@ mod env {
         pub mod config {
             pub mod __init__;
         }
+        pub mod clib {
+            pub mod __init__;
+            pub mod _tcc;
+        }
     }
 }
 
@@ -306,6 +310,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_preprocessor: true,
         print_comments: false,
         allow_fetch: true,
+        allow_unsafe: false,
         home_dir: env_path_str,
         recursion_limit: 9999,
         color_scheme: ColorScheme {

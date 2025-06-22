@@ -8,6 +8,7 @@
   "use_preprocessor": true,
   "print_comments": false,
   "allow_fetch": true,
+  "allow_unsafe": true,
   "home_dir": "C:\\Users\\Ja\\Desktop\\lucia-rust\\src\\env",
   "recursion_limit": 9999,
   "version": "2.0.0",

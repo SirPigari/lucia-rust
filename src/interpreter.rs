@@ -1238,6 +1238,25 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                "clib" => {
+                    use crate::env::libs::clib::__init__ as clib;
+                    let arc_config = Arc::new(self.config.clone());
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("clib").join("__init__.rs").display().to_string();
+                    let result = clib::init_clib(arc_config, module_path);
+                    if let Err(e) = result {
+                        self.stack.pop();
+                        return self.raise_with_ref(
+                            "ImportError",
+                            "Failed to initialize clib module",
+                            e,
+                        );
+                    }
+                    let clib_module_props = clib::register();
+                    clib::init();
+                    for (name, var) in clib_module_props {
+                        properties.insert(name, var);
+                    }
+                }
                 _ => {
                     self.stack.pop();
                     return self.raise(
