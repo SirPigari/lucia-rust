@@ -744,6 +744,53 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
     return map;
 }
 
+pub fn deep_get<'a>(root: &'a Value, path: &[Value]) -> Option<&'a Value> {
+    let mut cur = root;
+    for key in path {
+        match cur {
+            Value::Map { keys, values } => {
+                let i = keys.iter().position(|k| k == key)?;
+                cur = &values[i];
+            }
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+pub fn deep_insert(root: &mut Value, path: &[Value], val: Value) -> bool {
+    let mut cur = root;
+    for (i, key) in path.iter().enumerate() {
+        match cur {
+            Value::Map { keys, values } => {
+                if let Some(pos) = keys.iter().position(|k| k == key) {
+                    if i + 1 == path.len() {
+                        values[pos] = val.clone();
+                        return true;
+                    } else {
+                        cur = &mut values[pos];
+                    }
+                } else {
+                    keys.push(key.clone());
+                    let new_val = if i + 1 == path.len() {
+                        val.clone()
+                    } else {
+                        Value::Map { keys: vec![], values: vec![] }
+                    };
+                    values.push(new_val);
+                    if i + 1 == path.len() {
+                        return true;
+                    } else {
+                        cur = values.last_mut().unwrap();
+                    }
+                }
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

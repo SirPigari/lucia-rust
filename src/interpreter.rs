@@ -20,6 +20,8 @@ use crate::env::runtime::utils::{
     get_type_from_token_name,
     sanitize_alias,
     special_function_meta,
+    deep_insert,
+    deep_get
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -62,6 +64,7 @@ pub struct Interpreter {
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
+    cache: HashMap<String, Value>,
 }
 
 impl Interpreter {
@@ -80,7 +83,25 @@ impl Interpreter {
             file_path: file_path.to_string(),
             cwd: cwd.clone(),
             preprocessor_info,
+            cache: HashMap::new(),
         };
+
+        this.cache.insert(
+            "operations".to_string(),
+            Value::Map { keys: vec![], values: vec![] },
+        );
+        this.cache.insert(
+            "constants".to_string(),
+            Value::Map { keys: vec![
+                "true".into(),
+                "false".into(),
+                "null".into(),
+            ], values: vec![
+                TRUE.clone(),
+                FALSE.clone(),
+                NULL.clone(),
+            ] },
+        );
 
         this.variables.insert(
             "print".to_string(),
@@ -118,7 +139,7 @@ impl Interpreter {
 
         this
     }
-
+    
     pub fn is_stopped(&self) -> bool {
         self.is_stopped
     }
@@ -540,7 +561,7 @@ impl Interpreter {
     
         false
     }
-
+    
     fn get_properties_from_file(&mut self, path: &PathBuf) -> HashMap<String, Variable> {
         if !path.exists() || !path.is_file() {
             self.raise("ImportError", to_static(format!("File '{}' does not exist or is not a file", path.display())));
@@ -916,18 +937,18 @@ impl Interpreter {
     fn handle_map(&mut self, statement: HashMap<Value, Value>) -> Value {
         let keys_opt = statement.get(&Value::String("keys".to_string())).unwrap_or_else(|| {
             self.raise("RuntimeError", "Missing 'keys' in map statement");
-            &Value::Null
+            &NULL
         });
         let values_opt = statement.get(&Value::String("values".to_string())).unwrap_or_else(|| {
             self.raise("RuntimeError", "Missing 'values' in map statement");
-            &Value::Null
+            &NULL
         });
         
         let raw_keys = match keys_opt {
             Value::List(v) => v,
             _ => {
                 self.raise("TypeError", "Expected list for map keys");
-                return Value::Null;
+                return NULL;
             }
         };
         
@@ -935,13 +956,13 @@ impl Interpreter {
             Value::List(v) => v,
             _ => {
                 self.raise("TypeError", "Expected list for map values");
-                return Value::Null;
+                return NULL;
             }
         };
     
         if raw_keys.len() != raw_values.len() {
             self.raise("RuntimeError", "Keys and values lists must have the same length");
-            return Value::Null;
+            return NULL;
         }
     
         let mut keys = Vec::with_capacity(raw_keys.len());
@@ -960,7 +981,7 @@ impl Interpreter {
         for key in &keys {
             if !seen.insert(key) {
                 self.raise("SyntaxError", &format!("Duplicate key in map: {}", key));
-                return Value::Null;
+                return NULL;
             }
         }
     
@@ -1646,7 +1667,7 @@ impl Interpreter {
                         let val = &values[pos];
                         self.evaluate(val.convert_to_statement())
                     }
-                    None => Value::Null,
+                    None => NULL,
                 };
         
                 match &type_eval {
@@ -2431,7 +2452,7 @@ impl Interpreter {
             _ => self.raise("TypeError", &format!("Cannot modify type '{}'", get_type_from_token_name(left_type))),
         }
     }
-    
+
     fn handle_index_access(&mut self, statement: HashMap<Value, Value>) -> Value {
         let object_val = match statement.get(&Value::String("object".to_string())) {
             Some(v) => self.evaluate(Value::convert_to_statement(v)),
@@ -2467,13 +2488,13 @@ impl Interpreter {
     
         let start_eval_opt = start_val_opt
             .map(|v| self.evaluate(v.convert_to_statement()))
-            .and_then(|val| if val == Value::Null { None } else { Some(val) });
+            .and_then(|val| if val == NULL { None } else { Some(val) });
         let end_eval_opt = end_val_opt
             .map(|v| self.evaluate(v.convert_to_statement()))
-            .and_then(|val| if val == Value::Null { None } else { Some(val) });
+            .and_then(|val| if val == NULL { None } else { Some(val) });
     
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
     
         let mut to_index = |val: &Value| -> Result<usize, Value> {
@@ -2573,7 +2594,7 @@ impl Interpreter {
             }
         }
     }
-    
+
     fn handle_variable_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
         let name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(s)) => s,
@@ -2658,7 +2679,7 @@ impl Interpreter {
             }
         }
     }
-
+    
     fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
         let iterable = match statement.get(&Value::String("iterable".to_string())) {
             Some(v) => v,
@@ -2733,7 +2754,7 @@ impl Interpreter {
 
                 let end_raw = statement.get(&Value::String("end".to_string()))
                     .cloned()
-                    .unwrap_or(Value::Null);
+                    .unwrap_or(NULL);
 
                 let pattern_flag = statement.get(&Value::String("pattern_reg".to_string()))
                     .cloned()
@@ -2743,7 +2764,7 @@ impl Interpreter {
                     Value::List(elements) => elements.clone(),
                     _ => {
                         self.raise("TypeError", "Expected 'seed' to be a list");
-                        return Value::Null;
+                        return NULL;
                     }
                 };
 
@@ -2752,12 +2773,12 @@ impl Interpreter {
                         self.evaluate(map_val.convert_to_statement())
                     } else {
                         self.raise("RuntimeError", "Expected all elements in seed to be Map");
-                        Value::Null
+                        NULL
                     }
                 }).collect();
 
                 if self.err.is_some() {
-                    return Value::Null;
+                    return NULL;
                 }
 
                 let end = self.evaluate(end_raw.convert_to_statement());
@@ -2766,7 +2787,7 @@ impl Interpreter {
                     Value::Boolean(b) => b,
                     _ => {
                         self.raise("RuntimeError", "Expected 'pattern_reg' to be a boolean");
-                        return Value::Null;
+                        return NULL;
                     }
                 };
 
@@ -2774,13 +2795,13 @@ impl Interpreter {
                     let len = evaluated_seed.len();
                     if len == 0 {
                         self.raise("ValueError", "Seed list cannot be empty");
-                        return Value::Null;
+                        return NULL;
                     }
                 
                     for v in &evaluated_seed {
                         if !matches!(v, Value::Int(_)) {
                             self.raise("TypeError", "Seed elements must be Int");
-                            return Value::Null;
+                            return NULL;
                         }
                     }
                 
@@ -2793,7 +2814,7 @@ impl Interpreter {
                                     Ok(n) => temp.push(n),
                                     Err(_) => {
                                         self.raise("OverflowError", "Seed element out of i64 range");
-                                        return Value::Null;
+                                        return NULL;
                                     }
                                 }                                
                             } else {
@@ -2808,7 +2829,7 @@ impl Interpreter {
                         for i in 1..(len - 1) {
                             if nums_i64[i + 1] - nums_i64[i] != initial_step {
                                 self.raise("PatternCompletionError", "Seed values do not have consistent step");
-                                return Value::Null;
+                                return NULL;
                             }
                         }
                     }
@@ -2820,7 +2841,7 @@ impl Interpreter {
                         }),
                         _ => {
                             self.raise("TypeError", "End value must be Int");
-                            return Value::Null;
+                            return NULL;
                         }
                     };
                 
@@ -2832,7 +2853,7 @@ impl Interpreter {
                 
                     if step == 0 {
                         self.raise("ValueError", "Step cannot be zero");
-                        return Value::Null;
+                        return NULL;
                     }
                 
                     let last_val = nums_i64[len - 1];
@@ -2840,12 +2861,12 @@ impl Interpreter {
                 
                     if (step > 0 && diff < 0) || (step < 0 && diff > 0) {
                         self.raise("PatternCompletionError", "End value is unreachable with given seed and step");
-                        return Value::Null;
+                        return NULL;
                     }
                 
                     if diff % step != 0 {
                         self.raise("PatternCompletionError", "Pattern does not fit into range defined by end");
-                        return Value::Null;
+                        return NULL;
                     }
                 
                     let total_steps = (diff / step).abs() as usize;
@@ -2934,7 +2955,7 @@ impl Interpreter {
         }
 
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
 
         return self.call_method(
@@ -3269,7 +3290,7 @@ impl Interpreter {
                 }
                 self.stack.pop();
                 debug_log(
-                    &format!("<Function '{}' returned: {}>", method_name, format_value(&result)),
+                    &format!("<Function '{}' returned {}>", method_name, format_value(&result)),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
@@ -3325,7 +3346,7 @@ impl Interpreter {
         }
 
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
         
         let var = match object_variable.properties.get(property_name) {
@@ -3428,7 +3449,7 @@ impl Interpreter {
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
 
-        let mut value = Value::Null;
+        let mut value = NULL;
 
         if !is_special_function {
             value = match self.variables.get(function_name) {
@@ -3782,7 +3803,7 @@ impl Interpreter {
                 }
                 self.stack.pop();
                 debug_log(
-                    &format!("<Function '{}' returned: {}>", function_name, format_value(&result)),
+                    &format!("<Function '{}' returned {}>", function_name, format_value(&result)),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
@@ -3833,7 +3854,6 @@ impl Interpreter {
             _ => return self.raise("TypeError", "Expected a string for operator"),
         };
     
-        // Convert Boolean to Float
         let left = if let Value::Boolean(b) = left {
             Value::Float(if b { 1.0.into() } else { 0.0.into() })
         } else {
@@ -3844,8 +3864,45 @@ impl Interpreter {
         } else {
             right
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
     
-        self.make_operation(left, right, operator)
+        let path = &[
+            left.clone(),
+            right.clone(),
+            Value::String(operator.clone()),
+            right.clone(),
+        ];
+        
+        let result = {
+            let cache_root = self.cache
+                .entry("operations".into())
+                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+        
+            if let Some(cached) = deep_get(cache_root, path) {
+                debug_log(
+                    &format!(
+                        "<CachedOperation: {} {} {}>",
+                        format_value(&left),
+                        operator,
+                        format_value(&right)
+                    ),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
+                return cached.clone();
+            }
+            
+            self.make_operation(left.clone(), right.clone(), &operator)
+        };
+        
+        if let Some(cache_root) = self.cache.get_mut("operations") {
+            deep_insert(cache_root, path, result.clone());
+        }
+        
+        result        
     }
     
     fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -3862,28 +3919,57 @@ impl Interpreter {
             _ => return self.raise("TypeError", "Expected a string for operator"),
         };
     
+        let path = &[
+            Value::String("unary".to_string()),
+            Value::String(operator.clone()),
+            operand.clone(),
+        ];
+        
+        let cached_opt = {
+            let cache_root = self.cache
+                .entry("operations".into())
+                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+    
+            deep_get(cache_root, path).cloned()
+        };
+        
+        if let Some(cached) = cached_opt {
+            debug_log(
+                &format!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand)),
+                &self.config,
+                Some(self.use_colors.clone()),
+            );
+            return cached;
+        }
+        
         debug_log(
             &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
             &self.config,
             Some(self.use_colors.clone()),
         );
-    
-        match operator.as_str() {
+        
+        let result = match operator.as_str() {
             "-" => match operand {
                 Value::Int(n) => Value::Int(-n),
                 Value::Float(f) => Value::Float(-f),
-                _ => self.raise("TypeError", &format!("Cannot negate {}", operand.type_name())),
+                _ => return self.raise("TypeError", &format!("Cannot negate {}", operand.type_name())),
             },
             "+" => match operand {
                 Value::Int(n) => Value::Int(n.abs()),
                 Value::Float(f) => Value::Float(f.abs()),
-                _ => self.raise("TypeError", &format!("Cannot apply unary plus to {}", operand.type_name())),
+                _ => return self.raise("TypeError", &format!("Cannot apply unary plus to {}", operand.type_name())),
             },
             "!" => Value::Boolean(!operand.is_truthy()),
-            _ => self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
+            _ => return self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
+        };
+        
+        if let Some(cache_root) = self.cache.get_mut("operations") {
+            deep_insert(cache_root, path, result.clone());
         }
+        
+        result
     }
-    
+
     fn make_operation(&mut self, left: Value, right: Value, mut operator: &str) -> Value {
         operator = match operator {
             "isnt" | "isn't" | "nein" => "!=",
@@ -4227,23 +4313,56 @@ impl Interpreter {
     }
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
-        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            if s.contains('.') {
-                match Float::from_str(s) {
-                    Ok(num) => Value::Float(num),
-                    Err(_) => self.raise("RuntimeError", "Invalid float format"),
-                }
-            } else {
-                match Int::from_str(s) {
-                    Ok(num) => Value::Int(num),
-                    Err(_) => self.raise("RuntimeError", "Invalid integer format"),
-                }
+        let s = match map.get(&Value::String("value".to_string())) {
+            Some(Value::String(s)) => s,
+            _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
+        };
+    
+        if let Some(cache_root) = self.cache.get_mut("constants") {
+            if let Some(cached) = deep_get(cache_root, &[Value::String(s.clone())]) {
+                debug_log(
+                    &format!("<CachedConstantNumber: {}>", s),
+                    &self.config,
+                    Some(self.use_colors.clone()),
+                );
+                return cached.clone();
+            }
+        }
+    
+        let result = if s.contains('.') {
+            match Float::from_str(s) {
+                Ok(f) => Value::Float(f),
+                Err(_) => return self.raise("RuntimeError", "Invalid float format"),
             }
         } else {
-            self.raise("RuntimeError", "Missing 'value' in number statement")
+            match Int::from_str(s) {
+                Ok(i) => Value::Int(i),
+                Err(_) => return self.raise("RuntimeError", "Invalid integer format"),
+            }
+        };
+        
+        let cacheable = if let Value::Float(f) = &result {
+            match f.to_f64() {
+                Ok(val) => !val.is_finite(),
+                Err(_) => true,
+            }
+        } else if let Value::Int(i) = &result {
+            i.to_i64().is_err()
+        } else {
+            false
+        };
+    
+        if cacheable {
+            let cache_root = self.cache
+                .entry("constants".into())
+                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+    
+            deep_insert(cache_root, &[Value::String(s.clone())], result.clone());
         }
+    
+        result
     }    
-
+    
     fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             let mut modified_string = s.clone();
