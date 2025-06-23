@@ -126,7 +126,7 @@ pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
 
     if !Path::new(lib_path).exists() {
         return Err(Error::error_with_help(
-            "MissingTccLib",
+            "RuntimeError",
             "TCC_PATH is not set or the path does not exist.",
             format!("Please ensure TCC_PATH points to the TCC shared library. Current path: {}", lib_path),
             to_static(file_path),
