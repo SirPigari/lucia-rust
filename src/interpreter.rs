@@ -21,7 +21,8 @@ use crate::env::runtime::utils::{
     sanitize_alias,
     special_function_meta,
     deep_insert,
-    deep_get
+    deep_get,
+    check_version
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -68,7 +69,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(config: Config, use_colors: bool, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool)) -> Self {
+    pub fn new(config: Config, use_colors: bool, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool), argv: &Vec<String>) -> Self {
         let mut this = Self {
             config,
             err: None,
@@ -101,6 +102,18 @@ impl Interpreter {
                 FALSE.clone(),
                 NULL.clone(),
             ] },
+        );
+
+        this.variables.insert(
+            "argv".to_string(),
+            Variable::new(
+                "argv".to_string(),
+                Value::List(argv.iter().map(|s| Value::String(s.clone())).collect()),
+                "list".to_string(),
+                false,
+                true,
+                true,
+            ),
         );
 
         this.variables.insert(
@@ -139,7 +152,7 @@ impl Interpreter {
 
         this
     }
-    
+
     pub fn is_stopped(&self) -> bool {
         self.is_stopped
     }
@@ -152,7 +165,7 @@ impl Interpreter {
                 if adjusted >= 0 && (adjusted as usize) < len {
                     Ok(adjusted as usize)
                 } else {
-                    Err(Value::Error("IndexError", "Index out of range"))
+                    Err(Value::Error("IndexError", "Index out of range", None))
                 }
             }
             Value::String(s) => {
@@ -167,17 +180,17 @@ impl Interpreter {
             }            
             Value::Float(f) => {
                 if !f.is_integer_like() {
-                    return Err(Value::Error("IndexError", "Float index must have zero fractional part"));
+                    return Err(Value::Error("IndexError", "Float index must have zero fractional part", None));
                 }
                 let idx = f.to_f64().map_err(|_| { self.raise("ConversionError", "Failed to convert Float to isize") })? as isize;
                 let adjusted = if idx < 0 { len as isize + idx } else { idx };
                 if adjusted >= 0 && (adjusted as usize) < len {
                     Ok(adjusted as usize)
                 } else {
-                    Err(Value::Error("IndexError", "Index out of range"))
+                    Err(Value::Error("IndexError", "Index out of range", None))
                 }
             }
-            _ => Err(Value::Error("IndexError", "Index must be Int, String or Float with no fraction")),
+            _ => Err(Value::Error("IndexError", "Index must be Int, String or Float with no fraction", None)),
         }
     }
 
@@ -621,7 +634,7 @@ impl Interpreter {
             .unwrap_or(Path::new("."))
             .canonicalize()
             .unwrap_or_else(|_| PathBuf::from("."));
-        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone());
+        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone(), &vec![]);
         interpreter.stack = self.stack.clone();
         let result = interpreter.interpret(statements, content);
         self.stack = interpreter.stack.clone();
@@ -683,8 +696,12 @@ impl Interpreter {
                 self.current_statement = Some(statement.clone());
 
                 let value = self.evaluate(statement.clone());
-                if let Value::Error(err_type, err_msg) = value {
-                    self.raise(err_type, &err_msg);
+                if let Value::Error(err_type, err_msg, ref referr) = value {
+                    if let Some(referr) = referr {
+                        self.raise_with_ref(err_type, &err_msg, referr.clone());
+                    } else {
+                        self.raise(err_type, &err_msg);
+                    }
                 }
                 if self.is_returning {
                     return Ok(value.clone());
@@ -1216,7 +1233,18 @@ impl Interpreter {
     
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
             debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
-        
+
+            let expected_lucia_version = lib_info.expected_lucia_version.clone();
+
+            if !expected_lucia_version.is_empty() && !check_version(&self.config.version, &expected_lucia_version) {
+                self.stack.pop();
+                return self.raise_with_help(
+                    "ImportError",
+                    &format!("Module '{}' requires Lucia version '{}', but current version is '{}'", module_name, expected_lucia_version, self.config.version),
+                    &format!("Please update Lucia to the required version: '{}'", expected_lucia_version),
+                );
+            }            
+
             match module_name.as_str() {
                 "math" => {
                     use crate::env::libs::math::__init__ as math;
@@ -1299,6 +1327,14 @@ impl Interpreter {
                     let random_module_props = random::register();
                     let result = random::init();
                     for (name, var) in random_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "lasm" => {
+                    use crate::env::libs::lasm::__init__ as lasm;
+                    let lasm_module_props = lasm::register();
+                    let result = lasm::init();
+                    for (name, var) in lasm_module_props {
                         properties.insert(name, var);
                     }
                 }
@@ -2915,11 +2951,11 @@ impl Interpreter {
 
     fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing 'object' in method call");
+            return Value::Error("RuntimeError", "Missing 'object' in method call", None);
         };
     
         let Some(Value::String(method)) = statement.get(&Value::String("method".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing or invalid 'method' in method call");
+            return Value::Error("RuntimeError", "Missing or invalid 'method' in method call", None);
         };
     
         let (pos_args, named_args) = match self.translate_args(
@@ -3266,12 +3302,26 @@ impl Interpreter {
                     .collect::<HashMap<String, Variable<>>>();            
             
                 if !metadata.is_native {
+                    let argv_vec = self.variables.get("argv").map(|var| {
+                        match var.get_value() {
+                            Value::List(vals) => vals.iter().filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).collect(),
+                            _ => vec![],
+                        }
+                    }).unwrap_or_else(|| vec![]);
+                    
                     let mut new_interpreter = Interpreter::new(
                         self.config.clone(),
                         self.use_colors.clone(),
                         &self.file_path.clone(),
                         &self.cwd.clone(),
                         self.preprocessor_info.clone(),
+                        &argv_vec,
                     );
                     let mut merged_variables = self.variables.clone();
                     merged_variables.extend(final_args_variables);
@@ -3290,11 +3340,18 @@ impl Interpreter {
                 }
                 self.stack.pop();
                 debug_log(
-                    &format!("<Function '{}' returned {}>", method_name, format_value(&result)),
+                    &format!("<Method '{}' returned {}>", method_name, format_value(&result)),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
-                if let Value::Error(err_type, err_msg) = &result {
+                if let Value::Error(err_type, err_msg, referr) = &result {
+                    if let Some(rerr) = referr {
+                        return self.raise_with_ref(
+                            err_type,
+                            err_msg,
+                            rerr.clone(),
+                        );
+                    }
                     return self.raise(err_type, err_msg);
                 }
                 if !self.check_type(&result, &metadata.return_type, false) {
@@ -3317,11 +3374,11 @@ impl Interpreter {
 
     fn handle_property_access(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing 'object' in property access");
+            return Value::Error("RuntimeError", "Missing 'object' in property access", None);
         };
     
         let Some(Value::String(property)) = statement.get(&Value::String("property".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing or invalid 'property' in property access");
+            return Value::Error("RuntimeError", "Missing or invalid 'property' in property access", None);
         };
     
         let property_name = property.as_str();
@@ -3779,12 +3836,26 @@ impl Interpreter {
                 }
             
                 if !metadata.is_native {
+                    let argv_vec = self.variables.get("argv").map(|var| {
+                        match var.get_value() {
+                            Value::List(vals) => vals.iter().filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).collect(),
+                            _ => vec![],
+                        }
+                    }).unwrap_or_else(|| vec![]);
+                    
                     let mut new_interpreter = Interpreter::new(
                         self.config.clone(),
                         self.use_colors.clone(),
                         &self.file_path.clone(),
                         &self.cwd.clone(),
                         self.preprocessor_info.clone(),
+                        &argv_vec,
                     );
                     let mut merged_variables = self.variables.clone();
                     merged_variables.extend(final_args_variables);
@@ -3807,7 +3878,14 @@ impl Interpreter {
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
-                if let Value::Error(err_type, err_msg) = &result {
+                if let Value::Error(err_type, err_msg, referr) = &result {
+                    if let Some(err) = referr {
+                        return self.raise_with_ref(
+                            err_type,
+                            err_msg,
+                            err.clone(),
+                        );
+                    }
                     return self.raise(err_type, err_msg);
                 }
                 if !self.check_type(&result, &metadata.return_type, false) {

@@ -131,7 +131,7 @@ fn input(args: &HashMap<String, Value>) -> Value {
     let mut buffer = String::new();
     match io::stdin().read_line(&mut buffer) {
         Ok(_) => Value::String(buffer.trim_end().to_string()),
-        Err(_) => Value::Error("IOError", "Failed to read input"),
+        Err(_) => Value::Error("IOError", "Failed to read input", None),
     }
 }
 
@@ -148,7 +148,7 @@ fn len(args: &HashMap<String, Value>) -> Value {
                 "Function 'len()' doesn't support type '{}'",
                 v.type_name()
             );
-            Value::Error("TypeError", to_static(msg))
+            Value::Error("TypeError", to_static(msg), None)
         }
         None => Value::Null,
     }
@@ -238,7 +238,7 @@ fn type_name(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("obj") {
         return Value::String(value.type_name().to_string());
     }
-    Value::Error("TypeError", "No value provided for type_name()")
+    Value::Error("TypeError", "No value provided for type_name()", None)
 }
 
 fn sum(args: &HashMap<String, Value>) -> Value {
@@ -254,7 +254,7 @@ fn sum(args: &HashMap<String, Value>) -> Value {
                             total += Float::from_f64(n as f64);
                         }
                         Err(_) => {
-                            return Value::Error("TypeError", "Failed to convert BigInt to f64");
+                            return Value::Error("TypeError", "Failed to convert BigInt to f64", None);
                         }
                     }
                 }
@@ -266,18 +266,18 @@ fn sum(args: &HashMap<String, Value>) -> Value {
                         stack.push(v);
                     }
                 }
-                _ => return Value::Error("TypeError", "Value is not summable"),
+                _ => return Value::Error("TypeError", "Value is not summable", None),
             }
         }
 
         Value::Float(total)
     } else {
-        Value::Error("TypeError", "Expected a list of numeric values")
+        Value::Error("TypeError", "Expected a list of numeric values", None)
     }
 }
 
 fn __placeholder__(args: &HashMap<String, Value>) -> Value {
-    Value::Error("PlaceholderError", "This is a placeholder function and should not be called.")
+    Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
 
 // -------------------------------
@@ -329,7 +329,7 @@ fn format_value(value: &Value) -> String {
         Value::Function(func) => {
             format!("<function '{}' at {:p}>", func.get_name(), func)
         }
-        Value::Error(err_type, err_msg) => {
+        Value::Error(err_type, err_msg, _) => {
             format!("<{}: {}>", err_type, err_msg)
         }
         _ => "<unsupported value type>".to_string(),

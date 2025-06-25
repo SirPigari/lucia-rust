@@ -4,6 +4,7 @@ use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::types::Int;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::utils::to_static;
 use crate::{insert_native_fn};
 use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, ParseError};
 
@@ -14,12 +15,12 @@ use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, ParseError};
 fn parse_time(args: &HashMap<String, Value>) -> Value {
     let format = match args.get("format") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError", "Expected a string for 'format'"),
+        _ => return Value::Error("TypeError", "Expected a string for 'format'", None),
     };
 
     let time_str = match args.get("time") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError", "Expected a string for 'time'"),
+        _ => return Value::Error("TypeError", "Expected a string for 'time'", None),
     };
 
     match NaiveDateTime::parse_from_str(time_str, format) {
@@ -36,7 +37,7 @@ fn parse_time(args: &HashMap<String, Value>) -> Value {
                 values: map.values().cloned().collect(),
             }
         }
-        Err(e) => Value::Error("ParseError", Box::leak(Box::new(format!("{}", e)))),
+        Err(e) => Value::Error("ParseError", to_static(format!("{}", e)), None),
     }
 }
 
@@ -92,7 +93,7 @@ fn format_datetime(args: &HashMap<String, Value>) -> Value {
                 s => Value::String(s),
             }
         }
-        _ => Value::Error("TypeError", "expected str argument 'format'"),
+        _ => Value::Error("TypeError", "expected str argument 'format'", None),
     }
 }
 

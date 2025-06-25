@@ -90,6 +90,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         _ => Value::Error(
             "KeyError",
             to_static(format!("Key '{}' not found in config", key)),
+            None,
         ),
     }
 }

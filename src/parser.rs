@@ -684,7 +684,14 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "for" => {
                     self.next();
-                    self.check_for("SEPARATOR", "(");
+                    if self.token_is("SEPARATOR", "else") {
+                        self.raise("SyntaxError", "Unexpected 'else' after 'for'");
+                        return Statement::Null;
+                    }
+                    if !self.token_is("SEPARATOR", "(") {
+                        self.raise_with_help("SyntaxError", "Expected '(' after 'for'", "Did you forget to add '('?");
+                        return Statement::Null;
+                    }
                     self.next();
                     let variable = self.token().cloned().unwrap_or_else(|| {
                         self.raise("SyntaxError", "Expected identifier after 'for'");
@@ -697,11 +704,17 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    self.check_for("SEPARATOR", ")");
+                    if !self.token_is("SEPARATOR", ")") {
+                        self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?");
+                        return Statement::Null;
+                    }
                     self.next();
                     line = self.current_line();
                     column = self.get_line_column();
-                    self.check_for("SEPARATOR", ":");
+                    if !self.token_is("SEPARATOR", ":") {
+                        self.raise_with_help("SyntaxError", "Expected ':' after ')'", "Did you forget to add ':'?");
+                        return Statement::Null;
+                    }
                     self.next();
                     let mut body = vec![];
                     while let Some(tok) = self.token() {
@@ -714,7 +727,10 @@ impl Parser {
                         }
                         body.push(stmt);
                     }
-                    self.check_for("IDENTIFIER", "end");
+                    if !self.token_is("IDENTIFIER", "end") {
+                        self.raise_with_help("SyntaxError", "Expected 'end' after 'for' body", "Did you forget to add 'end'?");
+                        return Statement::Null;
+                    }
                     self.next();
                     Statement::Statement {
                         keys: vec![
@@ -801,7 +817,14 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "if" => {
                     self.next();
-                    self.check_for("SEPARATOR", "(");
+                    if self.token_is("SEPARATOR", "else") {
+                        self.raise("SyntaxError", "Unexpected 'else' after 'if'");
+                        return Statement::Null;
+                    }
+                    if !self.token_is("SEPARATOR", "(") {
+                        self.raise_with_help("SyntaxError", "Expected '(' after 'if'", "Did you forget to add '('?");
+                        return Statement::Null;
+                    }
                     self.next();
                     let condition = self.parse_expression();
                     if self.err.is_some() {

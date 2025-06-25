@@ -31,7 +31,7 @@ fn from_json_value(jv: &JsonValue) -> Value {
             } else if let Some(f) = n.as_f64() {
                 Value::Float(Float::from_f64(f))
             } else {
-                Value::Error("JSONError", Box::leak(Box::new("invalid number".to_string())))
+                Value::Error("JSONError", to_static("invalid number".to_string()), None)
             }
         }
         JsonValue::String(s) => Value::String(s.clone()),
@@ -53,16 +53,16 @@ pub fn register() -> HashMap<String, Variable> {
         |args: &HashMap<String, Value>| -> Value {
             let value = match args.get("value") {
                 Some(v) => v,
-                None => return Value::Error("ValueError", "missing 'value'"),
+                None => return Value::Error("ValueError", "missing 'value'", None),
             };
 
             let indent = match args.get("indent") {
                 Some(Value::Int(i)) => match i.to_i64() {
                     Ok(val) => Some(val as usize),
-                    Err(_) => return Value::Error("TypeError", "expected int for 'indent'"),
+                    Err(_) => return Value::Error("TypeError", "expected int for 'indent'", None),
                 },
                 
-                Some(_) => return Value::Error("TypeError", "expected int for 'indent'"),
+                Some(_) => return Value::Error("TypeError", "expected int for 'indent'", None),
                 None => None,
             };
 
@@ -79,7 +79,7 @@ pub fn register() -> HashMap<String, Variable> {
                     }
                     Value::String(String::from_utf8(buf).unwrap())
                 }
-                Err(e) => Value::Error("JSONError", to_static(e)),
+                Err(e) => Value::Error("JSONError", to_static(e), None),
             }
         },
         vec![
@@ -95,12 +95,12 @@ pub fn register() -> HashMap<String, Variable> {
         |args: &HashMap<String, Value>| -> Value {
             let text = match args.get("text") {
                 Some(Value::String(s)) => s,
-                _ => return Value::Error("TypeError", "expected string for 'text'"),
+                _ => return Value::Error("TypeError", "expected string for 'text'", None),
             };
 
             match serde_json::from_str::<JsonValue>(text) {
                 Ok(json_val) => from_json_value(&json_val),
-                Err(e) => Value::Error("JSONError", to_static(e.to_string())),
+                Err(e) => Value::Error("JSONError", to_static(e.to_string()), None),
             }
         },
         vec![Parameter::positional("text", "str")],
@@ -113,32 +113,32 @@ pub fn register() -> HashMap<String, Variable> {
         |args: &HashMap<String, Value>| -> Value {
             let path = match args.get("path") {
                 Some(Value::String(s)) => s,
-                _ => return Value::Error("TypeError", "expected string for 'path'"),
+                _ => return Value::Error("TypeError", "expected string for 'path'", None),
             };
 
             let value = match args.get("value") {
                 Some(v) => v,
-                None => return Value::Error("ValueError", "missing 'value'"),
+                None => return Value::Error("ValueError", "missing 'value'", None),
             };
 
             let indent = match args.get("indent") {
                 Some(Value::Int(i)) => match i.to_i64() {
                     Ok(val) => Some(val as usize),
-                    Err(_) => return Value::Error("TypeError", "expected int for 'indent'"),
+                    Err(_) => return Value::Error("TypeError", "expected int for 'indent'", None),
                 },
 
-                Some(_) => return Value::Error("TypeError", "expected int for 'indent'"),
+                Some(_) => return Value::Error("TypeError", "expected int for 'indent'", None),
                 None => None,
             };
 
             let json_val = match to_json_value(value) {
                 Ok(v) => v,
-                Err(e) => return Value::Error("JSONError", to_static(e)),
+                Err(e) => return Value::Error("JSONError", to_static(e), None),
             };
 
             let file = File::create(path);
             if file.is_err() {
-                return Value::Error("IOError", "failed to open file");
+                return Value::Error("IOError", "failed to open file", None);
             }
             let mut file = file.unwrap();
 
@@ -153,7 +153,7 @@ pub fn register() -> HashMap<String, Variable> {
 
             match result {
                 Ok(_) => Value::Null,
-                Err(e) => Value::Error("JSONError", to_static(e.to_string())),
+                Err(e) => Value::Error("JSONError", to_static(e.to_string()), None),
             }
         },
         vec![

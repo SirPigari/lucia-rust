@@ -17,6 +17,7 @@ fn set(args: &HashMap<String, Value>) -> Value {
     Value::Error(
         "NotImplementedError",
         "set function is not implemented",
+        None,
     )
 }
 
@@ -39,7 +40,7 @@ pub fn register(config: Arc<Config>) -> HashMap<String, Variable> {
         move |args: &HashMap<String, Value>| -> Value {
             let key = match args.get("key") {
                 Some(Value::String(s)) => s.as_str(),
-                _ => return Value::Error("TypeError", "Expected a string for 'key'"),
+                _ => return Value::Error("TypeError", "Expected a string for 'key'", None),
             };
             get_from_config(&config_for_get, key)
         },

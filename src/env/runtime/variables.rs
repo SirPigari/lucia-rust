@@ -222,7 +222,7 @@ impl Variable {
                             match &val_clone {
                                 Value::Int(i) => match i.to_float() {
                                     Ok(f) => Value::Float(f),
-                                    Err(_) => Value::Error("TypeError", "Failed to convert Int to Float"),
+                                    Err(_) => Value::Error("TypeError", "Failed to convert Int to Float", None),
                                 },
                                 Value::Float(f) => Value::Float(f.clone()),
                                 _ => Value::Float(Float::from_f64(0.0)),
@@ -385,7 +385,7 @@ impl Variable {
                             match &val_clone {
                                 Value::Float(f) => match f.to_int() {
                                     Ok(i) => Value::Int(i),
-                                    Err(_) => Value::Error("TypeError", "Failed to convert Float to Int"),
+                                    Err(_) => Value::Error("TypeError", "Failed to convert Float to Int", None),
                                 },
                                 Value::Int(i) => Value::Int(i.clone()),
                                 _ => Value::Int(0i64.into()),

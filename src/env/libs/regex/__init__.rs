@@ -16,12 +16,12 @@ use crate::{insert_native_fn, insert_native_var};
 fn regex_match(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into()),
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into()),
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
     };
 
     match Regex::new(pattern) {
@@ -31,24 +31,24 @@ fn regex_match(args: &HashMap<String, Value>) -> Value {
                 None => Value::Null,
             }
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e))),
+        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e)), None),
     }
 }
 
 fn regex_replace(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into()),
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into()),
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
     };
 
     let replacement = match args.get("replacement") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError".into(), "expected a string for 'replacement'".into()),
+        _ => return Value::Error("TypeError".into(), "expected a string for 'replacement'".into(), None),
     };
 
     match Regex::new(pattern) {
@@ -56,7 +56,7 @@ fn regex_replace(args: &HashMap<String, Value>) -> Value {
             let replaced = re.replace_all(value, replacement);
             Value::String(replaced.into_owned())
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e))),
+        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e)), None),
     }
 }
 

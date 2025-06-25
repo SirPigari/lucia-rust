@@ -18,7 +18,7 @@ where
 {
     move |_| match func() {
         Ok(s) => Value::String(s),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e)))),
+        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
     }
 }
 
@@ -28,7 +28,7 @@ where
 {
     move |_| match func() {
         Ok(v) => Value::Int(Int::from_i64(v as i64)),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e)))),
+        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
     }
 }
 
@@ -38,7 +38,7 @@ where
 {
     move |_| match func() {
         Ok(v) => Value::Int(Int::from_i64(v as i64)),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e)))),
+        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
     }
 }
 
@@ -124,7 +124,7 @@ pub fn register() -> HashMap<String, Variable> {
                         values: inner_map.values().cloned().collect::<Vec<_>>(),
                     }                    
                 }
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e)))),
+                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }
         },
         vec![],
@@ -145,7 +145,7 @@ pub fn register() -> HashMap<String, Variable> {
                         values: inner_map.values().cloned().collect::<Vec<_>>(),
                     }                    
                 }
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e)))),
+                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }
         },
         vec![],

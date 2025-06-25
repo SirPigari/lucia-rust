@@ -2,6 +2,7 @@ use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::Object;
+use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{to_static, format_float, format_int};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
@@ -25,7 +26,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     Function(Function),
     Object(Object),
-    Error(&'static str, &'static str),
+    Error(&'static str, &'static str, Option<Error>),
 }
 
 impl Serialize for Value {
@@ -62,7 +63,7 @@ impl Serialize for Value {
             Value::Object(_) => {
                 serializer.serialize_str("Object(opaque)")
             }
-            Value::Error(kind, msg) => {
+            Value::Error(kind, msg, _) => {
                 let mut s = serializer.serialize_struct("Error", 2)?;
                 s.serialize_field("kind", kind)?;
                 s.serialize_field("message", msg)?;
@@ -122,9 +123,13 @@ impl Hash for Value {
                 obj.get_parameters().hash(state);
             }
 
-            Value::Error(err_type, err_msg) => {
+            Value::Error(err_type, err_msg, referr) => {
                 err_type.hash(state);
                 err_msg.hash(state);
+                if let Some(err) = referr {
+                    err.error_type().hash(state);
+                    err.msg().hash(state);
+                }
             }
             Value::Tuple(tuple) => {
                 3u8.hash(state);
@@ -232,7 +237,7 @@ impl Value {
             Value::Bytes(_) => "bytes",
             Value::Function(_) => "function",
             Value::Object(obj) => to_static(obj.name().to_string()),
-            Value::Error(_, _) => "error",
+            Value::Error(..) => "error",
         }
     }
     pub fn type_name(&self) -> String {
@@ -248,7 +253,7 @@ impl Value {
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(func) => "function".to_string(),
             Value::Object(obj) => obj.name().to_string(),
-            Value::Error(err_type, _) => "error".to_string(),
+            Value::Error(err_type, _, _) => "error".to_string(),
         }
     }
     pub fn is_truthy(&self) -> bool {
@@ -263,7 +268,7 @@ impl Value {
             Value::Bytes(b) => !b.is_empty(),
             Value::Function(_) => true,
             Value::Object(_) => true,
-            Value::Error(_, _) => true,
+            Value::Error(_, _, _) => true,
             Value::Null => false,
         }
     }
@@ -305,7 +310,7 @@ impl Value {
             }
             Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
             Value::Object(obj) => format!("<object '{}' at {:p}>", obj.name(), obj.ptr()),
-            Value::Error(err_type, err_msg) => format!("<{}: {}>", err_type, err_msg),
+            Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
     pub fn to_bytes(&self) -> Option<Vec<u8>> {
@@ -338,7 +343,7 @@ impl Value {
                 Some(description.into_bytes())
             }
     
-            Value::Error(kind, msg) => {
+            Value::Error(kind, msg, _) => {
                 let error = format!("<{}: {}>", kind, msg);
                 Some(error.into_bytes())
             }

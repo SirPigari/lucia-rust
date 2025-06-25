@@ -25,7 +25,7 @@ const _CATALAN: &str =          "0.915965594177219015054603514932384110774149374
 
 fn math_error(err_id: i16) -> Value {
     let msg = get_imagnum_error_message(err_id);
-    Value::Error("MathError", to_static(msg))
+    Value::Error("MathError", to_static(msg), None)
 }
 
 fn create_float_constant(name: &str, value: &str) -> Variable {
@@ -33,7 +33,7 @@ fn create_float_constant(name: &str, value: &str) -> Variable {
         name.to_string(),
         match Float::from_str(value) {
             Ok(num) => Value::Float(num),
-            Err(_) => Value::Error("RuntimeError", "Invalid float format"),
+            Err(_) => Value::Error("RuntimeError", "Invalid float format", None),
         },
         "float".to_string(),
         true,
@@ -55,7 +55,7 @@ where
             Ok(n) => Value::Float(Float::from_f64(f(n as f64))),
             Err(e) => math_error(e),
         },
-        _ => Value::Error("TypeError", "expected a float or int"),
+        _ => Value::Error("TypeError", "expected a float or int", None),
     }
 }
 
@@ -69,10 +69,10 @@ fn log_base(args: &HashMap<String, Value>) -> Value {
                 (Ok(xf), Ok(bf)) if xf > 0.0 && bf > 0.0 && bf != 1.0 => {
                     Value::Float(Float::from_f64(xf.log(bf)))
                 }
-                _ => Value::Error("MathError", "Invalid base or x for log"),
+                _ => Value::Error("MathError", "Invalid base or x for log", None),
             }
         }
-        _ => Value::Error("TypeError", "log(x, base) expects float args"),
+        _ => Value::Error("TypeError", "log(x, base) expects float args", None),
     }
 }
 
@@ -87,6 +87,48 @@ fn exp(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::exp) }
 fn floor(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::floor) }
 fn ceil(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::ceil) }
 fn round(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::round) }
+fn pow(args: &HashMap<String, Value>) -> Value {
+    let x_val = args.get("x");
+    let y_val = args.get("y");
+
+    match (x_val, y_val) {
+        (Some(x), Some(y)) => {
+            fn value_to_f64(val: &Value) -> Result<f64, Value> {
+                match val {
+                    Value::Float(f) => f.to_f64().map_err(math_error),
+                    Value::Int(i) => i.to_i64().map(|v| v as f64).map_err(math_error),
+                    _ => Err(math_error(1)),
+                }
+            }
+
+            let x_f = match value_to_f64(x) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            let y_f = match value_to_f64(y) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+
+            dbg!(&x_f, &y_f);
+            dbg!(x_f.powf(y_f));
+
+            if x_f < 0.0 && y_f.fract() == 0.0 {
+                let y_i = y_f as i32;
+                let result = (x_f.abs()).powi(y_i);
+                let final_result = if y_i % 2 == 0 { result } else { -result };
+                return Value::Float(Float::from_f64(final_result));
+            }
+
+            if x_f < 0.0 {
+                return Value::Error("MathError", "negative base with fractional exponent", None);
+            }
+
+            Value::Float(Float::from_f64(x_f.powf(y_f)))
+        }
+        _ => Value::Error("TypeError", "pow(x, y) expects numeric args", None),
+    }
+}
 
 fn create_native_fn(
     name: &str,
@@ -139,6 +181,27 @@ pub fn register() -> HashMap<String, Variable> {
         log_base,
         vec![Parameter::positional("x", "float"), Parameter::positional("base", "float")],
         "float"
+    );
+    insert_native_fn!(
+        map,
+        "powf",
+        pow,
+        vec![Parameter::positional("x", "float"), Parameter::positional("y", "float")],
+        "float"
+    );
+    insert_native_fn!(
+        map,
+        "powi",
+        pow,
+        vec![Parameter::positional("x", "int"), Parameter::positional("y", "int")],
+        "int"
+    );
+    insert_native_fn!(
+        map,
+        "pow",
+        pow,
+        vec![Parameter::positional("x", "any"), Parameter::positional("y", "any")],
+        "any"
     );
 
     macro_rules! insert_irrational {

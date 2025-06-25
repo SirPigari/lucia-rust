@@ -18,7 +18,7 @@ fn random_int_handler(args: &HashMap<String, Value>) -> Value {
     let min = match args.get("min") {
         Some(Value::Int(i)) => match i.to_i64() {
             Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid min value".into()),
+            Err(_) => return Value::Error("ValueError".into(), "Invalid min value".into(), None),
         },
         _ => 0,
     };
@@ -26,13 +26,13 @@ fn random_int_handler(args: &HashMap<String, Value>) -> Value {
     let max = match args.get("max") {
         Some(Value::Int(i)) => match i.to_i64() {
             Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid max value".into()),
+            Err(_) => return Value::Error("ValueError".into(), "Invalid max value".into(), None),
         },
         _ => 100,
     };
 
     if max < min {
-        return Value::Error("ValueError".into(), "max must be >= min".into());
+        return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
     let val = rng.gen_range(min..=max);
@@ -45,7 +45,7 @@ fn random_float_handler(args: &HashMap<String, Value>) -> Value {
     let min = match args.get("min") {
         Some(Value::Float(f)) => match f.to_f64() {
             Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid min float".into()),
+            Err(_) => return Value::Error("ValueError".into(), "Invalid min float".into(), None),
         },
         _ => 0.0,
     };
@@ -53,13 +53,13 @@ fn random_float_handler(args: &HashMap<String, Value>) -> Value {
     let max = match args.get("max") {
         Some(Value::Float(f)) => match f.to_f64() {
             Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid max float".into()),
+            Err(_) => return Value::Error("ValueError".into(), "Invalid max float".into(), None),
         },
         _ => 100.0,
     };
 
     if max < min {
-        return Value::Error("ValueError".into(), "max must be >= min".into());
+        return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
     let val = rng.gen_range(min..=max);
@@ -74,8 +74,8 @@ fn random_choice_handler(args: &HashMap<String, Value>) -> Value {
             let idx = rng.gen_range(0..list.len());
             list[idx].clone()
         }
-        Some(_) => Value::Error("ValueError".into(), "list must not be empty".into()),
-        None => Value::Error("TypeError".into(), "expected a list".into()),
+        Some(_) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
+        None => Value::Error("TypeError".into(), "expected a list".into(), None),
     }
 }
 
@@ -87,8 +87,8 @@ fn shuffle_handler(args: &HashMap<String, Value>) -> Value {
             cloned.shuffle(&mut rng);
             Value::List(cloned)
         }
-        Some(_) => Value::Error("TypeError".into(), "expected a list".into()),
-        None => Value::Error("TypeError".into(), "expected a list".into()),
+        Some(_) => Value::Error("TypeError".into(), "expected a list".into(), None),
+        None => Value::Error("TypeError".into(), "expected a list".into(), None),
     }
 }
 

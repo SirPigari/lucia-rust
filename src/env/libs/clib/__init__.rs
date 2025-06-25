@@ -139,7 +139,7 @@ pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
 // ------ Native functions ------
 
 fn tcc_error(msg: &str) -> Value {
-    Value::Error("TccError", to_static(msg.to_string()))
+    Value::Error("TccError", to_static(msg.to_string()), None)
 }
 
 fn run(args: &HashMap<String, Value>) -> Value {
@@ -150,19 +150,19 @@ fn run(args: &HashMap<String, Value>) -> Value {
                 Err(e) => tcc_error(&format!("Failed to run code: {}", e)),
             }
         }
-        _ => Value::Error("TypeError", "Argument 'code' must be a string"),
+        _ => Value::Error("TypeError", "Argument 'code' must be a string", None),
     }
 }
 
 fn compile(args: &HashMap<String, Value>) -> Value {
     let code = match args.get("code") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'code' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'code' must be a string", None),
     };
 
     let file_path = match args.get("file_path") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
     };
 
     match _tcc::compile(&TCC_PATH, code, file_path) {
@@ -174,12 +174,12 @@ fn compile(args: &HashMap<String, Value>) -> Value {
 fn compile_shared(args: &HashMap<String, Value>) -> Value {
     let code = match args.get("code") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'code' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'code' must be a string", None),
     };
 
     let file_path = match args.get("file_path") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
     };
 
     match _tcc::compile_shared(&TCC_PATH, code, file_path) {
@@ -196,24 +196,24 @@ fn check(args: &HashMap<String, Value>) -> Value {
                 Err(e) => tcc_error(&format!("Check failed: {}", e)),
             }
         }
-        _ => Value::Error("TypeError", "Argument 'code' must be a string"),
+        _ => Value::Error("TypeError", "Argument 'code' must be a string", None),
     }
 }
 
 fn export(args: &HashMap<String, Value>) -> Value {
     let file_path = match args.get("file_path") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'value' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'value' must be a string", None),
     };
 
     let expected_type = match args.get("expected_type") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'expected_type' must be a string"),
+        _ => return Value::Error("TypeError", "Argument 'expected_type' must be a string", None),
     };
 
     match _tcc::export(&TCC_PATH, file_path, value, expected_type) {

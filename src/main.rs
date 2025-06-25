@@ -1,11 +1,13 @@
 use std::env as std_env;
 use std::fs::{self, File};
 use std::io::{self, Read};
+use std::thread;
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::process::exit;
 use std::collections::HashMap;
 use colored::*;
+use sys_info;
 
 mod env {
     pub mod runtime {
@@ -52,6 +54,12 @@ mod env {
         }
         pub mod random {
             pub mod __init__;
+        }
+        pub mod lasm {
+            pub mod __init__;
+            pub mod cpu {
+                pub mod __init__;
+            }
         }
     }
 }
@@ -344,7 +352,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
     Ok(())
 }
 
-fn main() {
+fn lucia(args: Vec<String>) {
     let cwd = std_env::current_dir()
     .and_then(|p| p.canonicalize())
     .unwrap_or_else(|e| {
@@ -379,9 +387,6 @@ fn main() {
         }))
         .unwrap();
 
-
-    
-    let args: Vec<String> = std_env::args().collect();
     let activate_flag = args.contains(&"--activate".to_string());
     let no_color_flag = args.contains(&"--no-color".to_string());
     let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
@@ -391,6 +396,23 @@ fn main() {
     let version_flag = args.contains(&"--version".to_string()) || args.contains(&"-v".to_string());
     let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
     let config_arg = args.iter().find(|arg| arg.starts_with("--config="));
+    let argv_arg = args.iter()
+        .find(|arg| arg.starts_with("--argv="))
+        .map(|arg| arg.trim_start_matches("--argv="));
+
+    let mut argv = if let Some(val) = argv_arg {
+        let val = val.trim_start_matches('[').trim_end_matches(']');
+        val.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<String>>()
+    } else {
+        vec![]
+    };
+
+    if let Some(exe_path) = args.get(0) {
+        argv.insert(0, exe_path.clone());
+    }
 
     if version_flag {
         println!("Lucia-{}", VERSION);
@@ -639,6 +661,38 @@ fn main() {
         }
     }
 
+    let moded = config.moded.clone();
+
+    if config.version != VERSION {
+        if !moded {
+            handle_error(
+                &Error::error_with_help(
+                    "VersionMismatchError",
+                    to_static(format!(
+                        "Lucia version mismatch: expected {}, got {}. Please update your Lucia installation.",
+                        VERSION, config.version
+                    )),
+                    "Set 'moded' to true in your config file to ignore this error.".to_string(),
+                    to_static(exe_path.display().to_string()),
+                ),
+                "",
+                (0, "".to_string()),
+                &config,
+                use_colors,
+            );
+            exit(1);
+        } else {
+            debug_log(
+                &format!(
+                    "Warning: Lucia version mismatch: expected {}, got {}. Running in moded mode.",
+                    VERSION, config.version
+                ),
+                &config,
+                Some(use_colors),
+            );
+        }
+    }
+
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
             let path = Path::new(&file_path);
@@ -649,7 +703,7 @@ fn main() {
                 None
             };
             
-            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some);
+            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -658,11 +712,11 @@ fn main() {
             None
         };
 
-        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone());
+        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv);
     }
 }
 
-fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>) {
+fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
@@ -766,7 +820,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 .canonicalize()
                 .unwrap_or_else(|_| PathBuf::from("."))
         };
-        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
+        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor), argv);
         let out: Value = match interpreter.interpret(statements, file_content.clone()) {
             Ok(out) => out,
             Err(error) => {
@@ -784,14 +838,14 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
     }
 }
 
-fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf) {
+fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
         hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
         config.version, 
         hex_to_ansi("reset", Some(use_colors))
     );
-    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor));
+    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor), argv);
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
         config_path.clone(),
@@ -957,4 +1011,41 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             );
         }
     }
+}
+
+fn main() {
+    let args: Vec<String> = std_env::args().collect();
+
+    let stack_size = args.iter()
+        .find(|arg| arg.starts_with("--stack-size="))
+        .and_then(|arg| arg.split('=').nth(1))
+        .and_then(|size| size.parse::<usize>().ok())
+        .unwrap_or_else(|| {
+            match sys_info::mem_info() {
+                Ok(mem) => {
+                    let total_ram_bytes = mem.total * 1024;
+
+                    if total_ram_bytes > 16 * 1024 * 1024 * 1024 {
+                        64 * 1024 * 1024
+                    } else if total_ram_bytes > 8 * 1024 * 1024 * 1024 {
+                        32 * 1024 * 1024
+                    } else {
+                        8 * 1024 * 1024
+                    }
+                }
+                Err(_) => {
+                    8 * 1024 * 1024
+                }
+            }
+        });
+
+    let handle = thread::Builder::new()
+        .stack_size(stack_size)
+        .name(format!("Lucia-{}", VERSION))
+        .spawn(|| {
+            lucia(args);
+        })
+        .unwrap();
+
+    handle.join().unwrap();
 }

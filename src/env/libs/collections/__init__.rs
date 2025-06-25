@@ -34,7 +34,7 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
     if let (Some(Value::String(s1)), Some(Value::String(s2))) = (args.get("s1"), args.get("s2")) {
         Value::Int(Int::from_i64(levenshtein_distance(s1, s2) as i64))
     } else {
-        Value::Error("TypeError", "expected two strings")
+        Value::Error("TypeError", "expected two strings", None)
     }
 }
 
@@ -42,7 +42,7 @@ fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
         Value::String(hex_to_ansi(hex, Some(true)))
     } else {
-        Value::Error("TypeError", "expected a string")
+        Value::Error("TypeError", "expected a string", None)
     }
 }
 
@@ -50,7 +50,7 @@ fn format_value_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("value") {
         Value::String(format_value(value))
     } else {
-        Value::Error("TypeError", "expected a value")
+        Value::Error("TypeError", "expected a value", None)
     }
 }
 
@@ -58,10 +58,10 @@ fn unescape_string_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         match unescape_string(s) {
             Ok(unescaped) => Value::String(unescaped),
-            Err(e) => Value::Error("UnescapeError".into(), to_static(e)),
+            Err(e) => Value::Error("UnescapeError".into(), to_static(e), None),
         }
     } else {
-        Value::Error("TypeError", "expected a string")
+        Value::Error("TypeError", "expected a string", None)
     }
 }
 
@@ -69,7 +69,7 @@ fn capitalize_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         Value::String(capitalize(s))
     } else {
-        Value::Error("TypeError", "expected a string")
+        Value::Error("TypeError", "expected a string", None)
     }
 }
 
@@ -77,7 +77,7 @@ fn get_type_default_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(typ)) = args.get("type") {
         get_type_default(typ)
     } else {
-        Value::Error("TypeError", "expected a string")
+        Value::Error("TypeError", "expected a string", None)
     }
 }
 
@@ -88,7 +88,7 @@ fn replace_accented_handler(args: &HashMap<String, Value>) -> Value {
             .collect();
         Value::String(replaced)
     } else {
-        Value::Error("TypeError".into(), "expected a string".into())
+        Value::Error("TypeError".into(), "expected a string".into(), None)
     }
 }
 
@@ -96,7 +96,7 @@ fn sanitize_alias_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         Value::String(sanitize_alias(s))
     } else {
-        Value::Error("TypeError", "expected a string")
+        Value::Error("TypeError", "expected a string", None)
     }
 }
 
