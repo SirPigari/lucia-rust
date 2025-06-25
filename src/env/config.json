@@ -9,7 +9,7 @@
   "print_comments": false,
   "allow_fetch": true,
   "allow_unsafe": true,
-  "home_dir": "C:\\Users\\Ja\\Desktop\\lucia-rust\\src\\env",
+  "home_dir": "C:\\Users\\Ja\\Desktop\\projects\\lucia-rust\\src\\env",
   "recursion_limit": 9999,
   "version": "2.0.0",
   "color_scheme": {

@@ -891,12 +891,13 @@ impl Interpreter {
                 "IF" => self.handle_if(statement.clone()),
                 "TRY_CATCH" | "TRY" => self.handle_try(statement.clone()),
                 "THROW" => self.handle_throw(statement.clone()),
+                "FORGET" => self.handle_forget(statement.clone()),
 
                 // Variables and assignment
                 "VARIABLE" => self.handle_variable(statement.clone()),
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
                 "ASSIGNMENT" => self.handle_assignment(statement.clone()),
-                "FORGET" => self.handle_forget(statement.clone()),
+                "UNPACK_ASSIGN" => self.handle_unpack_assignment(statement.clone()),
         
                 // Types
                 "TYPE" => self.handle_type(statement.clone()),
@@ -932,6 +933,19 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_unpack_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let target_opt = statement.get(&Value::String("target".to_string())).unwrap_or_else(|| {
+            self.raise("RuntimeError", "Missing 'target' in unpack assignment");
+            &NULL
+        });
+        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or_else(|| {
+            self.raise("RuntimeError", "Missing 'value' in unpack assignment");
+            &NULL
+        });
+        self.raise("NotImplemented", "Unpack assignment is not implemented yet");
+        NULL
     }
 
     fn handle_map(&mut self, statement: HashMap<Value, Value>) -> Value {

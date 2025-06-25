@@ -421,13 +421,31 @@ impl Parser {
                     };
                 }
 
-                ("OPERATOR", op) if op == "=" => {
+                ("OPERATOR", "=") => {
                     self.next();
                     let value = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-        
+                
+                    let expr_type = expr.get_type();
+                    if expr_type == "TUPLE" {
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("target".to_string()),
+                                Value::String("value".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("UNPACK_ASSIGN".to_string()),
+                                expr.convert_to_map(),
+                                value.convert_to_map(),
+                            ],
+                            line: self.current_line(),
+                            column: self.get_line_column(),
+                        };
+                    }
+                    
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -442,7 +460,7 @@ impl Parser {
                         line: self.current_line(),
                         column: self.get_line_column(),
                     };
-                }
+                }                
 
                 ("OPERATOR", op) if op != "|" => {
                     let operator = tok.1.clone();
