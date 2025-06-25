@@ -2556,7 +2556,7 @@ impl Interpreter {
                             return v.clone();
                         }
                     }
-                    return self.raise("KeyError", "Key not found in map");
+                    return self.raise("KeyError", &format!("'{}' not found in map", format_value(&key_val)));
                 }
                 _ => return self.raise("TypeError", "Start must be int or string"),
             },
@@ -4318,10 +4318,22 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
         };
     
+        if s.is_empty() {
+            return self.raise("RuntimeError", "Empty string provided for number");
+        }
+    
+        let trimmed = s.trim_start_matches('0');
+    
+        let normalized = if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        };
+    
         if let Some(cache_root) = self.cache.get_mut("constants") {
-            if let Some(cached) = deep_get(cache_root, &[Value::String(s.clone())]) {
+            if let Some(cached) = deep_get(cache_root, &[Value::String(normalized.clone())]) {
                 debug_log(
-                    &format!("<CachedConstantNumber: {}>", s),
+                    &format!("<CachedConstantNumber: {}>", normalized),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
@@ -4330,26 +4342,24 @@ impl Interpreter {
         }
     
         let result = if s.contains('.') {
-            match Float::from_str(s) {
+            match Float::from_str(normalized.as_str()) {
                 Ok(f) => Value::Float(f),
                 Err(_) => return self.raise("RuntimeError", "Invalid float format"),
             }
         } else {
-            match Int::from_str(s) {
+            match Int::from_str(normalized.as_str()) {
                 Ok(i) => Value::Int(i),
                 Err(_) => return self.raise("RuntimeError", "Invalid integer format"),
             }
         };
-        
-        let cacheable = if let Value::Float(f) = &result {
-            match f.to_f64() {
+    
+        let cacheable = match &result {
+            Value::Float(f) => match f.to_f64() {
                 Ok(val) => !val.is_finite(),
                 Err(_) => true,
-            }
-        } else if let Value::Int(i) = &result {
-            i.to_i64().is_err()
-        } else {
-            false
+            },
+            Value::Int(i) => i.to_i64().is_err(),
+            _ => false,
         };
     
         if cacheable {
@@ -4357,11 +4367,12 @@ impl Interpreter {
                 .entry("constants".into())
                 .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
     
-            deep_insert(cache_root, &[Value::String(s.clone())], result.clone());
+            deep_insert(cache_root, &[Value::String(normalized)], result.clone());
         }
     
         result
-    }    
+    }
+    
     
     fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
