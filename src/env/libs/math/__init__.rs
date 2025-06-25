@@ -110,9 +110,6 @@ fn pow(args: &HashMap<String, Value>) -> Value {
                 Err(e) => return e,
             };
 
-            dbg!(&x_f, &y_f);
-            dbg!(x_f.powf(y_f));
-
             if x_f < 0.0 && y_f.fract() == 0.0 {
                 let y_i = y_f as i32;
                 let result = (x_f.abs()).powi(y_i);

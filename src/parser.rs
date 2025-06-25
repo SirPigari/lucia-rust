@@ -224,115 +224,14 @@ impl Parser {
         }
         self.statements.clone()
     }
-    
-    fn parse_expression(&mut self) -> Statement {
-        let mut expr = self.parse_primary();
+
+    fn parse_postfix(&mut self, mut expr: Statement) -> Statement {
         if self.err.is_some() {
             return Statement::Null;
         }
-
-        if expr.get_type() == "TYPE" {
-            return expr;
-        }
-    
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
-        
             match (tok.0.as_str(), tok.1.as_str()) {
-                ("SEPARATOR", ".") => {
-                    self.next();
-                    let property_token = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected identifier after '.'");
-                        Token("".to_string(), "".to_string())
-                    });
-        
-                    if property_token.0 != "IDENTIFIER" {
-                        self.raise("SyntaxError", &format!(
-                            "Expected identifier after '.', found '{}'", property_token.1
-                        ));
-                        return Statement::Null;
-                    }
-        
-                    self.next();
-        
-                    if let Some(next_tok) = self.token() {
-                        if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
-                            self.next();
-                            let (pos_args, named_args) = self.parse_arguments();
-                            self.check_for("SEPARATOR", ")");
-                            self.next();
-        
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-        
-                            expr = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("method".to_string()),
-                                    Value::String("pos_args".to_string()),
-                                    Value::String("named_args".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("METHOD_CALL".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::String(property_token.1),
-                                    Value::List(pos_args),
-                                    Value::Map {
-                                        keys: named_args.iter().map(|(k, _)| k.clone()).collect(),
-                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                                    },
-                                ],
-                                line: self.current_line(),
-                                column: self.get_line_column(),
-                            };
-                        } else {
-                            expr = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("property".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("PROPERTY_ACCESS".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::String(property_token.1),
-                                ],
-                                line: self.current_line(),
-                                column: self.get_line_column(),
-                            };
-                        }
-                    }
-                }
-
-                ("IDENTIFIER", "as") => {
-                    self.next();
-            
-                    let type_conv = self.parse_type();
-                    if self.err.is_some() {
-                        return Statement::Null;
-                    }
-            
-                    let line = self.current_line();
-                    let column = self.get_line_column();
-            
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("value".to_string()),
-                            Value::String("to".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TYPE_CONVERT".to_string()),
-                            expr.convert_to_map(),
-                            type_conv.convert_to_map(),
-                        ],
-                        line,
-                        column,
-                    };
-                }
-        
                 ("SEPARATOR", "[") => {
                     self.check_for("SEPARATOR", "[");
                     self.next();
@@ -407,13 +306,146 @@ impl Parser {
                     };
                 }
 
-                ("OPERATOR", op) if op == "=" => {
+                ("SEPARATOR", ".") => {
+                    self.next();
+                    let property_token = self.token().cloned().unwrap_or_else(|| {
+                        self.raise("SyntaxError", "Expected identifier after '.'");
+                        Token("".to_string(), "".to_string())
+                    });
+        
+                    if property_token.0 != "IDENTIFIER" {
+                        self.raise("SyntaxError", &format!(
+                            "Expected identifier after '.', found '{}'", property_token.1
+                        ));
+                        return Statement::Null;
+                    }
+        
+                    self.next();
+        
+                    if let Some(next_tok) = self.token() {
+                        if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
+                            self.next();
+                            let (pos_args, named_args) = self.parse_arguments();
+                            self.check_for("SEPARATOR", ")");
+                            self.next();
+        
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+        
+                            expr = Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("object".to_string()),
+                                    Value::String("method".to_string()),
+                                    Value::String("pos_args".to_string()),
+                                    Value::String("named_args".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("METHOD_CALL".to_string()),
+                                    expr.convert_to_map(),
+                                    Value::String(property_token.1),
+                                    Value::List(pos_args),
+                                    Value::Map {
+                                        keys: named_args.iter().map(|(k, _)| k.clone()).collect(),
+                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
+                                    },
+                                ],
+                                line: self.current_line(),
+                                column: self.get_line_column(),
+                            };
+                        } else {
+                            expr = Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("object".to_string()),
+                                    Value::String("property".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("PROPERTY_ACCESS".to_string()),
+                                    expr.convert_to_map(),
+                                    Value::String(property_token.1),
+                                ],
+                                line: self.current_line(),
+                                column: self.get_line_column(),
+                            };
+                        }
+                    }
+                }
+
+                _ => break,
+            }
+        }
+
+        expr
+    }
+    
+    fn parse_expression(&mut self) -> Statement {
+        let mut expr = self.parse_primary();
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+    
+        if expr.get_type() == "TYPE" {
+            return expr;
+        }
+    
+        while let Some(tok_ref) = self.token() {
+            let tok = tok_ref.clone();
+    
+            match (tok.0.as_str(), tok.1.as_str()) {
+                ("IDENTIFIER", "as") => {
+                    self.next();
+            
+                    let type_conv = self.parse_type();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+            
+                    let line = self.current_line();
+                    let column = self.get_line_column();
+            
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                            Value::String("to".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TYPE_CONVERT".to_string()),
+                            expr.convert_to_map(),
+                            type_conv.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    };
+                }
+
+                ("OPERATOR", "=") => {
                     self.next();
                     let value = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-        
+                
+                    let expr_type = expr.get_type();
+                    if expr_type == "TUPLE" {
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("target".to_string()),
+                                Value::String("value".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("UNPACK_ASSIGN".to_string()),
+                                expr.convert_to_map(),
+                                value.convert_to_map(),
+                            ],
+                            line: self.current_line(),
+                            column: self.get_line_column(),
+                        };
+                    }
+                    
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -428,8 +460,8 @@ impl Parser {
                         line: self.current_line(),
                         column: self.get_line_column(),
                     };
-                }
-        
+                }                
+
                 ("OPERATOR", op) if op != "|" => {
                     let operator = tok.1.clone();
                     self.next();
@@ -437,7 +469,7 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-        
+    
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -455,7 +487,7 @@ impl Parser {
                         column: self.get_line_column(),
                     };
                 }
-        
+
                 _ => break,
             }
         }
@@ -467,7 +499,7 @@ impl Parser {
         let mut line = self.current_line();
         let mut column = self.get_line_column();
 
-        match self.token().cloned() {
+        let expr = match self.token().cloned() {
             Some(token) => match token.0.as_str() {
                 "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_str()) => {
                     self.parse_type()
@@ -1447,7 +1479,9 @@ impl Parser {
                 self.raise("SyntaxError", "Expected expression");
                 Statement::Null
             }
-        }
+        };
+        
+        self.parse_postfix(expr)
     }
 
     fn parse_type(&mut self) -> Statement {
