@@ -65,6 +65,10 @@ impl Statement {
             },
         }
     }
+    pub fn get_value(&self, key: &str) -> Option<Value> {
+        let map = self.convert_to_hashmap();
+        map.get(&Value::String(key.to_string())).cloned()
+    }    
     pub fn get_type(&self) -> String {
         let map = self.convert_to_hashmap();
         match map.get(&Value::String("type".to_string())) {

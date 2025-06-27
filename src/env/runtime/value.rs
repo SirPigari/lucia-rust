@@ -9,6 +9,7 @@ use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
 use std::collections::HashMap;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -25,7 +26,7 @@ pub enum Value {
     List(Vec<Value>),
     Bytes(Vec<u8>),
     Function(Function),
-    Object(Object),
+    Module(Object, PathBuf),
     Error(&'static str, &'static str, Option<Error>),
 }
 
@@ -60,7 +61,7 @@ impl Serialize for Value {
             Value::Function(_) => {
                 serializer.serialize_str("Function(opaque)")
             }
-            Value::Object(_) => {
+            Value::Module(..) => {
                 serializer.serialize_str("Object(opaque)")
             }
             Value::Error(kind, msg, _) => {
@@ -113,7 +114,7 @@ impl Hash for Value {
                 func.get_return_type().hash(state);
             }
 
-            Value::Object(obj) => {
+            Value::Module(obj, path) => {
                 obj.name().hash(state);
                 if let Some(props) = obj.get_properties() {
                     for var in props.values() {
@@ -121,6 +122,7 @@ impl Hash for Value {
                     }
                 }                
                 obj.get_parameters().hash(state);
+                path.to_str().unwrap_or("").hash(state);
             }
 
             Value::Error(err_type, err_msg, referr) => {
@@ -192,6 +194,35 @@ impl Value {
             _ => Statement::Null,
         }
     }
+    pub fn from_json(val: &serde_json::Value) -> Self {
+        match val {
+            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Bool(b) => Value::Boolean(*b),
+            serde_json::Value::Number(num) => {
+                if let Some(i) = num.as_i64() {
+                    Value::Int(i.into())
+                } else if let Some(f) = num.as_f64() {
+                    Value::Float(f.into())
+                } else {
+                    Value::Null
+                }
+            }
+            serde_json::Value::String(s) => Value::String(s.clone()),
+            serde_json::Value::Array(arr) => {
+                let vals = arr.iter().map(Value::from_json).collect();
+                Value::List(vals)
+            }
+            serde_json::Value::Object(obj) => {
+                let keys = obj.keys()
+                    .map(|k| Value::String(k.clone()))
+                    .collect::<Vec<_>>();
+                let values = obj.values()
+                    .map(Value::from_json)
+                    .collect::<Vec<_>>();
+                Value::Map { keys, values }
+            }
+        }
+    }
     pub fn is_iterable(&self) -> bool {
         match self {
             Value::List(_) | Value::Map { .. } => true,
@@ -236,7 +267,7 @@ impl Value {
             Value::Tuple(_) => "tuple",
             Value::Bytes(_) => "bytes",
             Value::Function(_) => "function",
-            Value::Object(obj) => to_static(obj.name().to_string()),
+            Value::Module(obj, _) => to_static(obj.name().to_string()),
             Value::Error(..) => "error",
         }
     }
@@ -252,7 +283,7 @@ impl Value {
             Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(func) => "function".to_string(),
-            Value::Object(obj) => obj.name().to_string(),
+            Value::Module(obj, _) => obj.name().to_string(),
             Value::Error(err_type, _, _) => "error".to_string(),
         }
     }
@@ -267,7 +298,7 @@ impl Value {
             Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Function(_) => true,
-            Value::Object(_) => true,
+            Value::Module(..) => true,
             Value::Error(_, _, _) => true,
             Value::Null => false,
         }
@@ -309,7 +340,7 @@ impl Value {
                 }
             }
             Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
-            Value::Object(obj) => format!("<object '{}' at {:p}>", obj.name(), obj.ptr()),
+            Value::Module(obj, _) => format!("<object '{}' at {:p}>", obj.name(), obj.ptr()),
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
@@ -338,7 +369,7 @@ impl Value {
                 Some(description.into_bytes())
             }
 
-            Value::Object(obj) => {
+            Value::Module(obj, _) => {
                 let description = format!("<object '{}' at {:p}>", obj.name(), obj.ptr());
                 Some(description.into_bytes())
             }

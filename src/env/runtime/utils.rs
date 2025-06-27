@@ -165,7 +165,7 @@ pub fn format_value(value: &Value) -> String {
             format!("<function '{}' at {:p}>", func.get_name(), func.ptr())
         }
         
-        Value::Object(obj) => {
+        Value::Module(obj, _) => {
             format!("<object '{}' at {:p}>", obj.name(), obj.ptr())
         }
 
@@ -185,6 +185,9 @@ pub fn find_closest_match<'a>(target: &str, options: &'a [String]) -> Option<&'a
     let mut closest: Option<(&str, usize)> = None;
 
     for opt in options {
+        if opt == "_" {
+            continue;
+        }
         let dist = levenshtein_distance(target, opt);
         if closest.is_none() || dist < closest.unwrap().1 {
             closest = Some((opt.as_str(), dist));
@@ -208,12 +211,16 @@ pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
 
 pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
-    if config.debug {
-        let single_line_message = message.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t").replace('\0', "\\0").replace('\x1b', "\\e");
+    if config.debug && (config.debug_mode == "full" || config.debug_mode == "normal") {
+        let single_line_message = message
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+            .replace('\0', "\\0")
+            .replace('\x1b', "\\e");
         print_colored(&single_line_message, &config.color_scheme.debug, Some(use_colors));
     }
 }
-
 
 pub fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -892,6 +899,22 @@ pub fn check_version(current: &str, required: &str) -> bool {
     }
 }
 
+pub fn fix_path(raw_path: String) -> String {
+    let path = raw_path.trim();
+    if path.is_empty() {
+        return String::new();
+    }
+    if path.starts_with('/') {
+        return path.to_string();
+    }
+    if path.starts_with("./") {
+        return path[2..].to_string();
+    }
+    if path.starts_with(r"\\?\") {
+        return path[4..].to_string();
+    }
+    Regex::new(r"\\").unwrap().replace_all(&path, "/").to_string()
+}
 
 
 pub const NULL: Value = Value::Null;

@@ -1,0 +1,9 @@
+{
+    "name": "requests",
+    "version": "0.11.14",
+    "required_lucia_version": "^2.0.0",
+    "description": "This module provides HTTP request functionality.",
+    "config": {
+        "allow_fetch": true
+    }
+}

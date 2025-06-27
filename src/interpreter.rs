@@ -1,5 +1,5 @@
 use std::collections::{HashMap, BTreeMap, HashSet};
-use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::runtime::config::{Config, ColorScheme, get_from_config};
 use crate::env::runtime::utils::{
     print_colored,
     hex_to_ansi,
@@ -22,10 +22,12 @@ use crate::env::runtime::utils::{
     special_function_meta,
     deep_insert,
     deep_get,
-    check_version
+    check_version,
+    fix_path,
 };
 use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
+use crate::env::runtime::build::VERSION;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
@@ -210,7 +212,7 @@ impl Interpreter {
         types_mapping.insert("function", "function");
         types_mapping.insert("bytes", "bytes");
         for obj in self.variables.values() {
-            if let Value::Object(obj) = &obj.value {
+            if let Value::Module(obj, _) = &obj.value {
                 let name = obj.name();
                 types_mapping.insert(&name, "object");
             }
@@ -953,16 +955,140 @@ impl Interpreter {
     }
 
     fn handle_unpack_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let target_opt = statement.get(&Value::String("target".to_string())).unwrap_or_else(|| {
-            self.raise("RuntimeError", "Missing 'target' in unpack assignment");
+        let targets_opt = statement.get(&Value::String("targets".to_string())).unwrap_or_else(|| {
+            self.raise("RuntimeError", "Missing 'targets' in unpack assignment");
             &NULL
         });
         let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or_else(|| {
             self.raise("RuntimeError", "Missing 'value' in unpack assignment");
             &NULL
         });
-        self.raise("NotImplemented", "Unpack assignment is not implemented yet");
-        NULL
+
+        if self.err.is_some() {
+            return NULL;
+        }
+        
+        let value = self.evaluate(value_opt.convert_to_statement());
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let targets = match targets_opt {
+            Value::List(target_list) => target_list,
+            _ => {
+                self.raise("RuntimeError", "Unpack assignment targets expected to be a list");
+                return NULL;
+            }
+        };
+
+        let value_list: Vec<Value> = match value {
+            Value::List(target_list) => {
+                if target_list.is_empty() {
+                    self.raise("SyntaxError", "Unpack assignment target cannot be an empty list");
+                    return NULL;
+                }
+                target_list.clone()
+            },
+            Value::Tuple(target_tuple) => {
+                if target_tuple.is_empty() {
+                    self.raise("SyntaxError", "Unpack assignment target cannot be an empty tuple");
+                    return NULL;
+                }
+                target_tuple.clone()
+            },
+            Value::String(target_str) => {
+                if target_str.is_empty() {
+                    self.raise("SyntaxError", "Unpack assignment target cannot be an empty string");
+                    return NULL;
+                }
+                vec![Value::String(target_str.clone())]
+            },
+            Value::Map { keys, values } => {
+                if keys.is_empty() || values.is_empty() {
+                    self.raise("SyntaxError", "Unpack assignment target cannot be an empty map");
+                    return NULL;
+                }
+                keys.iter()
+                    .cloned()
+                    .zip(values.iter().cloned())
+                    .map(|(k, v)| Value::Map {
+                        keys: vec![k],
+                        values: vec![v],
+                    })
+                    .collect()
+            },
+            Value::Bytes(bytes) => {
+                if bytes.is_empty() {
+                    self.raise("SyntaxError", "Unpack assignment target cannot be an empty bytes");
+                    return NULL;
+                }
+                bytes
+                    .iter()
+                    .map(|b| Value::Int(Int::from_i64(*b as i64)))
+                    .collect()
+            },
+            _ => {
+                self.raise("TypeError", "Unpack assignment target must be a list, tuple, string, map or bytes");
+                return NULL;
+            }
+        };
+
+        if targets.len() != value_list.len() {
+            self.raise("ValueError", "Unpack assignment targets and value must have the same length");
+            return NULL;
+        }
+
+        let mut result_values = vec![];
+
+        for (i, target) in targets.iter().enumerate() {
+            let val = value_list[i].clone();
+    
+            match target {
+                Value::Map { keys, values } => {
+                    let mut map: HashMap<String, Value> = HashMap::new();
+                    for (k, v) in keys.iter().zip(values.iter()) {
+                        if let Value::String(key_str) = k {
+                            map.insert(key_str.clone(), v.clone());
+                        } else {
+                            self.raise("TypeError", "Invalid key in unpack target map");
+                            return NULL;
+                        }
+                    }
+    
+                    let typ = map.get("type");
+                    let name = map.get("name");
+    
+                    if typ != Some(&Value::String("VARIABLE".to_string())) {
+                        self.raise("TypeError", "Unpack target must be of type VARIABLE");
+                        return NULL;
+                    }
+    
+                    if let Some(Value::String(var_name)) = name {
+                        if let Some(var) = self.variables.get_mut(var_name) {
+                            var.set_value(val);
+                            result_values.push(var.value.clone());
+                        } else {
+                            self.raise("NameError", &format!("Variable '{}' is not defined", var_name));
+                            return NULL;
+                        }
+                    } else {
+                        self.raise("TypeError", "Missing or invalid variable name in unpack target");
+                        return NULL;
+                    }
+                }
+                _ => {
+                    self.raise("TypeError", "Unpack target must be a VARIABLE map");
+                    return NULL;
+                }
+            }
+        }
+        
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        Value::Tuple(result_values)
     }
 
     fn handle_map(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1123,7 +1249,7 @@ impl Interpreter {
             "map" => {
                 if let Value::Map { keys, values } = value {
                     Value::Map { keys: keys.clone(), values: values.clone() }
-                } else if let Value::Object(obj) = value {
+                } else if let Value::Module(obj, _) = value {
                     let mut keys = Vec::new();
                     let mut values = Vec::new();
                     for (name, var) in obj.get_properties().iter().flat_map(|map| map.iter()) {
@@ -1145,8 +1271,8 @@ impl Interpreter {
                 }
             },
             "object" => {
-                if let Value::Object(obj) = value {
-                    Value::Object(obj.clone())
+                if let Value::Module(obj, path) = value {
+                    Value::Module(obj.clone(), path.clone())
                 } else {
                     self.raise("TypeError", &format!("Cannot convert '{}' to object", value.type_name()))
                 }
@@ -1244,6 +1370,7 @@ impl Interpreter {
         }
     
         let mut properties = HashMap::new();
+        let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
     
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
             debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
@@ -1255,7 +1382,7 @@ impl Interpreter {
                 return self.raise_with_help(
                     "ImportError",
                     &format!("Module '{}' requires Lucia version '{}', but current version is '{}'", module_name, expected_lucia_version, self.config.version),
-                    &format!("Please update Lucia to the required version: '{}'", expected_lucia_version),
+                    &format!("Please update Lucia to match the required version: '{}'", expected_lucia_version),
                 );
             }            
 
@@ -1467,7 +1594,7 @@ impl Interpreter {
                 ));
             }
     
-            let module_path = resolved_module_path.unwrap();
+            module_path = resolved_module_path.unwrap();
     
             if module_path.is_file() {
                 if let Some(ext) = module_path.extension().and_then(|e| e.to_str()) {
@@ -1487,8 +1614,94 @@ impl Interpreter {
                     return self.raise("ImportError", "Module file has no extension");
                 }
             } else if module_path.is_dir() {
+                let manifest_path = module_path.join("manifest.json");
+                if manifest_path.exists() {
+                    let manifest_file = fs::File::open(&manifest_path);
+                    if let Ok(file) = manifest_file {
+                        let reader = std::io::BufReader::new(file);
+                        let manifest_json = match serde_json::from_reader::<_, serde_json::Value>(reader) {
+                            Ok(json) => json,
+                            Err(_) => {
+                                self.stack.pop();
+                                return self.raise("MalformedManifest", &format!("Manifest file '{}' is not valid JSON", fix_path(manifest_path.display().to_string())));
+                            }
+                        };
+                        
+                        let print_name = manifest_json.get("name").and_then(|v| v.as_str()).unwrap_or(&module_name);
+                        let version = manifest_json.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let required_lucia_version = manifest_json.get("required_lucia_version").and_then(|v| v.as_str()).unwrap_or(VERSION);
+                        let description = manifest_json.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                        
+                        for (field, value) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
+                            if manifest_json.get(field).is_some() && !manifest_json.get(field).unwrap().is_string() {
+                                self.stack.pop();
+                                return self.raise("MalformedManifest", &format!("Field '{}' in manifest '{}' must be a string", field, fix_path(manifest_path.display().to_string())));
+                            }
+                        }
+                
+                        if !check_version(&self.config.version, required_lucia_version) {
+                            self.stack.pop();
+                            return self.raise_with_help(
+                                "ImportError",
+                                &format!("Module '{}' requires Lucia version '{}', but current version is '{}'", print_name, required_lucia_version, self.config.version),
+                                &format!("Please update Lucia to match the required version: '{}'", required_lucia_version),
+                            );
+                        }
+                        
+                        debug_log(
+                            &format!(
+                                "<Importing module '{}', version: {}{}>",
+                                print_name,
+                                version,
+                                if description.is_empty() { "".to_string() } else { format!(", description: {}", description) }
+                            ),
+                            &self.config,
+                            Some(self.use_colors)
+                        );
+                        
+                        if let Some(deps) = manifest_json.get("dependencies").and_then(|v| v.as_object()) {
+                            for dep_name in deps.keys() {
+                                let dep_path = module_path.join(dep_name);
+                                if !dep_path.exists() {
+                                    self.stack.pop();
+                                    return self.raise("ImportError", &format!(
+                                        "Dependency '{}' listed in manifest not found in '{}'",
+                                        dep_name,
+                                        module_path.display()
+                                    ));
+                                }
+                            }
+                        }
+                
+                        if let Some(config) = manifest_json.get("config").and_then(|v| v.as_object()) {
+                            for (key, expected_json_value) in config.iter() {
+                                let expected_value = Value::from_json(expected_json_value);
+                                let actual_value = get_from_config(&self.config, key);
+                                
+                                if actual_value != expected_value {
+                                    self.stack.pop();
+                                    return self.raise("ImportError", &format!(
+                                        "Config key '{}' value mismatch. Expected: {}, Found: {}",
+                                        key,
+                                        format_value(&expected_value),
+                                        format_value(&actual_value)
+                                    ));
+                                }
+                            }
+                        }                            
+                    } else {
+                        self.stack.pop();
+                        return self.raise("MalformedManifest", &format!("Could not open manifest file '{}'", fix_path(manifest_path.display().to_string())));
+                    }
+                } else {
+                    debug_log(&format!("<Importing module '{}'>", module_name), &self.config, Some(self.use_colors));
+                }                
+                
                 let init_path_lc = module_path.join("__init__.lc");
                 let init_path_lucia = module_path.join("__init__.lucia");
+
+                let has_init = (init_path_lc.exists() && init_path_lc.is_file()) || (init_path_lucia.exists() && init_path_lucia.is_file());
+
                 if init_path_lc.exists() && init_path_lc.is_file() {
                     let props = self.get_properties_from_file(&init_path_lc);
                     if self.err.is_some() {
@@ -1517,9 +1730,13 @@ impl Interpreter {
                                         return NULL;
                                     }
                                     properties.extend(properties_result);
-                                } else if ext != "lc" && ext != "lucia" {
-                                    self.stack.pop();
-                                    return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                                } else if !has_init {
+                                    if ext != "lc" && ext != "lucia" {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                                    }
+                                } else {
+                                    continue;
                                 }
                             }
                         }
@@ -1535,7 +1752,7 @@ impl Interpreter {
     
         for (name, var) in properties.iter() {
             let category = match &var.value {
-                Value::Object(_) => "object",
+                Value::Module(..) => "object",
                 Value::Function(_) => "function",
                 _ if var.is_final() => "constant",
                 _ => "variable",
@@ -1572,7 +1789,7 @@ impl Interpreter {
         let class = Class::new(module_name.clone(), module_meta.clone());
         let object = Object::Class(class);
     
-        let module = Value::Object(object);
+        let module = Value::Module(object, PathBuf::from(module_path.clone()));
         self.variables.insert(
             alias.to_string(),
             Variable::new(alias.to_string(), module.clone(), "module".to_string(), false, true, true),
@@ -2680,10 +2897,10 @@ impl Interpreter {
             return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, format_type(&declared_type), value.type_name()));
         }
     
-        let variable = Variable::new(name.to_string(), value, declared_type.to_string(), is_static, is_public, is_final);
+        let variable = Variable::new(name.to_string(), value.clone(), declared_type.to_string(), is_static, is_public, is_final);
         self.variables.insert(name.to_string(), variable);
     
-        NULL
+        value   
     }
 
     fn handle_variable(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2996,7 +3213,7 @@ impl Interpreter {
             true,
         );
         
-        if let Value::Object(ref o) = object_value {
+        if let Value::Module(ref o, _) = object_value {
             if let Some(props) = o.get_properties() {
                 object_variable.properties = props.clone();
             }
@@ -3113,6 +3330,10 @@ impl Interpreter {
     
                 let passed_args_count = positional.len() + named_map.len();
                 let expected_args_count = metadata.parameters.len();
+
+                let mut object_value = object_variable.get_value();
+
+                let is_module = matches!(object_value, Value::Module(..));
                 
                 if expected_args_count == 0 && passed_args_count > 0 {
                     return self.raise(
@@ -3290,7 +3511,8 @@ impl Interpreter {
 
                 debug_log(
                     &format!(
-                        "<Call: {}({})>",
+                        "<Method call: {}.{}({})>",
+                        object_variable.get_name(),
                         method_name,
                         final_args
                             .iter()
@@ -3301,8 +3523,6 @@ impl Interpreter {
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
-    
-                self.stack.push((method_name.to_string(), final_args.clone(), self.variables.clone()));
 
                 let mut result = NULL;
 
@@ -3313,44 +3533,100 @@ impl Interpreter {
                         let variable = Variable::new(name.clone(), v.clone(), "any".to_string(), false, true, true);
                         (name, variable)
                     })
-                    .collect::<HashMap<String, Variable<>>>();            
+                    .collect::<HashMap<String, Variable<>>>();
             
-                if !metadata.is_native {
-                    let argv_vec = self.variables.get("argv").map(|var| {
-                        match var.get_value() {
-                            Value::List(vals) => vals.iter().filter_map(|v| {
-                                if let Value::String(s) = v {
-                                    Some(s.clone())
-                                } else {
-                                    None
-                                }
-                            }).collect(),
-                            _ => vec![],
+                if !is_module {
+                    self.stack.push((method_name.to_string(), final_args.clone(), self.variables.clone()));
+                    if !metadata.is_native {
+                        let argv_vec = self.variables.get("argv").map(|var| {
+                            match var.get_value() {
+                                Value::List(vals) => vals.iter().filter_map(|v| {
+                                    if let Value::String(s) = v {
+                                        Some(s.clone())
+                                    } else {
+                                        None
+                                    }
+                                }).collect(),
+                                _ => vec![],
+                            }
+                        }).unwrap_or_else(|| vec![]);
+                        
+                        let mut new_interpreter = Interpreter::new(
+                            self.config.clone(),
+                            self.use_colors.clone(),
+                            &self.file_path.clone(),
+                            &self.cwd.clone(),
+                            self.preprocessor_info.clone(),
+                            &argv_vec,
+                        );
+                        let mut merged_variables = self.variables.clone();
+                        merged_variables.extend(final_args_variables);
+                        new_interpreter.variables.extend(merged_variables);
+                        new_interpreter.stack = self.stack.clone();
+                        let body = func.get_body();
+                        new_interpreter.interpret(body, self.source.clone());
+                        if new_interpreter.err.is_some() {
+                            self.err = new_interpreter.err.clone();
+                            return NULL;
                         }
-                    }).unwrap_or_else(|| vec![]);
-                    
-                    let mut new_interpreter = Interpreter::new(
-                        self.config.clone(),
-                        self.use_colors.clone(),
-                        &self.file_path.clone(),
-                        &self.cwd.clone(),
-                        self.preprocessor_info.clone(),
-                        &argv_vec,
-                    );
-                    let mut merged_variables = self.variables.clone();
-                    merged_variables.extend(final_args_variables);
-                    new_interpreter.variables = merged_variables;
-                    new_interpreter.stack = self.stack.clone();
-                    let body = func.get_body();
-                    new_interpreter.interpret(body, self.source.clone());
-                    if new_interpreter.err.is_some() {
-                        self.err = new_interpreter.err.clone();
-                        return NULL;
+                        result = new_interpreter.return_value.clone();
+                        self.stack = new_interpreter.stack;
+                    } else {
+                        result = func.call(&final_args);
                     }
-                    result = new_interpreter.return_value.clone();
-                    self.stack = new_interpreter.stack;
                 } else {
-                    result = func.call(&final_args);
+                    if !metadata.is_native {
+                        let module = match object_value {
+                            Value::Module(obj, _) => obj,
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    &format!("Expected a module, but got '{}'", object_value.type_name())
+                                );
+                            }
+                        };
+                        let module_path = match &object_value {
+                            Value::Module(_, path) => path.clone(),
+                            _ => { 
+                                return self.raise(
+                                    "TypeError",
+                                    &format!("Expected a module, but got '{}'", object_variable.type_name())
+                                );
+                            }
+                        };
+                        let mut new_interpreter = Interpreter::new(
+                            self.config.clone(),
+                            self.use_colors.clone(),
+                            to_static(module_path.display().to_string()),
+                            &self.cwd.clone(),
+                            self.preprocessor_info.clone(),
+                            &vec![],
+                        );
+                        new_interpreter.variables.extend(final_args_variables);
+                        new_interpreter.stack = self.stack.clone();
+                        if let Some(props) = module.get_properties() {
+                            new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
+                        } else {
+                            self.raise(
+                                "RuntimeError",
+                                &format!("Module '{}' has no properties", module.name())
+                            );
+                        }                    
+                        let body = func.get_body();
+                        new_interpreter.interpret(body, self.source.clone());
+                        if new_interpreter.err.is_some() {
+                            self.raise_with_ref(
+                                "RuntimeError",
+                                "Error in module method call",
+                                new_interpreter.err.unwrap()
+                            );
+                            return NULL;
+                        }
+                        result = new_interpreter.return_value.clone();
+                        self.stack = new_interpreter.stack;
+                    } else {
+                        result = func.call(&final_args);
+                    }
                 }
                 self.stack.pop();
                 debug_log(
@@ -3408,7 +3684,7 @@ impl Interpreter {
             true,
         );
         
-        if let Value::Object(ref o) = object_value {
+        if let Value::Module(ref o, _) = object_value {
             if let Some(props) = o.get_properties() {
                 object_variable.properties = props.clone();
             }
@@ -4464,7 +4740,6 @@ impl Interpreter {
     
         result
     }
-    
     
     fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {

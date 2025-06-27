@@ -7,7 +7,7 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct CPU {
     regs: HashMap<String, i32>,
-    memory: HashMap<u32, i32>,
+    memory: HashMap<u32, u8>,
     pc: usize,
     program: Vec<String>,
     zero: bool,
@@ -203,8 +203,8 @@ impl CPU {
                 let addr_num = addr_val.parse::<u32>()
                     .map_err(|_| ("RuntimeError".to_string(), "Invalid memory address number in ldr".to_string()))?;
                 let val = *self.memory.get(&addr_num).unwrap_or(&0);
-                self.regs.insert(dst.to_string(), val);
-                self.set_flags(val);
+                self.regs.insert(dst.to_string(), val as i32);
+                self.set_flags(val as i32);
                 Ok(None)
             }
             ("str", [src, addr]) => {
@@ -215,7 +215,7 @@ impl CPU {
                 let addr_num = addr_val.parse::<u32>()
                     .map_err(|_| ("RuntimeError".to_string(), "Invalid memory address number in str".to_string()))?;
                 let val = self.regs.get(src).copied().unwrap_or(0);
-                self.memory.insert(addr_num, val);
+                self.memory.insert(addr_num, val as u8);
                 Ok(None)
             }
             ("cmp", [op1, op2]) => {
@@ -306,17 +306,20 @@ impl CPU {
                             return Err(("RuntimeError".to_string(), format!("Unsupported file descriptor: {}", fd)));
                         }
                     
-                        let data = self.memory.get(&(addr as u32)).ok_or((
-                            "RuntimeError".to_string(),
-                            "Invalid memory address in syscall".to_string(),
-                        ))?;
-                    
-                        if fd == 1 {
-                            print!("{}", data);
-                        } else {
-                            eprint!("{}", data);
+                        let mut output = String::new();
+                        for i in 0..len {
+                            let byte = *self.memory.get(&(addr as u32 + i as u32)).unwrap_or(&0);
+                            output.push(byte as char);
                         }
-                    
+                        
+                        match fd {
+                            1 => print!("{}", output),
+                            2 => eprint!("{}", output),
+                            _ => return Err((
+                                "RuntimeError".to_string(),
+                                format!("Unsupported file descriptor: {}", fd),
+                            )),
+                        }
                         Ok(None)
                     }
                     3 => {

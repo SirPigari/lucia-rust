@@ -24,14 +24,6 @@ pub struct Config {
     pub color_scheme: ColorScheme,
 }
 
-#[allow(non_snake_case)]
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CodeBlocks {
-    pub C: bool,
-    pub ASM: bool,
-    pub PY: bool,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ColorScheme {
     pub exception: String,
@@ -113,7 +105,6 @@ pub fn get_config_path() -> String {
         "config.json".to_string()
     }
 }
-
 
 pub fn get_config() -> Result<Config, String> {
     let path = get_config_path();

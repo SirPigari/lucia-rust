@@ -7,7 +7,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{to_static};
 use crate::env::runtime::variables::Variable;
 
-use crate::env::libs::lasm::cpu::__init__::CPU;
+use crate::env::libs::lasm::cpu::CPU;
 
 use crate::{insert_native_fn, insert_native_var};
 

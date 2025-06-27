@@ -1,0 +1,28 @@
+// std/macros.lc
+// This file contains macros for the Lucia programming language's standard library.
+
+#macro assert($cond, $msg=("Assertion failed")):
+    if (!$cond):
+        throw $msg from "AssertionError"
+    end
+#endmacro
+
+#macro assert_eq($a, $b, $msg=("Values are not equal")):
+    if ($a != $b):
+        throw $msg from "AssertionError"
+    end
+#endmacro
+
+#macro assert_ne($a, $b, $msg=("Values are equal but should not be")):
+    if ($a == $b):
+        throw $msg from "AssertionError"
+    end
+#endmacro
+
+#macro unreachable($msg=("Entered unreachable code")):
+    throw $msg from "UnreachableError"
+#endmacro
+
+#macro todo($msg=("Not implemented yet")):
+    throw $msg from "NotImplemented"
+#endmacro

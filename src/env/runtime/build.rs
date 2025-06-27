@@ -3,6 +3,8 @@ use sha2::{Sha256, Digest};
 use serde::Serialize;
 use crate::env::runtime::utils::to_static;
 
+pub const VERSION: &str = "2.0.0";
+
 #[derive(Serialize)]
 pub struct BuildInfo {
     pub name: &'static str,

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::env::runtime::config::{Config, CodeBlocks, ColorScheme};
+use crate::env::runtime::config::{Config, ColorScheme};
 use crate::env::runtime::utils::{unescape_string_literal, print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
@@ -430,15 +430,16 @@ impl Parser {
                 
                     let expr_type = expr.get_type();
                     if expr_type == "TUPLE" {
+                        let targets = expr.get_value("items").unwrap_or(Value::Null);
                         return Statement::Statement {
                             keys: vec![
                                 Value::String("type".to_string()),
-                                Value::String("target".to_string()),
+                                Value::String("targets".to_string()),
                                 Value::String("value".to_string()),
                             ],
                             values: vec![
                                 Value::String("UNPACK_ASSIGN".to_string()),
-                                expr.convert_to_map(),
+                                targets.clone(),
                                 value.convert_to_map(),
                             ],
                             line: self.current_line(),
@@ -1359,7 +1360,7 @@ impl Parser {
                             return Statement::Statement {
                                 keys: vec![
                                     Value::String("type".to_string()),
-                                    Value::String("values".to_string()),
+                                    Value::String("items".to_string()),
                                 ],
                                 values: vec![
                                     Value::String("TUPLE".to_string()),
@@ -1382,7 +1383,7 @@ impl Parser {
                             let expr_item = self.parse_expression();
                             values.push(expr_item);
                         } else {
-                            break;  // break here when next token isn’t a comma
+                            break;
                         }
                     }
 
@@ -1393,7 +1394,7 @@ impl Parser {
                         Statement::Statement {
                             keys: vec![
                                 Value::String("type".to_string()),
-                                Value::String("values".to_string()),
+                                Value::String("items".to_string()),
                             ],
                             values: vec![
                                 Value::String("TUPLE".to_string()),
