@@ -960,7 +960,8 @@ impl Interpreter {
 
                 // Pointers
                 "POINTER_REF" |
-                "POINTER_DEREF" => self.handle_pointer(statement.clone()),
+                "POINTER_DEREF" |
+                "POINTER_ASSIGN" => self.handle_pointer(statement.clone()),
         
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
@@ -997,6 +998,12 @@ impl Interpreter {
     fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
         let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&Value::Null);
         let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&Value::Null);
+
+        if let pointer_type = Value::String("POINTER_ASSIGN".to_string()) {
+            if self.err.is_some() {
+                self.err = None;
+            }
+        }
     
         let value = self.evaluate(value_opt.convert_to_statement());
     
@@ -1040,7 +1047,25 @@ impl Interpreter {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
                     Value::Null
                 }
-            }            
+            }
+            
+            Value::String(t) if t == "POINTER_ASSIGN" => {
+                let left = self.evaluate(statement.get(&Value::String("left".to_string())).unwrap_or(&Value::Null).convert_to_statement());
+                let right = self.evaluate(statement.get(&Value::String("right".to_string())).unwrap_or(&Value::Null).convert_to_statement());
+                if self.err.is_some() {
+                    return Value::Null;
+                }
+                if let Value::Pointer(ptr_val) = left {
+                    let raw = ptr_val as *mut Value;
+                    unsafe {
+                        *raw = right.clone();
+                    }
+                    return Value::Pointer(ptr_val);
+                } else {
+                    self.raise("TypeError", "Expected a pointer reference for assignment");
+                    Value::Null
+                }
+            }
     
             _ => {
                 self.raise("SyntaxError", "Invalid pointer type");
@@ -2592,31 +2617,6 @@ impl Interpreter {
 
         if self.err.is_some() {
             return NULL;
-        }
-
-        let left_value = self.evaluate(left.convert_to_statement());
-        if self.err.is_some() {
-            self.err = None;
-        }
-
-        match left_value {
-            Value::Pointer(ptr) => {
-                if !self.config.allow_unsafe {
-                    return self.raise_with_help(
-                        "RuntimeError",
-                        "Pointers are not allowed in this context",
-                        "Enable pointers in the configuration if you want to use them.",
-                    );
-                }
-
-                let ptr = ptr as *mut Value;
-        
-                unsafe {
-                    *ptr = right_value.clone();
-                }
-                return Value::Pointer(ptr as usize);
-            }
-            _ => {}
         }
     
         match left_type.as_str() {

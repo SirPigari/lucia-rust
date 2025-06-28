@@ -1,0 +1,20 @@
+#include <std/macros>
+
+p: &int = &10
+
+fun f(f: function[int] -> int, a: &int) -> int: f(a) end
+
+fun g(a: &int) -> int:
+    return *a
+end
+
+assert_eq!(f(g, p), 10)
+
+fun set_ptr(p: &int, v: int) -> void:
+    // def not stolen syntax again
+    *p = v
+    return
+end
+
+set_ptr(p, 20)
+assert_eq!((*p), 20)

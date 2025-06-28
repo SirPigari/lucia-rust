@@ -579,8 +579,27 @@ impl Parser {
 
                 "OPERATOR" if token.1 == "*" => {
                     self.next();
-                    let expr = self.parse_expression();
+                    let expr = self.parse_operand();
                     if self.err.is_some() { return Statement::Null; }
+                    if self.token_is("OPERATOR", "=") {
+                        self.next();
+                        let value = self.parse_expression();
+                        if self.err.is_some() { return Statement::Null; }
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("left".to_string()),
+                                Value::String("right".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("POINTER_ASSIGN".to_string()),
+                                expr.convert_to_map(),
+                                value.convert_to_map(),
+                            ],
+                            line,
+                            column,
+                        };
+                    }
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
