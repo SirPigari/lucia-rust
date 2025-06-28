@@ -68,7 +68,6 @@ impl Preprocessor {
                 i += 1;
 
                 match directive.as_str() {
-                    // macro syntax is definitely not stolen from Rust
                     "macro" => {
                         if i >= tokens.len() {
                             return Err(Error {
@@ -616,7 +615,7 @@ impl Preprocessor {
                         return Err(Error {
                             error_type: "PreprocessorError".to_string(),
                             msg: format!("Unknown preprocessor directive: {}", directive),
-                            help: Some("Valid directives are: define, undef, ifdef, ifndef, endif, alias, unalias, include, config".to_string()),
+                            help: Some("Valid directives are: define, undef, ifdef, ifndef, endif, alias, unalias, include, config, macro and endmacro".to_string()),
                             line: (0, "".to_string()),
                             column: 0,
                             file: self.file_path.clone(),
@@ -625,6 +624,8 @@ impl Preprocessor {
                     }
                 }
             } else {
+                // macro_name!(args...)
+                // definitely not stolen from Rust
                 if !skipping && i + 2 < tokens.len() {
                     if tokens[i].0 == "IDENTIFIER"
                         && tokens[i + 1] == ("OPERATOR".to_string(), "!".to_string())
@@ -698,9 +699,9 @@ impl Preprocessor {
                             let mut replacement_map: HashMap<&str, Vec<(String, String)>> = HashMap::new();
                             for (idx, (name, default)) in param_names.iter().enumerate() {
                                 let value = if idx < args_values.len() {
-                                    Some(args_values[idx].clone())  // Option<Vec<_>>
+                                    Some(args_values[idx].clone())
                                 } else {
-                                    default.clone().map(|d| vec![d])  // map Option<(String, String)> to Option<Vec<(String, String)>>
+                                    default.clone().map(|d| vec![d])
                                 };                                
                 
                                 if let Some(v) = value {
@@ -723,7 +724,7 @@ impl Preprocessor {
                 
                             while body_i < body.len() {
                                 let (ttype, tval) = &body[body_i];
-                
+                            
                                 if ttype == "OPERATOR" && tval == "$" {
                                     body_i += 1;
                                     if body_i >= body.len() {
@@ -737,36 +738,95 @@ impl Preprocessor {
                                             ref_err: None,
                                         });
                                     }
-                                    let (next_type, next_val) = &body[body_i];
-                                    if next_type != "IDENTIFIER" {
-                                        return Err(Error {
-                                            error_type: "PreprocessorError".to_string(),
-                                            msg: format!("Expected IDENTIFIER after $, got {}", next_type),
-                                            help: None,
-                                            line: (0, "".to_string()),
-                                            column: 0,
-                                            file: self.file_path.clone(),
-                                            ref_err: None,
-                                        });
-                                    }
-                                    if let Some(replacement) = replacement_map.get(next_val.as_str()) {
-                                        expanded_tokens.extend(replacement.clone());
+                            
+                                    if body[body_i] == ("OPERATOR".to_string(), "!".to_string()) {
+                                        body_i += 1;
+                                        if body_i >= body.len() {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: "Expected identifier after $!".to_string(),
+                                                help: None,
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
+                                            });
+                                        }
+                            
+                                        let (next_type, next_val) = &body[body_i];
+                                        if next_type != "IDENTIFIER" {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: format!("Expected IDENTIFIER after $!, got {}", next_type),
+                                                help: None,
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
+                                            });
+                                        }
+                            
+                                        if let Some(replacement) = replacement_map.get(next_val.as_str()) {
+                                            let joined = replacement
+                                                .iter()
+                                                .map(|(ttype, val)| {
+                                                    if ttype == "STRING" {
+                                                        format!("\"{}\"", val)
+                                                    } else {
+                                                        val.clone()
+                                                    }
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .join(" ");
+                                            expanded_tokens.push(("STRING".to_string(), format!("\"{}\"", joined)));
+                                        } else {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: format!("Unknown macro argument $!{}", next_val),
+                                                help: None,
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
+                                            });
+                                        }
+                            
                                     } else {
-                                        return Err(Error {
-                                            error_type: "PreprocessorError".to_string(),
-                                            msg: format!("Unknown macro argument ${}", next_val),
-                                            help: None,
-                                            line: (0, "".to_string()),
-                                            column: 0,
-                                            file: self.file_path.clone(),
-                                            ref_err: None,
-                                        });
+                                        // Regular $arg replacement
+                                        let (next_type, next_val) = &body[body_i];
+                                        if next_type != "IDENTIFIER" {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: format!("Expected IDENTIFIER after $, got {}", next_type),
+                                                help: None,
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
+                                            });
+                                        }
+                            
+                                        if let Some(replacement) = replacement_map.get(next_val.as_str()) {
+                                            expanded_tokens.extend(replacement.clone());
+                                        } else {
+                                            return Err(Error {
+                                                error_type: "PreprocessorError".to_string(),
+                                                msg: format!("Unknown macro argument ${}", next_val),
+                                                help: None,
+                                                line: (0, "".to_string()),
+                                                column: 0,
+                                                file: self.file_path.clone(),
+                                                ref_err: None,
+                                            });
+                                        }
                                     }
+                            
                                 } else {
                                     expanded_tokens.push((ttype.clone(), tval.clone()));
                                 }
+                            
                                 body_i += 1;
-                            }
+                            }                            
                 
                             result.extend(expanded_tokens);
                             continue;

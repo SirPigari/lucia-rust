@@ -340,7 +340,7 @@ impl Value {
                 }
             }
             Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
-            Value::Module(obj, _) => format!("<object '{}' at {:p}>", obj.name(), obj.ptr()),
+            Value::Module(obj, _) => format!("<module '{}' at {:p}>", obj.name(), obj.ptr()),
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
@@ -370,7 +370,7 @@ impl Value {
             }
 
             Value::Module(obj, _) => {
-                let description = format!("<object '{}' at {:p}>", obj.name(), obj.ptr());
+                let description = format!("<module '{}' at {:p}>", obj.name(), obj.ptr());
                 Some(description.into_bytes())
             }
     

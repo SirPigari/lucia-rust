@@ -166,7 +166,7 @@ pub fn format_value(value: &Value) -> String {
         }
         
         Value::Module(obj, _) => {
-            format!("<object '{}' at {:p}>", obj.name(), obj.ptr())
+            format!("<module '{}' at {:p}>", obj.name(), obj.ptr())
         }
 
         Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),

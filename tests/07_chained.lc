@@ -1,10 +1,17 @@
+#include <std/macros>
+
 // variables
 x: int = 7
 y: int = 42
 z: int = 137
 
-print(x.toString().toBytes())
+assert_eq!((x.toString().toBytes()), (b"7"))
 
-print((x.toString() * y).toInt() / 42)
+multiplied_str: str = x.toString() * y
+divided_int: float = multiplied_str.toInt() / 42
+assert_eq!((divided_int), 18518518518518518518518518518518518518518.5)
 
-print(z.toFloat().toInt() ^ (x / 2))
+z_int: int = z.toFloat().toInt()
+x_half: float = x / 2
+pow_result: float = z_int ^ x_half  // pow operator
+assert_eq!((pow_result), (30096915.22952864))

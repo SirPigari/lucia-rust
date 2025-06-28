@@ -40,10 +40,6 @@ fn asm(args: &HashMap<String, Value>) -> Value {
     }
 }
 
-pub fn init() -> Value {
-    Value::Null
-}
-
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
     

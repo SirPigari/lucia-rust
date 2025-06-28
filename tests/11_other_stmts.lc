@@ -1,16 +1,19 @@
 // === Setup ===
+#include <std/macros>
 a: list = [0..5]  // creates a list: [0, 1, 2, 3, 4, 5]
-
+assert_eq!(a, ([0, 1, 2, 3, 4, 5]))
 
 // === Forget ===
 
 // forgets values in the inclusive range a[2..4] => removes [2, 3, 4]
 forget a[2..4]
-print(a)  // [0, 1, 5]
+assert_eq!(a, ([0, 1, 4, 5]))
 
 // forgets the entire variable 'a' from scope
 forget a
 
+// trying to access 'a' now should throw
+assert_err!(a)
 
 // === Throw & Try ===
 
@@ -18,7 +21,7 @@ forget a
 try:
     throw "This should throw an error" from "ExpectedError"
 catch (e):
-    print(e)  // prints the error value
+    assert_eq!(e, (("ExpectedError", "This should throw an error")))
 end
 
 // try block without catch — error is caught but ignored silently
@@ -30,12 +33,15 @@ end
 try:
     0 / 0
 end catch (err_type, err_msg):
-    print(err_type, err_msg)
+    assert_eq!(err_type, "ArithmeticError")
+    assert_err!(err_msg.length > 0)
 end
 
 // try with 3-part catch: error type, message, and help
 try:
     i = 10  // 'i' is not defined, will throw an error
 end catch (err_type, err_msg, err_help):
-    print(err_type, err_msg, err_help)
+    assert_eq!(err_type, "NameError")
+    assert_err!(err_msg.length > 0)
+    assert_err!(err_help.length > 0)
 end

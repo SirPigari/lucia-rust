@@ -108,10 +108,6 @@ pub fn register() -> HashMap<String, Variable> {
     map
 }
 
-pub fn init() -> Value {
-    Value::Null
-}
-
 pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
         return Err(Error::error_with_help(

@@ -1,6 +1,7 @@
-a: str = "hello"
-print(a)
+#include <std/macros>
 
+a: str = "hello"
+print(a)  // expect: hello
 
 // f-strings
 print(f"variable 'a' is {a}")
@@ -12,3 +13,9 @@ print(b)
 // bytes
 c: bytes = b"hello"
 print(c)
+
+// assertions to verify values
+assert_eq!((a), ("hello"))
+assert_eq!((b), (r"\"))
+assert_eq!((c), (b"hello"))
+assert_eq!((f"variable 'a' is {a}"), ("variable 'a' is hello"))

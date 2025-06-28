@@ -1,25 +1,43 @@
+#include <std/macros>
+
+// this is not an example its a test file its not meant to learn from
+// see examples instead
+
 i: int = 10
 
-fun f(f: function[int] -> int, a: int): f(a) end 
-fun g(a: int) -> int: return a end
+fun f(f: function[int] -> int, a: int) -> int: f(a) end
 
-print(f(g, i))
+fun g(a: int) -> int:
+    return a
+end
+
+assert_eq!(f(g, i), 10)
 
 l: list[int] = [1, 2, 3]
-fun h(l: list[int]) -> int: return l[0] end
-print(h(l))
+fun h(l: list[int]) -> int:
+    return l[0]
+end
+
+assert_eq!(h(l), 1)
 
 m: map = {"a": 1, "b": 2}
-fun i(m: map, k: str) -> int: return m[k] end
-print(i(m, "a"))
+fun i(m: map, k: str) -> int:
+    return m[k]
+end
+
+assert_eq!(i(m, "a"), 1)
 m["c"] = 3
-print(i(m, "c"))
+assert_eq!(i(m, "c"), 3)
 
 f: float = 42.137
 f_str: str = f as str
-print(f_str)
-fun j(s: str) -> float: return s as float end
-print(j(f_str))
+assert_eq!(f_str, "42.137")
+
+fun j(s: str) -> float:
+    return s as float
+end
+
+assert_eq!(j(f_str), 42.137)
 
 t: tuple = l as tuple
-print(t[0])
+assert_eq!(t[0], 1)

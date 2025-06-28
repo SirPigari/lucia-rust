@@ -1,7 +1,55 @@
+#include <std/macros>
+
+// initial declarations and defaults
 public i: int = 10
 a: str
 b: bool
 
-print(i)
-print(a)
-print(b)
+assert_eq!(i, 10)
+assert_eq!(a, "")
+assert_eq!(b, false)
+
+// variable reassignments
+i = 42
+a = "hello"
+b = true
+
+assert_eq!(i, 42)
+assert_eq!(a, "hello")
+assert_eq!(b, true)
+
+// declare and test float
+f: float = 3.14
+assert_eq!(f, 3.14)
+f = 2.718
+assert_eq!(f, 2.718)
+
+// multiple declarations
+x: int = 5
+y: int = 7
+z: int
+
+assert_eq!(x, 5)
+assert_eq!(y, 7)
+assert_eq!(z, 0)
+
+// boolean negation and logic
+c: bool = false
+d: bool = true
+
+assert_eq!(!c, true)
+assert_eq!(c && d, false)
+assert_eq!(c || d, true)
+
+// string concatenation
+s1: str = "foo"
+s2: str = "bar"
+s3: str = s1 + s2
+
+assert_eq!(s3, "foobar")
+
+// redeclare public variable with new value
+public i: int = 100
+assert_eq!(i, 100)
+
+print("Test completed successfully")

@@ -1,59 +1,62 @@
+#include <std/macros>
+
 // arithmetic
-print("1 + 1 =", 1 + 1)
-print("1.5 + 2 =", 1.5 + 2)
-print("\"hello\" + \"world\" =", "hello" + "world")
+assert_eq!(1 + 1, 2)
+assert_eq!(1.5 + 2, 3.5)
+assert_eq!("hello" + "world", "helloworld")
 
-print("2 - 1 =", 2 - 1)
-print("5.0 - 3 =", 5.0 - 3)
-print("3 - 1.5 =", 3 - 1.5)
+assert_eq!(2 - 1, 1)
+assert_eq!(5.0 - 3, 2.0)
+assert_eq!(3 - 1.5, 1.5)
 
-print("2 * 3 =", 2 * 3)
-print("2.5 * 4 =", 2.5 * 4)
-print("\"ha\" * 3 =", "ha" * 3)
+assert_eq!(2 * 3, 6)
+assert_eq!(2.5 * 4, 10.0)
+assert_eq!("ha" * 3, "hahaha")
 
-print("6 / 2 =", 6 / 2)
-print("3.0 / 1.5 =", 3.0 / 1.5)
-print("6 / 2.5 =", 6 / 2.5)
+assert_eq!(6 / 2, 3.0)
+assert_eq!(3.0 / 1.5, 2.0)
+assert_eq!(6 / 2.5, 2.4)
 
-print("2 ^ 3 =", 2 ^ 3)
-print("4.0 ^ 2 =", 4.0 ^ 2)
-print("2 ^ 2.5 =", 2 ^ 2.5)
+assert_eq!(2 ^ 3, 8)
+assert_eq!(4.0 ^ 2, 16.0)
+assert_eq!(2 ^ 2.5, 5.656854249492381)
 
 // comparison
-print("1 == 1 =", 1 == 1)
-print("2 != 3 =", 2 != 3)
-print("3 > 2 =", 3 > 2)
-print("2 < 4 =", 2 < 4)
-print("4 >= 4 =", 4 >= 4)
-print("5 <= 5 =", 5 <= 5)
+assert!(1 == 1)
+assert!(2 != 3)
+assert!(3 > 2)
+assert!(2 < 4)
+assert!(4 >= 4)
+assert!(5 <= 5)
 
 // logical
-print("true && true =", true && true)
-print("false || true =", false || true)
-print("!true =", !true)
+assert!(true && true)
+assert!(false || true)
+assert!(!false)
 
 // membership
-print("1 in [1, 2, 3] =", 1 in [1, 2, 3])
+assert!((1 in [1, 2, 3]))
 
 // logic extensions
-print("true xor false =", true xor false)
-print("false xnor false =", false xnor false)
+assert_eq!(true xor false, true)
+assert_eq!(false xnor false, true)
 
 // aliases
-print("1 is 1 =", 1 is 1)
-print("2 isnt 3 =", 2 isnt 3)
-print("true and false =", true and false)
-print("false or true =", false or true)
+assert!(1 is 1)
+assert!(2 isnt 3)
+assert_eq!(true and false, false)
+assert_eq!(false or true, true)
 
 // nein
-print("1 nein 2 =", 1 nein 2)
+assert_eq!(1 nein 2, true)
 
 // abs
-print("|-1| =", |-1|)
-print("|1 - 2| =", |1 - 2|)
-print("|2.5 - 3.7| =", |2.5 - 3.7|)
-print("|(5 - 10) * 2| =", |(5 - 10) * 2|)
+assert_eq!(|-1|, 1)
+assert_eq!(|1 - 2|, 1)
+assert_eq!(|2.5 - 3.7|, 1.2)
+assert_eq!(|(5 - 10) * 2|, 10)
 
-// nested abs: use a space between '|' tokens to avoid '||' being parsed as the logical OR operator
-// without the space, the lexer would interpret '||' as a single token (logical OR) instead of two abs delimiters
-print("|-|-5| | =", |-|-5| |)
+// nested abs
+assert_eq!(|-|-5| |, 5)
+
+print("Test completed successfully")

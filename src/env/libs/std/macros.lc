@@ -1,5 +1,7 @@
 // std/macros.lc
 // This file contains macros for the Lucia programming language's standard library.
+import collections as _collections
+import config as _config
 
 #macro assert($cond, $msg=("Assertion failed")):
     if (!$cond):
@@ -9,12 +11,33 @@
 
 #macro assert_eq($a, $b, $msg=("Values are not equal")):
     if ($a != $b):
+        print("Expected: ", $b, ", but got: ", $a)
+        throw $msg from "AssertionError"
+    end
+#endmacro
+
+#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=("Values are not approximately equal")):
+    if (|$a - $b| > $epsilon):
+        print("Expected: ", $b, ", but got: ", $a)
         throw $msg from "AssertionError"
     end
 #endmacro
 
 #macro assert_ne($a, $b, $msg=("Values are equal but should not be")):
     if ($a == $b):
+        throw $msg from "AssertionError"
+    end
+#endmacro
+
+#macro assert_err($expr, $msg=("Expected an error but got success")):
+    // i couldnt find cleaner way sorry
+    mutable _error_occurred: bool = false
+    try:
+        $expr
+    catch (_err):
+        _error_occurred = true
+    end
+    if (!_error_occurred):
         throw $msg from "AssertionError"
     end
 #endmacro
@@ -26,3 +49,15 @@
 #macro todo($msg=("Not implemented yet")):
     throw $msg from "NotImplemented"
 #endmacro
+
+#macro dbg($value):
+    // $!value means the stringified version of the value tokens
+    print($!value, "=", _collections.format_value($value))
+#endmacro
+
+#macro dbglog($value):
+    styledprint($value, fg_color=_config.color_scheme["debug"])
+#endmacro
+
+// return null
+null

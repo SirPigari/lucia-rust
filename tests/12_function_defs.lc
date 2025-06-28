@@ -1,3 +1,5 @@
+#include <std/macros>
+
 public static final fun voidFunction() -> void:
     print("This is a void function")
     return  // null
@@ -57,16 +59,16 @@ private static mutable fun lowerOrderFunction(value: int) -> int:
     return value * 2
 end
 
+// === Assertions ===
+
 voidFunction()
-intFunction()
-stringFunction()
-boolFunction()
-listFunction()
+assert_eq!(intFunction(), 42)
+assert_eq!(stringFunction(), "Hello, World!")
+assert_eq!(boolFunction(), true)
+assert_eq!(listFunction(), ([1, 2, 3, 4, 5]))
 parameterFunction(5, "test")
 defaultParameterFunction()
-combinedFunction(15)
-combinedFunction(25, "override")
-recursiveResult: int = recursiveFunction(5)
-print("Result of recursive function:", recursiveResult)
-higherOrderResult: int = higherOrderFunction(lowerOrderFunction, value=10)
-print("Result of higher-order function:", higherOrderResult)
+assert_eq!(combinedFunction(15), "Combined: 15, default")
+assert_eq!(combinedFunction(25, "override"), "Combined: 25, override")
+assert_eq!(recursiveFunction(5), 15)
+assert_eq!(higherOrderFunction(lowerOrderFunction, 10), 20)

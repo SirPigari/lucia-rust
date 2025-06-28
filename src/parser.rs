@@ -167,6 +167,10 @@ impl Parser {
             return 0;
         }
     
+        while !self.source.is_char_boundary(byte_index) && byte_index > 0 {
+            byte_index -= 1;
+        }
+    
         self.source[..byte_index].chars().filter(|&c| c == '\n').count() + 1
     }
     
@@ -185,6 +189,10 @@ impl Parser {
             return 0;
         }
     
+        while !self.source.is_char_boundary(byte_index) && byte_index > 0 {
+            byte_index -= 1;
+        }
+    
         let mut line_start = 0;
     
         for (i, ch) in self.source[..byte_index].char_indices().rev() {
@@ -196,7 +204,6 @@ impl Parser {
     
         self.source[line_start..byte_index].chars().count()
     }
-    
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
@@ -235,18 +242,18 @@ impl Parser {
                 ("SEPARATOR", "[") => {
                     self.check_for("SEPARATOR", "[");
                     self.next();
-        
+                
                     let mut start_expr = None;
                     let mut end_expr = None;
-        
+                
                     let next_tok = self.token().cloned();
-        
+                
                     if let Some(t) = next_tok {
                         if t.0 == "SEPARATOR" && t.1 == "]" {
                             self.raise("SyntaxError", "Empty index access '[]' is not allowed");
                             return Statement::Null;
                         }
-        
+                
                         if t.0 == "SEPARATOR" && t.1 == ".." {
                             self.next();
                             if let Some(t2) = self.token().cloned() {
@@ -256,11 +263,11 @@ impl Parser {
                             }
                         } else {
                             start_expr = Some(self.parse_expression());
-        
+                
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
-        
+                
                             if let Some(t2) = self.token().cloned() {
                                 if t2.0 == "SEPARATOR" && t2.1 == ".." {
                                     self.next();
@@ -269,14 +276,16 @@ impl Parser {
                                             end_expr = Some(self.parse_expression());
                                         }
                                     }
+                                } else if t2.0 == "SEPARATOR" && t2.1 == "]" {
+                                    end_expr = start_expr.clone();
                                 }
                             }
                         }
                     }
-        
+                
                     self.check_for("SEPARATOR", "]");
                     self.next();
-        
+                
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),

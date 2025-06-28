@@ -1,15 +1,21 @@
+#include <std/macros>
+
 import math
 
 try:
     import a_non_existent_module
 catch (e):
+    assert_err!(e.length > 0)
     print(e)
 end
 
 import "04_variables.lc" from "." as vars
 
+assert_eq!(vars.i, 100)
 print(vars.i)
 
 import math as m
+assert_eq!(m.sqrt(16), 4.0)
+assert_approx_eq!(m.PI, 3.141592653589793)
 print(m.sqrt(16))
 print(m.PI)

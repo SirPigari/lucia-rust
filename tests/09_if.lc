@@ -1,55 +1,66 @@
 // 1. Just if
 if (1):
     print(1)
+else:
+    throw "Unexpected else in test 1" from "TestError"
 end
 
 // 2. If with else
-if (2):
-    print(2)
+if (0):
+    throw "Unexpected if branch in test 2" from "TestError"
 else:
     print("else for 2")
 end
 
 // 3. If with else if
-if (3):
-    print(3)
-else if (4):
+if (0):
+    throw "Unexpected if branch in test 3" from "TestError"
+else if (1):
     print(4)
+else:
+    throw "Unexpected else branch in test 3" from "TestError"
 end
 
 // 4. If with else if and else
-if (5):
-    print(5)
-else if (6):
-    print(6)
+if (0):
+    throw "Unexpected if branch in test 4" from "TestError"
+else if (0):
+    throw "Unexpected else if branch in test 4" from "TestError"
 else:
     print("else for 5 and 6")
 end
 
 // 5. If with multiple else ifs
-if (7):
-    print(7)
-else if (8):
-    print(8)
-else if (9):
+if (0):
+    throw "Unexpected if branch in test 5" from "TestError"
+else if (0):
+    throw "Unexpected first else if branch in test 5" from "TestError"
+else if (1):
     print(9)
+else:
+    throw "Unexpected else branch in test 5" from "TestError"
 end
 
 // 6. If with multiple else ifs and else
-if (10):
-    print(10)
-else if (11):
-    print(11)
-else if (12):
-    print(12)
+if (0):
+    throw "Unexpected if branch in test 6" from "TestError"
+else if (0):
+    throw "Unexpected first else if branch in test 6" from "TestError"
+else if (0):
+    throw "Unexpected second else if branch in test 6" from "TestError"
 else:
     print("else for 10, 11, 12")
 end
 
 // 7. Two separate if statements (not chained)
-if (13):
+if (1):
     print(13)
+else:
+    throw "Unexpected else branch in test 7a" from "TestError"
 end
-if (14):
+
+if (0):
+    throw "Unexpected if branch in test 7b" from "TestError"
+else:
     print(14)
 end

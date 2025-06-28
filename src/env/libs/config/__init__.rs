@@ -159,7 +159,3 @@ pub fn register(config: Arc<Config>) -> HashMap<String, Variable> {
 
     map
 }
-
-pub fn init() -> Value {
-    Value::Null
-}

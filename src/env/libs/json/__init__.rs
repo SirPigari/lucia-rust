@@ -166,7 +166,3 @@ pub fn register() -> HashMap<String, Variable> {
 
     map
 }
-
-pub fn init() -> Value {
-    Value::Null
-}

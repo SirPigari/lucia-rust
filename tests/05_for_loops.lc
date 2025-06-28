@@ -1,8 +1,30 @@
-for (i in [0..10]):
-    print(i)
-end
+#include <std/macros>
+
+outputs: list = []
 
 for (i in [0..10]):
-    print(i % 2)
-    print(f"hello number {i}")
+    outputs = outputs + [i.toString()]
 end
+assert_eq!((outputs), ([ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" ]))
+
+outputs = []
+for (i in [0..10]):
+    outputs = outputs + [(i % 2).toString()]
+    outputs = outputs + [f"hello number {i}"]
+end
+
+assert_eq!(outputs, ([
+    "0", "hello number 0",
+    "1", "hello number 1",
+    "0", "hello number 2",
+    "1", "hello number 3",
+    "0", "hello number 4",
+    "1", "hello number 5",
+    "0", "hello number 6",
+    "1", "hello number 7",
+    "0", "hello number 8",
+    "1", "hello number 9",
+    "0", "hello number 10"
+]))
+
+print("Test completed successfully")

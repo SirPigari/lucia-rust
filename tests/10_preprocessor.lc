@@ -1,26 +1,32 @@
 #include "04_variables.lc"
+#include <std/macros>
 
 // 'i' is defined in the included file "04_variables.lc"
-print(i)
+assert_eq!(i, 100)
 
 #define PI 3.14
 #define HELLO "world"
 
 #alias add sum
-print(add(2, 3))
+// macros dont support aliasing or defined values
+sum_output: float = sum(2, 3)
+assert_eq!(sum_output, 5.0)
 #unalias add
 
 // aliasing 1 to 2
 #alias 1 2
-print(1)
+i: int = 1
+assert_eq!(i, 2)
 #unalias 1
 
 #ifdef PI
-print(PI)
+    pi: float = PI
+    assert_eq!(pi, 3.14)
 #endif
 
 #ifndef UNDEFINED
-print(HELLO)
+    hello: str = HELLO
+    assert_eq!(hello, "world")
 #endif
 
-print(sum(2, 3))
+assert_eq!(sum(2, 3), 5.0)

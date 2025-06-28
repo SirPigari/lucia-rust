@@ -902,7 +902,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 .canonicalize()
                 .unwrap_or_else(|_| PathBuf::from("."))
         };
-        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor), argv);
+        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor), argv);
         let out: Value = match interpreter.interpret(statements, file_content.clone()) {
             Ok(out) => out,
             Err(error) => {
@@ -927,7 +927,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         config.version, 
         hex_to_ansi("reset", Some(use_colors))
     );
-    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.clone(), config_path.clone(), !disable_preprocessor), argv);
+    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor), argv);
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
         config_path.clone(),
