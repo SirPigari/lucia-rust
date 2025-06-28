@@ -208,7 +208,6 @@ impl Interpreter {
         types_mapping.insert("float", "float");
         types_mapping.insert("method", "function");
         types_mapping.insert("int", "int");
-        types_mapping.insert("float", "float");
         types_mapping.insert("bool", "bool");
         types_mapping.insert("str", "str");
         types_mapping.insert("list", "list");
@@ -216,13 +215,25 @@ impl Interpreter {
         types_mapping.insert("function", "function");
         types_mapping.insert("bytes", "bytes");
         types_mapping.insert("auto", "any");
+    
         for obj in self.variables.values() {
             if let Value::Module(obj, _) = &obj.value {
-                let name = obj.name();
-                types_mapping.insert(&name, "object");
+                types_mapping.insert(&obj.name(), "object");
             }
         }
-
+    
+        fn normalize(t: &str) -> &str {
+            if t.starts_with('&') {
+                &t[1..]
+            } else {
+                t
+            }
+        }
+    
+        fn is_ref_type(t: &str) -> bool {
+            t.starts_with('&')
+        }
+    
         fn is_type_equal(type_: Value, expected: Value) -> bool {
             match (type_, expected) {
                 (Value::String(t), Value::String(e)) => {
@@ -232,55 +243,63 @@ impl Interpreter {
                     if t == "null" && e == "bool" {
                         return true;
                     }
-                    e == t
-                },
+                    t == e
+                }
                 _ => false,
             }
         }
-
+    
         if let Value::String(type_str) = expected {
-            let type_type = value.type_name();
-            let type_type_str = type_type.as_str();
-            let type_str_str = type_str.as_str();
-
-            let normalized_type = types_mapping.get(type_type_str).unwrap_or(&type_type_str);
-            let expected_type = type_str.as_str();
-        
-            let normalized_type = *normalized_type;
-            let expected_type = expected_type;
-        
-            if normalized_type == "bool" && expected_type == "null" {
+            let actual_type_str = value.type_name();
+    
+            let normalized_actual = types_mapping
+                .get(actual_type_str.as_str())
+                .map_or(actual_type_str.as_str(), |v| *v);
+            let expected_str = type_str.as_str();
+    
+            let is_ref_expected = is_ref_type(expected_str);
+            let is_ref_actual = is_ref_type(normalized_actual);
+    
+            let expected_base = normalize(expected_str);
+            let actual_base = normalize(normalized_actual);
+    
+            if expected_base == "any" || actual_base == "any" {
                 return true;
             }
-        
-            if expected_type == "any" || normalized_type == "any" {
-                return true;
-            }
-        
-            if !valid_types.contains(&normalized_type) || !valid_types.contains(&expected_type) {
-                return self._handle_invalid_type(expected_type, valid_types);
-            }
-        
-            if normalized_type == "int" && expected_type == "float" {
-                return true;
-            }
-        
-            if normalized_type != expected_type {
+    
+            if is_ref_expected != is_ref_actual {
                 if error {
                     self.raise(
                         "TypeError",
-                        &format!("Expected type '{}', but got '{}'", expected_type, normalized_type),
+                        &format!("Expected type '{}', but got '{}'", expected_str, normalized_actual),
                     );
-                    return false;
-                } else {
-                    return false;
                 }
+                return false;
             }
-        
+    
+            if !valid_types.contains(&expected_base) || !valid_types.contains(&actual_base) {
+                return self._handle_invalid_type(expected_base, valid_types);
+            }
+    
+            if actual_base == "int" && expected_base == "float" && !is_ref_expected {
+                return true;
+            }
+    
+            if actual_base != expected_base {
+                if error {
+                    self.raise(
+                        "TypeError",
+                        &format!("Expected type '{}', but got '{}'", expected_str, normalized_actual),
+                    );
+                }
+                return false;
+            }
+    
             return true;
         } else if let Value::Map { keys, values } = expected {
-            let expected_hashmap: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-            
+            let expected_hashmap: HashMap<_, _> =
+                keys.iter().cloned().zip(values.iter().cloned()).collect();
+    
             let type_kind = expected_hashmap.get(&Value::String("type_kind".to_string()));
             match type_kind {
                 Some(Value::String(kind)) if kind == "function" => {
@@ -291,29 +310,35 @@ impl Interpreter {
                         }
                         let elements = expected_hashmap.get(&Value::String("elements".to_string()));
                         let return_type = expected_hashmap.get(&Value::String("return_type".to_string()));
-                        let variadic = expected_hashmap.get(&Value::String("variadic".to_string()));
-                        let variadic_type = expected_hashmap.get(&Value::String("variadic_type".to_string()));
-
+    
                         let mut status = true;
-
+    
                         let elements_vec = match elements {
                             Some(Value::List(e)) => e,
-                            _ => {self.raise("TypeError", "Expected a list for 'elements' in function type"); return false; },
+                            _ => {
+                                self.raise("TypeError", "Expected a list for 'elements' in function type");
+                                return false;
+                            }
                         };
-
+    
                         if elements_vec.len() == 1 {
                             let element_type = elements_vec.get(0).unwrap();
                             for param in metadata.parameters.iter() {
                                 if !is_type_equal(param.ty.clone(), element_type.clone()) {
                                     if error {
-                                        self.raise("TypeError", &format!("Parameter '{}' expected type '{}', got '{}'", param.name, element_type.to_string(), param.ty.to_string()));
+                                        self.raise("TypeError", &format!(
+                                            "Parameter '{}' expected type '{}', got '{}'",
+                                            param.name,
+                                            element_type.to_string(),
+                                            param.ty.to_string()
+                                        ));
                                     }
                                     status = false;
                                 }
                             }
                             status = true;
                         }
-
+    
                         if let Some(expected_ret_type) = return_type {
                             let matches = match metadata.return_type.clone() {
                                 Value::String(s) => {
@@ -322,7 +347,7 @@ impl Interpreter {
                                 }
                                 _ => self.check_type(expected_ret_type, &metadata.return_type, false),
                             };
-                        
+    
                             if !matches {
                                 if error {
                                     self.raise(
@@ -342,7 +367,8 @@ impl Interpreter {
                                 self.raise("TypeError", "Missing 'return_type' in expected function type");
                             }
                             status = false;
-                        }                     
+                        }
+    
                         return status;
                     } else {
                         if error {
@@ -359,11 +385,16 @@ impl Interpreter {
                 _ => {}
             }
         }
+    
         if error {
-            self.raise("TypeError", &format!("Expected type '{}', got '{}'", expected.to_string(), value.to_string()));
+            self.raise("TypeError", &format!(
+                "Expected type '{}', got '{}'",
+                expected.to_string(),
+                value.to_string()
+            ));
         }
         false
-    }
+    }    
 
     pub fn exit_with_code(&mut self, code: Value) -> Value {
         self.is_returning = true;
@@ -926,6 +957,10 @@ impl Interpreter {
                 // Types
                 "TYPE" => self.handle_type(statement.clone()),
                 "TYPE_CONVERT" => self.handle_type_conversion(statement.clone()),
+
+                // Pointers
+                "POINTER_REF" |
+                "POINTER_DEREF" => self.handle_pointer(statement.clone()),
         
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
@@ -957,6 +992,61 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&Value::Null);
+        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&Value::Null);
+    
+        let value = self.evaluate(value_opt.convert_to_statement());
+    
+        if !self.config.allow_unsafe {
+            return self.raise_with_help(
+                "PermissionError",
+                "Pointer operations are not allowed in this context",
+                "Enable 'allow_unsafe' in the configuration to use pointers."
+            );
+        }
+    
+        if self.err.is_some() {
+            return Value::Null;
+        }
+    
+        match pointer_type {
+            Value::String(t) if t == "POINTER_REF" => {
+                if self.err.is_some() {
+                    return Value::Null;
+                }
+            
+                let rc = std::rc::Rc::new(value);
+                let ptr = std::rc::Rc::into_raw(rc) as usize;
+            
+                if ptr == 0 {
+                    self.raise("MemoryError", "Failed to create pointer reference");
+                    return Value::Null;
+                }
+            
+                Value::Pointer(ptr)
+            }            
+    
+            Value::String(t) if t == "POINTER_DEREF" => {
+                if let Value::Pointer(ptr_val) = value {
+                    let raw = ptr_val as *const Value;
+                    let recovered_rc = unsafe { std::rc::Rc::from_raw(raw) };
+                    let clone = (*recovered_rc).clone();
+                    std::mem::forget(recovered_rc);
+                    clone
+                } else {
+                    self.raise("TypeError", "Expected a pointer reference for dereferencing");
+                    Value::Null
+                }
+            }            
+    
+            _ => {
+                self.raise("SyntaxError", "Invalid pointer type");
+                Value::Null
+            }
+        }
     }
 
     fn handle_unpack_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2191,7 +2281,7 @@ impl Interpreter {
                 let type_name = statement.get(&Value::String("value".to_string())).unwrap_or(&default_type);
         
                 if let Value::String(s) = type_name {
-                    if VALID_TYPES.contains(&s.as_str()) {
+                    if VALID_TYPES.contains(&s.trim_start_matches("&")) {
                         return Value::String(s.clone());
                     }
         
@@ -2499,6 +2589,35 @@ impl Interpreter {
             Some(Value::String(t)) => t,
             _ => return self.raise("RuntimeError", "Missing or invalid 'type' in assignment left"),
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let left_value = self.evaluate(left.convert_to_statement());
+        if self.err.is_some() {
+            self.err = None;
+        }
+
+        match left_value {
+            Value::Pointer(ptr) => {
+                if !self.config.allow_unsafe {
+                    return self.raise_with_help(
+                        "RuntimeError",
+                        "Pointers are not allowed in this context",
+                        "Enable pointers in the configuration if you want to use them.",
+                    );
+                }
+
+                let ptr = ptr as *mut Value;
+        
+                unsafe {
+                    *ptr = right_value.clone();
+                }
+                return Value::Pointer(ptr as usize);
+            }
+            _ => {}
+        }
     
         match left_type.as_str() {
             "VARIABLE" => {
@@ -2772,7 +2891,6 @@ impl Interpreter {
         if let Value::Map { keys, values } = &object_val {
             match (start_eval_opt.as_ref(), end_eval_opt.as_ref()) {
                 (Some(start_val), Some(end_val)) if start_val == end_val => {
-                    // single key lookup
                     for (k, v) in keys.iter().zip(values.iter()) {
                         if k == start_val {
                             return v.clone();
@@ -2781,11 +2899,9 @@ impl Interpreter {
                     return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(start_val)));
                 }
                 (Some(_), Some(_)) => {
-                    // start != end, slicing not allowed for maps
                     return self.raise("TypeError", "Slicing maps is not supported");
                 }
                 (Some(start_val), None) => {
-                    // single key lookup with only start_val
                     for (k, v) in keys.iter().zip(values.iter()) {
                         if k == start_val {
                             return v.clone();
@@ -4293,27 +4409,31 @@ impl Interpreter {
             Some(val_left) => self.evaluate(val_left.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'left' key in the statement.");
-                return NULL;
+                return Value::Null;
             }
         };
     
         if self.err.is_some() {
-            return NULL;
+            return Value::Null;
         }
     
         let right = match statement.get(&Value::String("right".to_string())) {
             Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
-                return NULL;
+                return Value::Null;
             }
         };
     
         let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(s)) => s,
-            _ => return self.raise("TypeError", "Expected a string for operator"),
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                self.raise("TypeError", "Expected a string for operator");
+                return Value::Null;
+            }
         };
     
+        // convert bools to floats (like your original logic)
         let left = if let Value::Boolean(b) = left {
             Value::Float(if b { 1.0.into() } else { 0.0.into() })
         } else {
@@ -4324,10 +4444,52 @@ impl Interpreter {
         } else {
             right
         };
-
+    
         if self.err.is_some() {
-            return NULL;
+            return Value::Null;
         }
+    
+        // dereference pointers if both are pointers, else deref one if only one is pointer
+        let (left, right) = match (&left, &right) {
+            (Value::Pointer(lp), Value::Pointer(rp)) => {
+                let l_val = unsafe {
+                    let raw = *lp as *const Value;
+                    let rc = std::rc::Rc::from_raw(raw);
+                    let val = (*rc).clone();
+                    std::mem::forget(rc);
+                    val
+                };
+                let r_val = unsafe {
+                    let raw = *rp as *const Value;
+                    let rc = std::rc::Rc::from_raw(raw);
+                    let val = (*rc).clone();
+                    std::mem::forget(rc);
+                    val
+                };
+                (l_val, r_val)
+            }
+            (Value::Pointer(lp), r) => {
+                let l_val = unsafe {
+                    let raw = *lp as *const Value;
+                    let rc = std::rc::Rc::from_raw(raw);
+                    let val = (*rc).clone();
+                    std::mem::forget(rc);
+                    val
+                };
+                (l_val, r.clone())
+            }
+            (l, Value::Pointer(rp)) => {
+                let r_val = unsafe {
+                    let raw = *rp as *const Value;
+                    let rc = std::rc::Rc::from_raw(raw);
+                    let val = (*rc).clone();
+                    std::mem::forget(rc);
+                    val
+                };
+                (l.clone(), r_val)
+            }
+            _ => (left.clone(), right.clone()),
+        };
     
         let path = &[
             left.clone(),
@@ -4335,12 +4497,12 @@ impl Interpreter {
             Value::String(operator.clone()),
             right.clone(),
         ];
-        
+    
         let result = {
             let cache_root = self.cache
                 .entry("operations".into())
                 .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-        
+    
             if let Some(cached) = deep_get(cache_root, path) {
                 debug_log(
                     &format!(
@@ -4354,15 +4516,15 @@ impl Interpreter {
                 );
                 return cached.clone();
             }
-            
+    
             self.make_operation(left.clone(), right.clone(), &operator)
         };
-        
+    
         if let Some(cache_root) = self.cache.get_mut("operations") {
             deep_insert(cache_root, path, result.clone());
         }
-        
-        result        
+    
+        result
     }
     
     fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {

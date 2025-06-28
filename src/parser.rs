@@ -559,6 +559,42 @@ impl Parser {
                     }
                 }
 
+                "OPERATOR" if token.1 == "&" => {
+                    self.next();
+                    let expr = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("POINTER_REF".to_string()),
+                            expr.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
+                "OPERATOR" if token.1 == "*" => {
+                    self.next();
+                    let expr = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("value".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("POINTER_DEREF".to_string()),
+                            expr.convert_to_map(),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
                 "SEPARATOR" if token.1 == "{" => {
                     self.next();
                     let mut keys = vec![];
@@ -1132,7 +1168,7 @@ impl Parser {
                         
                                 if self.token_is("SEPARATOR", ":") {
                                     self.next();
-                                    let type_expr = self.parse_expression();
+                                    let type_expr = self.parse_type();
                                     if self.err.is_some() {
                                         return Statement::Null;
                                     }
@@ -1203,7 +1239,7 @@ impl Parser {
 
                         if self.token_is("OPERATOR", "->") {
                             self.next();
-                            return_type = self.parse_expression();
+                            return_type = self.parse_type();
                         }
 
                         if self.err.is_some() {
@@ -1265,11 +1301,11 @@ impl Parser {
                         if self.token_is("SEPARATOR", ":") {
                             self.next();
                             let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                            if type_token.0 != "IDENTIFIER" {
+                            if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR") {
                                 self.raise("SyntaxError", "Expected type after ':'");
                                 return Statement::Null;
                             }
-                            let type_ = self.parse_expression();
+                            let type_ = self.parse_type();
                             let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
                             if self.err.is_some() {
                                 return Statement::Null;
@@ -1497,6 +1533,13 @@ impl Parser {
     fn parse_type(&mut self) -> Statement {
         let mut line = self.current_line();
         let mut column = self.get_line_column();
+
+        let mut is_ptr = false;
+
+        if self.token_is("OPERATOR", "&") {
+            is_ptr = true;
+            self.next();
+        }
         
         fn check_type(token: &Token) -> bool {
             token.0 == "IDENTIFIER" && VALID_TYPES.contains(&token.1.as_str())
@@ -1507,7 +1550,11 @@ impl Parser {
             self.raise("SyntaxError", &format!("Invalid type '{}'", base.1));
             return Statement::Null;
         }
-        let base_str = base.1.clone();
+        let base_str = if is_ptr {
+            "&".to_string() + &base.1.clone()
+        } else {
+            base.1.clone()
+        };
         self.next();
         if self.token_is("SEPARATOR", "(") {
             let to_type = Value::Map {
@@ -1745,11 +1792,11 @@ impl Parser {
             if self.token_is("SEPARATOR", ":") {
                 self.next();
                 let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                if type_token.0 != "IDENTIFIER" {
+                if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR") {
                     self.raise("SyntaxError", "Expected type after ':'");
                     return Statement::Null;
                 }
-                let type_ = self.parse_expression();
+                let type_ = self.parse_type();
                 let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
                 if self.err.is_some() {
                     return Statement::Null;

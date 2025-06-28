@@ -169,6 +169,11 @@ pub fn format_value(value: &Value) -> String {
             format!("<module '{}' at {:p}>", obj.name(), obj.ptr())
         }
 
+        Value::Pointer(ptr) => {
+            let raw_ptr = *ptr as *const ();
+            format!("<pointer to {:p}>", raw_ptr)
+        }
+
         Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
     }
 }

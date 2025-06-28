@@ -27,6 +27,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     Function(Function),
     Module(Object, PathBuf),
+    Pointer(usize),
     Error(&'static str, &'static str, Option<Error>),
 }
 
@@ -68,6 +69,12 @@ impl Serialize for Value {
                 let mut s = serializer.serialize_struct("Error", 2)?;
                 s.serialize_field("kind", kind)?;
                 s.serialize_field("message", msg)?;
+                s.end()
+            }
+            Value::Pointer(ptr) => {
+                let mut s = serializer.serialize_struct("Pointer", 1)?;
+                let raw_ptr = *ptr as *const ();  
+                s.serialize_field("address", &format!("{:p}", raw_ptr))?;
                 s.end()
             }
         }
@@ -136,6 +143,10 @@ impl Hash for Value {
             Value::Tuple(tuple) => {
                 3u8.hash(state);
                 tuple.hash(state);
+            }
+            Value::Pointer(ptr) => {
+                4u8.hash(state);
+                ptr.hash(state);
             }
         }
     }
@@ -268,6 +279,13 @@ impl Value {
             Value::Bytes(_) => "bytes",
             Value::Function(_) => "function",
             Value::Module(obj, _) => to_static(obj.name().to_string()),
+            Value::Pointer(ptr) => {
+                let raw = *ptr as *const Value;
+                let recovered = unsafe { std::rc::Rc::from_raw(raw) };
+                let name = recovered.type_name();
+                std::mem::forget(recovered);
+                to_static(format!("&{}", name))
+            }            
             Value::Error(..) => "error",
         }
     }
@@ -284,6 +302,13 @@ impl Value {
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(func) => "function".to_string(),
             Value::Module(obj, _) => obj.name().to_string(),
+            Value::Pointer(ptr) => {
+                let raw = *ptr as *const Value;
+                let recovered = unsafe { std::rc::Rc::from_raw(raw) };
+                let name = recovered.type_name();
+                std::mem::forget(recovered);
+                format!("&{}", name)
+            }            
             Value::Error(err_type, _, _) => "error".to_string(),
         }
     }
@@ -300,6 +325,7 @@ impl Value {
             Value::Function(_) => true,
             Value::Module(..) => true,
             Value::Error(_, _, _) => true,
+            Value::Pointer(_) => true,
             Value::Null => false,
         }
     }
@@ -339,6 +365,10 @@ impl Value {
                     Err(_) => "<invalid utf-8>".to_string(),
                 }
             }
+            Value::Pointer(ptr) => {
+                let raw_ptr = *ptr as *const ();
+                format!("<pointer to {:p}>", raw_ptr)
+            }            
             Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
             Value::Module(obj, _) => format!("<module '{}' at {:p}>", obj.name(), obj.ptr()),
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
@@ -371,6 +401,12 @@ impl Value {
 
             Value::Module(obj, _) => {
                 let description = format!("<module '{}' at {:p}>", obj.name(), obj.ptr());
+                Some(description.into_bytes())
+            }
+
+            Value::Pointer(ptr) => {
+                let raw_ptr = *ptr as *const ();
+                let description = format!("<pointer to {:p}>", raw_ptr);
                 Some(description.into_bytes())
             }
     
