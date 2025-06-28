@@ -215,6 +215,7 @@ impl Interpreter {
         types_mapping.insert("map", "map");
         types_mapping.insert("function", "function");
         types_mapping.insert("bytes", "bytes");
+        types_mapping.insert("auto", "any");
         for obj in self.variables.values() {
             if let Value::Module(obj, _) = &obj.value {
                 let name = obj.name();
@@ -1372,7 +1373,7 @@ impl Interpreter {
             } else {
                 return self.raise("ImportError", &format!("Module '{}' is already imported but not found in the current context", alias));
             }
-        }        
+        }
     
         let mut properties = HashMap::new();
         let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
@@ -1796,6 +1797,9 @@ impl Interpreter {
     }
 
     fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {
+        if self.stack.is_empty() {
+            return self.raise("RuntimeError", "Return statement outside of function");
+        }
         let value = match statement.get(&Value::String("value".to_string())) {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'value' in return statement"),
@@ -1850,7 +1854,11 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in function declaration"),
         };
 
-        let return_type_str = self.evaluate(return_type.convert_to_statement());
+        let mut return_type_str = self.evaluate(return_type.convert_to_statement());
+
+        if return_type_str == "auto".into() {
+            return_type_str = "any".into();
+        }
 
         if self.err.is_some() {
             return NULL;
@@ -2945,10 +2953,14 @@ impl Interpreter {
     
         let value = self.evaluate(value.convert_to_statement());
     
-        let declared_type = match statement.get(&Value::String("var_type".to_string())) {
+        let mut declared_type = match statement.get(&Value::String("var_type".to_string())) {
             Some(t) => self.evaluate(t.convert_to_statement()),
             _ => Value::String("any".to_string()),
         };
+
+        if declared_type == "auto".into() {
+            declared_type = value.type_name().into();
+        }
 
         let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
             Some(Value::List(mods)) => mods,
@@ -3579,10 +3591,16 @@ impl Interpreter {
                     }
                 }
 
+                let name = if let Value::Module(obj, _) = &object_value {
+                    obj.name()
+                } else {
+                    object_variable.get_name()
+                };
+
                 debug_log(
                     &format!(
                         "<Method call: {}.{}({})>",
-                        object_variable.get_name(),
+                        name,
                         method_name,
                         final_args
                             .iter()

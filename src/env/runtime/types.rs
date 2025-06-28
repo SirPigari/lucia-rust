@@ -11,7 +11,7 @@ pub use imagnum::{
 };
 
 pub const VALID_TYPES: &[&str] = &[
-    "void", "any", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes", "tuple", "object"
+    "void", "any", "int", "float", "bool", "str", "map", "list", "function", "error", "bytes", "tuple", "object", "auto"
 ];
 
 #[derive(Debug, Clone)]

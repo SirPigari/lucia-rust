@@ -1,7 +1,7 @@
 use std::env as std_env;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::thread;
+use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::process::exit;
@@ -1116,6 +1116,41 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
 
 fn main() {
     let args: Vec<String> = std_env::args().collect();
+
+    panic::set_hook(Box::new(|panic_info| {
+        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "Unknown panic message"
+        };
+
+        let location = panic_info.location()
+            .map(|loc| format!("at {}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "at unknown location".to_string());
+
+        let build_info = get_build_info();
+
+        eprintln!("{}", "Oops! The program panicked!".red().bold());
+        eprintln!("Message: {}", msg.red());
+        eprintln!("{}", location.red());
+        eprintln!();
+        eprintln!("{}", "--- Build info ---".dimmed());
+        eprintln!("Version: {}", build_info.version.cyan());
+        eprintln!("Rustc Version: {}", build_info.rustc_version.cyan());
+        eprintln!("Rustc Channel: {}", build_info.rustc_channel.cyan());
+        eprintln!("Target: {}", build_info.target.cyan());
+        eprintln!("Git commit: {}", build_info.git_hash.cyan());
+        eprintln!("Build profile: {}", build_info.profile.cyan());
+        eprintln!("CI: {}", build_info.ci.cyan());
+        eprintln!("Dependencies: {}", build_info.dependencies.cyan());
+        eprintln!("{}", "------------------".dimmed());
+        eprintln!("{}", "Please report this bug with the above information:".yellow());
+        eprintln!("{}", "https://github.com/SirPigari/lucia-rust/issues/new".blue().underline());
+        eprintln!("{}", "------------------".dimmed());
+        exit(101);        
+    }));
 
     let stack_size = args.iter()
         .find(|arg| arg.starts_with("--stack-size="))

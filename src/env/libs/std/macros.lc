@@ -18,7 +18,6 @@ import config as _config
 
 #macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=("Values are not approximately equal")):
     if (|$a - $b| > $epsilon):
-        print("Expected: ", $b, ", but got: ", $a)
         throw $msg from "AssertionError"
     end
 #endmacro

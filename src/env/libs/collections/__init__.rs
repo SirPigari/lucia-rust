@@ -38,6 +38,17 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn panic_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(message)) = args.get("message") {
+        panic!("{}", message);
+    }
+    Value::Error(
+        "PanicError",
+        "Panic called".into(),
+        None,
+    )
+}
+
 fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
         Value::String(hex_to_ansi(hex, Some(true)))
@@ -108,6 +119,13 @@ pub fn register() -> HashMap<String, Variable> {
         "clear_terminal",
         clear_terminal_handler,
         vec![],
+        "void"
+    );
+    insert_native_fn!(
+        map,
+        "panic",
+        panic_handler,
+        vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())],
         "void"
     );
     insert_native_fn!(

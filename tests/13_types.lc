@@ -41,3 +41,7 @@ assert_eq!(j(f_str), 42.137)
 
 t: tuple = l as tuple
 assert_eq!(t[0], 1)
+
+r: auto = 42
+assert_eq!(r, 42)
+assert_eq!(type(r), "int")
