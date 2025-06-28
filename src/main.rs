@@ -459,6 +459,7 @@ fn lucia(args: Vec<String>) {
     let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
     let config_arg = args.iter().find(|arg| arg.starts_with("--config="));
     let dump_pp_flag = args.contains(&"--dump-pp".to_string());
+    let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let argv_arg = args.iter()
         .find(|arg| arg.starts_with("--argv="))
         .map(|arg| arg.trim_start_matches("--argv="));
@@ -546,6 +547,11 @@ fn lucia(args: Vec<String>) {
             "  {:<32} {}",
             "--dump-pp".cyan(),
             "Dumps source code after preprocessing to a file for inspection or debugging."
+        );
+        println!(
+            "  {:<32} {}",
+            "--allow-unsafe".cyan(),
+            "Allow unsafe operations"
         );
         exit(0);
     }
@@ -730,6 +736,9 @@ fn lucia(args: Vec<String>) {
     }
 
     let moded = config.moded.clone();
+    if allow_unsafe {
+        config.allow_unsafe = true;
+    }
 
     if config.version != VERSION {
         if !moded {

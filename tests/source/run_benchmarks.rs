@@ -161,6 +161,7 @@ fn main() {
                 let output = Command::new(&target_path)
                     .arg(&path)
                     .arg("-q")
+                    .arg("--allow-unsafe")
                     .output();
                 let duration = start.elapsed().as_millis();
                 match &output {

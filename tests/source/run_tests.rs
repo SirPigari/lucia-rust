@@ -97,6 +97,7 @@ fn main() {
             let output = Command::new(&target_path)
                 .arg(&path)
                 .arg("-q")
+                .arg("--allow-unsafe")
                 .output();
 
             let mut test_stdout_file = stdout_dir.as_ref().and_then(|dir| {
