@@ -9,7 +9,7 @@ assert_eq!(i, 100)
 
 #alias add sum
 // macros dont support aliasing or defined values
-sum_output: float = sum(2, 3)
+sum_output: float = add(2, 3)
 assert_eq!(sum_output, 5.0)
 #unalias add
 
