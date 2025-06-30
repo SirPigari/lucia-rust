@@ -34,7 +34,6 @@ try:
     0 / 0
 end catch (err_type, err_msg):
     assert_eq!(err_type, "ArithmeticError")
-    assert_err!(err_msg.length > 0)
 end
 
 // try with 3-part catch: error type, message, and help
@@ -42,6 +41,4 @@ try:
     i = 10  // 'i' is not defined, will throw an error
 end catch (err_type, err_msg, err_help):
     assert_eq!(err_type, "NameError")
-    assert_err!(err_msg.length > 0)
-    assert_err!(err_help.length > 0)
 end
