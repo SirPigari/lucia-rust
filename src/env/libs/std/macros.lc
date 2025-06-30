@@ -11,7 +11,6 @@ import config as _config
 
 #macro assert_eq($a, $b, $msg=("Values are not equal")):
     if ($a != $b):
-        print("Expected: ", $b, ", but got: ", $a)
         throw $msg from "AssertionError"
     end
 #endmacro

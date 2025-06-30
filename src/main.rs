@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::process::exit;
 use std::collections::HashMap;
+use serde_json::to_string_pretty;
 use colored::*;
 use sys_info;
 
@@ -20,7 +21,6 @@ mod env {
         pub mod variables;
         pub mod native;
         pub mod statements;
-        pub mod build;
         pub mod pattern_reg;
         pub mod preprocessor;
         pub mod objects;
@@ -72,13 +72,44 @@ use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_t
 use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
-use crate::env::runtime::build::{BuildInfo, get_build_info};
 use crate::env::runtime::preprocessor::Preprocessor;
+use crate::env::runtime::statements::Statement;
 use crate::parser::{Parser, Token};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
-const VERSION: &str = env::runtime::build::VERSION;
+const VERSION: &str = env!("VERSION");
+
+#[derive(Serialize)]
+pub struct BuildInfo {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub rustc_version: &'static str,
+    pub rustc_channel: &'static str,
+    pub target: &'static str,
+    pub repository: &'static str,
+    pub git_hash: &'static str,
+    pub file_hash: &'static str,
+    pub profile: &'static str,
+    pub ci: &'static str,
+    pub dependencies: &'static str,
+}
+
+pub fn get_build_info() -> BuildInfo {
+    BuildInfo {
+        name: env!("CARGO_PKG_NAME"),
+        version: env!("VERSION"),
+        rustc_version: env!("RUSTC_VERSION"),
+        rustc_channel: env!("RUSTC_CHANNEL"),
+        target: env!("TARGET_TRIPLE"),
+        repository: env!("REPO"),
+        git_hash: env!("GIT_HASH"),
+        file_hash: env!("FILE_HASH"),
+        profile: env!("PROFILE"),
+        ci: env!("CI"),
+        dependencies: env!("DEPS"),
+    }
+}
 
 fn handle_error(
     error: &Error,
@@ -337,6 +368,141 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     );
 }
 
+
+fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_colors: bool) {
+    let base_path = Path::new(file_path)
+        .with_extension("")
+        .to_string_lossy()
+        .to_string();
+
+    let ast_path = format!("{}.ast.json", base_path);
+    let i_path = format!("{}.i.json", base_path);
+
+    let full_data: Vec<Value> = tokens.iter()
+        .map(|stmt| stmt.convert_to_map())
+        .collect();
+
+    let cleaned_data: Vec<Value> = full_data.iter()
+        .map(|value| {
+            match value {
+                Value::Map { keys, values } => {
+                    let mut new_keys = Vec::new();
+                    let mut new_values = Vec::new();
+                    for (k, v) in keys.iter().zip(values.iter()) {
+                        if let Value::String(s) = k {
+                            if s == "_line" || s == "_column" {
+                                continue;
+                            }
+                        }
+                        let cleaned_value = match v {
+                            Value::Map { .. } | Value::List(_) | Value::Tuple(_) => {
+                                let mut stack = vec![v.clone()];
+                                let mut cleaned = v.clone();
+                                while let Some(cur) = stack.pop() {
+                                    cleaned = match cur {
+                                        Value::Map { keys, values } => {
+                                            let mut k2 = Vec::new();
+                                            let mut v2 = Vec::new();
+                                            for (kk, vv) in keys.iter().zip(values.iter()) {
+                                                if let Value::String(ss) = kk {
+                                                    if ss == "_line" || ss == "_column" {
+                                                        continue;
+                                                    }
+                                                }
+                                                k2.push(kk.clone());
+                                                v2.push(vv.clone());
+                                                stack.push(vv.clone());
+                                            }
+                                            Value::Map { keys: k2, values: v2 }
+                                        }
+                                        Value::List(list) => {
+                                            Value::List(list.iter().map(|x| x.clone()).collect())
+                                        }
+                                        Value::Tuple(tuple) => {
+                                            Value::Tuple(tuple.iter().map(|x| x.clone()).collect())
+                                        }
+                                        _ => cur.clone(),
+                                    };
+                                }
+                                cleaned
+                            }
+                            _ => v.clone(),
+                        };
+
+                        new_keys.push(k.clone());
+                        new_values.push(cleaned_value);
+                    }
+                    Value::Map { keys: new_keys, values: new_values }
+                }
+                _ => value.clone(),
+            }
+        })
+        .collect();
+
+    let json_i = match serde_json::to_string_pretty(&full_data) {
+        Ok(j) => j,
+        Err(e) => {
+            print_colored(
+                &format!(
+                    "{}Failed to serialize full AST: {}",
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    e
+                ),
+                &config.color_scheme.exception,
+                Some(use_colors),
+            );
+            return;
+        }
+    };
+
+    let json_ast = match serde_json::to_string_pretty(&cleaned_data) {
+        Ok(j) => j,
+        Err(e) => {
+            print_colored(
+                &format!(
+                    "{}Failed to serialize cleaned AST: {}",
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    e
+                ),
+                &config.color_scheme.exception,
+                Some(use_colors),
+            );
+            return;
+        }
+    };
+
+    let write_file = |path: &str, content: &str| {
+        match File::create(path).and_then(|mut f| f.write_all(content.as_bytes())) {
+            Ok(_) => {
+                print_colored(
+                    &format!(
+                        "{}Dumped AST to {}",
+                        hex_to_ansi(&config.color_scheme.debug, Some(use_colors)),
+                        path
+                    ),
+                    &config.color_scheme.debug,
+                    Some(use_colors),
+                );
+            }
+            Err(e) => {
+                print_colored(
+                    &format!(
+                        "{}Failed to write {}: {}",
+                        hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                        path,
+                        e
+                    ),
+                    &config.color_scheme.exception,
+                    Some(use_colors),
+                );
+            }
+        }
+    };
+
+    write_file(&i_path, &json_i);
+    write_file(&ast_path, &json_ast);
+}
+
 fn load_config(path: &Path) -> Result<Config, String> {
     let mut file = File::open(path).map_err(|_| "Config file not found")?;
     let mut contents = String::new();
@@ -458,7 +624,8 @@ fn lucia(args: Vec<String>) {
     let version_flag = args.contains(&"--version".to_string()) || args.contains(&"-v".to_string());
     let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
     let config_arg = args.iter().find(|arg| arg.starts_with("--config="));
-    let dump_pp_flag = args.contains(&"--dump-pp".to_string());
+    let dump_pp_flag = args.contains(&"--dump-pp".to_string()) || args.contains(&"--dump".to_string());
+    let dump_ast_flag = args.contains(&"--dump-ast".to_string()) || args.contains(&"--dump".to_string());
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let argv_arg = args.iter()
         .find(|arg| arg.starts_with("--argv="))
@@ -488,73 +655,32 @@ fn lucia(args: Vec<String>) {
         println!("  lucia [options] [files...]\n");
     
         println!("{}", "Options:".bold());
-        println!(
-            "  {:<32} {}",
-            "--activate, -a".cyan(),
-            "Activate the environment"
-        );
-        println!(
-            "  {:<32} {}",
-            "--no-color".cyan(),
-            "Disable colored output"
-        );
-        println!(
-            "  {:<32} {}",
-            "--quiet, -q".cyan(),
-            "Suppress debug and warning messages"
-        );
-        println!(
-            "  {:<32} {}",
-            "--debug, -d".cyan(),
-            "Enable debug mode"
-        );
-        println!(
-            "  {:<32} {}",
-            "--debug-mode=<mode>".cyan(),
-            "Set debug mode (full, normal, minimal)"
-        );
-        println!(
-            "  {:<32} {}",
-            "--exit, -e".cyan(),
-            "Exit after executing files"
-        );
-        println!(
-            "  {:<32} {}",
-            "--help, -h".cyan(),
-            "Show this help message"
-        );
-        println!(
-            "  {:<32} {}",
-            "--version, -v".cyan(),
-            "Show version information"
-        );
-        println!(
-            "  {:<32} {}",
-            "--build-info".cyan(),
-            "Show build information"
-        );
-        println!(
-            "  {:<32} {}",
-            "--disable-preprocessor, -dp".cyan(),
-            "Disable preprocessor"
-        );
-        println!(
-            "  {:<32} {}",
-            "--config=<path>".cyan(),
-            "Specify a custom config file path"
-        );
-        println!(
-            "  {:<32} {}",
-            "--dump-pp".cyan(),
-            "Dumps source code after preprocessing to a file for inspection or debugging."
-        );
-        println!(
-            "  {:<32} {}",
-            "--allow-unsafe".cyan(),
-            "Allow unsafe operations"
-        );
+        let options = [
+            ("--activate, -a", "Activate the environment"),
+            ("--no-color", "Disable colored output"),
+            ("--quiet, -q", "Suppress debug and warning messages"),
+            ("--debug, -d", "Enable debug mode"),
+            ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal)"),
+            ("--exit, -e", "Exit after execution"),
+            ("--help, -h", "Show this help message"),
+            ("--version, -v", "Show version information"),
+            ("--build-info", "Show build information"),
+            ("--disable-preprocessor, -dp", "Disable preprocessor"),
+            ("--config=<path>", "Specify a custom config file path"),
+            ("--dump-pp", "Dump source code after preprocessing"),
+            ("--dump-ast", "Dump AST after parsing"),
+            ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
+            ("--allow-unsafe", "Allow unsafe operations"),
+            ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
+            ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
+        ];
+    
+        for (flag, desc) in options {
+            println!("  {:<32} {}", flag.cyan(), desc);
+        }
+    
         exit(0);
-    }
+    }    
 
     if args.contains(&"--build-info".to_string()) {
         let info = get_build_info();
@@ -780,7 +906,7 @@ fn lucia(args: Vec<String>) {
                 None
             };
             
-            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag);
+            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag, &dump_ast_flag);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -789,11 +915,11 @@ fn lucia(args: Vec<String>) {
             None
         };
 
-        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag);
+        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag, &dump_ast_flag);
     }
 }
 
-fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>, dump_pp_flag: &bool) {
+fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
@@ -871,6 +997,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             .map(|(t, v)| Token(t, v))
             .collect();
         let mut parser = Parser::new(tokens, config.clone(), file_content.to_string(), use_colors, file_path.as_str());
+        
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -883,6 +1010,16 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 exit(1);
             }
         };
+
+        if *dump_ast_flag && !statements.is_empty() {
+            let file_path = path.with_extension("ast");
+            dump_ast(
+                statements.iter().collect(),
+                file_path.to_str().unwrap_or(""),
+                &config,
+                use_colors,
+            );
+        }
 
         if print_start_debug {
             debug_log(
@@ -929,7 +1066,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
     }
 }
 
-fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool) {
+fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
         hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
@@ -1081,6 +1218,15 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 continue;
             }
         };
+        if *dump_ast_flag && !statements.is_empty() {
+            let file_path = cwd.join(format!("stdin-{}", line_number));
+            dump_ast(
+                statements.iter().collect(),
+                file_path.to_str().unwrap_or("stdin"),
+                &config,
+                use_colors,
+            );
+        }
         if print_start_debug {
             debug_log(
                 &format!(

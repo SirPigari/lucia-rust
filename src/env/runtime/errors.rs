@@ -38,6 +38,18 @@ impl Error {
         }
     }
 
+    pub fn with_ref(error_type: &str, msg: &str, ref_err: Error, file_path: &str) -> Self {
+        Self {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: None,
+            line: (0, "<unknown>".to_string()),
+            column: 0,
+            file: file_path.to_string(),
+            ref_err: Some(Box::new(ref_err)),
+        }
+    }
+
     pub fn with_position(error_type: &str, msg: &str, line: usize, line_text: &str, column: usize, file_path: &str) -> Self {
         Self {
             error_type: error_type.to_string(),

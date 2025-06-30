@@ -4,6 +4,7 @@ use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::types::Int;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::config::{get_from_config, Config};
 use crate::{insert_native_fn, insert_native_var};
 use std::env::consts;
 use sys_info;
@@ -58,7 +59,45 @@ fn mem_free_u64() -> Result<u64, sys_info::Error> {
     sys_info::mem_info().map(|m| m.free)
 }
 
-pub fn register() -> HashMap<String, Variable> {
+fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
+    if !allow_unsafe {
+        return Value::Error("TypeError", "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.", None);
+    }
+
+    if ptr < 0x1000 || ptr > 0x0000_FFFF_FFFF_FFFF {
+        return Value::Error("ValueError", "Pointer value is out of valid range", None);
+    }
+
+    unsafe {
+        let arc = Arc::from_raw(ptr as *const Value);
+
+        let cloned = arc.clone();
+        std::mem::forget(arc);
+
+        Value::Pointer(Arc::into_raw(cloned) as usize)
+    }
+}
+
+fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
+    if !allow_unsafe {
+        return Value::Error(
+            "TypeError",
+            "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.",
+            None,
+        );
+    }
+
+    if ptr < 0x1000 || ptr > 0x0000_FFFF_FFFF_FFFF {
+        return Value::Error("ValueError", "Pointer value is out of valid range", None);
+    }
+
+    unsafe {
+        let raw = ptr as *const Value;
+        (*raw).clone()
+    }
+}
+
+pub fn register(config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
     let string_fns: Vec<(&str, Box<dyn Fn() -> Result<String, sys_info::Error> + Send + Sync>)> = vec![
@@ -150,6 +189,47 @@ pub fn register() -> HashMap<String, Variable> {
         },
         vec![],
         "map"
+    );
+
+    let allow_unsafe = match get_from_config(config, "allow_unsafe") {
+        Value::Boolean(b) => b,
+        _ => false,
+    };
+
+    insert_native_fn!(
+        map,
+        "from_ptr",
+        move |args: &HashMap<String, Value>| -> Value {
+            if let Some(Value::Int(int)) = args.get("ptr") {
+                if let Ok(ptr) = int.to_i64() {
+                    from_ptr(ptr as usize, allow_unsafe)
+                } else {
+                    Value::Error("TypeError", "Invalid 'ptr' integer value", None)
+                }
+            } else {
+                Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+            }
+        },
+        vec![Parameter::positional("ptr", "int")],
+        "any"
+    );
+
+    insert_native_fn!(
+        map,
+        "to_ptr",
+        move |args: &HashMap<String, Value>| -> Value {
+            if let Some(Value::Int(int)) = args.get("ptr") {
+                if let Ok(ptr) = int.to_i64() {
+                    to_ptr(ptr as usize, allow_unsafe)
+                } else {
+                    Value::Error("TypeError", "Invalid 'ptr' integer value", None)
+                }
+            } else {
+                Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+            }
+        },
+        vec![Parameter::positional("ptr", "int")],
+        "any"
     );
 
     map

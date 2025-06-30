@@ -1,6 +1,6 @@
 use std::io::{self, Write, stdout};
 use std::fmt::{self, Write as FmtWrite};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::config::{Config};
@@ -16,6 +16,7 @@ use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::value::{Value};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
+use serde_json::Value as JsonValue;
 use regex::Regex;
 use crossterm::{
     execute,
@@ -246,7 +247,6 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
         let inner = &s[1..s.len() - 1];
 
-        // escape control characters, backslashes and quotes
         let escaped_inner = inner.chars().map(|c| {
             match c {
                 '\\' => "\\\\".to_string(),
@@ -328,6 +328,16 @@ where
 }
 
 pub fn get_type_default(type_: &str) -> Value {
+    if type_.starts_with("&") {
+        let inner_type = &type_[1..];
+        let boxed = Box::new(get_type_default(inner_type));
+        let ptr = Box::into_raw(boxed) as usize;
+        return Value::Pointer(ptr);
+    }
+    if type_.starts_with("?") {
+        let inner_type = &type_[1..];
+        return get_type_default(inner_type);
+    }
     match type_ {
         "float" => Value::Float(0.0.into()),
         "int" => Value::Int(0.into()),
@@ -344,6 +354,25 @@ pub fn get_type_default(type_: &str) -> Value {
 }
 
 pub fn get_type_default_as_statement(type_: &str) -> Statement {
+    if type_.starts_with("&") {
+        let inner_type = &type_[1..];
+        let inner_statement = get_type_default_as_statement(inner_type);
+        return Statement::Statement {
+            keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
+            values: vec![
+                Value::String("POINTER_REF".to_string()),
+                inner_statement.convert_to_map()
+            ],
+            line: 0,
+            column: 0,
+        };
+    }
+
+    if type_.starts_with("?") {
+        let inner_type = &type_[1..];
+        return get_type_default_as_statement(inner_type);
+    }
+
     match type_ {
         "int" => Statement::Statement {
             keys: vec![
@@ -540,6 +569,23 @@ pub fn format_type(value: &Value) -> String {
             None
         }
     }
+    
+    if let Value::String(s) = value {
+        if s.trim_start().starts_with('{') {
+            let mut err = false;
+            let fixed = fix_and_parse_json(s).unwrap_or_else(|| {
+                err = true;
+                return serde_json::Value::String("unknown".to_string());
+            });
+            if err {
+                return "unknown".to_string();
+            }
+            if let Value::Map { keys, values } = json_to_value(&fixed) {
+                let new_value = Value::Map { keys, values };
+                return format_type(&new_value);
+            }
+        }
+    }
 
     match value {
         Value::String(s) => s.clone(),
@@ -625,6 +671,21 @@ pub fn format_type(value: &Value) -> String {
                         val.to_string()
                     } else {
                         "unknown".to_string()
+                    }
+                }
+
+                Some("union") => {
+                    let types = map.get("types").and_then(|v| {
+                        if let Value::List(values) = v {
+                            Some(values.iter().filter_map(|v| as_str(v)).collect::<Vec<_>>())
+                        } else {
+                            None
+                        }
+                    }).unwrap_or(vec![]);
+                    if types.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        format!("union<{}>", types.join(", "))
                     }
                 }
 
@@ -763,6 +824,33 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             state: None,
         }
     );
+    map.insert(
+        "eval".to_string(),
+        FunctionMetadata {
+            name: "eval".to_string(),
+            parameters: vec![Parameter::positional("code", "str")],
+            return_type: Value::String("any".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
+        "exec".to_string(),
+        FunctionMetadata {
+            name: "exec".to_string(),
+            parameters: vec![Parameter::positional("code", "str")],
+            return_type: Value::String("any".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+
     return map;
 }
 
@@ -919,6 +1007,100 @@ pub fn fix_path(raw_path: String) -> String {
         return path[4..].to_string();
     }
     Regex::new(r"\\").unwrap().replace_all(&path, "/").to_string()
+}
+
+pub fn parse_json_string_to_key_value_vecs(json_str: &str) -> Option<(Vec<Value>, Vec<Value>)> {
+    let parsed: JsonValue = serde_json::from_str(json_str).ok()?;
+
+    let obj = parsed.as_object()?;
+
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+
+    for (k, v) in obj {
+        keys.push(Value::String(k.clone()));
+        values.push(json_to_value(v));
+    }
+
+    Some((keys, values))
+}
+
+fn remove_note_field(input: &str) -> String {
+    let re = regex::Regex::new(r#"(?s),?\s*_note:\s*[^,}]+,?"#).unwrap();
+    let result = re.replace_all(input, "");
+    result.trim().trim_start_matches(',').trim().to_string()
+}
+
+pub fn fix_and_parse_json(input: &str) -> Option<JsonValue> {
+    let no_note = remove_note_field(input);
+
+    let re_unicode = regex::Regex::new(r#"\\u\{([0-9a-fA-F]{1,4})\}"#).unwrap();
+    let fixed_unicode = re_unicode.replace_all(&no_note, |caps: &regex::Captures| {
+        format!("\\u{:0>4}", caps[1].to_uppercase())
+    });
+
+    let re_keys = regex::Regex::new(r#"(?P<prefix>[\{\s,])(?P<key>[a-zA-Z_][\w]*)\s*:"#).unwrap();
+    let fixed_keys = re_keys.replace_all(&fixed_unicode, r#"$prefix"$key":"#);
+
+    let re_unquoted_vals = regex::Regex::new(r#":\s*([\?&]?[a-zA-Z_][\w]*)"#).unwrap();
+    let mut fully_fixed = re_unquoted_vals.replace_all(&fixed_keys, |caps: &regex::Captures| {
+        let val = &caps[1];
+        if val == "true" || val == "false" || val == "null" {
+            format!(": {}", val)
+        } else {
+            format!(": \"{}\"", val)
+        }
+    }).to_string();
+
+    let re_unquoted_in_array = regex::Regex::new(r#"(\[|\s*,\s*)([\?&]?[a-zA-Z_][\w]*)"#).unwrap();
+    loop {
+        let new_fixed = re_unquoted_in_array.replace_all(&fully_fixed, |caps: &regex::Captures| {
+            format!("{}\"{}\"", &caps[1], &caps[2])
+        }).to_string();
+        if new_fixed == fully_fixed {
+            break;
+        }
+        fully_fixed = new_fixed;
+    }
+
+    serde_json::from_str(&fully_fixed).ok()
+}
+
+fn json_object_to_value_map(obj: &serde_json::Map<String, JsonValue>) -> (Vec<Value>, Vec<Value>) {
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+
+    for (k, v) in obj {
+        keys.push(Value::String(k.clone()));
+        values.push(json_to_value(v));
+    }
+
+    (keys, values)
+}
+
+pub fn json_to_value(v: &JsonValue) -> Value {
+    match v {
+        JsonValue::String(s) => Value::String(s.clone()),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i.into())
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f.into())
+            } else {
+                Value::Null
+            }
+        }
+        JsonValue::Bool(b) => Value::Boolean(*b),
+        JsonValue::Array(arr) => {
+            let list = arr.iter().map(json_to_value).collect();
+            Value::List(list)
+        }
+        JsonValue::Object(map) => {
+            let (k, v) = json_object_to_value_map(map);
+            Value::Map { keys: k, values: v }
+        }
+        JsonValue::Null => Value::Null,
+    }
 }
 
 

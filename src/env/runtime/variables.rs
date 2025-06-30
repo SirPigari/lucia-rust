@@ -591,6 +591,36 @@ impl Variable {
                     ),
                 );
             }
+            Value::Pointer(_) => {
+                let extract_ptr = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "extractPtr",
+                        move |_args| {
+                            match &val_clone {
+                                Value::Pointer(ptr) => Value::Int(create_int(&ptr.to_string())),
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "int",
+                        true, true, true,
+                        None,
+                    )
+                };
+                
+                self.properties.insert(
+                    "extractPtr".to_string(),
+                    Variable::new(
+                        "extractPtr".to_string(),
+                        extract_ptr,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
             _ => {}
         };
     }

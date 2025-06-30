@@ -50,8 +50,8 @@ jobs:
       - name: Install system dependencies
         run: choco install make --no-progress
 
-      - name: Build project (release)
-        run: make release
+      - name: Build project (debug)
+        run: make
 
       - name: Activate build environment
         run: make activate

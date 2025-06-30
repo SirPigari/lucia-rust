@@ -50,8 +50,8 @@ jobs:
       - name: Install system dependencies
         run: brew install make
 
-      - name: Build project (release)
-        run: make release
+      - name: Build project (debug)
+        run: make
 
       - name: Activate build environment
         run: make activate

@@ -3,9 +3,17 @@
 // this is not an example its a test file its not meant to learn from
 // see examples instead
 
-i: int = 10
 
-fun f(f: function[int] -> int, a: int) -> int: f(a) end
+// primitives
+
+// simple int assignment
+i: int = 10
+assert_eq!(i, 10)
+
+// function taking another function and int
+fun f(func: function[int] -> int, a: int) -> int:
+    return func(a)
+end
 
 fun g(a: int) -> int:
     return a
@@ -13,22 +21,25 @@ end
 
 assert_eq!(f(g, i), 10)
 
+// list and accessing first element
 l: list[int] = [1, 2, 3]
-fun h(l: list[int]) -> int:
-    return l[0]
+fun h(lst: list[int]) -> int:
+    return lst[0]
 end
 
 assert_eq!(h(l), 1)
 
+// map and key access
 m: map = {"a": 1, "b": 2}
-fun i(m: map, k: str) -> int:
-    return m[k]
+fun i(map_obj: map, key: str) -> int:
+    return map_obj[key]
 end
 
 assert_eq!(i(m, "a"), 1)
 m["c"] = 3
 assert_eq!(i(m, "c"), 3)
 
+// float to string conversion and back
 f: float = 42.137
 f_str: str = f as str
 assert_eq!(f_str, "42.137")
@@ -39,9 +50,66 @@ end
 
 assert_eq!(j(f_str), 42.137)
 
+// tuple conversion from list
 t: tuple = l as tuple
 assert_eq!(t[0], 1)
 
+// auto types
 r: auto = 42
 assert_eq!(r, 42)
 assert_eq!(type(r), "int")
+
+
+// pointer types
+k: &int = &42
+assert_eq!(*k, 42)
+(*k) = 69
+assert_eq!(k, &69)
+assert_eq!(*k, 69)
+assert_eq!(type(k), "&int")
+
+// maybe types
+m: ?int = *k
+assert_eq!(m, 69)
+m = null
+assert_eq!(m, null)
+
+// union types
+u: int | str = 42
+assert_eq!(u, 42)
+u = "Hello"
+assert_eq!(u, "Hello")
+
+// mixed types
+mixed: int | str | float = 3.14
+assert_eq!(mixed, 3.14)
+mixed = "World"
+assert_eq!(mixed, "World")
+mixed = 100
+assert_eq!(mixed, 100)
+
+q: int | &int = &42
+assert_eq!(*q, 42)
+q = 100
+assert_eq!(q, 100)
+
+e: ?int | &str = &"Hello"
+assert_eq!(*e, "Hello")
+e = null
+assert_eq!(e, null)
+e = &"World"
+assert_eq!(*e, "World")
+e = 100
+assert_eq!(e, 100)
+
+// type conversions
+assert_eq!(42 as str, "42")
+assert_eq!("3.14" as float, 3.14)
+assert_eq!(100 as int, 100)
+assert_eq!(3.14 as int, 3)
+
+assert_eq!(null as ?int, null)
+assert_eq!(42 as ?str, "42")
+
+assert_eq!(42 as &int, &42)
+assert_eq!("Hello" as &str, &"Hello")
