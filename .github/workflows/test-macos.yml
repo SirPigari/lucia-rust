@@ -51,7 +51,7 @@ jobs:
         run: brew install make
 
       - name: Build project (debug)
-        run: make
+        run: make build
 
       - name: Activate build environment
         run: make activate

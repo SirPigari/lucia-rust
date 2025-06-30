@@ -52,7 +52,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y make
 
       - name: Build project (debug)
-        run: make
+        run: make build
 
       - name: Activate build environment
         run: make activate
@@ -94,7 +94,7 @@ jobs:
             arch-
 
       - name: Build project (debug)
-        run: make
+        run: make build
 
       - name: Activate build environment
         run: make activate

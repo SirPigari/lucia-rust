@@ -51,7 +51,7 @@ jobs:
         run: choco install make --no-progress
 
       - name: Build project (debug)
-        run: make
+        run: make build
 
       - name: Activate build environment
         run: make activate

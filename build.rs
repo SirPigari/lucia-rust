@@ -1,6 +1,5 @@
 use std::{env, fs, process::Command, path::Path, collections::HashSet};
 use sha2::{Digest, Sha256};
-use winres::WindowsResource;
 use toml::Value;
 
 const VERSION: &str = "2.0.0";
@@ -90,6 +89,7 @@ fn main() {
     println!("cargo:rustc-env=REPO=https://github.com/SirPigari/lucia-rust");
 
     if cfg!(target_os = "windows") {
+        use winres::WindowsResource;
         let mut res = WindowsResource::new();
         res.set("ProductName", "Lucia");
         res.set("FileDescription", "Lucia Programming Language");
