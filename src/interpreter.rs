@@ -2216,12 +2216,26 @@ impl Interpreter {
                     None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
                 };
         
+                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::List(l) => l.iter().filter_map(|v| {
+                            if let Value::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        }).collect(),
+                        _ => vec![],
+                    },
+                    None => vec![],
+                };
+        
                 match &type_str_value {
                     Value::Map { .. } => {
-                        parameters.push(Parameter::positional_pt(name.as_str(), &type_str_value));
+                        parameters.push(Parameter::positional_pt(name.as_str(), &type_str_value).set_mods(mods));
                     }
                     Value::String(s) => {
-                        parameters.push(Parameter::positional(name.as_str(), s.as_str()));
+                        parameters.push(Parameter::positional(name.as_str(), s.as_str()).set_mods(mods));
                     }
                     _ => return self.raise("RuntimeError", "Invalid type for function parameter 'type'"),
                 }
@@ -2242,6 +2256,20 @@ impl Interpreter {
                     None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
                 };
         
+                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::List(l) => l.iter().filter_map(|v| {
+                            if let Value::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        }).collect(),
+                        _ => vec![],
+                    },
+                    None => vec![],
+                };
+        
                 let type_eval = self.evaluate(type_val.convert_to_statement());
         
                 let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
@@ -2258,14 +2286,14 @@ impl Interpreter {
                             name_str.as_str(),
                             &type_eval,
                             value,
-                        ));
+                        ).set_mods(mods));
                     }
                     Value::String(s) => {
                         parameters.push(Parameter::positional_optional(
                             name_str.as_str(),
                             s.as_str(),
                             value,
-                        ));
+                        ).set_mods(mods));
                     }
                     _ => return self.raise("RuntimeError", "Invalid type for named argument 'type'"),
                 }
@@ -4453,7 +4481,7 @@ impl Interpreter {
                 
                 let positional: Vec<Value> = pos_args.clone();
                 let mut named_map: HashMap<String, Value> = named_args.clone();
-                let mut final_args: HashMap<String, Value> = HashMap::new();
+                let mut final_args: HashMap<String, (Value, Vec<String>)> = HashMap::new();
     
                 let passed_args_count = positional.len() + named_map.len();
                 let expected_args_count = metadata.parameters.len();
@@ -4511,60 +4539,63 @@ impl Interpreter {
                             matched_positional_count
                         ),
                     );
-                }                     
+                }
     
                 for param in &metadata.parameters {
                     let param_name = &param.name;
                     let param_type = &param.ty;
                     let param_default = &param.default;
-
+                    let param_mods = &param.mods;  // Vec<String>
+                
                     match param.kind {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
                                 if self.check_type(&arg_value, param_type, false) {
-                                    final_args.insert(param_name.clone(), arg_value);
+                                    final_args.insert(param_name.clone(), (arg_value, param_mods.clone()));
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
                                         &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), arg_value.type_name()),
                                         &format!(
-                                            "Try using: '{}{}={}({}){}'",
+                                            "Try using: '{}{}{} as {}{}{}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
-                                            param_name,
-                                            format_type(param_type),
                                             format_value(&positional[pos_index]).to_string(),
-                                            check_ansi("\x1b[24m", &self.use_colors)
+                                            check_ansi("\x1b[24m", &self.use_colors),
+                                            check_ansi("\x1b[4m", &self.use_colors),
+                                            format_type(param_type),
+                                            check_ansi("\x1b[24m", &self.use_colors),
                                         ),
                                     );
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
                                 if self.check_type(&named_value, param_type, false) {
-                                    final_args.insert(param_name.clone(), named_value);
+                                    final_args.insert(param_name.clone(), (named_value, param_mods.clone()));
                                 } else {
                                     return self.raise_with_help(
                                         "TypeError",
                                         &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, format_type(param_type), named_value.type_name()),
                                         &format!(
-                                            "Try using: '{}{}={}({}){}'",
+                                            "Try using: '{}{}{} as {}{}{}'",
                                             check_ansi("\x1b[4m", &self.use_colors),
-                                            param_name,
+                                            named_value.to_string(),
+                                            check_ansi("\x1b[24m", &self.use_colors),
+                                            check_ansi("\x1b[4m", &self.use_colors),
                                             format_type(param_type),
                                             check_ansi("\x1b[24m", &self.use_colors),
-                                            named_value.to_string()
                                         ),
                                     );
                                 }
                             } else if let Some(default) = param_default {
-                                final_args.insert(param_name.clone(), default.clone());
+                                final_args.insert(param_name.clone(), (default.clone(), param_mods.clone()));
                             } else {
                                 return self.raise("TypeError", &format!("Missing required positional argument: '{}'", param_name));
                             }
-                        }                        
+                        }
                         ParameterKind::Variadic => {
                             let mut variadic_args = positional[pos_index..].to_vec();
-
+                
                             for (i, arg) in variadic_args.iter().enumerate() {
                                 if !self.check_type(&arg, param_type, false) {
                                     return self.raise(
@@ -4573,16 +4604,16 @@ impl Interpreter {
                                     );
                                 }
                             }
-                    
-                            final_args.insert(param_name.clone(), Value::List(variadic_args));
-                    
+                
+                            final_args.insert(param_name.clone(), (Value::List(variadic_args), param_mods.clone()));
+                
                             pos_index = positional.len();
                             named_map.remove(param_name);
                         }
                         ParameterKind::KeywordVariadic => {
                             if let Some(named_value) = named_map.remove(param_name) {
                                 if self.check_type(&named_value, &param_type, false) {
-                                    final_args.insert(param_name.clone(), named_value);
+                                    final_args.insert(param_name.clone(), (named_value, param_mods.clone()));
                                 } else {
                                     return self.raise(
                                         "TypeError",
@@ -4595,11 +4626,12 @@ impl Interpreter {
                                     );
                                 }
                             } else if let Some(default) = param_default {
-                                final_args.insert(param_name.clone(), default.clone());
+                                final_args.insert(param_name.clone(), (default.clone(), param_mods.clone()));
                             }
                         }
                     }
                 }
+                
 
                 if !named_map.is_empty() {
                     let mut expect_one_of = String::new();
@@ -4632,11 +4664,16 @@ impl Interpreter {
                     }
                 }
 
+                let final_args_no_mods: HashMap<String, Value> = final_args
+                    .iter()
+                    .map(|(k, (val, _mods))| (k.clone(), val.clone()))
+                    .collect();   
+
                 debug_log(
                     &format!(
                         "<Call: {}({})>",
                         function_name,
-                        final_args
+                        final_args_no_mods
                             .iter()
                             .map(|(k, v)| format!("{}: {}", k, format_value(v)))
                             .collect::<Vec<String>>()
@@ -4646,18 +4683,33 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
     
-                self.stack.push((function_name.to_string(), final_args.clone(), self.variables.clone()));
+                self.stack.push((function_name.to_string(), final_args_no_mods.clone(), self.variables.clone()));
 
                 let mut result = NULL;
 
                 let final_args_variables = final_args
-                    .iter()
-                    .map(|(k, v)| {
-                        let name = k.clone();
-                        let variable = Variable::new(name.clone(), v.clone(), "any".to_string(), false, true, true);
-                        (name, variable)
-                    })
-                    .collect::<HashMap<String, Variable<>>>();
+                .iter()
+                .map(|(k, v)| {
+                    let name = k.clone();
+                    let mods = &v.1;
+                    
+                    let mut is_static = false;
+                    let mut is_final = false;
+            
+                    for m in mods {
+                        match m.as_str() {
+                            "mutable" => is_final = false,
+                            "final" => is_final = true,
+                            "static" => is_static = true,
+                            "non-static" => is_static = false,
+                            _ => unreachable!(),
+                        }
+                    }
+            
+                    let variable = Variable::new(name.clone(), v.0.clone(), "any".to_string(), is_static, false, is_final);
+                    (name, variable)
+                })
+                .collect::<HashMap<String, Variable>>();            
                 
                 if self.err.is_some() {
                     return NULL;
@@ -4686,11 +4738,11 @@ impl Interpreter {
                         }
                         "fetch" => {
                             self.stack.pop();
-                            return self.fetch_fn(&final_args);
+                            return self.fetch_fn(&final_args_no_mods);
                         }
                         "exec" => {
                             self.stack.pop();
-                            if let Some(Value::String(script_str)) = final_args.get("code") {
+                            if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
                                 debug_log(
                                     &format!("<Exec script: '{}'>", script_str),
                                     &self.config,
@@ -4732,7 +4784,7 @@ impl Interpreter {
                         }
                         "eval" => {
                             self.stack.pop();
-                            if let Some(Value::String(script_str)) = final_args.get("code") {
+                            if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
                                 debug_log(
                                     &format!("<Eval script: '{}'>", script_str),
                                     &self.config,
@@ -4814,7 +4866,7 @@ impl Interpreter {
                     result = new_interpreter.return_value.clone();
                     self.stack = new_interpreter.stack;
                 } else {
-                    result = func.call(&final_args);
+                    result = func.call(&final_args_no_mods);
                 }
                 self.stack.pop();
                 debug_log(

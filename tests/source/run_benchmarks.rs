@@ -17,6 +17,7 @@ use sys_info;
 pub struct BuildInfo {
     pub name: String,
     pub version: String,
+    pub uuid: String,
     pub rustc_version: String,
     pub rustc_channel: String,
     pub target: String,
@@ -25,6 +26,7 @@ pub struct BuildInfo {
     pub file_hash: String,
     pub profile: String,
     pub ci: String,
+    pub build_date: String,
     pub dependencies: String,
 }
 

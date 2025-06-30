@@ -24,6 +24,7 @@ pub struct Parameter {
     pub ty: Value,
     pub default: Option<Value>,
     pub kind: ParameterKind,
+    pub mods: Vec<String>,
 }
 
 
@@ -325,12 +326,18 @@ impl PartialOrd for Function {
 }
 
 impl Parameter {
+    pub fn set_mods(mut self, mods: Vec<String>) -> Self {
+        self.mods = mods;
+        self
+    }
+
     pub fn positional(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
             ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::Positional,
+            mods: vec![],
         }
     }
     
@@ -340,6 +347,7 @@ impl Parameter {
             ty: ty.clone(),
             default: None,
             kind: ParameterKind::Positional,
+            mods: vec![],
         }
     }
 
@@ -349,6 +357,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::Positional,
+            mods: vec![],
         }
     }
     
@@ -358,6 +367,7 @@ impl Parameter {
             ty: ty.clone(),
             default: Some(default),
             kind: ParameterKind::Positional,
+            mods: vec![],
         }
     }
 
@@ -367,6 +377,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::Variadic,
+            mods: vec![],
         }
     }
 
@@ -376,6 +387,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::Variadic,
+            mods: vec![],
         }
     }
 
@@ -385,6 +397,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: None,
             kind: ParameterKind::KeywordVariadic,
+            mods: vec![],
         }
     }
 
@@ -394,6 +407,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
+            mods: vec![],
         }
     }
 
@@ -403,6 +417,7 @@ impl Parameter {
             ty: Value::String(ty.to_string()),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
+            mods: vec![],
         }
     }
 
@@ -412,6 +427,7 @@ impl Parameter {
             ty: Value::String("any".to_string()),
             default: None,
             kind: ParameterKind::Positional,
+            mods: vec!["mutable".to_string()],
         }
     }
 }

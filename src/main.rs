@@ -84,6 +84,7 @@ const VERSION: &str = env!("VERSION");
 pub struct BuildInfo {
     pub name: &'static str,
     pub version: &'static str,
+    pub uuid: &'static str,
     pub rustc_version: &'static str,
     pub rustc_channel: &'static str,
     pub target: &'static str,
@@ -92,6 +93,7 @@ pub struct BuildInfo {
     pub file_hash: &'static str,
     pub profile: &'static str,
     pub ci: &'static str,
+    pub build_date: &'static str,
     pub dependencies: &'static str,
 }
 
@@ -99,6 +101,7 @@ pub fn get_build_info() -> BuildInfo {
     BuildInfo {
         name: env!("CARGO_PKG_NAME"),
         version: env!("VERSION"),
+        uuid: env!("BUILD_UUID"),
         rustc_version: env!("RUSTC_VERSION"),
         rustc_channel: env!("RUSTC_CHANNEL"),
         target: env!("TARGET_TRIPLE"),
@@ -107,6 +110,7 @@ pub fn get_build_info() -> BuildInfo {
         file_hash: env!("FILE_HASH"),
         profile: env!("PROFILE"),
         ci: env!("CI"),
+        build_date: env!("BUILD_DATE"),
         dependencies: env!("DEPS"),
     }
 }
