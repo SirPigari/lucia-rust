@@ -1,9 +1,0 @@
-// This example demonstrates a simple recursive function to calculate the Fibonacci sequence.
-fun fibonacciRecursive(n: int) -> int:
-    if (n <= 1):
-        return n
-    end
-    return fibonacciRecursive(n - 1) + fibonacciRecursive(n - 2)
-end
-
-print(fibonacciRecursive(10))

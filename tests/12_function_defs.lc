@@ -20,7 +20,7 @@ public static final fun boolFunction() -> bool:
     return true
 end
 
-public static final fun listFunction() -> list:
+public static final fun listFunction() -> list[int]:
     print("This function returns a list of integers")
     return [1, 2, 3, 4, 5]
 end
@@ -48,7 +48,7 @@ public static final fun recursiveFunction(n: int) -> int:
     end
 end
 
-public static final fun higherOrderFunction(func: function[int], value: int) -> int:
+public static final fun higherOrderFunction(func: function[int] -> int, value: int) -> int:
     print(func, value)
     print("This function takes another function as a parameter")
     return func(value)
@@ -57,6 +57,14 @@ end
 private static mutable fun lowerOrderFunction(value: int) -> int:
     print("This is a lower-order function")
     return value * 2
+end
+
+public static final fun mutableArgumentsFunction(mutable a: int, b: str) -> int:
+    print("This function takes mutable arguments")
+    print("a =", a, ", b =", b)
+    a += 5
+    print("After modification, a =", a)
+    return a
 end
 
 // === Assertions ===
@@ -71,4 +79,7 @@ defaultParameterFunction()
 assert_eq!(combinedFunction(15), "Combined: 15, default")
 assert_eq!(combinedFunction(25, "override"), "Combined: 25, override")
 assert_eq!(recursiveFunction(5), 15)
+assert_eq!(recursiveFunction(0), 0)
+assert_eq!(recursiveFunction(1), 1)
 assert_eq!(higherOrderFunction(lowerOrderFunction, 10), 20)
+assert_eq!(mutableArgumentsFunction(10, "test"), 15)

@@ -1,0 +1,37 @@
+import math
+
+fun fibonacciRecursive(n: int) -> int:
+    if (n <= 1):
+        return n
+    end
+    return fibonacciRecursive(n - 1) + fibonacciRecursive(n - 2)
+end
+
+fun fibonacciIterative(n: int) -> int:
+    if (n <= 1):
+        return n
+    end
+
+    a: int = 0
+    b: int = 1    
+    for (i in [2..n]):
+        (a, b) = (b, a + b)
+    end
+    return b
+end
+
+fun fibonacciBinet(n: int) -> int:
+    phi: float = math.GOLDEN_RATIO
+    psi: float = 1 - phi
+    sqrt5: float = math.sqrt(5)
+
+    num: float = math.pow(phi, n) - math.pow(psi, n)
+    result: float = num / sqrt5
+
+    return int(result)
+end
+
+
+print(fibonacciRecursive(10))
+print(fibonacciIterative(10))
+print(fibonacciBinet(10))

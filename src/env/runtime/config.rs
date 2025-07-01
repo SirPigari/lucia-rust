@@ -37,6 +37,142 @@ pub struct ColorScheme {
     pub info: String,
 }
 
+pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(), String> {
+    match key {
+        "moded" => {
+            if let Value::Boolean(val) = value {
+                config.moded = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'moded'".to_string())
+            }
+        }
+        "debug" => {
+            if let Value::Boolean(val) = value {
+                config.debug = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'debug'".to_string())
+            }
+        }
+        "debug_mode" => {
+            if let Value::String(val) = value {
+                config.debug_mode = val;
+                Ok(())
+            } else {
+                Err("Expected a string value for 'debug_mode'".to_string())
+            }
+        }
+        "supports_color" => {
+            if let Value::Boolean(val) = value {
+                config.supports_color = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'supports_color'".to_string())
+            }
+        }
+        "use_lucia_traceback" => {
+            if let Value::Boolean(val) = value {
+                config.use_lucia_traceback = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'use_lucia_traceback'".to_string())
+            }
+        }
+        "warnings" => {
+            if let Value::Boolean(val) = value {
+                config.warnings = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'warnings'".to_string())
+            }
+        }
+        "use_preprocessor" => {
+            if let Value::Boolean(val) = value {
+                config.use_preprocessor = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'use_preprocessor'".to_string())
+            }
+        }
+        "print_comments" => {
+            if let Value::Boolean(val) = value {
+                config.print_comments = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'print_comments'".to_string())
+            }
+        }
+        "allow_fetch" => {
+            if let Value::Boolean(val) = value {
+                config.allow_fetch = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'allow_fetch'".to_string())
+            }
+        }
+        "allow_unsafe" => {
+            if let Value::Boolean(val) = value {
+                config.allow_unsafe = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'allow_unsafe'".to_string())
+            }
+        }
+        "home_dir" => {
+            if let Value::String(val) = value {
+                config.home_dir = val;
+                Ok(())
+            } else {
+                Err("Expected a string value for 'home_dir'".to_string())
+            }
+        }
+        "recursion_limit" => {
+            if let Value::Int(val) = value {
+                if let Ok(i64_val) = val.to_i64() {
+                    config.recursion_limit = i64_val as usize;
+                    Ok(())
+                } else {
+                    Err("Expected an integer value for 'recursion_limit'".to_string())
+                }
+            } else {
+                Err("Expected an integer value for 'recursion_limit'".to_string())
+            }
+        }
+        "version" => {
+            if let Value::String(val) = value {
+                config.version = val;
+                Ok(())
+            } else {
+                Err("Expected a string value for 'version'".to_string())
+            }
+        }
+        "color_scheme" => {
+            if let Value::Map { keys, values } = value {
+                if keys.len() == 9 && values.len() == 9 {
+                    config.color_scheme = ColorScheme {
+                        exception: values[0].to_string(),
+                        warning: values[1].to_string(),
+                        help: values[2].to_string(),
+                        debug: values[3].to_string(),
+                        comment: values[4].to_string(),
+                        input_arrows: values[5].to_string(),
+                        note: values[6].to_string(),
+                        output_text: values[7].to_string(),
+                        info: values[8].to_string(),
+                    };
+                    Ok(())
+                } else {
+                    Err("Expected a map with 9 color scheme entries".to_string())
+                }
+            } else {
+                Err("Expected a map for 'color_scheme'".to_string())
+            }
+        }
+        _ => Err(format!("Key '{}' not found in config", key)),
+    }
+}
+
 pub fn get_from_config(config: &Config, key: &str) -> Value {
     match key {
         "moded" => Value::Boolean(config.moded),

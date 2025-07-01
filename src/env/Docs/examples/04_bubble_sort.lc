@@ -1,0 +1,19 @@
+fun bubbleSort(arr: list) -> list:
+    n: int = len(arr)
+
+    for (i in [0...n - 2]):
+        for (j in [0...n - i - 2]):
+            aj: int = arr[j]
+            aj1: int = arr[j + 1]
+
+            if (aj > aj1):
+                arr[j] = aj1
+                arr[j + 1] = aj
+            end
+        end
+    end
+    return arr
+end
+
+arr: list = [64, 34, 25, 12, 22, 11, 90]
+print(bubbleSort(arr))

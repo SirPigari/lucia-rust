@@ -5,6 +5,8 @@ use crate::env::runtime::types::Int;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::to_static;
+use std::thread;
+use std::time::Duration;
 use crate::{insert_native_fn};
 use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, ParseError};
 
@@ -97,6 +99,45 @@ fn format_datetime(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn sleep(args: &HashMap<String, Value>) -> Value {
+    if let Some(duration_val) = args.get("duration") {
+        match duration_val {
+            Value::Int(int_val) => {
+                match int_val.to_i64() {
+                    Ok(duration_ms) => {
+                        if duration_ms < 0 {
+                            return Value::Error(
+                                "InvalidArgument",
+                                "duration must be non-negative",
+                                None,
+                            );
+                        }
+                        let duration = Duration::from_millis(duration_ms as u64);
+                        thread::sleep(duration);
+                        Value::Null
+                    }
+                    Err(_) => Value::Error(
+                        "ConversionError",
+                        "failed to convert Int to i64",
+                        None,
+                    ),
+                }
+            }
+            _ => Value::Error(
+                "InvalidArgument",
+                "duration must be an integer",
+                None,
+            ),
+        }
+    } else {
+        Value::Error(
+            "MissingArgument",
+            "duration argument missing",
+            None,
+        )
+    }
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -131,7 +172,15 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("format", "str")
         ],
         "map"
-    );    
+    );
+
+    insert_native_fn!(
+        map,
+        "sleep",
+        sleep,
+        vec![Parameter::positional("duration", "int")],
+        "void"
+    );
 
     map
 }

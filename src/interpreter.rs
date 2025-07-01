@@ -1,5 +1,5 @@
 use std::collections::{HashMap, BTreeMap, HashSet};
-use crate::env::runtime::config::{Config, ColorScheme, get_from_config};
+use crate::env::runtime::config::{Config, ColorScheme, get_from_config, set_in_config};
 use crate::env::runtime::utils::{
     print_colored,
     hex_to_ansi,
@@ -61,7 +61,7 @@ pub struct Interpreter {
     config: Config,
     err: Option<Error>,
     is_returning: bool,
-    is_stopped: bool,
+    state: String,
     return_value: Value,
     source: String,
     stack: Vec<(String, HashMap<String, Value>, HashMap<String, Variable>)>,
@@ -81,7 +81,7 @@ impl Interpreter {
             err: None,
             return_value: NULL,
             is_returning: false,
-            is_stopped: false,
+            state: "normal".to_string(),
             source: String::new(),
             stack: vec![],
             use_colors,
@@ -150,6 +150,18 @@ impl Interpreter {
             "sum".to_string(),
             Variable::new("sum".to_string(), Value::Function(native::sum_fn()), "function".to_string(), false, true, true),
         );
+        this.variables.insert(
+            "ord".to_string(),
+            Variable::new("ord".to_string(), Value::Function(native::ord_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "styledstr".to_string(),
+            Variable::new("styledstr".to_string(), Value::Function(native::styledstr_fn()), "function".to_string(), false, true, true),
+        );
+        this.variables.insert(
+            "array".to_string(),
+            Variable::new("array".to_string(), Value::Function(native::array_fn()), "function".to_string(), false, true, true),
+        );
         // 00 so user cant call it
         this.variables.insert(
             "00__placeholder__".to_string(),
@@ -160,7 +172,7 @@ impl Interpreter {
     }
 
     pub fn is_stopped(&self) -> bool {
-        self.is_stopped
+        self.state == "exit"
     }
 
     fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
@@ -1004,6 +1016,12 @@ impl Interpreter {
         let Statement::Statement { keys, values, .. } = statement else {
             return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
         };
+
+        if self.state == "break" {
+            return NULL;
+        } else if self.state == "continue" {
+            return NULL;
+        }
     
         let statement: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
@@ -1012,9 +1030,11 @@ impl Interpreter {
                 // Control flow
                 "IF" => self.handle_if(statement.clone()),
                 "FOR" => self.handle_for_loop(statement.clone()),
+                "WHILE" => self.handle_while(statement.clone()),
                 "TRY_CATCH" | "TRY" => self.handle_try(statement.clone()),
                 "THROW" => self.handle_throw(statement.clone()),
                 "FORGET" => self.handle_forget(statement.clone()),
+                "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement.clone()),
         
                 // Function related
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
@@ -1087,6 +1107,66 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_continue_and_break(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let control_type = match statement.get(&Value::String("type".to_string())) {
+            Some(Value::String(t)) => t,
+            _ => {
+                self.raise("SyntaxError", "Expected 'type' to be a string in continue/break statement");
+                return NULL;
+            }
+        };
+    
+        if control_type == "CONTINUE" {
+            self.state = "continue".to_string();
+            return NULL;
+        } else if control_type == "BREAK" {
+            self.state = "break".to_string();
+            return NULL;
+        } else {
+            self.raise("SyntaxError", &format!("Unsupported control type: {}", control_type));
+            return NULL;
+        }
+    }
+
+    fn handle_while(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let condition = match statement.get(&Value::String("condition".to_string())) {
+            Some(v) => v,
+            _ => {
+                self.raise("SyntaxError", "Missing 'condition' in while loop");
+                return NULL;
+            }
+        };
+    
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b,
+            _ => {
+                self.raise("SyntaxError", "Expected a list for 'body' in while loop");
+                return NULL;
+            }
+        };
+    
+        while self.evaluate(condition.convert_to_statement()).is_truthy() {
+            for stmt in body.iter() {
+                let result = self.evaluate(stmt.convert_to_statement());
+                if self.err.is_some() {
+                    return NULL;
+                }
+                if self.state == "break" {
+                    self.state = "normal".to_string();
+                    return NULL;
+                } else if self.state == "continue" {
+                    self.state = "normal".to_string();
+                    break;
+                }
+                if self.is_returning {
+                    return result;
+                }
+            }
+        }
+    
+        NULL
     }
     
     fn handle_compound_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2962,176 +3042,239 @@ impl Interpreter {
                 var.value.clone()
             }
             "INDEX_ACCESS" => {
-                let variable_name: Option<String> = match left_hashmap.get(&Value::String("object".to_string())) {
-                    Some(Value::Map { keys, values }) => {
-                        keys.iter()
-                            .zip(values.iter())
-                            .find_map(|(k, v)| if k == &Value::String("name".to_string()) {
-                                if let Value::String(name) = v {
-                                    Some(name.clone())
-                                } else {
-                                    None
+                fn assign_index(
+                    interpreter: &mut Interpreter,
+                    variable_name: &str,
+                    index_access: Value,
+                    right_value: Value,
+                ) -> Value {
+                    let var = match interpreter.variables.get_mut(variable_name) {
+                        Some(v) => v,
+                        None => return interpreter.raise("NameError", &format!("Variable '{}' not found for index assignment", variable_name)),
+                    };
+                
+                    if var.is_final() {
+                        return interpreter.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", variable_name));
+                    }
+                
+                    match &mut var.value {
+                        Value::List(l) => {
+                            let index = match index_access {
+                                Value::Int(i) => match i.to_i64() {
+                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
+                                    _ => return interpreter.raise("TypeError", "List index must be a non-negative integer"),
+                                },
+                                Value::Float(f) => {
+                                    match f.to_f64() {
+                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
+                                        _ => return interpreter.raise("TypeError", "List index must be a non-negative whole number"),
+                                    }
+                                },
+                                _ => return interpreter.raise("TypeError", "List index must be an integer or whole float"),
+                            };
+                            if index >= l.len() {
+                                return interpreter.raise("IndexError", "List index out of range");
+                            }
+                            l[index] = right_value;
+                            var.value.clone()
+                        }
+                        Value::Bytes(b) => {
+                            let index = match index_access {
+                                Value::Int(i) => match i.to_i64() {
+                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
+                                    _ => return interpreter.raise("TypeError", "Bytes index must be a non-negative integer"),
+                                },
+                                Value::Float(f) => {
+                                    match f.to_f64() {
+                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
+                                        _ => return interpreter.raise("TypeError", "Bytes index must be a non-negative whole number"),
+                                    }
+                                },
+                                _ => return interpreter.raise("TypeError", "Bytes index must be an integer or whole float"),
+                            };
+                            if index >= b.len() {
+                                return interpreter.raise("IndexError", "Bytes index out of range");
+                            }
+                            let val_as_u8 = match right_value {
+                                Value::Int(i) => match i.to_i64() {
+                                    Ok(i64_val) => i64_val as u8,
+                                    Err(_) => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
+                                },
+                                Value::Float(f) => match f.to_f64() {
+                                    Ok(f64_val) => f64_val as u8,
+                                    Err(_) => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
+                                },
+                                Value::String(s) => s.parse::<u8>().unwrap_or(0),
+                                _ => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
+                            };
+                            b[index] = val_as_u8;
+                            var.value.clone()
+                        }
+                        Value::String(s) => {
+                            let index = match index_access {
+                                Value::Int(i) => match i.to_i64() {
+                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
+                                    _ => return interpreter.raise("TypeError", "String index must be a non-negative integer"),
+                                },
+                                Value::Float(f) => {
+                                    match f.to_f64() {
+                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
+                                        _ => return interpreter.raise("TypeError", "String index must be a non-negative whole number"),
+                                    }
+                                },
+                                _ => return interpreter.raise("TypeError", "String index must be an integer or whole float"),
+                            };
+                            if index >= s.len() {
+                                return interpreter.raise("IndexError", "String index out of range");
+                            }
+                            let mut chars: Vec<char> = s.chars().collect();
+                            let replacement_str = right_value.to_string();
+                            if replacement_str.chars().count() != 1 {
+                                return interpreter.raise("TypeError", "String assignment must be a single character");
+                            }
+                            chars[index] = replacement_str.chars().next().unwrap();
+                            *s = chars.into_iter().collect();
+                            var.value.clone()
+                        }
+                        Value::Map { keys, values } => {
+                            let key = index_access;
+                            match keys.iter().position(|k| k == &key) {
+                                Some(idx) => values[idx] = right_value,
+                                None => {
+                                    keys.push(key);
+                                    values.push(right_value);
                                 }
-                            } else {
-                                None
-                            })
+                            }
+                            var.value.clone()
+                        }
+                        _ => interpreter.raise("TypeError", "Object not indexable for index assignment"),
                     }
-                    _ => None,
-                };
+                }
+                let mut get_single_index_from_map = |index_map: &Value| -> Result<Value, (String, String)> {
+                    if let Value::Map { keys, values } = index_map {
+                        let mut start_val = None;
+                        let mut end_val = None;
+                
+                        for (k, v) in keys.iter().zip(values.iter()) {
+                            if let Value::String(s) = k {
+                                if s == "start" {
+                                    start_val = Some(v.clone());
+                                } else if s == "end" {
+                                    end_val = Some(v.clone());
+                                }
+                            }
+                        }
+                
+                        match (start_val, end_val) {
+                            (Some(start), Some(end)) => {
+                                if start == end {
+                                    Ok(self.evaluate(start.convert_to_statement()))
+                                } else {
+                                    Err((
+                                        "IndexError".to_string(),
+                                        "Slice assignment requires 'start' and 'end' to be equal".to_string(),
+                                    ))
+                                }
+                            }
+                            _ => Err((
+                                "RuntimeError".to_string(),
+                                "Missing 'start' or 'end' in index access assignment".to_string(),
+                            )),
+                        }
+                    } else {
+                        Err((
+                            "TypeError".to_string(),
+                            "Index access must be a map with 'start' and 'end' keys".to_string(),
+                        ))
+                    }
+                };           
 
-                let is_map = if let Some(name) = &variable_name {
-                    match self.variables.get(name) {
-                        Some(var) => matches!(var.value, Value::Map { .. }),
-                        None => return self.raise("NameError", &format!("Variable '{}' not found for index assignment", name)),
-                    }
-                } else {
-                    return self.raise("RuntimeError", "Expected variable name for index assignment object");
+                let mut object_val = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'object' in index access assignment"),
                 };
 
                 let access_val = match left_hashmap.get(&Value::String("access".to_string())) {
                     Some(v) => v,
-                    None => return self.raise("RuntimeError", "Missing 'access' in index access"),
+                    None => return self.raise("RuntimeError", "Missing 'access' in index access assignment"),
                 };
 
-                let access_hashmap = match access_val {
-                    Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-                    _ => return self.raise("RuntimeError", "Expected a map for index access"),
+                let mut index_access = match get_single_index_from_map(&access_val) {
+                    Ok(idx) => idx,
+                    Err((kind, msg)) => return self.raise(&kind, &msg),
                 };
 
-                if let Some(name) = &variable_name {
-                    let len = match self.variables.get(name) {
-                        Some(var) => match &var.value {
-                            Value::String(s) => s.chars().count(),
-                            Value::List(l) => l.len(),
-                            Value::Bytes(b) => b.len(),
-                            Value::Tuple(t) => t.len(),
-                            Value::Map { keys, values } => {
-                                if keys.len() != values.len() {
-                                    return self.raise("TypeError", "Map keys and values must have the same length");
+                loop {
+                    let object_type = match object_val {
+                        Value::Map { keys, values } => {
+                            let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                    
+                            match obj_map.get(&Value::String("type".to_string())) {
+                                Some(t) => match t {
+                                    Value::String(s) => s.clone(),
+                                    _ => {
+                                        self.raise("RuntimeError", "Expected 'type' to be a String");
+                                        "".to_string()
+                                    }
+                                },
+                                None => {
+                                    self.raise("RuntimeError", "Missing 'type' field");
+                                    "".to_string()
                                 }
-                                keys.len()
                             }
-                            _ => return self.raise("TypeError", "Object not indexable"),
-                        },
-                        None => return self.raise("NameError", &format!("Variable '{}' not found for index assignment", name)),
+                        }
+                        _ => {
+                            self.raise("RuntimeError", "Expected a Map value");
+                            "".to_string()
+                        }
                     };
 
-                    let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
-                    let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
-
-                    let evaluated_key = if let Some(start_val) = start_val_opt {
-                        Some(self.evaluate(Value::convert_to_statement(start_val)))
-                    } else {
-                        None
+                    if self.err.is_some() {
+                        return NULL;
                     };
 
-                    if is_map {
-                        let evaluated_key = if let Some(start_val) = start_val_opt {
-                            self.evaluate(Value::convert_to_statement(start_val))
-                        } else {
-                            return self.raise("RuntimeError", "Missing index for map assignment");
-                        };
-
-                        if let Some(var) = self.variables.get_mut(name) {
-                            if var.is_final() {
-                                return self.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", name));
-                            }
-                            if let Value::Map { keys, values } = &mut var.value {
-                                if let Some(pos) = keys.iter().position(|k| k == &evaluated_key) {
-                                    values[pos] = right_value;
-                                } else {
-                                    keys.push(evaluated_key);
-                                    values.push(right_value);
+                    match object_type.as_str() {
+                        "VARIABLE" => {
+                            let variable_name = match object_val {
+                                Value::Map { keys, values } => {
+                                    let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                                    match obj_map.get(&Value::String("name".to_string())) {
+                                        Some(Value::String(name)) => name.clone(),
+                                        _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable assignment"),
+                                    }
                                 }
+                                _ => return self.raise("RuntimeError", "Expected a Map value for variable assignment"),
+                            };
+
+                            if self.err.is_some() {
                                 return NULL;
                             }
-                        } else {
-                            return self.raise("NameError", &format!("Variable '{}' not found for index assignment", name));
-                        }
-                    }
 
-                    let start_idx = match start_val_opt {
-                        Some(v) => match self.to_index(v, len) {
-                            Ok(i) => i,
-                            Err(e) => return e,
-                        },
-                        None => 0,
+                            return assign_index(self, &variable_name, index_access, right_value);
+                        }
+                        "INDEX_ACCESS" => {
+                            object_val = match object_val {
+                                Value::Map { keys, values } => {
+                                    if let Some(pos) = keys.iter().position(|k| *k == Value::String("object".to_string())) {
+                                        &values[pos]
+                                    } else {
+                                        return self.raise("RuntimeError", "Missing 'object' in nested index access assignment");
+                                    }
+                                }
+                                _ => return self.raise("RuntimeError", "Expected a Map value for nested index access assignment"),
+                            };
+                            continue;     
+                        }
+                        "LIST" | "BYTES" | "STRING" | "TUPLE" => {
+                            return assign_index(self, &object_val.to_string(), index_access, right_value);
+                        }
+                        _ => {
+                            self.raise("TypeError", &format!("Unsupported object type for index assignment: {}", object_type));
+                            return NULL;
+                        }
                     };
 
-                    let end_idx = match end_val_opt {
-                        Some(v) => match self.to_index(v, len) {
-                            Ok(i) => i,
-                            Err(e) => return e,
-                        },
-                        None => len,
-                    };
-
-                    if end_idx > len {
-                        return self.raise("IndexError", "End index out of range");
-                    }
-
-                    if start_idx > end_idx {
-                        return self.raise("IndexError", "Start index greater than end index");
-                    }
-
-                    if let Some(var) = self.variables.get_mut(name) {
-                        if var.is_final() {
-                            return self.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", name));
-                        }
-
-                        if start_idx == end_idx {
-                            match &mut var.value {
-                                Value::String(s) => {
-                                    if start_idx >= s.chars().count() {
-                                        return self.raise("IndexError", "Index out of range");
-                                    }
-                                    if let Value::String(new_char) = right_value {
-                                        if new_char.chars().count() != 1 {
-                                            return self.raise("ValueError", "Expected a single character for string assignment");
-                                        }
-                                        let mut chars: Vec<char> = s.chars().collect();
-                                        chars[start_idx] = new_char.chars().next().unwrap();
-                                        let new_string: String = chars.into_iter().collect();
-                                        var.set_value(Value::String(new_string));
-                                    } else {
-                                        return self.raise("TypeError", "Expected string for character assignment");
-                                    }
-                                }
-                                Value::List(l) => {
-                                    if start_idx >= l.len() {
-                                        return self.raise("IndexError", "Index out of range");
-                                    }
-                                    l[start_idx] = right_value;
-                                }
-                                Value::Bytes(b) => {
-                                    if let Value::Int(i) = right_value {
-                                        let int_val = i.to_i64().unwrap_or(-1);
-                                        if int_val < 0 || int_val > 255 {
-                                            return self.raise("ValueError", "Byte value out of range");
-                                        }
-                                        if start_idx >= b.len() {
-                                            return self.raise("IndexError", "Index out of range");
-                                        }
-                                        b[start_idx] = int_val as u8;
-                                    } else {
-                                        return self.raise("TypeError", "Expected integer for byte assignment");
-                                    }
-                                }
-                                Value::Tuple(_) => {
-                                    return self.raise("TypeError", "Tuples are immutable, cannot assign index");
-                                }
-                                _ => return self.raise("TypeError", "Object not indexable"),
-                            }
-                        } else {
-                            return self.raise("NotImplemented", "Slice assignment not supported");
-                        }
-
-                        NULL
-                    } else {
-                        self.raise("NameError", &format!("Variable '{}' not found for index assignment", name))
-                    }
-                } else {
-                    self.raise("RuntimeError", "Expected variable name for index assignment object")
+                    return NULL;
                 }
             }
             // fuck my parser
@@ -3234,7 +3377,7 @@ impl Interpreter {
         let end_eval_opt = end_val_opt
             .map(|v| self.evaluate(v.convert_to_statement()))
             .and_then(|val| if val == NULL { Some(Value::Int(len.into())) } else { Some(val) });
-    
+
         if self.err.is_some() {
             return NULL;
         }
@@ -3528,9 +3671,23 @@ impl Interpreter {
 
             for stmt in body {
                 result = self.evaluate(stmt.convert_to_statement());
+                if self.err.is_some() {
+                    return NULL;
+                }
                 if self.is_returning {
                     return result;
                 }
+            }
+            match self.state.as_str() {
+                "break" => {
+                    self.state = "normal".to_string();
+                    break;
+                },
+                "continue" => {
+                    self.state = "normal".to_string();
+                    continue;
+                },
+                _ => {},
             }
         }
 
@@ -4375,7 +4532,7 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval"
+            "exit", "fetch", "exec", "eval", "set_cfg"
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
@@ -4545,7 +4702,7 @@ impl Interpreter {
                     let param_name = &param.name;
                     let param_type = &param.ty;
                     let param_default = &param.default;
-                    let param_mods = &param.mods;  // Vec<String>
+                    let param_mods = &param.mods;
                 
                     match param.kind {
                         ParameterKind::Positional => {
@@ -4726,7 +4883,7 @@ impl Interpreter {
                                 Value::Int(Int::from_i64(0))
                             };
                             self.is_returning = true;
-                            self.is_stopped = true;
+                            self.state = "exit".to_string();
                             self.return_value = code.clone();
                             self.stack.pop();
                             debug_log(
@@ -4820,6 +4977,24 @@ impl Interpreter {
                                 return new_interpreter.return_value.clone();
                             } else {
                                 return self.raise("TypeError", "Expected a string in 'code' argument in eval");
+                            }
+                        }
+                        "set_cfg" => {
+                            self.stack.pop();
+                            if let Some(Value::String(key)) = final_args_no_mods.get("key") {
+                                if let Some(value) = final_args_no_mods.get("value") {
+                                    set_in_config(&mut self.config, &key.clone(), value.clone());
+                                    debug_log(
+                                        &format!("<Set config: {} = {}>", key, format_value(value)),
+                                        &self.config,
+                                        Some(self.use_colors.clone()),
+                                    );
+                                    return Value::Null;
+                                } else {
+                                    return self.raise("TypeError", "Expected a value in 'value' argument in set_cfg");
+                                }
+                            } else {
+                                return self.raise("TypeError", "Expected a string in 'key' argument in set_cfg");
                             }
                         }
                         _ => {
@@ -5265,6 +5440,12 @@ impl Interpreter {
             "%" => match (left, right) {
                 (_, Value::Int(ref val)) if val.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
                 (_, Value::Float(ref f)) if f.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
+                (Value::Int(ref i1), Value::Int(ref i2)) => {
+                    match i1.clone() % i2.clone() {
+                        Ok(res) => Value::Int(res),
+                        Err(_) => self.raise("ArithmeticError", "Integer modulo failed"),
+                    }
+                }
                 (a, b) => {
                     let base = match a {
                         Value::Int(ref i) => match Float::from_int(&i) {
@@ -5287,7 +5468,7 @@ impl Interpreter {
                         Err(_) => self.raise("TypeError", "Float modulo failed"),
                     }
                 }
-            },
+            }
             "^" => match (&left, &right) {
                 (_, Value::Int(b)) if b.is_zero() => Value::Float(1.0.into()),
                 (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
@@ -5373,8 +5554,6 @@ impl Interpreter {
             },
             "<=" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Value::Boolean(a <= b),
-                (Value::Float(a), Value::Float(b)) => Value::Boolean(a <= b),
-                (Value::Int(a), Value::Float(b)) => Value::Boolean(Float::from_int(&a) <= Ok(b)),
                 (Value::Float(a), Value::Int(b)) => {
                     match Float::from_int(&b) {
                         Ok(b_float) => Value::Boolean(a <= b_float),

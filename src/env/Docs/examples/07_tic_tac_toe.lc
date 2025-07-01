@@ -1,0 +1,116 @@
+#config debug false
+
+// simple tic-tac-toe in Lucia
+// made by Markofwitch 2025, the developer of Lucia
+
+fun printBoard(board: list) -> void:
+    print("╔═══════════╗")
+
+    for (i in [0...2]):
+        print("║ ", end="")
+
+        for (j in [0...2]):
+            idx: int = i * 3 + j
+            cell: str = board[idx]
+
+            if (cell == " "):
+                styledprint(str(idx + 1), fg_color="#434343", end="")
+            else:
+                // use getPlayerString here for colored X/O
+                styledprint(getPlayerString(cell), end="")
+            end
+
+            if (j < 2):
+                print(" | ", end="")
+            end
+        end
+
+        print(" ║")
+
+        if (i < 2):
+            print("║---+---+---║")
+        end
+    end
+
+    print("╚═══════════╝")
+end
+
+fun checkWin(board: list, player: str) -> bool:
+    wins: list = [
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],  // rows
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],  // cols
+        [0, 4, 8], [2, 4, 6]              // diagonals
+    ]
+
+    for (line in wins):
+        if ((board[line[0]] == player) && (board[line[1]] == player) && (board[line[2]] == player)):
+            return true
+        end
+    end
+    return false
+end
+
+fun isDraw(board: list) -> bool:
+    for (cell in board):
+        if (cell == " "):
+            return false
+        end
+    end
+    return true
+end
+
+fun getPlayerString(player: str) -> str:
+    if (player == "X"):
+        return styledstr("X", fg_color="#FF0000", end="")
+    else:
+        return styledstr("O", fg_color="#0000FF", end="")
+    end
+end
+
+fun ticTacToe() -> void:
+    board: list = [" ", " ", " ", " ", " ", " ", " ", " ", " "]
+    currentPlayer: str = "X"
+
+    while (true):
+        printBoard(board)
+        print(f"Player {currentPlayer}, enter your move (1-9): ", end="")
+
+        moveStr: str = input()
+
+        moveCharCode: int = ord(moveStr[0])
+
+        if (len(moveStr) != 1 || !(((moveCharCode >= ord("1")) && (moveCharCode <= ord("9"))))):
+            print("Invalid input, please enter a number from 1 to 9.")
+            continue
+        end
+
+        move: int = int(moveStr) - 1
+
+        if (board[move] != " "):
+            print("That spot is already taken, try again.")
+            continue
+        end
+
+        board[move] = currentPlayer
+
+        if (checkWin(board, currentPlayer)):
+            printBoard(board)
+            print("Player " + getPlayerString(currentPlayer) + " wins!")
+            break
+        end
+
+        if (isDraw(board)):
+            printBoard(board)
+            print("It's a draw!")
+            break
+        end
+
+        if (currentPlayer == "X"):
+            currentPlayer = "O"
+        else:
+            currentPlayer = "X"
+        end
+    end
+end
+
+ticTacToe()

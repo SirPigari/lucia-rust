@@ -276,6 +276,107 @@ fn sum(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn ord(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(s)) = args.get("s") {
+        if let Some(c) = s.chars().next() {
+            return Value::Int(Int::from_i64(c as i64));
+        }
+    }
+    Value::Error("TypeError", "Expected a string with at least one character", None)
+}
+
+fn styledstr(args: &HashMap<String, Value>) -> Value {
+    let values = match args.get("args") {
+        Some(Value::List(list)) => list,
+        _ => &vec![],
+    };
+
+    let sep = match args.get("sep") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => format_value(other),
+        None => " ".to_string(),
+    };
+
+    let mut text = values
+        .iter()
+        .map(|v| format_value(v))
+        .collect::<Vec<_>>()
+        .join(sep.as_str());
+
+    let mut style = String::new();
+
+    if let Some(Value::String(fg)) = args.get("fg_color") {
+        style += &utils::hex_to_ansi(fg, Some(true));
+    }
+
+    if let Some(Value::String(bg)) = args.get("bg_color") {
+        let hex = if bg.starts_with('#') { &bg[1..] } else { bg };
+        if hex.len() == 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                style.push_str(&format!("\x1b[48;2;{};{};{}m", r, g, b));
+            }
+        }
+    }
+
+    if matches!(args.get("bold"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[1m");
+    }
+    if matches!(args.get("italic"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[3m");
+    }
+    if matches!(args.get("underline"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[4m");
+    }
+    if matches!(args.get("blink"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[5m");
+    }
+    if matches!(args.get("reverse"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[7m");
+    }
+    if matches!(args.get("strikethrough"), Some(Value::Boolean(true))) {
+        style.push_str("\x1b[9m");
+    }
+
+    if let Some(Value::String(link)) = args.get("link") {
+        text = format!("[{}]({})", text, link);
+    }
+
+    let reset = "\x1b[0m";
+    let styled_text = format!("{}{}{}", style, text, reset);
+    let end = match args.get("end") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => format_value(other),
+        None => "".to_string(),
+    };
+
+    let mut output = String::new();
+    output.push_str(&styled_text);
+    output.push_str(&end);
+
+    Value::String(output)
+}
+
+fn array(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::Int(size)) = args.get("size") {
+        if let Ok(size) = size.to_usize() {
+            let initial_value = args.get("initial_value").cloned().unwrap_or(Value::Null);
+
+            let mut list = Vec::with_capacity(size);
+            for _ in 0..size {
+                list.push(initial_value.clone());
+            }
+            return Value::List(list);
+        } else {
+            return Value::Error("TypeError", "Size must be a positive integer", None);
+        }
+    }
+    Value::Error("TypeError", "Expected 'size' parameter of type int", None)
+}
+
 fn __placeholder__(args: &HashMap<String, Value>) -> Value {
     Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
@@ -441,6 +542,57 @@ pub fn sum_fn() -> Function {
             Parameter::keyword_optional("start", "any", Value::Int(0.into())),
         ],
         "float",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn ord_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "ord",
+        ord,
+        vec![
+            Parameter::positional("s", "str"),
+        ],
+        "int",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn styledstr_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "styledstr",
+        styledstr,
+        vec![
+            Parameter::variadic_optional("args", "any", Value::String("".to_string())),
+            Parameter::keyword_optional("sep", "str", Value::String(" ".to_string())),
+            Parameter::keyword_optional("end", "str", Value::String("\n".to_string())),
+            Parameter::keyword_optional("fg_color", "str", Value::String("reset".to_string())),
+            Parameter::keyword_optional("bg_color", "str", Value::String("reset".to_string())),
+            Parameter::keyword_optional("bold", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("italic", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("underline", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("blink", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("reverse", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("strikethrough", "bool", Value::Boolean(false)),
+            Parameter::keyword_optional("link", "any", Value::Null),
+        ],
+        "str",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn array_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "array",
+        array,
+        vec![
+            Parameter::positional("size", "int"),
+            Parameter::positional_optional("initial_value", "any", Value::Null),
+        ],
+        "list",
         true, true, true,
         None,
     )))

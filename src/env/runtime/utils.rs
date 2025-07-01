@@ -247,16 +247,11 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
         let inner = &s[1..s.len() - 1];
 
-        let escaped_inner = inner.chars().map(|c| {
-            match c {
-                '\\' => "\\\\".to_string(),
-                '"' => "\\\"".to_string(),
-                '\x00'..='\x1F' => format!("\\u{:04X}", c as u32),
-                _ => c.to_string(),
-            }
-        }).collect::<String>();
-
-        let json_quoted = format!("\"{}\"", escaped_inner);
+        let json_quoted = if first == '\'' {
+            format!("\"{}\"", inner)
+        } else {
+            s.to_string()
+        };
 
         match serde_json::from_str::<String>(&json_quoted) {
             Ok(unescaped) => Ok(unescaped),
@@ -843,6 +838,22 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             name: "exec".to_string(),
             parameters: vec![Parameter::positional("code", "str")],
             return_type: Value::String("any".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
+        "set_cfg".to_string(),
+        FunctionMetadata {
+            name: "set_cfg".to_string(),
+            parameters: vec![
+                Parameter::positional("key", "str"),
+                Parameter::positional("value", "any"),
+            ],
+            return_type: Value::String("void".to_string()),
             is_public: true,
             is_static: true,
             is_final: true,

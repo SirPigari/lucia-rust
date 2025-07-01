@@ -589,27 +589,25 @@ impl Preprocessor {
 
                         let key = tokens[i].1.clone();
                         i += 1;
-                        let value = tokens[i].1.clone();
+                        let value = tokens[i].clone();
                         i += 1;
 
-                        result.push(("IDENTIFIER".to_string(), "config".to_string()));
-                        result.push(("OPERATOR".to_string(), ".".to_string()));
-                        result.push(("IDENTIFIER".to_string(), "set".to_string()));
-                        result.push(("OPERATOR".to_string(), "(".to_string()));
-                        result.push(("STRING".to_string(), key));
-                        result.push(("OPERATOR".to_string(), ",".to_string()));
-                        result.push(("STRING".to_string(), value));
-                        result.push(("OPERATOR".to_string(), ")".to_string()));
+                        result.push(("IDENTIFIER".to_string(), "set_cfg".to_string()));
+                        result.push(("SEPARATOR".to_string(), "(".to_string()));
+                        result.push(("STRING".to_string(), format!("\"{}\"", key)));
+                        result.push(("SEPARATOR".to_string(), ",".to_string()));
+                        result.push(value);
+                        result.push(("SEPARATOR".to_string(), ")".to_string()));
 
-                        return Err(Error {
-                            error_type: "Unimplemented".to_string(),
-                            msg: "config.set() is not implemented yet".to_string(),
-                            help: Some("This feature will be added later".to_string()),
-                            line: (0, "".to_string()),
-                            column: 0,
-                            file: self.file_path.clone(),
-                            ref_err: None,
-                        });
+                        // return Err(Error {
+                        //     error_type: "Unimplemented".to_string(),
+                        //     msg: "set_cfg() is not implemented yet".to_string(),
+                        //     help: Some("This feature will be added later".to_string()),
+                        //     line: (0, "".to_string()),
+                        //     column: 0,
+                        //     file: self.file_path.clone(),
+                        //     ref_err: None,
+                        // });
                     }
                     _ => {
                         return Err(Error {

@@ -904,6 +904,102 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if token.1 == "while" => {
+                    self.next();
+                    if !self.token_is("SEPARATOR", "(") {
+                        self.raise_with_help("SyntaxError", "Expected '(' after 'while'", "Did you forget to add '('?");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    let condition = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    self.check_for("SEPARATOR", ")");
+                    self.next();
+                    let line = self.current_line();
+                    let column = self.get_line_column();
+                    if self.token_is("IDENTIFIER", "end") {
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("WHILE".to_string()),
+                                condition.convert_to_map(),
+                                Value::List(vec![]),
+                            ],
+                            line,
+                            column,
+                        };
+                    }
+                    self.check_for("SEPARATOR", ":");
+                    self.next();
+
+                    let mut body = vec![];
+                    while let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                            break;
+                        }
+                        let stmt = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        body.push(stmt);
+                    }
+
+                    if !self.token_is("IDENTIFIER", "end") {
+                        self.raise_with_help("SyntaxError", "Expected 'end' after 'while' body", "Did you forget to add 'end'?");
+                        return Statement::Null;
+                    }
+                    self.next();
+
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("condition".to_string()),
+                            Value::String("body".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("WHILE".to_string()),
+                            condition.convert_to_map(),
+                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "continue" => {
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("CONTINUE".to_string()),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "break" => {
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("BREAK".to_string()),
+                        ],
+                        line,
+                        column,
+                    }
+                }
+
                 "IDENTIFIER" if token.1 == "forget" => {
                     self.next();
                     let value = self.parse_expression();

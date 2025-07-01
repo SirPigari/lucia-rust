@@ -85,6 +85,8 @@ fn generate_uuid(git_hash: &str) -> Uuid {
 }
 
 fn main() {
+    println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu=native");
+
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let output = Command::new("rustc").arg("-vV").output().ok();
     let rustc_info = output
@@ -173,7 +175,9 @@ fn main() {
     println!("cargo:rustc-env=BUILD_MSG={msg}");
 
     let src_path = Path::new(&manifest_dir).join("src");
+    let build_path = Path::new(&manifest_dir).join("build.rs");
     rerun_if_changed_recursive(&src_path);
+    println!("cargo:rerun-if-changed={}", build_path.display());
 
     if cfg!(target_os = "windows") {
         use winres::WindowsResource;

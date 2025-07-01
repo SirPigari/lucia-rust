@@ -1,0 +1,132 @@
+#config debug false
+
+import time
+import random
+import collections  // for clear_terminal
+
+// Conway's game of life in Lucia
+// made by Markofwitch 2025, the developer of Lucia
+// code inspired by https://github.com/mwharrisjr/Game-of-Life/
+// Game originally created by John Conway in 1970
+
+
+fun createInitialGrid(rows: int, cols: int) -> list:
+    grid: list = []
+    for (row in [0..rows - 1]):
+        rowList: list = []
+        for (col in [0..cols - 1]):
+            if (random.randint(0, 7) == 0):
+                rowList = rowList.append(1)
+            else:
+                rowList = rowList.append(0)
+            end
+        end
+        grid = grid.append(rowList)
+    end
+    return grid
+end
+
+fun printGrid(rows: int, cols: int, grid: list, generation: int) -> void:
+    collections.clear_terminal()
+    outputStr: str = "Generation " + str(generation) + " - To exit the program press <Ctrl-C>\n\r"
+    for (row in [0..rows - 1]):
+        for (col in [0..cols - 1]):
+            if (grid[row][col] == 0):
+                outputStr += ". "
+            else:
+                outputStr += "@ "
+            end
+        end
+        outputStr += "\n\r"
+    end
+    print(outputStr, end="")
+end
+
+fun getLiveNeighbors(row: int, col: int, rows: int, cols: int, grid: list) -> int:
+    lifeSum: int = 0
+    for (i in [-1, 0, 1]):
+        for (j in [-1, 0, 1]):
+            if (!((i == 0) && (j == 0))):
+                lifeSum += grid[(row + i + rows) % rows][(col + j + cols) % cols]
+            end
+        end
+    end
+    return lifeSum
+end
+
+fun createNextGrid(rows: int, cols: int, grid: list, nextGrid: list) -> void:
+    for (row in [0..rows - 1]):
+        for (col in [0..cols - 1]):
+            liveNeighbors: int = getLiveNeighbors(row, col, rows, cols, grid)
+            if (liveNeighbors < 2 || liveNeighbors > 3):
+                nextGrid[row][col] = 0
+            else if (liveNeighbors == 3 && grid[row][col] == 0):
+                nextGrid[row][col] = 1
+            else:
+                nextGrid[row][col] = grid[row][col]
+            end
+        end
+    end
+    null
+end
+
+fun gridChanging(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
+    for (row in [0..rows - 1]):
+        for (col in [0..cols - 1]):
+            if (grid[row][col] != nextGrid[row][col]):
+                return true
+            end
+        end
+    end
+    return false
+end
+
+fun getIntegerValue(prompt: str, low: int, high: int) -> int:
+    while (true):
+        print(prompt, end="")
+        inputStr: str = input()
+        try:
+            value: int = int(inputStr)
+        catch (e):
+            print("Input was not a valid integer value.")
+            continue
+        end
+        if (value < low || value > high):
+            print("Input was not inside the bounds (value < " + str(low) + " or value > " + str(high) + ").")
+            continue
+        end
+        return value
+    end
+end
+
+fun runGame() -> void:
+    collections.clear_terminal()
+    rows: int = getIntegerValue("Enter the number of rows (10-60): ", 10, 60)
+    collections.clear_terminal()
+    cols: int = getIntegerValue("Enter the number of cols (10-118): ", 10, 118)
+
+    generations: int = 5000
+
+    currentGeneration: list = createInitialGrid(rows, cols)
+    nextGeneration: list = createInitialGrid(rows, cols)
+
+    for (gen in [1..generations]):
+        if (!gridChanging(rows, cols, currentGeneration, nextGeneration)):
+            break
+        end
+        printGrid(rows, cols, currentGeneration, gen)
+        createNextGrid(rows, cols, currentGeneration, nextGeneration)
+        time.sleep(200)
+        (currentGeneration, nextGeneration) = (nextGeneration, currentGeneration)
+    end
+
+    printGrid(rows, cols, currentGeneration, generations)
+    print("<Enter> to exit or r to run again: ", end="")
+    out: str = input()
+    if (out == "r"):
+        runGame()
+    end
+    null
+end
+
+runGame()

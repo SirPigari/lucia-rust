@@ -156,6 +156,52 @@ impl Variable {
                         None,
                     )
                 };
+                let split = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "split",
+                        move |args| {
+                            if let Some(Value::String(delim)) = args.get("delimiter") {
+                                if let Value::String(val) = &val_clone {
+                                    let parts: Vec<Value> = val.split(delim.as_str())
+                                        .map(|s| Value::String(s.to_string()))
+                                        .collect();
+                                    return Value::List(parts);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("delimiter", "str")],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+                let join = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "join",
+                        move |args| {
+                            if let Some(Value::List(parts)) = args.get("parts") {
+                                if let Value::String(val) = &val_clone {
+                                    let joined: String = parts.iter()
+                                        .filter_map(|v| match v {
+                                            Value::String(s) => Some(s.clone()),
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<String>>()
+                                        .join(val);
+                                    return Value::String(joined);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("parts", "list")],
+                        "str",
+                        true, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "toBytes".to_string(),
@@ -206,6 +252,28 @@ impl Variable {
                     Variable::new(
                         "toFloat".to_string(),
                         to_float,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "split".to_string(),
+                    Variable::new(
+                        "split".to_string(),
+                        split,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "join".to_string(),
+                    Variable::new(
+                        "join".to_string(),
+                        join,
                         "function".to_string(),
                         false,
                         true,
@@ -591,6 +659,75 @@ impl Variable {
                     ),
                 );
             }
+            Value::List(_) => {
+                let append = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "append",
+                        move |args| {
+                            if let Some(item) = args.get("item") {
+                                if let Value::List(list) = &val_clone {
+                                    let mut new_list = list.clone();
+            
+                                    new_list.push(item.clone());
+            
+                                    return Value::List(new_list);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("item", "any")],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+            
+                let extend = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "extend",
+                        move |args| {
+                            if let Some(item) = args.get("item") {
+                                if let (Value::List(list), Value::List(to_extend)) = (&val_clone, item) {
+                                    let mut new_list = list.clone();
+                                    new_list.extend(to_extend.clone());
+                                    return Value::List(new_list);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("item", "list")],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+            
+                self.properties.insert(
+                    "append".to_string(),
+                    Variable::new(
+                        "append".to_string(),
+                        append,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            
+                self.properties.insert(
+                    "extend".to_string(),
+                    Variable::new(
+                        "extend".to_string(),
+                        extend,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }            
             Value::Pointer(_) => {
                 let extract_ptr = {
                     let val_clone = self.value.clone();
