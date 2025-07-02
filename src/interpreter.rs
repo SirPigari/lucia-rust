@@ -1153,16 +1153,21 @@ impl Interpreter {
                 if self.err.is_some() {
                     return NULL;
                 }
-                if self.state == "break" {
-                    self.state = "normal".to_string();
-                    return NULL;
-                } else if self.state == "continue" {
-                    self.state = "normal".to_string();
-                    break;
-                }
+                
                 if self.is_returning {
                     return result;
                 }
+            }
+            match self.state.as_str() {
+                "break" => {
+                    self.state = "normal".to_string();
+                    break;
+                },
+                "continue" => {
+                    self.state = "normal".to_string();
+                    continue;
+                },
+                _ => {},
             }
         }
     
