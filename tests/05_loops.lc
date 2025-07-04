@@ -27,4 +27,21 @@ assert_eq!(outputs, ([
     "0", "hello number 10"
 ]))
 
-print("Test completed successfully")
+while (len(outputs) > 20):
+    outputs = outputs[0..20]
+end
+
+i: int = 0
+while (i < 20):
+    i += 1
+end
+
+running: bool = true
+while (running):
+    i += 1
+    if (i >= 40):
+        running = false
+    end
+end
+
+assert_eq!(len(outputs), 20)

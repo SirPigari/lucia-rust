@@ -51,5 +51,3 @@ assert_eq!(s3, "foobar")
 // redeclare public variable with new value
 public i: int = 100
 assert_eq!(i, 100)
-
-print("Test completed successfully")

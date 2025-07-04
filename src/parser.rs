@@ -526,7 +526,7 @@ impl Parser {
                     }
                 }
 
-                "OPERATOR" if ["+", "-", "!"].contains(&token.1.as_str()) => {
+                "OPERATOR" if ["+", "-", "!", "nein", "isnt", "isn't", "not"].contains(&token.1.as_str()) => {
                     let operator = token.1.clone();
                     self.next();
                     let operand = self.parse_expression();
@@ -1142,7 +1142,7 @@ impl Parser {
                                 }
                             }
 
-                            self.next(); // consume ')'
+                            self.next();
 
                             if !self.token_is("SEPARATOR", ":") {
                                 self.raise_with_help("SyntaxError", "Expected ':' after exception vars", "Did you forget to add ':'?");

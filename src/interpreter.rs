@@ -5157,6 +5157,10 @@ impl Interpreter {
     }
     
     fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {
+        if self.err.is_some() {
+            return NULL;
+        }
+
         let operand = match statement.get(&Value::String("operand".to_string())) {
             Some(val) => self.evaluate(val.convert_to_statement()),
             None => {
@@ -5165,14 +5169,19 @@ impl Interpreter {
             }
         };
     
-        let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(s)) => s,
+        let operator: &str = match statement.get(&Value::String("operator".to_string())) {
+            Some(Value::String(s)) => s.as_str(),
             _ => return self.raise("TypeError", "Expected a string for operator"),
-        };
+        };        
+
+        let operator = match operator {
+            "isnt" | "isn't" | "nein" | "not" => "!",
+            other => other,
+        };        
     
         let path = &[
             Value::String("unary".to_string()),
-            Value::String(operator.clone()),
+            Value::String(operator.to_string()),
             operand.clone(),
         ];
         
@@ -5199,7 +5208,7 @@ impl Interpreter {
             Some(self.use_colors.clone()),
         );
         
-        let result = match operator.as_str() {
+        let result = match operator {
             "-" => match operand {
                 Value::Int(n) => Value::Int(-n),
                 Value::Float(f) => Value::Float(-f),
@@ -5426,20 +5435,40 @@ impl Interpreter {
                         Err(_) => self.raise("TypeError", "Float modulo failed"),
                     }
                 }
-            }
+            },
             "^" => match (&left, &right) {
+                // fast path: 0 exponent
                 (_, Value::Int(b)) if b.is_zero() => Value::Float(1.0.into()),
                 (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
+
+                // if either side is negative, fallback to Float
+                (Value::Int(a), Value::Int(b)) if a.negative || b.negative => {
+                    let base = match Float::from_int(a) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    let exp = match Float::from_int(b) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+                    match base.pow(&exp) {
+                        Ok(res) => Value::Float(res),
+                        Err(_) => return self.raise("TypeError", "Float pow failed"),
+                    }
+                }
+
                 (Value::Int(a), Value::Int(b)) => {
                     match a.pow(b) {
                         Ok(res) => Value::Int(res),
                         Err(_) => return self.raise("TypeError", "Int pow failed"),
                     }
                 }
+
                 (Value::Float(a), Value::Float(b)) => match a.pow(b) {
                     Ok(res) => Value::Float(res),
                     Err(_) => return self.raise("TypeError", "Float pow failed"),
                 },
+
                 (Value::Int(a), Value::Float(b)) => {
                     let base = match Float::from_int(a) {
                         Ok(f) => f,
@@ -5450,6 +5479,7 @@ impl Interpreter {
                         Err(_) => return self.raise("TypeError", "Float pow failed"),
                     }
                 }
+
                 (Value::Float(a), Value::Int(b)) => {
                     let exp = match Float::from_int(b) {
                         Ok(f) => f,
@@ -5460,6 +5490,7 @@ impl Interpreter {
                         Err(_) => return self.raise("TypeError", "Float pow failed"),
                     }
                 }
+
                 (a, b) => self.raise("TypeError", &format!(
                     "Operator '^' requires numeric operands, got '{}' and '{}'",
                     a.type_name(),
@@ -5574,26 +5605,15 @@ impl Interpreter {
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
         let s = match map.get(&Value::String("value".to_string())) {
-            Some(Value::String(s)) => s,
+            Some(Value::String(s)) if !s.is_empty() => s.as_str(),
+            Some(Value::String(_)) => return self.raise("RuntimeError", "Empty string provided for number"),
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
         };
     
-        if s.is_empty() {
-            return self.raise("RuntimeError", "Empty string provided for number");
-        }
-    
-        let trimmed = s.trim_start_matches('0');
-    
-        let normalized = if trimmed.is_empty() {
-            "0".to_string()
-        } else {
-            trimmed.to_string()
-        };
-    
         if let Some(cache_root) = self.cache.get_mut("constants") {
-            if let Some(cached) = deep_get(cache_root, &[Value::String(normalized.clone())]) {
+            if let Some(cached) = deep_get(cache_root, &[Value::String(s.into())]) {
                 debug_log(
-                    &format!("<CachedConstantNumber: {}>", normalized),
+                    &format!("<CachedConstantNumber: {}>", s),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
@@ -5601,24 +5621,52 @@ impl Interpreter {
             }
         }
     
-        let result = if s.contains('.') {
-            match Float::from_str(normalized.as_str()) {
-                Ok(f) => Value::Float(f),
+        fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
+            u64::from_str_radix(s, base)
+                .map_err(|_| ())?
+                .try_into()
+                .map(Int::from_i64)
+                .or_else(|_| Int::from_str(&s).map_err(|_| ()))
+        }
+    
+        let result = if s.starts_with("0b") || s.starts_with("0B") {
+            parse_int_with_base(&s[2..], 2)
+                .map(Value::Int)
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid binary integer format"))
+        } else if s.starts_with("0o") || s.starts_with("0O") {
+            parse_int_with_base(&s[2..], 8)
+                .map(Value::Int)
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid octal integer format"))
+        } else if s.starts_with("0x") || s.starts_with("0X") {
+            parse_int_with_base(&s[2..], 16)
+                .map(Value::Int)
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid hex integer format"))
+        } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
+            let f = match Float::from_str(s) {
+                Ok(f) => f,
                 Err(_) => return self.raise("RuntimeError", "Invalid float format"),
+            };            
+    
+            if s.to_ascii_lowercase().contains('e') && f.is_integer_like() {
+                return f.to_int()
+                    .map(Value::Int)
+                    .unwrap_or_else(|_| self.raise("RuntimeError", "Failed to convert float to int"));
+            }            
+    
+            match f.to_f64() {
+                Ok(val) if val == 0.0 => Value::Int(Int::from_i64(0)),
+                Ok(_) => Value::Float(f),
+                Err(_) => Value::Float(f),
             }
         } else {
-            match Int::from_str(normalized.as_str()) {
-                Ok(i) => Value::Int(i),
-                Err(_) => return self.raise("RuntimeError", "Invalid integer format"),
-            }
+            Int::from_str(s)
+                .map(Value::Int)
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid integer format"))
         };
     
         let cacheable = match &result {
-            Value::Float(f) => match f.to_f64() {
-                Ok(val) => !val.is_finite(),
-                Err(_) => true,
-            },
-            Value::Int(i) => i.to_i64().is_err(),
+            Value::Float(f) => f.to_f64().map_or(false, |val| val.is_finite()),
+            Value::Int(i) => i.to_i64().is_ok(),
             _ => false,
         };
     
@@ -5626,8 +5674,8 @@ impl Interpreter {
             let cache_root = self.cache
                 .entry("constants".into())
                 .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-    
-            deep_insert(cache_root, &[Value::String(normalized)], result.clone());
+            
+            deep_insert(cache_root, &[Value::String(s.into())], result.clone());
         }
     
         result

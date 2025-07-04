@@ -1102,6 +1102,38 @@ pub fn json_to_value(v: &JsonValue) -> Value {
     }
 }
 
+pub fn remove_loc_keys(value: &Value) -> Value {
+    match value {
+        Value::Map { keys, values } => {
+            let filtered: Vec<(Value, Value)> = keys.iter()
+                .zip(values.iter())
+                .filter_map(|(k, v)| {
+                    if let Value::String(s) = k {
+                        if s == "_loc" {
+                            return None;
+                        }
+                    }
+                    Some((k.clone(), remove_loc_keys(v)))
+                })
+                .collect();
+
+            let (new_keys, new_values): (Vec<_>, Vec<_>) = filtered.into_iter().unzip();
+
+            Value::Map {
+                keys: new_keys,
+                values: new_values,
+            }
+        }
+        Value::List(items) => {
+            Value::List(items.iter().map(remove_loc_keys).collect())
+        }
+        Value::Tuple(items) => {
+            Value::Tuple(items.iter().map(remove_loc_keys).collect())
+        }
+        _ => value.clone(),
+    }
+}
+
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

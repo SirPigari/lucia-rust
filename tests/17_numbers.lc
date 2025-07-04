@@ -1,0 +1,38 @@
+#include <std/macros>
+import math
+
+fun create_number(base: int | float, exponent: int | float) -> int | float:
+    return base ^ exponent;
+end
+
+fun nth_root(value: float, n: int) -> float:
+    return value ^ (1.0 / n);
+end
+
+// tests for create_number
+assert_eq!(1e50, create_number(10, 50))
+assert_eq!(1e-50, create_number(10, -50))
+assert_eq!(2.5e3, 2500)
+assert_eq!(3.14E-2, 0.0314)
+
+// tests for nth_root
+assert_approx_eq!(nth_root(27.0, 3), 3.0)
+assert_approx_eq!(nth_root(16.0, 4), 2.0)
+
+// hexadecimal notation
+assert_eq!(0x1A, 26)
+assert_eq!(0xFF, 255)
+assert_eq!(0x1A + 0x2B, 69)
+assert_eq!(0X1A - 0X0F, 11)
+
+// octal notation
+assert_eq!(0o12, 10)
+assert_eq!(0o17, 15)
+assert_eq!(0o12 + 0o34, 38)
+assert_eq!(0O12 - 0O10, 2)
+
+// binary notation
+assert_eq!(0b1010, 10)
+assert_eq!(0b1111, 15)
+assert_eq!(0b1010 + 0b1100, 22)
+assert_eq!(0B1010 - 0B0101, 5)

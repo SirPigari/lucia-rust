@@ -69,7 +69,7 @@ mod lexer;
 
 use crate::env::runtime::utils;
 use crate::env::runtime::config::{Config, ColorScheme};
-use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string};
+use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys};
 use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -1204,33 +1204,15 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     statements
                         .iter()
                         .map(|stmt| {
-                            if let Value::Map { keys, values } = stmt.convert_to_map() {
-                                let (filtered_keys, filtered_values): (Vec<_>, Vec<_>) = keys.iter()
-                                    .zip(values.iter())
-                                    .filter(|(k, _)| {
-                                        if let Value::String(s) = k {
-                                            s != "_loc"
-                                        } else {
-                                            true
-                                        }
-                                    })
-                                    .map(|(k, v)| (k.clone(), v.clone()))
-                                    .unzip();
-            
-                                format_value(&Value::Map {
-                                    keys: filtered_keys,
-                                    values: filtered_values,
-                                })
-                            } else {
-                                unreachable!("Expected Value::Map from convert_to_map");
-                            }
+                            let cleaned = remove_loc_keys(&stmt.convert_to_map());
+                            format_value(&cleaned)
                         })
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
                 &config,
                 Some(use_colors),
-            );            
+            );
         }
 
         let out = match interpreter.interpret(statements, input.clone()) {

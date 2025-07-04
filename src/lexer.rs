@@ -28,17 +28,31 @@ impl<'a> Lexer<'a> {
                 "++", "--", "+", "-", "^", "*", "/", ">", "<", "!", "%", "||", "&&",
                 "|", "#", "~", "$", "?", "&", "^=", "%="
             ];
-
+            
             let word_operators = [
                 "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein"
             ];
-
+            
             let operator_pattern = format!(
                 "({})|\\b({})\\b",
                 operators.iter().map(|pattern| regex::escape(*pattern)).collect::<Vec<_>>().join("|"),
                 word_operators.iter().map(|pattern| regex::escape(*pattern)).collect::<Vec<_>>().join("|"),
-            );            
-
+            );
+            
+            // number regex with scientific notation and 0b, 0x, 0o support
+            let number_pattern = r"(?x)
+                -?
+                (
+                    0[bB][01]+(?:_[01]+)*
+                    | 0[oO][0-7]+(?:_[0-7]+)*
+                    | 0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*
+                    |
+                    \d+(?:_\d+)*
+                    (?:\.\d+(?:_\d+)*)?
+                    (?:[eE][+-]?\d+)?
+                )
+            ";
+            
             let token_specifications = [
                 ("COMMENT_INLINE", r"<#.*?#>"),
                 ("COMMENT_SINGLE", r"//.*"),
@@ -46,13 +60,13 @@ impl<'a> Lexer<'a> {
                 ("RAW_STRING", r#"(?i)([fb]*r[fb]*)("([^"]*)"|'([^']*)')"#),
                 ("STRING", r#"(?i)([fb]{0,3})("([^"\\]|\\.)*"|'([^'\\]|\\.)*')"#),
                 ("BOOLEAN", r"\b(true|false|null)\b"),
-                ("NUMBER", r"-?\d(?:_?\d)*(?:\.\d(?:_?\d)*)?"),
+                ("NUMBER", &number_pattern),
                 ("OPERATOR", &operator_pattern),
                 ("IDENTIFIER", r"\bnon-static\b|\b[a-zA-Z_]\w*\b"),
                 ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?]"),
                 ("WHITESPACE", r"\s+"),
                 ("INVALID", r"."),
-            ];
+            ];            
 
             let regex_parts: Vec<String> = token_specifications.iter()
                 .map(|(name, pattern)| format!(r"(?P<{}>{})", name, pattern))
