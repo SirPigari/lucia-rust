@@ -262,6 +262,144 @@ pub fn predict_sequence(
     Ok(seed_f64)
 }
 
+pub fn predict_sequence_until_length(
+    seed: Vec<Value>,
+    length: usize,
+) -> Result<Vec<f64>, (&'static str, &'static str, &'static str)> {
+    let mut seed_f64 = Vec::with_capacity(seed.len());
+
+    for v in &seed {
+        let f = match v {
+            Value::Float(f) => f.to_f64().map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
+            Value::Int(i) => i.to_i64().map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
+            _ => return Err(("TypeError", "Seed values must be Float or Int", "")),
+        };
+        seed_f64.push(f);
+    }
+
+    if seed_f64.is_empty() {
+        return Err(("InputError", "Seed cannot be empty", "Provide a non-empty seed vector"));
+    }
+
+    if length < seed_f64.len() {
+        return Err(("ValueError", "Length must be >= seed length", ""));
+    }
+
+    if seed_f64.len() == length {
+        return Ok(seed_f64);
+    }
+
+    macro_rules! done {
+        () => {
+            seed_f64.len() >= length
+        };
+    }
+
+    // handle 1-element seed (arithmetic sequence step = ±1)
+    if seed_f64.len() == 1 {
+        let start = seed_f64[0];
+        let step = 1.0;
+
+        while !done!() {
+            seed_f64.push(seed_f64.last().unwrap() + step);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Fibonacci
+    if try_fibonacci(&seed_f64) {
+        while !done!() {
+            let len = seed_f64.len();
+            let next = seed_f64[len - 1] + seed_f64[len - 2];
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Geometric
+    if let Some(ratios) = try_geometric(&seed_f64) {
+        let ratio = ratios[0];
+        while !done!() {
+            let next = seed_f64.last().unwrap() * ratio;
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Linear
+    if let Some(diff) = try_linear(&seed_f64) {
+        while !done!() {
+            let next = seed_f64.last().unwrap() + diff;
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Factorial
+    if try_factorial(&seed_f64) {
+        let mut i = seed_f64.len();
+        while !done!() {
+            let next = (1..=i).map(|x| x as f64).product::<f64>();
+            seed_f64.push(next);
+            i += 1;
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Quadratic
+    if let Some(second_diff) = try_quadratic(&seed_f64) {
+        while !done!() {
+            let len = seed_f64.len();
+            let next = 2.0 * seed_f64[len - 1] - seed_f64[len - 2] + second_diff;
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Exponential
+    if let Some(base_ratio) = try_exponential(&seed_f64) {
+        while !done!() {
+            let next = seed_f64.last().unwrap() * base_ratio;
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok(seed_f64);
+    }
+
+    // Polynomial (Newton's finite differences)
+    let mut diffs = finite_differences(&seed_f64);
+
+    fn newton_next_element(diffs: &[Vec<f64>], n: usize) -> f64 {
+        let mut result = diffs[0][0];
+        let mut factorial = 1.0;
+        let mut product = 1.0;
+
+        for i in 1..diffs.len() {
+            factorial *= i as f64;
+            product *= n as f64 - (i as f64 - 1.0);
+            result += (product / factorial) * diffs[i][0];
+        }
+
+        result
+    }
+
+    while !done!() {
+        let n = seed_f64.len();
+        let next = newton_next_element(&diffs, n);
+        seed_f64.push(next);
+        diffs = finite_differences(&seed_f64);
+    }
+
+    seed_f64.truncate(length);
+    Ok(seed_f64)
+}
+
 
 fn is_close(a: f64, b: f64, epsilon: f64) -> bool {
     (a - b).abs() < epsilon

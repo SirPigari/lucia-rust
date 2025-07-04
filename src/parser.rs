@@ -341,20 +341,11 @@ impl Parser {
         if expr.get_type() == "TYPE" {
             return expr;
         }
-
-        if self.token_is("SEPARATOR", ";") {
-            self.next();
-            return expr;
-        }
     
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
     
             match (tok.0.as_str(), tok.1.as_str()) {
-                ("SEPARATOR", ";") => {
-                    break;
-                }
-
                 ("IDENTIFIER", "as") => {
                     self.next();
             
@@ -1550,11 +1541,6 @@ impl Parser {
                     self.parse_list()
                 }
 
-                "SEPARATOR" if token.1 == ";" => {
-                    self.next();
-                    Statement::Null
-                }
-
                 "IDENTIFIER" => {
                     let next_token = self.peek().cloned();
                     if let Some(next_tok) = next_token {
@@ -2273,8 +2259,8 @@ impl Parser {
         self.next();
     
         let mut elements = Vec::new();
-        let mut found_range = false;
         let mut pattern_reg = false;
+        let mut found_semicolon = false;
     
         while let Some(token) = self.token() {
             if token.0 == "SEPARATOR" && token.1 == "]" {
@@ -2282,14 +2268,30 @@ impl Parser {
             }
     
             if token.0 == "SEPARATOR" && (token.1 == ".." || token.1 == "...") {
-                found_range = true;
                 pattern_reg = token.1 == "...";
                 self.next();
     
-                let end_expr = self.parse_expression();
-                if self.err.is_some() {
+                let end_expr = if let Some(next_token) = self.token() {
+                    if next_token.0 == "SEPARATOR" && next_token.1 == ";" {
+                        found_semicolon = true;
+                        self.next();
+    
+                        let expr = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        expr.convert_to_map()
+                    } else {
+                        let expr = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        expr.convert_to_map()
+                    }
+                } else {
+                    self.raise("UEFError", "Unexpected end of input after range operator");
                     return Statement::Null;
-                }
+                };
     
                 self.check_for("SEPARATOR", "]");
                 self.next();
@@ -2301,15 +2303,17 @@ impl Parser {
                         Value::String("seed".to_string()),
                         Value::String("end".to_string()),
                         Value::String("pattern_reg".to_string()),
+                        Value::String("range_mode".to_string()),
                     ],
                     values: vec![
                         Value::String("ITERABLE".to_string()),
                         Value::String("LIST_COMPLETION".to_string()),
                         Value::List(elements),
-                        end_expr.convert_to_map(),
+                        end_expr,
                         Value::Boolean(pattern_reg),
+                        Value::String(if found_semicolon { "length" } else { "value" }.to_string()),
                     ],
-                    loc
+                    loc,
                 };
             }
     
@@ -2322,7 +2326,7 @@ impl Parser {
     
             if let Some(next_token) = self.token() {
                 let token_str = next_token.1.clone();
-            
+    
                 if next_token.0 == "SEPARATOR" && next_token.1 == "," {
                     self.next();
                 } else if next_token.0 == "SEPARATOR" && next_token.1 == "]" {
@@ -2333,7 +2337,7 @@ impl Parser {
                     self.raise("UEFError", &format!("Expected token ',' but found: {}", token_str));
                     return Statement::Null;
                 }
-            }            
+            }
         }
     
         self.check_for("SEPARATOR", "]");
@@ -2350,7 +2354,7 @@ impl Parser {
                 Value::String("LIST".to_string()),
                 Value::List(elements),
             ],
-            loc
+            loc,
         }
     }
     

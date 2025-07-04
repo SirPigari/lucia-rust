@@ -9,6 +9,8 @@ import collections  // for clear_terminal
 // code inspired by https://github.com/mwharrisjr/Game-of-Life/
 // Game originally created by John Conway in 1970
 
+// doesnt work rn due to a bug in the nested index access
+// will fix later
 
 fun createInitialGrid(rows: int, cols: int) -> list:
     grid: list = []

@@ -58,5 +58,3 @@ assert_eq!(|(5 - 10) * 2|, 10)
 
 // nested abs
 assert_eq!(|-|-5| |, 5)
-
-print("Test completed successfully")

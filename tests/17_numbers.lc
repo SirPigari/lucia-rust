@@ -2,11 +2,11 @@
 import math
 
 fun create_number(base: int | float, exponent: int | float) -> int | float:
-    return base ^ exponent;
+    return base ^ exponent
 end
 
 fun nth_root(value: float, n: int) -> float:
-    return value ^ (1.0 / n);
+    return value ^ (1.0 / n)
 end
 
 // tests for create_number

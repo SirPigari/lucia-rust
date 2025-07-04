@@ -28,10 +28,34 @@ fun fibonacciBinet(n: int) -> int:
     num: float = math.pow(phi, n) - math.pow(psi, n)
     result: float = num / sqrt5
 
-    return int(result)
+    return result.round() as int
+end
+
+/*
+Some Lucia pattern reg magic
+
+it was supposed to be called pattern recognition but i misspelled it as pattern regocnition so from then on its called pattern reg
+
+pattern reg is different than range (..) because it can generate more complex sequences like fibonacci, prime numbers, etc.
+
+examples:
+[1, 1, 2...; n + 1] // fibonacci sequence up to nth index
+[1, 1, 2...55] // fibonacci sequence up to 55 (value 55 not index)
+
+[1, 1, 2..; n + 1] // RangeError: Seed values do not have consistent step
+
+(finally found a use to ';' in Lucia)
+*/
+fun fibonacciPatternReg(n: int) -> int:
+    if (n <= 1):
+        return n
+    end
+    l: list[int] = [0, 1, 1, 2...; n + 1]
+    return l[n]
 end
 
 
 print(fibonacciRecursive(10))
 print(fibonacciIterative(10))
 print(fibonacciBinet(10))
+print(fibonacciPatternReg(10))
