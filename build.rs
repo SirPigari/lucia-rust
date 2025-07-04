@@ -6,6 +6,32 @@ use rand::RngCore;
 
 const VERSION: &str = "2.0.0";
 
+const CPU_OPT: &str = "native";
+/*
+CPU_OPT options for RUSTFLAGS -C target-cpu:
+default CPU_OPT is "generic"
+
+"native"       - Optimize for the CPU of the current machine (auto-detect).
+"generic"      - Generic CPU architecture.
+"x86-64"       - Generic x86-64 CPU.
+"x86-64-v2"    - Intel Nehalem and later CPUs.
+"x86-64-v3"    - Intel Haswell and later CPUs.
+"x86-64-v4"    - Intel Ice Lake and later CPUs.
+"athlon64"     - AMD Athlon 64.
+"znver1"       - AMD Zen 1 architecture.
+"znver2"       - AMD Zen 2 architecture.
+"znver3"       - AMD Zen 3 architecture.
+"skylake"      - Intel Skylake architecture.
+"cascadelake"  - Intel Cascade Lake architecture.
+"armv8-a"      - ARMv8-A architecture.
+"cortex-a53"   - ARM Cortex-A53 CPU.
+
+for other specific targets, pick the closest matching CPU architecture.
+
+ full list: https://doc.rust-lang.org/rustc/codegen-options/index.html#target-cpu
+*/
+
+
 fn rerun_if_changed_recursive(dir: &Path) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -85,7 +111,7 @@ fn generate_uuid(git_hash: &str) -> Uuid {
 }
 
 fn main() {
-    println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu=native");
+    println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu={CPU_OPT}");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let output = Command::new("rustc").arg("-vV").output().ok();

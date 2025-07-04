@@ -904,24 +904,12 @@ fn lucia(args: Vec<String>) {
     }
 }
 
-fn execute_file(
-    path: &Path,
-    file_path: String,
-    config: &Config,
-    use_colors: bool,
-    disable_preprocessor: bool,
-    home_dir_path: PathBuf,
-    config_path: PathBuf,
-    debug_mode: Option<String>,
-    argv: &Vec<String>,
-    dump_pp_flag: &bool,
-    dump_ast_flag: &bool,
-) {
+fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
         let file_content = fs::read_to_string(path).expect("Failed to read file");
-        let lexer = Lexer::new(&file_content, file_path.clone());
+        let lexer = Lexer::new(&file_content, to_static(file_path.clone()));
         let raw_tokens = lexer.tokenize();
 
         let print_start_debug = debug_mode
@@ -1215,13 +1203,34 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     "Statements: [{}]",
                     statements
                         .iter()
-                        .map(|stmt| format_value(&stmt.convert_to_map()))
+                        .map(|stmt| {
+                            if let Value::Map { keys, values } = stmt.convert_to_map() {
+                                let (filtered_keys, filtered_values): (Vec<_>, Vec<_>) = keys.iter()
+                                    .zip(values.iter())
+                                    .filter(|(k, _)| {
+                                        if let Value::String(s) = k {
+                                            s != "_loc"
+                                        } else {
+                                            true
+                                        }
+                                    })
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .unzip();
+            
+                                format_value(&Value::Map {
+                                    keys: filtered_keys,
+                                    values: filtered_values,
+                                })
+                            } else {
+                                unreachable!("Expected Value::Map from convert_to_map");
+                            }
+                        })
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
                 &config,
                 Some(use_colors),
-            );
+            );            
         }
 
         let out = match interpreter.interpret(statements, input.clone()) {
@@ -1250,6 +1259,8 @@ fn main() {
     let args: Vec<String> = std_env::args().collect();
 
     panic::set_hook(Box::new(|panic_info| {
+        const CUSTOM_PANIC_MARKER: u8 = 0x1B;
+    
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             *s
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
@@ -1257,15 +1268,22 @@ fn main() {
         } else {
             "Unknown panic message"
         };
-
+    
+        let (is_custom, display_msg) = if msg.as_bytes().first() == Some(&CUSTOM_PANIC_MARKER) {
+            (true, &msg[1..])
+        } else {
+            (false, msg)
+        };
+    
         let location = panic_info.location()
             .map(|loc| format!("at {}:{}:{}", loc.file(), loc.line(), loc.column()))
             .unwrap_or_else(|| "at unknown location".to_string());
-
+    
         let build_info = get_build_info();
+    
 
         eprintln!("{}", "Oops! The program panicked!".red().bold());
-        eprintln!("Message: {}", msg.red());
+        eprintln!("Message: {}", display_msg.red());
         eprintln!("{}", location.red());
         eprintln!();
         eprintln!("{}", "--- Build info ---".dimmed());
@@ -1274,15 +1292,21 @@ fn main() {
         eprintln!("Rustc Channel: {}", build_info.rustc_channel.cyan());
         eprintln!("Target: {}", build_info.target.cyan());
         eprintln!("Git commit: {}", build_info.git_hash.cyan());
+        eprintln!("UUID: {}", build_info.uuid.cyan());
         eprintln!("Build profile: {}", build_info.profile.cyan());
         eprintln!("CI: {}", build_info.ci.cyan());
         eprintln!("Dependencies: {}", build_info.dependencies.cyan());
         eprintln!("{}", "------------------".dimmed());
-        eprintln!("{}", "Please report this bug with the above information:".yellow());
-        eprintln!("{}", "https://github.com/SirPigari/lucia-rust/issues/new".blue().underline());
-        eprintln!("{}", "------------------".dimmed());
+    
+        if !is_custom {
+            eprintln!("{}", "Please report this bug with the above information:".yellow());
+            eprintln!("{}", "https://github.com/SirPigari/lucia-rust/issues/new".blue().underline());
+            eprintln!("{}", "------------------".dimmed());
+        }
+    
         exit(101);        
     }));
+    
 
     let stack_size = args.iter()
         .find(|arg| arg.starts_with("--stack-size="))

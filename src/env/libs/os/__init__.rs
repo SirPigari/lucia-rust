@@ -97,6 +97,22 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 }
 
+fn panic_handler(args: &HashMap<String, Value>) -> Value {
+    const CUSTOM_PANIC_MARKER: u8 = 0x1B;
+
+    if let Some(Value::String(message)) = args.get("message") {
+        let mut marked_message = String::new();
+        marked_message.push(CUSTOM_PANIC_MARKER as char);
+        marked_message.push_str(message);
+        panic!("{}", marked_message);
+    }
+    Value::Error(
+        "PanicError",
+        "Panic called".into(),
+        None,
+    )
+}
+
 pub fn register(config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -230,6 +246,13 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         },
         vec![Parameter::positional("ptr", "int")],
         "any"
+    );
+    insert_native_fn!(
+        map,
+        "panic",
+        panic_handler,
+        vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())],
+        "void"
     );
 
     map

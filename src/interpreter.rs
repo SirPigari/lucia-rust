@@ -734,7 +734,7 @@ impl Interpreter {
             }
         };
         
-        let lexer = Lexer::new(&content, path.display().to_string());
+        let lexer = Lexer::new(&content, to_static(path.display().to_string()));
         let raw_tokens = lexer.tokenize();
 
         let (pr1, pr2, ep) = self.preprocessor_info.clone();
@@ -4865,7 +4865,7 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let lexer = Lexer::new(to_static(script_str.clone()), self.file_path.clone());
+                                let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
                                 let source_string = script_str.to_string();
@@ -4906,7 +4906,7 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let lexer = Lexer::new(to_static(script_str.clone()), self.file_path.clone());
+                                let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
                                 let source_string = script_str.to_string();
@@ -5675,7 +5675,7 @@ impl Interpreter {
                                             return self.raise("SyntaxError", "Unmatched '{' in f-string");
                                         }
     
-                                        let tokens = Lexer::new(&expr, self.file_path.clone()).tokenize();
+                                        let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
                                         if tokens.is_empty() {
                                             return self.raise("SyntaxError", "Empty expression inside {}");
                                         }

@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::utils::to_static;
 
 pub struct Preprocessor {
     lib_dir: PathBuf,
     config_path: PathBuf,
-    defines: HashMap<String, Token>, // IDENTIFIER -> replacement token
-    aliases: HashMap<Token, Token>, // Token -> replacement token
+    defines: HashMap<String, Token>, // IDENTIFIER -> TOKEN
+    aliases: HashMap<Token, Token>, // TOKEN -> ALIAS_TOKEN
     macros: HashMap<String, (Vec<(String, Option<Token>)>, Vec<Token>)>, // MACRO_NAME -> (ARGS, BODY)
     file_path: String,
 }
@@ -34,7 +35,6 @@ impl Preprocessor {
         let filtered = tokens
             .into_iter()
             .filter(|tok| tok.0 != "WHITESPACE")
-            .filter(|tok| !tok.0.starts_with("COMMENT_"))
             .collect();
     
         self._process(filtered, current_dir)
@@ -454,7 +454,7 @@ impl Preprocessor {
                                     &self.file_path,
                                 ))?;
 
-                                let lexer = Lexer::new(&content, self.file_path.clone());
+                                let lexer = Lexer::new(&content, to_static(self.file_path.clone()));
                                 let mut toks = lexer.tokenize()
                                     .into_iter()
                                     .filter(|tok| tok.0 != "WHITESPACE")
@@ -482,7 +482,7 @@ impl Preprocessor {
                                 &self.file_path,
                             ))?;
 
-                            let lexer = Lexer::new(&content, self.file_path.clone());
+                            let lexer = Lexer::new(&content, to_static(self.file_path.clone()));
                             let mut toks = lexer.tokenize()
                                 .into_iter()
                                 .filter(|tok| tok.0 != "WHITESPACE")
@@ -512,7 +512,6 @@ impl Preprocessor {
                         let value = tokens[i].clone();
                         i += 1;
 
-                        // Use the location of the last normal token for new tokens
                         let loc = last_normal_token_location.clone();
                         
                         result.push(Token("IDENTIFIER".to_string(), "set_cfg".to_string(), loc.clone()));
@@ -538,8 +537,8 @@ impl Preprocessor {
                 && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
                 && matches!(tokens[i + 2], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(") 
             {
-                // name!(args..)
-                // Def not stolen syntax
+                // macro_name!(args...)
+                // definitely not stolen from Rust
                 let macro_name = &tokens[i].1;
                 if let Some((param_names, body)) = self.macros.get(macro_name) {
                     i += 3;
