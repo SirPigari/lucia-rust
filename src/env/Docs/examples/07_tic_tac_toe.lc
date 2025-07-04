@@ -1,4 +1,4 @@
-#config debug false
+#config debug = false
 
 // simple tic-tac-toe in Lucia
 // made by Markofwitch 2025, the developer of Lucia
@@ -16,7 +16,6 @@ fun printBoard(board: list) -> void:
             if (cell == " "):
                 styledprint(str(idx + 1), fg_color="#434343", end="")
             else:
-                // use getPlayerString here for colored X/O
                 styledprint(getPlayerString(cell), end="")
             end
 

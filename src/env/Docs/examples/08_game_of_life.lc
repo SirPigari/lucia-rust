@@ -1,4 +1,4 @@
-#config debug false
+#config debug = false
 
 import time
 import random
