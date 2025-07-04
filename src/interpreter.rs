@@ -60,6 +60,7 @@ const VERSION: &str = env!("VERSION");
 #[derive(Debug, Clone)]
 pub struct Interpreter {
     config: Config,
+    og_cfg: Config,
     err: Option<Error>,
     is_returning: bool,
     state: String,
@@ -80,7 +81,8 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new(config: Config, use_colors: bool, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool), argv: &[String]) -> Self {
         let mut this = Self {
-            config,
+            config: config.clone(),
+            og_cfg: config.clone(),
             err: None,
             return_value: NULL,
             is_returning: false,
@@ -4778,7 +4780,7 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "set_cfg"
+            "exit", "fetch", "exec", "eval", "00__set_cfg__",
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
@@ -5216,11 +5218,26 @@ impl Interpreter {
                                 return self.raise("TypeError", "Expected a string in 'code' argument in eval");
                             }
                         }
-                        "set_cfg" => {
+                        "00__set_cfg__" => {
                             self.stack.pop();
                             if let Some(Value::String(key)) = final_args_no_mods.get("key") {
                                 if let Some(value) = final_args_no_mods.get("value") {
-                                    set_in_config(&mut self.config, &key.clone(), value.clone());
+                                    if let Value::Int(num_wrapper) = value {
+                                        if let Ok(num) = num_wrapper.to_i64() {
+                                            if num == 26985 {
+                                                let default_val = get_from_config(&self.og_cfg.clone(), key);
+                                                set_in_config(&mut self.config, key, default_val.clone());                                                
+                                                debug_log(
+                                                    &format!("<Reset config: {} to default>", key),
+                                                    &self.config,
+                                                    Some(self.use_colors.clone()),
+                                                );
+                                                return NULL;
+                                            }
+                                        }
+                                    }                                    
+
+                                    set_in_config(&mut self.config, key, value.clone());
                                     debug_log(
                                         &format!("<Set config: {} = {}>", key, format_value(value)),
                                         &self.config,

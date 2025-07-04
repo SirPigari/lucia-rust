@@ -502,25 +502,65 @@ impl Preprocessor {
                         if i + 1 >= tokens.len() {
                             return Err(Error::new(
                                 "PreprocessorError",
-                                "#config requires a key and a value",
+                                "#config requires a key and a value or reset key",
                                 &self.file_path,
                             ));
                         }
 
                         let key = tokens[i].1.clone();
                         i += 1;
-                        let value = tokens[i].clone();
-                        i += 1;
 
-                        let loc = last_normal_token_location.clone();
-                        
-                        result.push(Token("IDENTIFIER".to_string(), "set_cfg".to_string(), loc.clone()));
-                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                        result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
-                        result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
-                        result.push(value);
-                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
-                        continue;
+                        if key == "reset" {
+                            if i >= tokens.len() {
+                                return Err(Error::new(
+                                    "PreprocessorError",
+                                    "#config reset requires a key",
+                                    &self.file_path,
+                                ));
+                            }
+                            let reset_key = tokens[i].1.clone();
+                            i += 1;
+
+                            let loc = last_normal_token_location.clone();
+
+                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
+                            result.push(Token("STRING".to_string(), format!("\"{}\"", reset_key), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            // 0x6969 = 26985
+                            result.push(Token("NUMBER".to_string(), "26985".to_string(), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            continue;
+                        } else {
+                            if i >= tokens.len() || tokens[i].1 != "=" {
+                                return Err(Error::new(
+                                    "PreprocessorError",
+                                    "Missing '=' after #config key",
+                                    &self.file_path,
+                                ));
+                            }
+                            i += 1;
+
+                            if i >= tokens.len() {
+                                return Err(Error::new(
+                                    "PreprocessorError",
+                                    "#config requires a value after '='",
+                                    &self.file_path,
+                                ));
+                            }
+                            let value = tokens[i].clone();
+                            i += 1;
+
+                            let loc = last_normal_token_location.clone();
+
+                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
+                            result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            result.push(value);
+                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            continue;
+                        }
                     }
 
                     _ => {

@@ -834,9 +834,9 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         },
     );
     map.insert(
-        "set_cfg".to_string(),
+        "00__set_cfg__".to_string(),
         FunctionMetadata {
-            name: "set_cfg".to_string(),
+            name: "00__set_cfg__".to_string(),
             parameters: vec![
                 Parameter::positional("key", "str"),
                 Parameter::positional("value", "any"),

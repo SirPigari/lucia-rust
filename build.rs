@@ -194,6 +194,11 @@ fn main() {
         "btw lucia was my crush",
         "30.6.2025",
         "151211",
+        "sowing the seeds of love",
+        "west end girls",
+        "always on my mind",
+        "open your mind",
+        "tchaikovsky piano concerto no. 1",
     ];
     let hash_byte = git_hash.bytes().last().unwrap_or(b'0');
     let index = (hash_byte as usize) % MESSAGES.len();
@@ -212,14 +217,14 @@ fn main() {
 
         res.set("ProductName", "Lucia");
         res.set("FileDescription", "Lucia Programming Language");
-        res.set("CompanyName", "Alfa Reklama");
-        res.set("LegalCopyright", "© 2025 Alfa Reklama");
+        res.set("CompanyName", "Lucia Programming Language Project");
+        res.set("LegalCopyright", "© 2025 Lucia Programming Language Project");
         res.set("FileVersion", &target);
         res.set("ProductVersion", VERSION);
         res.set("Comments", "Licensed under GPLv3");
         res.set("OriginalFilename", "lucia.exe");
         res.set("InternalName", "lucia");
-        res.set("LegalTrademarks", "Lucia™ is a trademark of Alfa Reklama");
+        res.set("LegalTrademarks", "Lucia™ is a trademark of Lucia Programming Language Project");
         res.set_icon(icon_path.to_str().unwrap());
         res.compile().expect("Failed to compile Windows resources");
     }

@@ -1,6 +1,7 @@
 #include <std/macros>
 // this test needs the 'allow_unsafe' key to be true
 // pointers are considered unsafe in Lucia
+#config allow_unsafe = true
 
 p: &int = &10
 
