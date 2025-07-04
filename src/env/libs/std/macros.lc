@@ -16,9 +16,7 @@ import config as _config
 #endmacro
 
 #macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=("Values are not approximately equal")):
-    diff: float = |$a - $b|;
-    print("assert_approx_eq diff:", diff);
-    if (diff > $epsilon):
+    if (|$a - $b| > $epsilon):
         throw $msg from "AssertionError"
     end
 #endmacro
