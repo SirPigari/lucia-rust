@@ -73,6 +73,8 @@ pub struct Interpreter {
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
     cache: HashMap<String, Value>,
+    defer_stack: Vec<Vec<Statement>>,
+    scope: String,
 }
 
 impl Interpreter {
@@ -95,6 +97,8 @@ impl Interpreter {
                 ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
             ]),
+            defer_stack: vec![],
+            scope: "main".to_owned(),
         };
         
         this.variables.insert(
@@ -132,6 +136,10 @@ impl Interpreter {
         );
     
         this
+    }
+
+    pub fn set_scope(&mut self, scope: &str) {
+        self.scope = scope.to_owned();
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -177,6 +185,34 @@ impl Interpreter {
             }
             _ => Err(Value::Error("IndexError", "Index must be Int, String or Float with no fraction", None)),
         }
+    }
+
+    pub fn exit(&mut self, code: Value) {
+        self.state = "defer".to_owned();
+        if !self.defer_stack.is_empty() {
+            let defer_statements = self.defer_stack.concat();
+            for stmt in defer_statements {
+                self.current_statement = Some(stmt);
+                self.evaluate(self.current_statement.clone().unwrap());
+            }
+        }
+        self.state = "exit".to_owned();
+        self.is_returning = true;
+        self.stack.clear();
+        self.return_value = match code {
+            Value::Int(i) => Value::Int(i),
+            Value::Float(f) => Value::Float(f),
+            Value::String(s) => Value::String(s),
+            _ => {
+                self.raise("TypeError", "Exit code must be an int, float or string");
+                NULL
+            }
+        };
+        debug_log(
+            &format!("<Exit with code: {}>", format_value(&self.return_value)),
+            &self.config,
+            Some(self.use_colors),
+        );
     }
 
     // i personally hate this function
@@ -740,7 +776,7 @@ impl Interpreter {
             .unwrap_or_else(|_| PathBuf::from("."));
         let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone(), &vec![]);
         interpreter.stack = self.stack.clone();
-        let result = interpreter.interpret(statements, content);
+        let result = interpreter.interpret(statements, content, true);
         self.stack = interpreter.stack.clone();
     
         let properties = interpreter.variables.clone();
@@ -790,12 +826,18 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&mut self, statements: Vec<Statement>, source: String) -> Result<Value, Error> {
+    pub fn interpret(&mut self, statements: Vec<Statement>, source: String, deferable: bool) -> Result<Value, Error> {
         self.source = String::new();
         self.is_returning = false;
         self.return_value = NULL;
         self.err = None;
         self.current_statement = None;
+        self.state = "normal".to_owned();
+        self.stack.push((
+            self.file_path.clone(),
+            HashMap::new(),
+            self.variables.clone(),
+        ));
         for statement in statements {
             if let Some(err) = &self.err {
                 println!("Error: {}", err.msg);
@@ -829,6 +871,18 @@ impl Interpreter {
                     &self.file_path.to_string()
                 ));
             }
+        }
+
+        if deferable {
+            self.state = "defer".to_owned();
+            if !self.defer_stack.is_empty() {
+                let defer_statements = self.defer_stack.concat();
+                for stmt in defer_statements {
+                    self.current_statement = Some(stmt);
+                    self.evaluate(self.current_statement.clone().unwrap());
+                }
+            }
+            self.state = "normal".to_owned();
         }
 
         Ok(self.return_value.clone())
@@ -901,7 +955,7 @@ impl Interpreter {
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
 
-        if self.stack.len() > self.config.recursion_limit {
+        if self.stack.len() + self.defer_stack.len() > self.config.recursion_limit {
             return self.raise("RecursionError", "Maximum recursion depth exceeded");
         }
     
@@ -952,6 +1006,8 @@ impl Interpreter {
                 "THROW" => self.handle_throw(statement.clone()),
                 "FORGET" => self.handle_forget(statement.clone()),
                 "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement.clone()),
+                "DEFER" => self.handle_defer(statement.clone()),
+                "SCOPE" => self.handle_scope(statement.clone()),
         
                 // Function related
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
@@ -1024,6 +1080,133 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_scope(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b,
+            _ => {
+                self.raise("SyntaxError", "Expected a list for 'body' in scope statement");
+                return NULL;
+            }
+        };
+    
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n.clone(),
+            None => self.scope.clone(),
+            _ => {
+                self.raise("SyntaxError", "Expected a string for 'name' in scope statement");
+                return NULL;
+            }
+        };
+
+        let locals = match statement.get(&Value::String("locals".to_string())) {
+            Some(Value::List(locals_list)) => locals_list,
+            _ => {
+                &vec![]
+            }
+        };
+
+        self.stack.push((
+            self.file_path.clone(),
+            HashMap::new(),
+            self.variables.clone(),
+        ));
+
+        let stmts: Vec<Statement> = body.iter()
+            .filter_map(|v| {
+                match v {
+                    Value::Map { .. } => Some(v.convert_to_statement()),
+                    Value::Null => Some(Statement::Null),
+                    _ => {
+                        self.raise("RuntimeError", "Invalid value in 'scope' body - expected map");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        let new_file_path = if statement.get(&Value::String("name".to_string())).is_some() {
+            self.file_path.clone() + &format!("+scope.{}", name)
+        } else {
+            self.file_path.clone()
+        };
+
+        let mut scope_interpreter = Interpreter::new(
+            self.config.clone(),
+            self.use_colors,
+            &new_file_path,
+            &self.cwd.clone(),
+            self.preprocessor_info.clone(),
+            &[]
+        );
+        scope_interpreter.set_scope(&name.clone());
+
+        for local in locals.iter() {
+            if let Value::String(var_name) = local {
+                if let Some(val) = self.variables.get(var_name) {
+                    scope_interpreter.variables.insert(var_name.clone(), val.clone());
+                } else {
+                    self.raise(
+                        "NameError",
+                        &format!("Variable '{}' is not defined in the outer scope", var_name),
+                    );
+                    return NULL;
+                }
+            }
+        }
+
+        if body.is_empty() {
+            return NULL;
+        }
+
+        scope_interpreter.interpret(stmts, self.source.clone(), true);
+
+        if let Some(err) = scope_interpreter.err {
+            self.raise_with_ref(
+                "RuntimeError",
+                &format!("Error in scope '{}'", name),
+                err,
+            );
+            return NULL;
+        }
+
+        self.stack.pop();
+        if scope_interpreter.is_returning {
+            return scope_interpreter.return_value.clone();
+        }
+        NULL
+    }
+
+    fn handle_defer(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b,
+            _ => {
+                self.raise("RuntimeError", "Expected a list for 'body' in defer statement");
+                return NULL;
+            }
+        };
+    
+        if body.is_empty() {
+            return NULL;
+        }
+    
+        let stmts: Vec<Statement> = body.iter()
+            .filter_map(|v| {
+                match v {
+                    Value::Map { .. } => Some(v.convert_to_statement()),
+                    Value::Null => Some(Statement::Null),
+                    _ => {
+                        self.raise("RuntimeError", "Invalid value in 'defer' body - expected map");
+                        None
+                    }
+                }
+            })
+            .collect();
+    
+        self.defer_stack.push(stmts);
+    
+        NULL
     }
 
     fn handle_continue_and_break(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1164,8 +1347,8 @@ impl Interpreter {
     }
 
     fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&Value::Null);
-        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&Value::Null);
+        let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&NULL);
+        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&NULL);
 
         if let pointer_type = Value::String("POINTER_ASSIGN".to_string()) {
             if self.err.is_some() {
@@ -1184,13 +1367,13 @@ impl Interpreter {
         }
     
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
     
         match pointer_type {
             Value::String(t) if t == "POINTER_REF" => {
                 if self.err.is_some() {
-                    return Value::Null;
+                    return NULL;
                 }
             
                 let rc = std::rc::Rc::new(value);
@@ -1198,7 +1381,7 @@ impl Interpreter {
             
                 if ptr == 0 {
                     self.raise("MemoryError", "Failed to create pointer reference");
-                    return Value::Null;
+                    return NULL;
                 }
             
                 Value::Pointer(ptr)
@@ -1213,15 +1396,15 @@ impl Interpreter {
                     clone
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
-                    Value::Null
+                    NULL
                 }
             }
             
             Value::String(t) if t == "POINTER_ASSIGN" => {
-                let left = self.evaluate(statement.get(&Value::String("left".to_string())).unwrap_or(&Value::Null).convert_to_statement());
-                let right = self.evaluate(statement.get(&Value::String("right".to_string())).unwrap_or(&Value::Null).convert_to_statement());
+                let left = self.evaluate(statement.get(&Value::String("left".to_string())).unwrap_or(&NULL).convert_to_statement());
+                let right = self.evaluate(statement.get(&Value::String("right".to_string())).unwrap_or(&NULL).convert_to_statement());
                 if self.err.is_some() {
-                    return Value::Null;
+                    return NULL;
                 }
                 if let Value::Pointer(ptr_val) = left {
                     let raw = ptr_val as *mut Value;
@@ -1231,13 +1414,13 @@ impl Interpreter {
                     return Value::Pointer(ptr_val);
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for assignment");
-                    Value::Null
+                    NULL
                 }
             }
     
             _ => {
                 self.raise("SyntaxError", "Invalid pointer type");
-                Value::Null
+                NULL
             }
         }
     }
@@ -2118,6 +2301,16 @@ impl Interpreter {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'value' in return statement"),
         };
+
+        self.state = "defer".to_owned();
+        if !self.defer_stack.is_empty() {
+            let defer_statements = self.defer_stack.concat();
+            for stmt in defer_statements {
+                self.current_statement = Some(stmt);
+                self.evaluate(self.current_statement.clone().unwrap());
+            }
+        }
+        self.state = "normal".to_owned();
     
         let evaluated_value = self.evaluate(value.convert_to_statement());
         if self.err.is_some() {
@@ -2126,6 +2319,7 @@ impl Interpreter {
     
         self.is_returning = true;
         self.return_value = evaluated_value.clone();
+
         evaluated_value
     }
 
@@ -3203,7 +3397,7 @@ impl Interpreter {
                 let left_value = left_hashmap
                     .get(&Value::String("value".to_string()))
                     .cloned()
-                    .unwrap_or(Value::Null);
+                    .unwrap_or(NULL);
 
                 let mut loc = Location {
                     file: self.file_path.clone(),
@@ -4327,7 +4521,7 @@ impl Interpreter {
                         new_interpreter.variables.extend(merged_variables);
                         new_interpreter.stack = self.stack.clone();
                         let body = func.get_body();
-                        new_interpreter.interpret(body, self.source.clone());
+                        new_interpreter.interpret(body, self.source.clone(), true);
                         if new_interpreter.err.is_some() {
                             self.raise_with_ref(
                                 "RuntimeError",
@@ -4380,7 +4574,7 @@ impl Interpreter {
                             );
                         }                    
                         let body = func.get_body();
-                        new_interpreter.interpret(body, self.source.clone());
+                        new_interpreter.interpret(body, self.source.clone(), true);
                         if new_interpreter.err.is_some() {
                             self.raise_with_ref(
                                 "RuntimeError",
@@ -4934,15 +5128,8 @@ impl Interpreter {
                             } else {
                                 Value::Int(Int::from_i64(0))
                             };
-                            self.is_returning = true;
-                            self.state = "exit".to_string();
-                            self.return_value = code.clone();
                             self.stack.pop();
-                            debug_log(
-                                &format!("<Exit with code: {}>", format_value(&code)),
-                                &self.config,
-                                Some(self.use_colors.clone()),
-                            );
+                            self.exit(code.clone());
                             return code;
                         }
                         "fetch" => {
@@ -4981,7 +5168,7 @@ impl Interpreter {
                                 );
                                 new_interpreter.variables = self.variables.clone();
                                 new_interpreter.stack = self.stack.clone();
-                                new_interpreter.interpret(statements, script_str.clone());
+                                new_interpreter.interpret(statements, script_str.clone(), true);
                                 if let Some(err) = new_interpreter.err {
                                     self.raise_with_ref("RuntimeError", "Error in exec script", err);
                                 }
@@ -5020,7 +5207,7 @@ impl Interpreter {
                                     self.preprocessor_info.clone(),
                                     &vec![],
                                 );
-                                new_interpreter.interpret(statements, script_str.clone());
+                                new_interpreter.interpret(statements, script_str.clone(), true);
                                 if let Some(err) = new_interpreter.err {
                                     self.raise_with_ref("RuntimeError", "Error in exec script", err);
                                 }
@@ -5039,7 +5226,7 @@ impl Interpreter {
                                         &self.config,
                                         Some(self.use_colors.clone()),
                                     );
-                                    return Value::Null;
+                                    return NULL;
                                 } else {
                                     return self.raise("TypeError", "Expected a value in 'value' argument in set_cfg");
                                 }
@@ -5083,7 +5270,7 @@ impl Interpreter {
                     new_interpreter.variables = merged_variables;
                     new_interpreter.stack = self.stack.clone();
                     let body = func.get_body();
-                    new_interpreter.interpret(body, self.source.clone());
+                    new_interpreter.interpret(body, self.source.clone(), true);
                     if new_interpreter.err.is_some() {
                         self.err = new_interpreter.err.clone();
                         return NULL;
@@ -5132,19 +5319,19 @@ impl Interpreter {
             Some(val_left) => self.evaluate(val_left.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'left' key in the statement.");
-                return Value::Null;
+                return NULL;
             }
         };
     
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
     
         let right = match statement.get(&Value::String("right".to_string())) {
             Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
-                return Value::Null;
+                return NULL;
             }
         };
     
@@ -5152,7 +5339,7 @@ impl Interpreter {
             Some(Value::String(s)) => s.clone(),
             _ => {
                 self.raise("TypeError", "Expected a string for operator");
-                return Value::Null;
+                return NULL;
             }
         };
     
@@ -5168,7 +5355,7 @@ impl Interpreter {
         };
     
         if self.err.is_some() {
-            return Value::Null;
+            return NULL;
         }
     
         let (left, right) = match (&left, &right) {

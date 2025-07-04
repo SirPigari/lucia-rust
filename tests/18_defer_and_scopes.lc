@@ -1,0 +1,27 @@
+#include <std/macros>
+output: list[str] = ["first"]
+
+// TODO: make defer and scope keywords in vsix extension
+
+output = output.extend(
+    scope defer_test:
+        scope_output: list[str] = []
+        defer (scope_output = scope_output.append("third"))
+        defer:
+            scope_output = scope_output.append("fourth")
+        end
+        scope_output = scope_output.append("second")
+        return scope_output
+    end
+)
+
+a: &int = &10
+scope (a):
+    *a = 20
+end
+
+assert_eq!(*a, 20)
+
+assert_eq!(output, (["first", "second", "third", "fourth"]))
+
+exit(0)

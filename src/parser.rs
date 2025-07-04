@@ -1481,6 +1481,188 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if token.1 == "defer" => {
+                    self.next();
+                    match self.token() {
+                        Some(next_token) if next_token.0 == "SEPARATOR" && next_token.1 == "(" => {
+                            self.next();
+                            let expr = self.parse_expression();
+                            if !self.token_is("SEPARATOR", ")") {
+                                self.raise_with_help(
+                                    "SyntaxError",
+                                    "Expected ')' after expression in 'defer(...)'",
+                                    "Maybe you forgot to add ')'?"
+                                );
+                                return Statement::Null;
+                            }
+                            self.next();
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("body".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("DEFER".to_string()),
+                                    Value::List(vec![expr.convert_to_map()]),
+                                ],
+                                loc: self.get_loc(),
+                            }
+                        }
+                        Some(next_token) if next_token.0 == "SEPARATOR" && next_token.1 == ":" => {
+                            self.next();
+                            let mut body = vec![];
+                            while let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                    break;
+                                }
+                                let stmt = self.parse_expression();
+                                if self.err.is_some() {
+                                    return Statement::Null;
+                                }
+                                body.push(stmt);
+                            }
+
+                            if !self.token_is("IDENTIFIER", "end") {
+                                self.raise_with_help(
+                                    "SyntaxError",
+                                    "Missing 'end' after 'defer:' block",
+                                    "Did you forget 'end'?"
+                                );
+                                return Statement::Null;
+                            }
+
+                            self.next();
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("body".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("DEFER".to_string()),
+                                    Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                ],
+                                loc: self.get_loc(),
+                            }
+                        }
+                        _ => {
+                            self.raise(
+                                "SyntaxError",
+                                "Unexpected token after 'defer'. Expected ':' or '('.",
+                            );
+                            Statement::Null
+                        }
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "scope" => {
+                    self.next();
+
+                    let name_opt = match self.token() {
+                        Some(token) if token.0 == "IDENTIFIER" => {
+                            let name = token.1.clone();
+                            self.next();
+                            Some(name)
+                        }
+                        _ => None,
+                    };
+
+                    let locals_opt = if self.token_is("SEPARATOR", "(") {
+                        self.next();
+                        let mut locals = Vec::new();
+
+                        while !self.token_is("SEPARATOR", ")") {
+                            match self.token() {
+                                Some(tok) if tok.0 == "IDENTIFIER" => {
+                                    locals.push(tok.1.clone());
+                                    self.next();
+                                }
+                                Some(tok) if tok.0 == "SEPARATOR" && tok.1 == "," => {
+                                    self.next();
+                                }
+                                Some(tok) if tok.0 == "SEPARATOR" && tok.1 == ")" => break,
+                                _ => {
+                                    self.raise_with_help(
+                                        "SyntaxError",
+                                        "Expected identifier or ',' or ')' in locals list",
+                                        "Maybe you forgot an identifier or comma inside the parentheses?"
+                                    );
+                                    return Statement::Null;
+                                }
+                            }
+                        }
+
+                        if !self.token_is("SEPARATOR", ")") {
+                            self.raise_with_help(
+                                "SyntaxError",
+                                "Expected ')' after locals list",
+                                "Maybe you forgot to close the parentheses?"
+                            );
+                            return Statement::Null;
+                        }
+                        self.next();
+
+                        Some(locals)
+                    } else {
+                        Some(Vec::new())
+                    };
+
+                    if !self.token_is("SEPARATOR", ":") {
+                        self.raise_with_help(
+                            "SyntaxError",
+                            "Expected ':' after 'scope' or 'scope <name>' or 'scope <name> (locals)'",
+                            "Did you forget ':' after scope or after locals list?"
+                        );
+                        return Statement::Null;
+                    }
+                    self.next();
+
+                    let mut body = vec![];
+                    while let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                            break;
+                        }
+                        let stmt = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        body.push(stmt);
+                    }
+
+                    if !self.token_is("IDENTIFIER", "end") {
+                        self.raise_with_help(
+                            "SyntaxError",
+                            "Missing 'end' after 'scope' block",
+                            "Did you forget to close the scope block with 'end'?"
+                        );
+                        return Statement::Null;
+                    }
+                    self.next();
+
+                    let mut keys = vec![
+                        Value::String("type".to_string()),
+                        Value::String("body".to_string()),
+                    ];
+                    let mut values = vec![
+                        Value::String("SCOPE".to_string()),
+                        Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                    ];
+
+                    if let Some(name) = name_opt {
+                        keys.push(Value::String("name".to_string()));
+                        values.push(Value::String(name));
+                    }
+
+                    let locals = locals_opt.unwrap();
+                    keys.push(Value::String("locals".to_string()));
+                    values.push(Value::List(locals.into_iter().map(Value::String).collect()));
+
+                    Statement::Statement {
+                        keys,
+                        values,
+                        loc: self.get_loc(),
+                    }
+                }
+
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();
                     let mut values = vec![];

@@ -947,25 +947,16 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         }
 
         if print_start_debug {
-            debug_log(
-                &format!(
-                    "Raw Tokens: {:?}",
-                    processed_tokens
-                        .iter()
-                        .filter(|token| {
-                            let t = token.0.as_str();
-                            t != "WHITESPACE"
-                                && t != "COMMENT_INLINE"
-                                && t != "COMMENT_SINGLE"
-                                && t != "COMMENT_MULTI"
-                                && t != "EOF"
-                        })
-                        .map(|t| (t.0.clone(), t.1.clone()))
-                        .collect::<Vec<_>>()
-                ),
-                &config,
-                Some(use_colors),
-            );
+            let filtered = processed_tokens
+                .iter()
+                .filter(|token| {
+                    let t = &token.0;
+                    t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+                })
+                .map(|token| (&token.0, &token.1))
+                .collect::<Vec<_>>();
+        
+            debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
         }
 
         let tokens: Vec<Token> = processed_tokens;
@@ -994,10 +985,13 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         if print_start_debug {
             debug_log(
                 &format!(
-                    "Parsed Statements: [{}]",
+                    "Statements: [{}]",
                     statements
                         .iter()
-                        .map(|stmt| format_value(&stmt.convert_to_map()))
+                        .map(|stmt| {
+                            let cleaned = remove_loc_keys(&stmt.convert_to_map());
+                            format_value(&cleaned)
+                        })
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
@@ -1026,7 +1020,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
             argv,
         );
-        let out: Value = match interpreter.interpret(statements, file_content.clone()) {
+        let out: Value = match interpreter.interpret(statements, file_content.clone(), true) {
             Ok(out) => out,
             Err(error) => {
                 debug_log("Error while interpreting:", &config, Some(use_colors));
@@ -1215,7 +1209,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             );
         }
 
-        let out = match interpreter.interpret(statements, input.clone()) {
+        let out = match interpreter.interpret(statements, input.clone(), false) {
             Ok(out) => {
                 if interpreter.is_stopped() {
                     exit(0);
