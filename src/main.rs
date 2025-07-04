@@ -540,7 +540,6 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_lucia_traceback: true,
         warnings: true,
         use_preprocessor: true,
-        print_comments: false,
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: env_path_str,

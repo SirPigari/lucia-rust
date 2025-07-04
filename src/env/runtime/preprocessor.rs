@@ -82,6 +82,7 @@ impl Preprocessor {
                         }
 
                         let name_token = &tokens[i];
+
                         i += 1;
 
                         if name_token.0 != "IDENTIFIER" {
@@ -185,8 +186,8 @@ impl Preprocessor {
 
                         let mut body_tokens = Vec::new();
                         while i < tokens.len() {
-                            if tokens[i].0 == "OPERATOR" && tokens[i].1 == "#" {
-                                if i + 1 < tokens.len() && tokens[i + 1].0 == "IDENTIFIER" && tokens[i + 1].1 == "endmacro" {
+                            if tokens[i].0 == "OPERATOR" && tokens[i].1 == "#" && i + 1 < tokens.len() {
+                                if i + 1 < tokens.len() && ((tokens[i + 1].0 == "IDENTIFIER") && (tokens[i + 1].1 == "endmacro")) {
                                     i += 2;
                                     break;
                                 }
@@ -194,9 +195,17 @@ impl Preprocessor {
                             body_tokens.push(tokens[i].clone());
                             i += 1;
                         }
-                        dbg!(tokens[i].clone(), tokens.get(i - 1), tokens.get(i - 2));
 
                         self.macros.insert(name_token.1.clone(), (args, body_tokens));
+                        continue;
+                    }
+
+                    "endmacro" => {
+                        return Err(Error::new(
+                            "PreprocessorError",
+                            "#endmacro without matching #macro",
+                            &self.file_path,
+                        ));
                     }
 
                     "define" => {
@@ -231,6 +240,7 @@ impl Preprocessor {
                         i += 1;
 
                         self.defines.insert(name_token.1.clone(), value);
+                        continue;
                     }
 
                     "undef" => {
@@ -254,6 +264,7 @@ impl Preprocessor {
                         }
                         
                         self.defines.remove(&name_token.1);
+                        continue;
                     }
 
                     "ifdef" => {
@@ -279,6 +290,7 @@ impl Preprocessor {
                         let cond = self.defines.contains_key(&name_token.1);
                         skip_stack.push(skipping);
                         skipping = !cond;
+                        continue;
                     }
 
                     "ifndef" => {
@@ -304,10 +316,12 @@ impl Preprocessor {
                         let cond = !self.defines.contains_key(&name_token.1);
                         skip_stack.push(skipping);
                         skipping = !cond;
+                        continue;
                     }
 
                     "endif" => {
                         skipping = skip_stack.pop().unwrap_or(false);
+                        continue;
                     }
 
                     "alias" => {
@@ -325,6 +339,7 @@ impl Preprocessor {
                         i += 1;
 
                         self.aliases.insert(from_token, to_token);
+                        continue;
                     }
 
                     "unalias" => {
@@ -340,6 +355,7 @@ impl Preprocessor {
                         i += 1;
 
                         self.aliases.remove(&token);
+                        continue;
                     }
 
                     "include" => {
@@ -479,6 +495,7 @@ impl Preprocessor {
                             let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
                             result.extend(included);
                         }
+                        continue;
                     }
 
                     "config" => {
@@ -504,15 +521,7 @@ impl Preprocessor {
                         result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
                         result.push(value);
                         result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
-                    }
-
-                    "endmacro" => {
-                        dbg!(tokens[i].clone(), tokens.get(i - 1), tokens.get(i - 2));
-                        return Err(Error::new(
-                            "PreprocessorError",
-                            "#endmacro without matching #macro",
-                            &self.file_path,
-                        ));
+                        continue;
                     }
 
                     _ => {
@@ -529,7 +538,8 @@ impl Preprocessor {
                 && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
                 && matches!(tokens[i + 2], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(") 
             {
-                // Handle macro invocation: name!(args)
+                // name!(args..)
+                // Def not stolen syntax
                 let macro_name = &tokens[i].1;
                 if let Some((param_names, body)) = self.macros.get(macro_name) {
                     i += 3;
@@ -665,7 +675,6 @@ impl Preprocessor {
                                         .collect::<Vec<_>>()
                                         .join(" ");
                                     
-                                    // Use the original token's location or fallback to last known location
                                     let loc = token.2.clone().or(last_normal_token_location.clone());
                                     expanded_tokens.push(Token(
                                         "STRING".to_string(),
@@ -681,7 +690,6 @@ impl Preprocessor {
                                 }
                     
                             } else {
-                                // Regular $arg replacement
                                 let next_token = &body[body_i];
                                 if next_token.0 != "IDENTIFIER" {
                                     return Err(Error::new(
@@ -720,19 +728,22 @@ impl Preprocessor {
                 }
             } else if !skipping {
                 let mut token = token.clone();
-        
-                if let Some(alias) = self.aliases.get(&token) {
+            
+                let alias = self.aliases.iter()
+                    .find_map(|(k, v)| if k.0 == token.0 && k.1 == token.1 { Some(v) } else { None });
+                
+                if let Some(alias) = alias {
                     token = alias.clone();
                 }
-        
+            
                 if token.0 == "IDENTIFIER" {
                     if let Some(def) = self.defines.get(&token.1) {
                         token = def.clone();
                     }
                 }
-        
+            
                 result.push(token);
-            }
+            }            
             
             i += 1;
         }

@@ -103,8 +103,9 @@ impl<'a> Lexer<'a> {
                     if let Some(value) = cap.name(name) {
                         let mut val = value.as_str().to_string();
 
-                        if name.starts_with("COMMENT") {
-                            val = val.replace("    ", "\t").replace("  ", "\t").replace(" ", "\t");
+                        if name.starts_with("COMMENT_") {
+                            byte_index = token_end;
+                            continue;
                         } else if name == "NUMBER" {
                             val = val.replace("_", "");
                         }

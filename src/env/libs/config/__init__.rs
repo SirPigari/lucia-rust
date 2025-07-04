@@ -93,12 +93,6 @@ pub fn register(config: Arc<Config>) -> HashMap<String, Variable> {
     );
     insert_native_var!(
         map,
-        "print_comments",
-        Value::Boolean(config.print_comments),
-        "bool"
-    );
-    insert_native_var!(
-        map,
         "allow_fetch",
         Value::Boolean(config.allow_fetch),
         "bool"
