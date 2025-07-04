@@ -5,12 +5,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{Float, Int, VALID_TYPES};
-use once_cell::sync::Lazy;
-
-static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(|| Token("".to_string(), "".to_string()));
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct Token(pub String, pub String);
+use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -55,9 +50,7 @@ impl Parser {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            line: (self.current_line(), self.source.clone()),
-            column: self.get_line_column(),
-            file: self.file_path.to_string(),
+            loc: self.get_loc(),
             ref_err: None,
         });
         Statement::Null
@@ -72,9 +65,7 @@ impl Parser {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: Some(help.to_string()),
-            line: (self.current_line(), self.source.clone()),
-            column: self.get_line_column(),
-            file: self.file_path.to_string(),
+            loc: self.get_loc(),
             ref_err: None,
         });
         Statement::Null
@@ -152,57 +143,12 @@ impl Parser {
         None
     }
 
-    pub fn current_line(&self) -> usize {
-        let mut byte_index = 0;
-    
-        for (i, token) in self.tokens.iter().enumerate() {
-            if i == self.pos {
-                break;
-            }
-    
-            byte_index += token.1.len();
+    pub fn get_loc(&mut self) -> Option<Location> {
+        if let Some(token) = self.token() {
+            token.2.clone()
+        } else {
+            None
         }
-    
-        if byte_index > self.source.len() {
-            return 0;
-        }
-    
-        while !self.source.is_char_boundary(byte_index) && byte_index > 0 {
-            byte_index -= 1;
-        }
-    
-        self.source[..byte_index].chars().filter(|&c| c == '\n').count() + 1
-    }
-    
-    pub fn get_line_column(&self) -> usize {
-        let mut byte_index = 0;
-    
-        for (i, token) in self.tokens.iter().enumerate() {
-            if i == self.pos {
-                break;
-            }
-    
-            byte_index += token.1.len();
-        }
-    
-        if byte_index > self.source.len() {
-            return 0;
-        }
-    
-        while !self.source.is_char_boundary(byte_index) && byte_index > 0 {
-            byte_index -= 1;
-        }
-    
-        let mut line_start = 0;
-    
-        for (i, ch) in self.source[..byte_index].char_indices().rev() {
-            if ch == '\n' {
-                line_start = i + ch.len_utf8();
-                break;
-            }
-        }
-    
-        self.source[line_start..byte_index].chars().count()
     }
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
@@ -310,8 +256,7 @@ impl Parser {
                                 ],
                             },
                         ],
-                        line: self.current_line(),
-                        column: self.get_line_column(),
+                        loc: self.get_loc(),
                     };
                 }
 
@@ -319,7 +264,7 @@ impl Parser {
                     self.next();
                     let property_token = self.token().cloned().unwrap_or_else(|| {
                         self.raise("SyntaxError", "Expected identifier after '.'");
-                        Token("".to_string(), "".to_string())
+                        DEFAULT_TOKEN.clone()
                     });
         
                     if property_token.0 != "IDENTIFIER" {
@@ -360,8 +305,7 @@ impl Parser {
                                         values: named_args.iter().map(|(_, v)| v.clone()).collect(),
                                     },
                                 ],
-                                line: self.current_line(),
-                                column: self.get_line_column(),
+                                loc: self.get_loc(),
                             };
                         } else {
                             expr = Statement::Statement {
@@ -375,8 +319,7 @@ impl Parser {
                                     expr.convert_to_map(),
                                     Value::String(property_token.1),
                                 ],
-                                line: self.current_line(),
-                                column: self.get_line_column(),
+                                loc: self.get_loc(),
                             };
                         }
                     }
@@ -420,9 +363,6 @@ impl Parser {
                         return Statement::Null;
                     }
             
-                    let line = self.current_line();
-                    let column = self.get_line_column();
-            
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -434,8 +374,7 @@ impl Parser {
                             expr.convert_to_map(),
                             type_conv.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     };
                 }
 
@@ -460,8 +399,7 @@ impl Parser {
                                 targets.clone(),
                                 value.convert_to_map(),
                             ],
-                            line: self.current_line(),
-                            column: self.get_line_column(),
+                            loc: self.get_loc(),
                         };
                     }
                     
@@ -476,8 +414,7 @@ impl Parser {
                             expr.convert_to_map(),
                             value.convert_to_map(),
                         ],
-                        line: self.current_line(),
-                        column: self.get_line_column(),
+                        loc: self.get_loc(),
                     };
                 }
 
@@ -520,12 +457,10 @@ impl Parser {
                                         },
                                         Value::String(operator),
                                     ],
-                                    line: self.current_line(),
-                                    column: self.get_line_column(),
+                                    loc: self.get_loc(),
                                 }.convert_to_map(),
                         ],
-                        line: self.current_line(),
-                        column: self.get_line_column(),
+                        loc: self.get_loc(),
                     };
                 }
 
@@ -550,8 +485,7 @@ impl Parser {
                             Value::String(operator),
                             right.convert_to_map(),
                         ],
-                        line: self.current_line(),
-                        column: self.get_line_column(),
+                        loc: self.get_loc(),
                     };
                 }
 
@@ -563,9 +497,6 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Statement {
-        let mut line = self.current_line();
-        let mut column = self.get_line_column();
-
         let expr = match self.token().cloned() {
             Some(token) => match token.0.as_str() {
                 "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_str()) => {
@@ -591,8 +522,7 @@ impl Parser {
                             Value::Null,
                             expr.convert_to_map(),
                         ],
-                        line: self.current_line(),
-                        column: self.get_line_column(),
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -611,8 +541,7 @@ impl Parser {
                             Value::String(operator),
                             operand.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -629,8 +558,7 @@ impl Parser {
                             Value::String("POINTER_REF".to_string()),
                             expr.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -653,8 +581,7 @@ impl Parser {
                                 expr.convert_to_map(),
                                 value.convert_to_map(),
                             ],
-                            line,
-                            column,
+                            loc: self.get_loc(),
                         };
                     }
                     Statement::Statement {
@@ -666,8 +593,7 @@ impl Parser {
                             Value::String("POINTER_DEREF".to_string()),
                             expr.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -738,8 +664,7 @@ impl Parser {
                             Value::List(keys),
                             Value::List(values),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -816,8 +741,6 @@ impl Parser {
                         alias = Some(next_token);
                         self.next();
                     }
-                    line = self.current_line();
-                    column = self.get_line_column();
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -831,8 +754,7 @@ impl Parser {
                             path.map_or(Value::Null, |p| p.convert_to_map()),
                             alias.map_or(Value::Null, |a| Value::String(a.1)),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -863,8 +785,6 @@ impl Parser {
                         return Statement::Null;
                     }
                     self.next();
-                    line = self.current_line();
-                    column = self.get_line_column();
                     if !self.token_is("SEPARATOR", ":") {
                         self.raise_with_help("SyntaxError", "Expected ':' after ')'", "Did you forget to add ':'?");
                         return Statement::Null;
@@ -899,8 +819,7 @@ impl Parser {
                             iterable.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -917,8 +836,6 @@ impl Parser {
                     }
                     self.check_for("SEPARATOR", ")");
                     self.next();
-                    let line = self.current_line();
-                    let column = self.get_line_column();
                     if self.token_is("IDENTIFIER", "end") {
                         return Statement::Statement {
                             keys: vec![
@@ -931,8 +848,7 @@ impl Parser {
                                 condition.convert_to_map(),
                                 Value::List(vec![]),
                             ],
-                            line,
-                            column,
+                            loc: self.get_loc(),
                         };
                     }
                     self.check_for("SEPARATOR", ":");
@@ -967,8 +883,7 @@ impl Parser {
                             condition.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -981,8 +896,7 @@ impl Parser {
                         values: vec![
                             Value::String("CONTINUE".to_string()),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -995,8 +909,7 @@ impl Parser {
                         values: vec![
                             Value::String("BREAK".to_string()),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -1015,8 +928,7 @@ impl Parser {
                             Value::String("FORGET".to_string()),
                             value.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -1037,8 +949,7 @@ impl Parser {
                             Value::String("\"LuciaError\"".to_string()),
                             Value::List(vec![]),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     };
                     if self.token_is("IDENTIFIER", "from") {
                         self.next();
@@ -1047,8 +958,6 @@ impl Parser {
                             return Statement::Null;
                         }
                     }
-                    line = self.current_line();
-                    column = self.get_line_column();
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -1060,8 +969,7 @@ impl Parser {
                             message.convert_to_map(),
                             from.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }                    
                 }
 
@@ -1082,8 +990,6 @@ impl Parser {
                     }
                     self.check_for("SEPARATOR", ")");
                     self.next();
-                    let line = self.current_line();
-                    let column = self.get_line_column();
                     self.check_for("SEPARATOR", ":");
                     self.next();
 
@@ -1128,7 +1034,6 @@ impl Parser {
                                     }
                                     else_body = Some(else_stmts);
                     
-                                    // consume the `end` token after else block
                                     if self.token_is("IDENTIFIER", "end") {
                                         self.next();
                                     } else {
@@ -1165,15 +1070,13 @@ impl Parser {
                                 None => vec![],
                             })                            
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
                 "IDENTIFIER" if token.1 == "try" => {
                     self.next();
-                    let line = self.current_line();
-                    let column = self.get_line_column();
+                    let loc = self.get_loc();
 
                     self.check_for("SEPARATOR", ":");
                     self.next();
@@ -1276,8 +1179,7 @@ impl Parser {
                             Value::List(exception_vars.into_iter().map(Value::String).collect()),
                             Value::List(catch_body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
-                        line,
-                        column,
+                        loc
                     }
                 }
 
@@ -1403,8 +1305,7 @@ impl Parser {
                                     let arg_stmt = Statement::Statement {
                                         keys,
                                         values,
-                                        line,
-                                        column,
+                                        loc: self.get_loc(),
                                     };
                                     pos_args.push(arg_stmt);
                                 }
@@ -1493,8 +1394,7 @@ impl Parser {
                                 Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                 return_type.convert_to_map(),
                             ],
-                            line,
-                            column,
+                            loc: self.get_loc(),
                         };
                     } else {
                         if self.token_is("SEPARATOR", ":") {
@@ -1531,8 +1431,7 @@ impl Parser {
                                     value,
                                     Value::List(modifiers.into_iter().map(Value::String).collect()),
                                 ],
-                                line,
-                                column,
+                                loc: self.get_loc(),
                             };
                         } else {
                             return Statement::Statement {
@@ -1544,8 +1443,7 @@ impl Parser {
                                     Value::String("VARIABLE".to_string()),
                                     Value::String(name),
                                 ],
-                                line,
-                                column,
+                                loc: self.get_loc(),
                             };
                         }
                     }
@@ -1572,8 +1470,7 @@ impl Parser {
                                     ],
                                 },
                             ],
-                            line,
-                            column,
+                            loc: self.get_loc(),
                         };
                     }
                     let value = self.parse_expression();
@@ -1589,8 +1486,7 @@ impl Parser {
                             Value::String("RETURN".to_string()),
                             value.convert_to_map(),
                         ],
-                        line,
-                        column,
+                        loc: self.get_loc(),
                     }
                 }
 
@@ -1610,8 +1506,7 @@ impl Parser {
                                     Value::String("TUPLE".to_string()),
                                     Value::List(vec![]),
                                 ],
-                                line,
-                                column,
+                                loc: self.get_loc(),
                             };
                         }
                     }
@@ -1644,8 +1539,7 @@ impl Parser {
                                 Value::String("TUPLE".to_string()),
                                 Value::List(values.into_iter().map(|s| s.convert_to_map()).collect()),
                             ],
-                            line,
-                            column,
+                            loc: self.get_loc(),
                         }
                     } else {
                         values.remove(0)
@@ -1699,8 +1593,7 @@ impl Parser {
                                     left.convert_to_map(),
                                     right.convert_to_map(),
                                 ],
-                                line,
-                                column,
+                                loc: self.get_loc(),
                             }
                         } else {
                             self.parse_operand()
@@ -1739,8 +1632,7 @@ impl Parser {
 
     fn parse_compound_assignment(&mut self) -> Statement {
         let identifier = self.token().cloned().unwrap();
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
     
         self.next();
         let operator = self.token().cloned().unwrap();
@@ -1761,14 +1653,12 @@ impl Parser {
                 Value::String(operator.1),
                 expr.convert_to_map(),
             ],
-            line,
-            column,
+            loc
         }
     }    
 
     fn parse_type(&mut self) -> Statement {
-        let mut line = self.current_line();
-        let mut column = self.get_line_column();
+        let mut loc = self.get_loc();
     
         fn check_type(token: &Token) -> bool {
             token.0 == "IDENTIFIER" && VALID_TYPES.contains(&token.1.as_str())
@@ -1855,8 +1745,7 @@ impl Parser {
                             to_type,
                             value.convert_to_map(),
                         ],
-                        line: parser.current_line(),
-                        column: parser.get_line_column(),
+                        loc: parser.get_loc(),
                     },
                 ));
             }
@@ -1867,8 +1756,7 @@ impl Parser {
                 let mut has_variadic_any = false;
                 let mut has_variadic_typed = None;
     
-                let mut inner_line = parser.current_line();
-                let mut inner_column = parser.get_line_column();
+                let mut inner_loc = parser.get_loc();
     
                 while let Some(token) = parser.token().cloned() {
                     if token.0 == "SEPARATOR" && token.1 == "]" {
@@ -2009,8 +1897,7 @@ impl Parser {
                                 Value::Boolean(has_variadic_any),
                                 Value::String(has_variadic_typed.unwrap_or_else(|| "any".to_string())),
                             ],
-                            line: inner_line,
-                            column: inner_column,
+                            loc: inner_loc
                         },
                     ));
                 } else if !["map", "tuple", "list"].contains(&base_str.as_str()) {
@@ -2039,8 +1926,7 @@ impl Parser {
                             Value::Boolean(has_variadic_any),
                             Value::String(has_variadic_typed.unwrap_or_else(|| "any".to_string())),
                         ],
-                        line: inner_line,
-                        column: inner_column,
+                        loc: inner_loc
                     },
                 ));
             }
@@ -2058,8 +1944,7 @@ impl Parser {
                         Value::String("simple".to_string()),
                         Value::String(base_str),
                     ],
-                    line: parser.current_line(),
-                    column: parser.get_line_column(),
+                    loc: parser.get_loc(),
                 },
             ))
         };
@@ -2081,8 +1966,7 @@ impl Parser {
         }
     
         if union_types.len() > 1 {
-            line = self.current_line();
-            column = self.get_line_column();
+            loc = self.get_loc();
     
             return Statement::Statement {
                 keys: vec![
@@ -2095,8 +1979,7 @@ impl Parser {
                     Value::String("union".to_string()),
                     Value::List(union_types.into_iter().map(|stmt| stmt.convert_to_map()).collect()),
                 ],
-                line,
-                column,
+                loc
             };
         }
     
@@ -2105,8 +1988,7 @@ impl Parser {
 
     fn parse_variable(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
 
         if token.0 == "IDENTIFIER" {
             let name = token.1.clone();
@@ -2145,8 +2027,7 @@ impl Parser {
                         value,
                         Value::List(vec![]),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             } else {
                 return Statement::Statement {
@@ -2158,8 +2039,7 @@ impl Parser {
                         Value::String("VARIABLE".to_string()),
                         Value::String(name),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             }
         }
@@ -2170,8 +2050,7 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
 
         if token.0 == "OPERATOR" && ["-", "+", "!", "not"].contains(&token.1.as_str()) {
             let op = token.1.clone();
@@ -2188,8 +2067,7 @@ impl Parser {
                     Value::String(op),
                     operand.convert_to_map(),
                 ],
-                line,
-                column,
+                loc
             };
         }
 
@@ -2197,9 +2075,8 @@ impl Parser {
     }
 
     fn parse_operand(&mut self) -> Statement {
-        let mut token = self.token().cloned().unwrap_or_else(|| Token("".to_string(), "".to_string()));
-        let mut line = self.current_line();
-        let mut column = self.get_line_column();
+        let mut token = self.token().cloned().unwrap_or_else(|| DEFAULT_TOKEN.clone());
+        let mut loc = self.get_loc();
         let mut token_type = token.0.clone();
         let mut token_value = token.1.clone();        
         let mut next_token = self.peek();
@@ -2228,8 +2105,7 @@ impl Parser {
                     Value::String("NUMBER".to_string()),
                     Value::String(token_value.clone()),
                 ],
-                line,
-                column,
+                loc
             };
         }
 
@@ -2259,8 +2135,7 @@ impl Parser {
                         Value::String(literal_str.to_string()),
                         Value::List(mods),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             } else {
                 return Statement::Statement {
@@ -2274,8 +2149,7 @@ impl Parser {
                         Value::String(token_value.clone()),
                         Value::List(Vec::new()),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             }
         }
@@ -2306,8 +2180,7 @@ impl Parser {
                         Value::String(literal_str.to_string()),
                         Value::List(mods),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             } else {
                 return Statement::Statement {
@@ -2321,8 +2194,7 @@ impl Parser {
                         Value::String(token_value.clone()),
                         Value::List(Vec::new()),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             }
         }
@@ -2345,8 +2217,7 @@ impl Parser {
                     Value::String("BOOLEAN".to_string()),
                     Value::String(token_value.clone()),
                 ],
-                line,
-                column,
+                loc
             };
         };        
         self.raise("SyntaxError", &format!(
@@ -2358,8 +2229,7 @@ impl Parser {
 
     fn parse_operation(&mut self) -> Statement {
         let mut left = self.parse_operand();
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
         if self.err.is_some() {
             return Statement::Null;
         }
@@ -2387,8 +2257,7 @@ impl Parser {
                         Value::String(operator),
                         right.convert_to_map(),
                     ],
-                    line,
-                    column,
+                    loc: loc.clone()
                 };
             } else {
                 break;
@@ -2399,8 +2268,7 @@ impl Parser {
     }
 
     fn parse_list(&mut self) -> Statement {
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
     
         self.next();
     
@@ -2441,8 +2309,7 @@ impl Parser {
                         end_expr.convert_to_map(),
                         Value::Boolean(pattern_reg),
                     ],
-                    line,
-                    column,
+                    loc
                 };
             }
     
@@ -2483,8 +2350,7 @@ impl Parser {
                 Value::String("LIST".to_string()),
                 Value::List(elements),
             ],
-            line,
-            column,
+            loc
         }
     }
     
@@ -2501,8 +2367,7 @@ impl Parser {
             return Statement::Null;
         }
 
-        let line = self.current_line();
-        let column = self.get_line_column();
+        let loc = self.get_loc();
 
         self.next();
         self.check_for("SEPARATOR", "(");
@@ -2532,8 +2397,7 @@ impl Parser {
                     Value::List(pos_args),
                     Value::Map { keys, values },
                 ],
-                line,
-                column,
+                loc
             }
         }
 
@@ -2552,8 +2416,7 @@ impl Parser {
                 Value::List(pos_args),
                 Value::Map { keys, values },
             ],
-            line,
-            column,
+            loc
         }
     }
 
@@ -2574,7 +2437,7 @@ impl Parser {
                 break;
             }
     
-            if let Some(Token(t_type, t_val)) = &next_token {
+            if let Some(Token(t_type, t_val, _)) = &next_token {
                 if t_type == "OPERATOR" && t_val == "=" {
                     let name = current_token.1;
                     self.next();
@@ -2609,7 +2472,7 @@ impl Parser {
                 pos_args.push(expr.convert_to_map());
             }
     
-            if let Some(Token(t_type, t_val)) = self.token() {
+            if let Some(Token(t_type, t_val, _)) = self.token() {
                 if t_type == "SEPARATOR" && t_val == "," {
                     self.next();
                 }

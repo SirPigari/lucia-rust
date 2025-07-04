@@ -25,6 +25,7 @@ mod env {
         pub mod preprocessor;
         pub mod objects;
         pub mod libs;
+        pub mod tokens;
     }
     pub mod libs {
         pub mod math {
@@ -74,7 +75,8 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
-use crate::parser::{Parser, Token};
+use crate::parser::Parser;
+use crate::env::runtime::tokens::{Token, Location};
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
@@ -115,103 +117,91 @@ pub fn get_build_info() -> BuildInfo {
     }
 }
 
-fn handle_error(
+pub fn handle_error(
     error: &Error,
     source: &str,
-    line: (usize, String),
     config: &Config,
     use_colors: bool,
 ) {
-    let line_number = error.line.0;
-
-    let error_type = &error.error_type;
-    let error_msg = &error.msg;
-
-    let mut suffix = "";
-    let mut antisuffix = "\n";
-
-    if error.file != "<stdin>" {
-        suffix = "\n";
-        antisuffix = "";
-    }
-
     let use_lucia_traceback = config.use_lucia_traceback;
 
-    let current_line = get_line_info(source, line_number).unwrap_or_default();
-    let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
-    let next_line = get_line_info(source, line_number + 1);
+    let format_location = |loc: &Location| -> String {
+        match loc {
+            Location { range: (0, 0), .. } => loc.file.clone(),
+            Location { range: (line, 0), .. } => format!("{}:{}", loc.file, line),
+            Location { range: (0, col), .. } => format!("{}:{}", loc.file, col),
+            Location { range: (line, col), .. } => format!("{}:{}:{}", loc.file, line, col),
+        }
+    };
 
-    let mut indent = " ".repeat(line_number.to_string().len());
-
-    let lexer = Lexer::new(&current_line);
-
-    let mut print_single_error = |err: &Error| {
+    let print_single_error = |err: &Error| -> String {
         let mut trace = String::new();
-        let mut arrows_under = String::new();
 
-        let file_name = err.file.strip_prefix(r"\\?\").unwrap_or(&err.file);
-
-        if !(err.column == 0 && err.line.0 == 0) {
-            let mut current_pos = 1;
-            let mut found = false;
-
-            for (token_type, token_value) in lexer.tokenize(true) {
-                let token_len = token_value.len();
-
-                if token_type.starts_with("COMMENT") {
-                    continue;
-                }
-
-                if !found && current_pos >= err.column {
-                    arrows_under.push_str(&"^".repeat(token_len));
-                    found = true;
-                } else {
-                    arrows_under.push_str(&"~".repeat(token_len));
-                }
-
-                current_pos += token_len;
+        let loc = match &err.loc {
+            Some(loc) => loc,
+            None => {
+                trace.push_str(&format!(
+                    "{}-> Error: {}{}\n",
+                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    err.msg,
+                    hex_to_ansi("reset", Some(use_colors))
+                ));
+                return trace;
             }
+        };
 
-            if !found {
-                arrows_under = " ".repeat(err.column.saturating_sub(1)) + "^";
-            }
+        let file_name = loc.file.strip_prefix(r"\\?\").unwrap_or(&loc.file);
+        let line_number = loc.line_number;
+        let range = loc.range;
+        let col = range.0;
+        let reset = hex_to_ansi("reset", Some(use_colors));
 
-            trace.push_str(&format!(
-                "{}-> File '{}:{}:{}' got error:\n",
-                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                file_name,
-                err.line.0,
-                err.column
-            ));
-
-            if prev_line.is_some() {
-                trace.push_str(&format!("\t{} ...\n", indent));
-            }
-
-            trace.push_str(&format!("\t{} | {}\n", err.line.0, current_line));
-            trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
-
-            if next_line.is_some() {
-                trace.push_str(&format!("\t{} ...\n", indent));
-            }
+        let current_line = get_line_info(source, line_number).unwrap_or_default();
+        let prev_line = if line_number > 1 {
+            get_line_info(source, line_number - 1)
         } else {
-            if err.line.0 > 0 {
-                trace.push_str(&format!(
-                    "{}-> File '{}:{}' got error:\n",
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                    file_name,
-                    err.line.0
-                ));
-            } else {
-                trace.push_str(&format!(
-                    "{}-> File '{}' got error:\n",
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                    file_name
-                ));
-            }
+            None
+        };
+        let next_line = get_line_info(source, line_number + 1);
+        let indent = " ".repeat(line_number.to_string().len());
+
+        let mut arrows_under = String::new();
+        let line_len = current_line.len();
+        let start = range.0.min(line_len);
+        let end = range.1.min(line_len);
+
+        if start >= line_len || end == 0 || start >= end {
+            arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
+        } else {
+            arrows_under = "~".repeat(line_len);
+            let len = end.saturating_sub(start);
+            arrows_under.replace_range(start..end, &"^".repeat(len.max(1)));
         }
 
-        trace.push_str(&format!("\t{} | {}: {}", indent, err.error_type, err.msg));
+
+        trace.push_str(&format!(
+            "{}-> File '{}:{}:{}' got error:\n",
+            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            file_name,
+            line_number,
+            col
+        ));
+
+        if prev_line.is_some() {
+            trace.push_str(&format!("\t{} ...\n", indent));
+        }
+
+        trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
+        trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
+
+        if next_line.is_some() {
+            trace.push_str(&format!("\t{} ...\n", indent));
+        }
+
+        trace.push_str(&format!(
+            "\t{} | {}: {}",
+            indent, err.error_type, err.msg
+        ));
 
         if let Some(help) = &err.help {
             if !help.is_empty() {
@@ -228,52 +218,48 @@ fn handle_error(
             }
         }
 
-        trace.push_str(suffix);
-        trace.push_str(&hex_to_ansi("reset", Some(use_colors)));
+        trace.push('\n');
+        trace.push_str(&reset);
         trace
     };
 
     if !use_lucia_traceback {
         let mut depth = 0;
         let mut current = error;
-        while let Some(ref_ref) = &current.ref_err {
+        while let Some(inner) = &current.ref_err {
             depth += 1;
-            current = ref_ref;
+            current = inner;
         }
 
-        let deepest_error = current;
-        let file_name = deepest_error.file.strip_prefix(r"\\?\").unwrap_or(&deepest_error.file);
+        let location_str = current
+            .loc
+            .as_ref()
+            .map_or("<unknown>".to_string(), format_location);
 
-        let location = match (deepest_error.line.0, deepest_error.column) {
-            (0, 0) => file_name.to_string(),
-            (line, 0) => format!("{}:{}", file_name, line),
-            (0, col) => format!("{}:{}", file_name, col),
-            (line, col) => format!("{}:{}:{}", file_name, line, col),
-        };
-
-        let depth_info = if depth > 0 {
+        let depth_note = if depth > 0 {
             format!(" (nested depth: {})", depth)
         } else {
-            String::new()
+            "".into()
+        };
+
+        let help_msg = match &current.help {
+            Some(help) if !help.is_empty() => format!(
+                "   {}({}){}",
+                hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                help,
+                hex_to_ansi("reset", Some(use_colors))
+            ),
+            _ => String::new(),
         };
 
         eprintln!(
-            "{}[err] {} -> {}: {}{}{}{}{}",
+            "{}[err] {} -> {}: {}{}{}{}",
             hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            location,
-            deepest_error.error_type,
-            deepest_error.msg,
-            depth_info,
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-            match &deepest_error.help {
-                Some(help) if !help.is_empty() => format!(
-                    "   {}({}){}",
-                    hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
-                    help,
-                    hex_to_ansi("reset", Some(use_colors))
-                ),
-                _ => String::new(),
-            },
+            location_str,
+            current.error_type,
+            current.msg,
+            depth_note,
+            help_msg,
             hex_to_ansi("reset", Some(use_colors))
         );
         return;
@@ -284,15 +270,13 @@ fn handle_error(
 
     while let Some(err) = current_error {
         trace.push_str(&print_single_error(err));
-        if let Some(ref_err) = &err.ref_err {
+        if let Some(ref inner) = err.ref_err {
             trace.push_str(&format!(
-                "{}{}\t{}^-- caused by:\n{}",
-                antisuffix,
-                " ".repeat(indent.len() + 1),
-                hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                hex_to_ansi("reset", Some(use_colors))
+                "\t{}^-- caused by:\n",
+                hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
             ));
-            current_error = Some(ref_err);
+            trace.push_str(&hex_to_ansi("reset", Some(use_colors)));
+            current_error = Some(inner);
         } else {
             current_error = None;
         }
@@ -313,7 +297,7 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     let mut pp_buffer = String::from("// This file was generated by lucia preprocessor dump\n// You can just rename this to .lc file and it will work just fine\n\n");
 
     for (i, token) in tokens.iter().enumerate() {
-        let Token(kind, val) = token;
+        let Token(kind, val, _) = token;
 
         if kind == "EOF" {
             break;
@@ -372,7 +356,6 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     );
 }
 
-
 fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_colors: bool) {
     let base_path = Path::new(file_path)
         .with_extension("")
@@ -394,7 +377,7 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
                     let mut new_values = Vec::new();
                     for (k, v) in keys.iter().zip(values.iter()) {
                         if let Value::String(s) = k {
-                            if s == "_line" || s == "_column" {
+                            if s == "_loc" {
                                 continue;
                             }
                         }
@@ -873,17 +856,16 @@ fn lucia(args: Vec<String>) {
     if config.version != VERSION {
         if !moded {
             handle_error(
-                &Error::error_with_help(
+                &Error::with_help(
                     "VersionMismatchError",
                     to_static(format!(
                         "Lucia version mismatch: expected {}, got {}. Please update your Lucia installation.",
                         VERSION, config.version
                     )),
-                    "Set 'moded' to true in your config file to ignore this error.".to_string(),
+                    "Set 'moded' to true in your config file to ignore this error.",
                     to_static(exe_path.display().to_string()),
                 ),
                 "",
-                (0, "".to_string()),
                 &config,
                 use_colors,
             );
@@ -923,13 +905,25 @@ fn lucia(args: Vec<String>) {
     }
 }
 
-fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
+fn execute_file(
+    path: &Path,
+    file_path: String,
+    config: &Config,
+    use_colors: bool,
+    disable_preprocessor: bool,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    debug_mode: Option<String>,
+    argv: &Vec<String>,
+    dump_pp_flag: &bool,
+    dump_ast_flag: &bool,
+) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
         let file_content = fs::read_to_string(path).expect("Failed to read file");
-        let lexer = Lexer::new(&file_content);
-        let raw_tokens = lexer.tokenize(config.print_comments);
+        let lexer = Lexer::new(&file_content, file_path.clone());
+        let raw_tokens = lexer.tokenize();
 
         let print_start_debug = debug_mode
             .as_ref()
@@ -938,44 +932,33 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         let print_intime_debug = debug_mode
             .as_ref()
             .map_or(false, |mode| mode == "full" || mode == "normal");
-        
+
         let processed_tokens = if !disable_preprocessor {
             let mut preprocessor = Preprocessor::new(
                 home_dir_path.join("libs"),
                 config_path.clone(),
-                file_path.as_str()
+                file_path.as_str(),
             );
-            match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+            match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
                 Ok(tokens) => tokens,
                 Err(e) => {
-                    handle_error(
-                        &e.clone(),
-                        &file_content,
-                        (0, "".to_string()),
-                        &config,
-                        use_colors,
-                    );
+                    handle_error(&e, &file_content, &config, use_colors);
                     exit(1);
                 }
             }
         } else {
-            raw_tokens
+            raw_tokens.clone()
         };
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
-            let tokens: Vec<Token> = processed_tokens
-                .iter()
-                .map(|(kind, val)| Token(kind.clone(), val.clone()))
-                .collect();
-        
             dump_pp(
-                tokens.iter().collect(),
+                processed_tokens.iter().collect(),
                 path.to_str().unwrap_or(""),
                 &config,
                 use_colors,
             );
         }
-        
+
         if print_start_debug {
             debug_log(
                 &format!(
@@ -983,34 +966,30 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                     processed_tokens
                         .iter()
                         .filter(|token| {
-                            token.0 != "WHITESPACE"
-                            && token.0 != "COMMENT_INLINE"
-                            && token.0 != "COMMENT_SINGLE"
-                            && token.0 != "COMMENT_MULTI"
-                            && token.0 != "EOF"
+                            let t = token.0.as_str();
+                            t != "WHITESPACE"
+                                && t != "COMMENT_INLINE"
+                                && t != "COMMENT_SINGLE"
+                                && t != "COMMENT_MULTI"
+                                && t != "EOF"
                         })
+                        .map(|t| (t.0.clone(), t.1.clone()))
                         .collect::<Vec<_>>()
                 ),
                 &config,
                 Some(use_colors),
             );
         }
-        
-        let tokens: Vec<Token> = processed_tokens
-            .into_iter()
-            .map(|(t, v)| Token(t, v))
-            .collect();
-        let mut parser = Parser::new(tokens, config.clone(), file_content.to_string(), use_colors, file_path.as_str());
-        
+
+        let tokens: Vec<Token> = processed_tokens;
+        let mut parser =
+            Parser::new(tokens.clone(), config.clone(), file_content.to_string(), use_colors, file_path.as_str());
+
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
-                debug_log(
-                    "Error while parsing:",
-                    &config,
-                    Some(use_colors),
-                );
-                handle_error(&error.clone(), &file_content, error.line, &config, use_colors);
+                debug_log("Error while parsing:", &config, Some(use_colors));
+                handle_error(&error, &file_content, &config, use_colors);
                 exit(1);
             }
         };
@@ -1052,16 +1031,19 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 .canonicalize()
                 .unwrap_or_else(|_| PathBuf::from("."))
         };
-        let mut interpreter = Interpreter::new(config.clone(), use_colors, file_path.as_str(), &parent_dir, (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor), argv);
+        let mut interpreter = Interpreter::new(
+            config.clone(),
+            use_colors,
+            file_path.as_str(),
+            &parent_dir,
+            (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
+            argv,
+        );
         let out: Value = match interpreter.interpret(statements, file_content.clone()) {
             Ok(out) => out,
             Err(error) => {
-                debug_log(
-                    "Error while interpreting:",
-                    &config,
-                    Some(use_colors),
-                );
-                handle_error(&error.clone(), &file_content, error.line, &config, use_colors);
+                debug_log("Error while interpreting:", &config, Some(use_colors));
+                handle_error(&error, &file_content, &config, use_colors);
                 exit(1);
             }
         };
@@ -1072,40 +1054,50 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
 
 fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     println!(
-        "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
-        hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
-        config.version, 
+        "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
+        hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
+        config.version,
         hex_to_ansi("reset", Some(use_colors))
     );
-    let mut interpreter = Interpreter::new(config.clone(), use_colors, "<stdin>", &cwd, (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor), argv);
+
+    let mut interpreter = Interpreter::new(
+        config.clone(),
+        use_colors,
+        "<stdin>",
+        &cwd,
+        (
+            home_dir_path.join("libs"),
+            config_path.clone(),
+            !disable_preprocessor,
+        ),
+        argv,
+    );
+
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
         config_path.clone(),
         "<stdin>",
     );
 
-    let print_start_debug = debug_mode
-        .as_ref()
-        .map_or(false, |mode| mode == "full" || mode == "minimal");
-
-    let print_intime_debug = debug_mode
-        .as_ref()
-        .map_or(false, |mode| mode == "full" || mode == "normal");
+    let print_start_debug = matches!(debug_mode.as_deref(), Some("full" | "minimal"));
+    let print_intime_debug = matches!(debug_mode.as_deref(), Some("full" | "normal"));
 
     let mut line_number = 0;
 
     loop {
         line_number += 1;
-        print!("{}{}{} ", 
-            hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)), 
-            ">>>", 
+        print!(
+            "{}{}{} ",
+            hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)),
+            ">>>",
             hex_to_ansi("reset", Some(use_colors))
         );
+
         let input = utils::read_input("");
         if input.is_empty() {
             continue;
         }
-        
+
         if input == "exit" {
             println!("Use 'exit()' to exit.");
             continue;
@@ -1126,40 +1118,33 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         }
 
         if input == "clear()" || input == "\x11" || input == "\x0F" {
-            if let Err(e) =  clear_terminal() {
+            if let Err(_) = clear_terminal() {
                 handle_error(
                     &Error::new("IOError", "Failed to clear screen", "<stdin>"),
                     &input,
-                    (0, "".to_string()),
                     &config,
                     use_colors,
                 );
             }
             println!(
-                "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}", 
-                hex_to_ansi(&config.color_scheme.info, Some(use_colors)), 
-                config.version, 
+                "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
+                hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
+                config.version,
                 hex_to_ansi("reset", Some(use_colors))
             );
             continue;
         }
 
-        let lexer = Lexer::new(&input);
-        let raw_tokens = lexer.tokenize(config.print_comments);
+        let lexer = Lexer::new(&input, "<stdin>".into());
+        let raw_tokens = lexer.tokenize();
 
-        let current_dir = std_env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         let processed_tokens = if !disable_preprocessor {
-            match preprocessor.process(raw_tokens, &current_dir) {
+            match preprocessor.process(raw_tokens.clone(), &current_dir) {
                 Ok(toks) => toks,
                 Err(e) => {
-                    handle_error(
-                        &e.clone(),
-                        &input,
-                        (0, "".to_string()),
-                        &config,
-                        use_colors,
-                    );
+                    handle_error(&e.clone(), &input, &config, use_colors);
                     continue;
                 }
             }
@@ -1168,46 +1153,38 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         };
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
-            let tokens: Vec<Token> = processed_tokens
-                .iter()
-                .map(|(kind, val)| Token(kind.clone(), val.clone()))
-                .collect();
-
             let file_path = cwd.join(format!("stdin-{}", line_number));
-        
             dump_pp(
-                tokens.iter().collect(),
+                processed_tokens.iter().collect(),
                 file_path.to_str().unwrap_or("stdin"),
                 &config,
                 use_colors,
             );
-        }        
-        
-        if print_start_debug {
-            debug_log(
-                &format!(
-                    "Tokens: {:?}",
-                    processed_tokens
-                        .iter()
-                        .filter(|token| {
-                            token.0 != "WHITESPACE"
-                            && token.0 != "COMMENT_INLINE"
-                            && token.0 != "COMMENT_SINGLE"
-                            && token.0 != "COMMENT_MULTI"
-                            && token.0 != "EOF"
-                        })
-                        .collect::<Vec<_>>()
-                ),
-                &config,
-                Some(use_colors),
-            );
         }
+
+        if print_start_debug {
+            let filtered = processed_tokens
+                .iter()
+                .filter(|token| {
+                    let t = &token.0;
+                    t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+                })
+                .map(|token| (&token.0, &token.1))
+                .collect::<Vec<_>>();
         
-        let tokens: Vec<Token> = processed_tokens
-            .into_iter()
-            .map(|(t, v)| Token(t, v))
-            .collect();
-        let mut parser = Parser::new(tokens, config.clone(), input.to_string(), use_colors, "<stdin>");
+            debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
+        }        
+
+        let tokens = processed_tokens;
+
+        let mut parser = Parser::new(
+            tokens,
+            config.clone(),
+            input.to_string(),
+            use_colors,
+            "<stdin>",
+        );
+
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -1218,10 +1195,11 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                         Some(use_colors),
                     );
                 }
-                handle_error(&error.clone(), &input, error.line, &config, use_colors);
+                handle_error(&error.clone(), &input, &config, use_colors);
                 continue;
             }
         };
+
         if *dump_ast_flag && !statements.is_empty() {
             let file_path = cwd.join(format!("stdin-{}", line_number));
             dump_ast(
@@ -1231,6 +1209,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 use_colors,
             );
         }
+
         if print_start_debug {
             debug_log(
                 &format!(
@@ -1245,30 +1224,25 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 Some(use_colors),
             );
         }
-        let out: Value = match interpreter.interpret(statements, input.clone()) {
+
+        let out = match interpreter.interpret(statements, input.clone()) {
             Ok(out) => {
                 if interpreter.is_stopped() {
                     exit(0);
                 }
                 out
-            },
+            }
             Err(error) => {
                 if print_intime_debug {
-                    debug_log(
-                        "Error while interpreting:",
-                        &config,
-                        Some(use_colors),
-                    );
+                    debug_log("Error while interpreting:", &config, Some(use_colors));
                 }
-                handle_error(&error.clone(), &input, error.line, &config, use_colors);
+                handle_error(&error.clone(), &input, &config, use_colors);
                 continue;
             }
         };
+
         if !matches!(out, Value::Null) {
-            println!(
-                    "{}",
-                    format_value(&out)
-            );
+            println!("{}", format_value(&out));
         }
     }
 }

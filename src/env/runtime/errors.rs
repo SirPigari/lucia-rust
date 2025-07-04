@@ -1,15 +1,14 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{to_static, format_value, self};
 use std::fmt::{self, Display};
+use crate::env::runtime::tokens::Location;
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub struct Error {
     pub error_type: String,
     pub msg: String,
     pub help: Option<String>,
-    pub line: (usize, String),
-    pub column: usize,
-    pub file: String,
+    pub loc: Option<Location>,
     pub ref_err: Option<Box<Error>>,
 }
 
@@ -19,21 +18,37 @@ impl Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            line: (0, "<unknown>".to_string()),
-            column: 0,
-            file: file_path.to_string(),
+            loc: Some(Location {
+                file: file_path.to_string(),
+                line_string: "".to_string(),
+                line_number: 0,
+                range: (0, 0),
+            }),
             ref_err: None,
         }
     }
 
-    pub fn error_with_help(error_type: &'static str, msg: &'static str, help: String, file_path: &str) -> Self {
+    pub fn error_with_help(error_type: &'static str, msg: &'static str, help: String, loc: Location) -> Self {
         Self {
             error_type: to_static(error_type.to_string()).to_string(),
             msg: to_static(msg.to_string()).to_string(),
             help: Some(help),
-            line: (0, "<unknown>".to_string()),
-            column: 0,
-            file: file_path.to_string(),
+            loc: Some(loc),
+            ref_err: None,
+        }
+    }
+
+    pub fn with_help(error_type: &str, msg: &str, help: &str, file_path: &str) -> Self {
+        Self {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: Some(help.to_string()),
+            loc: Some(Location {
+                file: file_path.to_string(),
+                line_string: "".to_string(),
+                line_number: 0,
+                range: (0, 0),
+            }),
             ref_err: None,
         }
     }
@@ -43,21 +58,32 @@ impl Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            line: (0, "<unknown>".to_string()),
-            column: 0,
-            file: file_path.to_string(),
+            loc: Some(Location {
+                file: file_path.to_string(),
+                line_string: "".to_string(),
+                line_number: 0,
+                range: (0, 0),
+            }),
             ref_err: Some(Box::new(ref_err)),
         }
     }
 
-    pub fn with_position(error_type: &str, msg: &str, line: usize, line_text: &str, column: usize, file_path: &str) -> Self {
+    pub fn error_with_ref(error_type: &'static str, msg: &'static str, ref_err: Error, loc: Location) -> Self {
+        Self {
+            error_type: to_static(error_type.to_string()).to_string(),
+            msg: to_static(msg.to_string()).to_string(),
+            help: None,
+            loc: Some(loc),
+            ref_err: Some(Box::new(ref_err)),
+        }
+    }
+
+    pub fn with_location(error_type: &str, msg: &str, loc: Location) -> Self {
         Self {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            line: (line, line_text.to_string()),
-            column,
-            file: file_path.to_string(),
+            loc: Some(loc),
             ref_err: None,
         }
     }
@@ -73,10 +99,8 @@ impl Error {
     pub fn help(&self) -> Option<&str> {
         self.help.as_deref()
     }
-}
 
-impl From<&str> for Error {
-    fn from(msg: &str) -> Self {
-        Error::new("UnknownError", msg, "<unknown>")
+    pub fn location(&self) -> Option<&Location> {
+        self.loc.as_ref()
     }
 }

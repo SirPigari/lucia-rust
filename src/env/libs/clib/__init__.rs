@@ -110,10 +110,10 @@ pub fn register() -> HashMap<String, Variable> {
 
 pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
-        return Err(Error::error_with_help(
+        return Err(Error::with_help(
             "UnsafeError",
             "Clib operations are unsafe and cannot be performed without explicit permission.",
-            "To enable unsafe operations, set 'allow_unsafe' to true in the configuration.".to_string(),
+            "To enable unsafe operations, set 'allow_unsafe' to true in the configuration.",
             to_static(file_path),
         ));
     }
@@ -121,10 +121,10 @@ pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     let lib_path = &*TCC_PATH;
 
     if !Path::new(lib_path).exists() {
-        return Err(Error::error_with_help(
+        return Err(Error::with_help(
             "RuntimeError",
             "TCC_PATH is not set or the path does not exist.",
-            format!("Please ensure TCC_PATH points to the TCC shared library. Current path: {}", lib_path),
+            &format!("Please ensure TCC_PATH points to the TCC shared library. Current path: {}", lib_path),
             to_static(file_path),
         ));
     }

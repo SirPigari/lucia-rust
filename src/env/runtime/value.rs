@@ -4,6 +4,7 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::Object;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{to_static, format_float, format_int};
+use crate::env::runtime::tokens::Location;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
@@ -156,40 +157,67 @@ impl Value {
     pub fn convert_to_statement(&self) -> Statement {
         match self {
             Value::Map { keys, values } => {
-                let mut line = 0;
-                let mut column = 0;
-
+                let mut loc: Option<Location> = None;
+    
                 let mut new_keys = Vec::new();
                 let mut new_values = Vec::new();
-
+    
                 for (i, key) in keys.iter().enumerate() {
                     if let Value::String(s) = key {
-                        if s == "_line" {
-                            if let Some(Value::Int(val)) = values.get(i) {
-                                line = val.to_usize().unwrap_or(0);;
-                                continue;
+                        if s == "_loc" {
+                            if let Some(Value::Map { keys: loc_keys, values: loc_values }) = values.get(i) {
+                                let mut file = String::new();
+                                let mut line_string = String::new();
+                                let mut line_number = 0;
+                                let mut range = (0, 0);
+    
+                                for (k, v) in loc_keys.iter().zip(loc_values.iter()) {
+                                    match (k, v) {
+                                        (Value::String(s), Value::String(val)) if s == "_file" => {
+                                            file = val.clone();
+                                        }
+                                        (Value::String(s), Value::String(val)) if s == "_line_string" => {
+                                            line_string = val.clone();
+                                        }
+                                        (Value::String(s), Value::Int(n)) if s == "_line_number" => {
+                                            line_number = n.to_i64().unwrap_or(0) as usize;
+                                        }
+                                        (Value::String(s), Value::Tuple(vs)) if s == "_range" && vs.len() == 2 => {
+                                            if let (Value::Int(start), Value::Int(end)) = (&vs[0], &vs[1]) {
+                                                range = (
+                                                    start.to_i64().unwrap_or(0) as usize,
+                                                    end.to_i64().unwrap_or(0) as usize,
+                                                );
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+    
+                                loc = Some(Location {
+                                    file,
+                                    line_string,
+                                    line_number,
+                                    range,
+                                });
                             }
-                        }
-                        if s == "_column" {
-                            if let Some(Value::Int(val)) = values.get(i) {
-                                column = val.to_usize().unwrap_or(0);;
-                                continue;
-                            }
+                            continue;
                         }
                     }
+    
                     new_keys.push(key.clone());
                     if let Some(value) = values.get(i) {
                         new_values.push(value.clone());
                     }
                 }
-
+    
                 Statement::Statement {
                     keys: new_keys,
                     values: new_values,
-                    line,
-                    column,
+                    loc,
                 }
             }
+    
             Value::Null => Statement::Statement {
                 keys: vec![
                     Value::String("type".to_string()),
@@ -199,9 +227,9 @@ impl Value {
                     Value::String("BOOLEAN".to_string()),
                     Value::String("null".to_string()),
                 ],
-                line: 0,
-                column: 0,
+                loc: None,
             },
+    
             _ => Statement::Null,
         }
     }

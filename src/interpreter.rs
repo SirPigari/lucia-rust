@@ -52,7 +52,8 @@ use serde_urlencoded;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
-use crate::parser::{Parser, Token};
+use crate::parser::Parser;
+use crate::env::runtime::tokens::{Token, Location};
 
 const VERSION: &str = env!("VERSION");
 
@@ -733,8 +734,8 @@ impl Interpreter {
             }
         };
         
-        let lexer = Lexer::new(&content);
-        let raw_tokens = lexer.tokenize(false);
+        let lexer = Lexer::new(&content, path.display().to_string());
+        let raw_tokens = lexer.tokenize();
 
         let (pr1, pr2, ep) = self.preprocessor_info.clone();
         let processed_tokens = if ep {
@@ -757,11 +758,7 @@ impl Interpreter {
         } else {
             raw_tokens
         };
-        let tokens: Vec<Token> = processed_tokens
-            .into_iter()
-            .map(|(t, v)| Token(t, v))
-            .collect();
-        let mut parser = Parser::new(tokens, self.config.clone(), content.clone(), self.use_colors, path.display().to_string().as_str());
+        let mut parser = Parser::new(processed_tokens, self.config.clone(), content.clone(), self.use_colors, path.display().to_string().as_str());
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -806,9 +803,15 @@ impl Interpreter {
             Ok(_) => final_properties,
             Err(e) => {
                 let mut pos = String::new();
-                let line = e.line.0;
+                let loc = if let Some(loc) = &e.loc {
+                    loc
+                } else {
+                    self.raise("RuntimeError", "Missing location on error");
+                    return HashMap::new();
+                };   
+                let line = loc.line_number;            
                 if line != 0 {
-                    let column = e.column;
+                    let column = loc.range.0;
                     if column > 0 {
                         pos = format!(":{}:{}", line, column);
                     } else {
@@ -837,7 +840,7 @@ impl Interpreter {
                 return Err(err.clone());
             }
 
-            if let Statement::Statement { keys, values, line, column } = statement.clone() {
+            if let Statement::Statement { keys, values, loc } = statement.clone() {
                 self.current_statement = Some(statement.clone());
 
                 let value = self.evaluate(statement.clone());
@@ -869,115 +872,67 @@ impl Interpreter {
         Ok(self.return_value.clone())
     }
 
-    pub fn raise(&mut self, error_type: &str, msg: &str) -> Value {
-        if let Some(current_statement) = &self.current_statement {
-            if let Statement::Statement { line, column, .. } = current_statement {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: None,
-                    line: (*line, "".to_string()),
-                    column: *column,
-                    file: self.file_path.clone(),
-                    ref_err: None,
-                });
-            } else {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: None,
-                    line: (0, "".to_string()),
-                    column: 0,
-                    file: self.file_path.clone(),
-                    ref_err: None,
-                });
-            }
-        } else {
-            self.err = Some(Error {
-                error_type: error_type.to_string(),
-                msg: msg.to_string(),
-                help: None,
-                line: (0, "".to_string()),
-                column: 0,
-                file: self.file_path.clone(),
-                ref_err: None,
-            });
+    fn get_location_from_current_statement(&self) -> Option<Location> {
+        match &self.current_statement {
+            Some(Statement::Statement { loc, .. }) => loc.clone(),
+            _ => None,
         }
-    
+    }
+
+    pub fn raise(&mut self, error_type: &str, msg: &str) -> Value {
+        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+            file: self.file_path.clone(),
+            line_string: "".to_string(),
+            line_number: 0,
+            range: (0, 0),
+        });
+
+        self.err = Some(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: None,
+            loc: Some(loc),
+            ref_err: None,
+        });
+
         NULL
     }
 
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
-        if let Some(current_statement) = &self.current_statement {
-            if let Statement::Statement { line, column, .. } = current_statement {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: Some(help.to_string()),
-                    line: (*line, "".to_string()),
-                    column: *column,
-                    file: self.file_path.clone(),
-                    ref_err: None,
-                });
-            } else {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: Some(help.to_string()),
-                    line: (0, "".to_string()),
-                    column: 0,
-                    file: self.file_path.clone(),
-                    ref_err: None,
-                });
-            }
-        } else {
-            self.err = Some(Error {
-                error_type: error_type.to_string(),
-                msg: msg.to_string(),
-                help: Some(help.to_string()),
-                line: (0, "".to_string()),
-                column: 0,
-                file: self.file_path.clone(),
-                ref_err: None,
-            });
-        }
+        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+            file: self.file_path.clone(),
+            line_string: "".to_string(),
+            line_number: 0,
+            range: (0, 0),
+        });
+
+        self.err = Some(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: Some(help.to_string()),
+            loc: Some(loc),
+            ref_err: None,
+        });
+
         NULL
     }
 
     pub fn raise_with_ref(&mut self, error_type: &str, msg: &str, ref_err: Error) -> Value {
-        if let Some(current_statement) = &self.current_statement {
-            if let Statement::Statement { line, column, .. } = current_statement {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: None,
-                    line: (*line, "".to_string()),
-                    column: *column,
-                    file: self.file_path.clone(),
-                    ref_err: Some(Box::new(ref_err)),
-                });
-            } else {
-                self.err = Some(Error {
-                    error_type: error_type.to_string(),
-                    msg: msg.to_string(),
-                    help: None,
-                    line: (0, "".to_string()),
-                    column: 0,
-                    file: self.file_path.clone(),
-                    ref_err: Some(Box::new(ref_err)),
-                });
-            }
-        } else {
-            self.err = Some(Error {
-                error_type: error_type.to_string(),
-                msg: msg.to_string(),
-                help: None,
-                line: (0, "".to_string()),
-                column: 0,
-                file: self.file_path.clone(),
-                ref_err: Some(Box::new(ref_err)),
-            });
-        }
+        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+            file: self.file_path.clone(),
+            line_string: "".to_string(),
+            line_number: 0,
+            range: (0, 0),
+        });
+
+        self.err = Some(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: None,
+            loc: Some(loc),
+            ref_err: Some(Box::new(ref_err)),
+        });
+
         NULL
     }
     
@@ -2976,8 +2931,7 @@ impl Interpreter {
                     Value::String("BOOLEAN".to_string()),
                     Value::String("null".to_string())
                 ],
-                column: 0,
-                line: 0,
+                loc: None,
             }.convert_to_hashmap(),
             _ => return self.raise("RuntimeError", "Expected a map for assignment"),
         };
@@ -3284,40 +3238,40 @@ impl Interpreter {
             }
             // fuck my parser
             "POINTER_DEREF" => {
-                let left_value = left_hashmap.get(&Value::String("value".to_string()))
+                let left_value = left_hashmap
+                    .get(&Value::String("value".to_string()))
                     .cloned()
                     .unwrap_or(Value::Null);
-                    let column = left_hashmap.get(&Value::String("column".to_string()))
-                    .and_then(|v| {
-                        if let Value::Int(i) = v {
-                            i.to_i64().ok().and_then(|num| {
-                                if num >= 0 {
-                                    Some(num as usize)
-                                } else {
-                                    None
-                                }
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(0);
-                
-                let line = left_hashmap.get(&Value::String("line".to_string()))
-                    .and_then(|v| {
-                        if let Value::Int(i) = v {
-                            i.to_i64().ok().and_then(|num| {
-                                if num >= 0 {
-                                    Some(num as usize)
-                                } else {
-                                    None
-                                }
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(0);                
+
+                let mut loc = Location {
+                    file: self.file_path.clone(),
+                    line_string: "".to_string(),
+                    line_number: 0,
+                    range: (0, 0),
+                };
+
+                if let Some(Value::Map { keys, values }) = left_hashmap.get(&Value::String("_loc".to_string())) {
+                    let loc_map: std::collections::HashMap<_, _> =
+                        keys.iter().cloned().zip(values.iter().cloned()).collect();
+
+                    if let Some(Value::String(f)) = loc_map.get(&Value::String("_file".to_string())) {
+                        loc.file = f.clone();
+                    }
+                    if let Some(Value::String(ls)) = loc_map.get(&Value::String("_line_string".to_string())) {
+                        loc.line_string = ls.clone();
+                    }
+                    if let Some(Value::Int(i)) = loc_map.get(&Value::String("_line_number".to_string())) {
+                        loc.line_number = i.to_i64().unwrap_or(0).max(0) as usize;
+                    }
+                    if let Some(Value::Tuple(vals)) = loc_map.get(&Value::String("_range".to_string())) {
+                        if let (Some(Value::Int(start)), Some(Value::Int(end))) = (vals.get(0), vals.get(1)) {
+                            let start = start.to_i64().unwrap_or(0).max(0) as usize;
+                            let end = end.to_i64().unwrap_or(0).max(0) as usize;
+                            loc.range = (start, end);
+                        }                        
+                    }
+                }
+
                 let result = self.evaluate(
                     Statement::Statement {
                         keys: vec![
@@ -3330,14 +3284,15 @@ impl Interpreter {
                             left_value,
                             right.clone(),
                         ],
-                        column,
-                        line,
+                        loc: Some(loc),
                     }
                 );
+
                 if self.err.is_some() {
                     return NULL;
                 }
-                return result;
+
+                result
             }
             _ => self.raise("TypeError", &format!("Cannot modify type '{}'", get_type_from_token_name(left_type))),
         }
@@ -4910,9 +4865,8 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let lexer = Lexer::new(to_static(script_str.clone()));
-                                let tokens = lexer.tokenize(false);
-                                let tokens: Vec<Token> = tokens.into_iter().map(|(a, b)| Token(a, b)).collect();
+                                let lexer = Lexer::new(to_static(script_str.clone()), self.file_path.clone());
+                                let tokens = lexer.tokenize();
 
                                 let source_string = script_str.to_string();
                                 let file_path_str = &self.file_path;
@@ -4952,9 +4906,8 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let lexer = Lexer::new(to_static(script_str.clone()));
-                                let tokens = lexer.tokenize(false);
-                                let tokens: Vec<Token> = tokens.into_iter().map(|(a, b)| Token(a, b)).collect();
+                                let lexer = Lexer::new(to_static(script_str.clone()), self.file_path.clone());
+                                let tokens = lexer.tokenize();
 
                                 let source_string = script_str.to_string();
                                 let file_path_str = &self.file_path;
@@ -5722,25 +5675,20 @@ impl Interpreter {
                                             return self.raise("SyntaxError", "Unmatched '{' in f-string");
                                         }
     
-                                        let raw_tokens = Lexer::new(&expr).tokenize(self.config.print_comments);
-                                        if raw_tokens.is_empty() {
+                                        let tokens = Lexer::new(&expr, self.file_path.clone()).tokenize();
+                                        if tokens.is_empty() {
                                             return self.raise("SyntaxError", "Empty expression inside {}");
                                         }
-                                        debug_log(
-                                            &format!(
-                                                "Generated f-string tokens: {:?}",
-                                                raw_tokens
-                                                    .iter()
-                                                    .filter(|token| token.0 != "WHITESPACE")
-                                                    .collect::<Vec<_>>()
-                                            ),
-                                            &self.config,
-                                            Some(self.use_colors),
-                                        );
+                                        let filtered = tokens
+                                            .iter()
+                                            .filter(|token| {
+                                                let t = &token.0;
+                                                t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+                                            })
+                                            .collect::<Vec<_>>();
+                        
+                                        debug_log(&format!("Generated f-string tokens: {:?}", filtered), &self.config, Some(self.use_colors));
                                         
-                                        let tokens: Vec<Token> = raw_tokens.into_iter()
-                                            .map(|(t, v)| Token(t, v))
-                                            .collect();
                                         let parsed = match Parser::new(tokens, self.config.clone(), expr.clone(), self.use_colors, &self.file_path).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {

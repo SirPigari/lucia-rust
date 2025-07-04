@@ -358,8 +358,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("POINTER_REF".to_string()),
                 inner_statement.convert_to_map()
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         };
     }
 
@@ -378,8 +377,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("NUMBER".to_string()),
                 Value::String("0".to_string())
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "float" => Statement::Statement {
             keys: vec![
@@ -390,8 +388,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("NUMBER".to_string()),
                 Value::String("0.0".to_string())
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "str" => Statement::Statement {
             keys: vec![
@@ -404,8 +401,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("\"\"".to_string()),
                 Value::List(vec![]),
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "bool" => Statement::Statement {
             keys: vec![
@@ -416,8 +412,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("BOOLEAN".to_string()),
                 Value::String("false".to_string()),
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "any" => Statement::Statement {
             keys: vec![
@@ -428,8 +423,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("BOOLEAN".to_string()),
                 Value::String("null".to_string()),
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "map" => Statement::Statement {
             keys: vec![
@@ -442,8 +436,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::List(vec![]),
                 Value::List(vec![])
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "list" => Statement::Statement {
             keys: vec![
@@ -456,8 +449,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("LIST".to_string()),
                 Value::List(vec![])
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "bytes" => Statement::Statement {
             keys: vec![
@@ -470,8 +462,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("\"\"".to_string()),
                 Value::List(vec![Value::String("b".to_string())])
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "tuple" => Statement::Statement {
             keys: vec![
@@ -482,8 +473,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("TUPLE".to_string()),
                 Value::List(vec![])
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         "void" => Statement::Statement {
             keys: vec![
@@ -494,8 +484,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("BOOLEAN".to_string()),
                 Value::String("null".to_string()),
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
         _ => Statement::Statement {
             keys: vec![
@@ -506,8 +495,7 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
                 Value::String("BOOLEAN".to_string()),
                 Value::String("null".to_string()),
             ],
-            line: 0,
-            column: 0,
+            loc: None,
         },
     }
 }
