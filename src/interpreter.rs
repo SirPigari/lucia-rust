@@ -2108,6 +2108,13 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                "fs" => {
+                    use crate::env::libs::fs::__init__ as fs;
+                    let fs_module_props = fs::register();
+                    for (name, var) in fs_module_props {
+                        properties.insert(name, var);
+                    }
+                }
                 _ => {
                     self.stack.pop();
                     return self.raise(
@@ -3912,10 +3919,8 @@ impl Interpreter {
         let mut result = NULL;
     
         for item in iterable_value.iter() {
-            // save previous value of the loop variable (if any)
             let previous = self.variables.remove(variable_name);
     
-            // shadow the loop variable with current item
             self.variables.insert(
                 variable_name.clone(),
                 Variable::new(variable_name.clone(), item.clone(), item.type_name(), false, true, true),
@@ -3925,7 +3930,6 @@ impl Interpreter {
                 result = self.evaluate(stmt.convert_to_statement());
     
                 if self.err.is_some() {
-                    // restore old variable before returning
                     match previous.clone() {
                         Some(var) => { self.variables.insert(variable_name.clone(), var); },
                         None => { self.variables.remove(variable_name); },
@@ -3942,7 +3946,6 @@ impl Interpreter {
                 }
             }
     
-            // restore the previous variable
             match previous {
                 Some(var) => { self.variables.insert(variable_name.clone(), var); },
                 None => { self.variables.remove(variable_name); },

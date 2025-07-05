@@ -145,11 +145,19 @@ impl Parser {
 
     pub fn get_loc(&mut self) -> Option<Location> {
         if let Some(token) = self.token() {
-            token.2.clone()
+            if token.2.is_some() {
+                token.2.clone()
+            } else if self.pos > 0 {
+                self.tokens.get(self.pos - 1).and_then(|t| t.2.clone())
+            } else {
+                None
+            }
+        } else if self.pos > 0 {
+            self.tokens.get(self.pos - 1).and_then(|t| t.2.clone())
         } else {
             None
         }
-    }
+    }     
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
@@ -1718,7 +1726,6 @@ impl Parser {
                                     Some(pat)
                                 };
                     
-                                // Optional if guard
                                 let guard = if self.token_is("IDENTIFIER", "if") {
                                     self.next();
                                     if !self.token_is("SEPARATOR", "(") {

@@ -4,7 +4,7 @@ use toml::Value;
 use uuid::{Builder, Uuid};
 use rand::RngCore;
 
-const VERSION: &str = "2.0.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const CPU_OPT: &str = "native";
 /*

@@ -60,6 +60,9 @@ mod env {
             pub mod __init__;
             pub mod cpu;
         }
+        pub mod fs {
+            pub mod __init__;
+        }
     }
 }
 
@@ -137,16 +140,17 @@ pub fn handle_error(
     let print_single_error = |err: &Error| -> String {
         let mut trace = String::new();
 
+        let dummy_loc;
         let loc = match &err.loc {
             Some(loc) => loc,
             None => {
-                trace.push_str(&format!(
-                    "{}-> Error: {}{}\n",
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
-                    err.msg,
-                    hex_to_ansi("reset", Some(use_colors))
-                ));
-                return trace;
+                dummy_loc = Location {
+                    file: "<unknown>".into(),
+                    line_string: String::new(),
+                    line_number: 0,
+                    range: (0, 0),
+                };
+                &dummy_loc
             }
         };
 
@@ -156,28 +160,40 @@ pub fn handle_error(
         let col = range.0;
         let reset = hex_to_ansi("reset", Some(use_colors));
 
-        let current_line = get_line_info(source, line_number).unwrap_or_default();
+        let current_line = if line_number > 0 {
+            get_line_info(source, line_number).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
         let prev_line = if line_number > 1 {
             get_line_info(source, line_number - 1)
         } else {
             None
         };
-        let next_line = get_line_info(source, line_number + 1);
+
+        let next_line = if line_number > 0 {
+            get_line_info(source, line_number + 1)
+        } else {
+            None
+        };
+
         let indent = " ".repeat(line_number.to_string().len());
 
         let mut arrows_under = String::new();
-        let line_len = current_line.len();
-        let start = range.0.min(line_len);
-        let end = range.1.min(line_len);
+        if line_number > 0 {
+            let line_len = current_line.len();
+            let start = range.0.min(line_len);
+            let end = range.1.min(line_len);
 
-        if start >= line_len || end == 0 || start >= end {
-            arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
-        } else {
-            arrows_under = "~".repeat(line_len);
-            let len = end.saturating_sub(start);
-            arrows_under.replace_range(start..end, &"^".repeat(len.max(1)));
+            if start >= line_len || end == 0 || start >= end {
+                arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
+            } else {
+                arrows_under = "~".repeat(line_len);
+                let len = end.saturating_sub(start);
+                arrows_under.replace_range(start..end, &"^".repeat(len.max(1)));
+            }
         }
-
 
         trace.push_str(&format!(
             "{}-> File '{}:{}:{}' got error:\n",
@@ -187,15 +203,17 @@ pub fn handle_error(
             col
         ));
 
-        if prev_line.is_some() {
-            trace.push_str(&format!("\t{} ...\n", indent));
-        }
+        if line_number > 0 {
+            if prev_line.is_some() {
+                trace.push_str(&format!("\t{} ...\n", indent));
+            }
 
-        trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
-        trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
+            trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
+            trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
 
-        if next_line.is_some() {
-            trace.push_str(&format!("\t{} ...\n", indent));
+            if next_line.is_some() {
+                trace.push_str(&format!("\t{} ...\n", indent));
+            }
         }
 
         trace.push_str(&format!(
@@ -218,7 +236,6 @@ pub fn handle_error(
             }
         }
 
-        trace.push('\n');
         trace.push_str(&reset);
         trace
     };
@@ -272,13 +289,19 @@ pub fn handle_error(
         trace.push_str(&print_single_error(err));
         if let Some(ref inner) = err.ref_err {
             trace.push_str(&format!(
-                "\t{}^-- caused by:\n",
+                "\n\t{}^-- caused by:\n",
                 hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
             ));
             trace.push_str(&hex_to_ansi("reset", Some(use_colors)));
             current_error = Some(inner);
         } else {
             current_error = None;
+        }
+    }
+
+    if let Some(loc) = error.loc.as_ref() {
+        if !(loc.file == "<stdin>") {
+            trace.push_str("\n");
         }
     }
 
@@ -546,7 +569,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         recursion_limit: 9999,
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),
-            warning: "#FFC107".to_string(),
+            warning: "#F5F534".to_string(),
             help: "#21B8DB".to_string(),
             debug: "#434343".to_string(),
             comment: "#757575".to_string(),
@@ -870,12 +893,12 @@ fn lucia(args: Vec<String>) {
             );
             exit(1);
         } else {
-            debug_log(
+            print_colored(
                 &format!(
                     "Warning: Lucia version mismatch: expected {}, got {}. Running in moded mode.",
                     VERSION, config.version
                 ),
-                &config,
+                &config.color_scheme.warning,
                 Some(use_colors),
             );
         }
