@@ -76,9 +76,14 @@ fun ticTacToe() -> void:
 
         moveStr: str = input()
 
+        if (len(moveStr) != 1):
+            print("Invalid input, please enter a number from 1 to 9.")
+            continue
+        end
+
         moveCharCode: int = ord(moveStr[0])
 
-        if (len(moveStr) != 1 || !(((moveCharCode >= ord("1")) && (moveCharCode <= ord("9"))))):
+        if (!((moveCharCode >= ord("1")) && (moveCharCode <= ord("9")))):
             print("Invalid input, please enter a number from 1 to 9.")
             continue
         end
