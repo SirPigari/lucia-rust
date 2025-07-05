@@ -1,0 +1,7 @@
+#ifndef LUCIA_STD_IMPORT
+#define LUCIA_STD_IMPORT
+
+import collections as _collections
+import config as _config
+
+#endif

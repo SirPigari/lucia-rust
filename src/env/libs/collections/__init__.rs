@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::io::{self, Write};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::value::Value;
@@ -41,6 +42,111 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
 fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
         Value::String(hex_to_ansi(hex, Some(true)))
+    } else {
+        Value::Error("TypeError", "expected a string", None)
+    }
+}
+
+fn format_string_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(format_str)) = args.get("format") {
+        if let Some(Value::List(args_list)) = args.get("args") {
+            let mut result = String::new();
+            let mut chars = format_str.chars().peekable();
+            let mut arg_index = 0;
+
+            while let Some(c) = chars.next() {
+                if c == '{' {
+                    if let Some(&next) = chars.peek() {
+                        if next == '{' {
+                            chars.next();
+                            result.push('{');
+                        } else if next == '}' {
+                            chars.next();
+                            if let Some(arg) = args_list.get(arg_index) {
+                                result.push_str(&format_value(arg));
+                                arg_index += 1;
+                            } else {
+                                result.push_str("{}");
+                            }
+                        } else if next == ':' {
+                            chars.next();
+                            if let Some(&next2) = chars.peek() {
+                                if next2 == '?' {
+                                    chars.next();
+                                    if let Some(&end) = chars.peek() {
+                                        if end == '}' {
+                                            chars.next();
+                                            if let Some(arg) = args_list.get(arg_index) {
+                                                result.push_str(&format!("{:?}", arg));
+                                                arg_index += 1;
+                                            } else {
+                                                result.push_str("{:?}");
+                                            }
+                                        } else {
+                                            result.push_str("{:?");
+                                        }
+                                    }
+                                } else {
+                                    result.push_str("{:");
+                                    result.push(next2);
+                                    chars.next();
+                                }
+                            } else {
+                                result.push_str("{:");
+                            }
+                        } else {
+                            result.push('{');
+                        }
+                    } else {
+                        result.push('{');
+                    }
+                } else if c == '}' {
+                    if let Some(&next) = chars.peek() {
+                        if next == '}' {
+                            chars.next();
+                            result.push('}');
+                        } else {
+                            result.push('}');
+                        }
+                    } else {
+                        result.push('}');
+                    }
+                } else {
+                    result.push(c);
+                }
+            }
+
+            Value::String(result)
+        } else {
+            Value::Error("TypeError", "expected a list of arguments", None)
+        }
+    } else {
+        Value::Error("TypeError", "expected a format string", None)
+    }
+}
+
+fn print_to_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(s)) = args.get("s") {
+        if let Some(Value::Int(stream)) = args.get("stream") {
+            match stream.to_i64() {
+                Ok(1) => {
+                    let _ = io::stdout().write_all(s.as_bytes());
+                    let _ = io::stdout().flush();
+                    Value::Null
+                }
+                Ok(2) => {
+                    let _ = io::stderr().write_all(s.as_bytes());
+                    let _ = io::stderr().flush();
+                    Value::Null
+                }
+                Ok(3) => {
+                    Value::Error("ValueError", "cannot write to stdin", None)
+                }
+                _ => Value::Error("ValueError", "invalid stream", None),
+            }
+        } else {
+            Value::Error("TypeError", "expected an integer stream", None)
+        }
     } else {
         Value::Error("TypeError", "expected a string", None)
     }
@@ -136,6 +242,16 @@ pub fn register() -> HashMap<String, Variable> {
     );
     insert_native_fn!(
         map,
+        "format_string",
+        format_string_handler,
+        vec![
+            Parameter::positional("format", "str"),
+            Parameter::positional("args", "list")
+        ],
+        "str"
+    );
+    insert_native_fn!(
+        map,
         "unescape_string",
         unescape_string_handler,
         vec![Parameter::positional("s", "str")],
@@ -147,6 +263,16 @@ pub fn register() -> HashMap<String, Variable> {
         capitalize_handler,
         vec![Parameter::positional("s", "str")],
         "str"
+    );
+    insert_native_fn!(
+        map,
+        "printto",
+        print_to_handler,
+        vec![
+            Parameter::positional("s", "str"),
+            Parameter::positional("stream", "int")
+        ],
+        "void"
     );
     insert_native_fn!(
         map,

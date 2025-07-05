@@ -13,22 +13,10 @@ default CPU_OPT is "generic"
 
 "native"       - Optimize for the CPU of the current machine (auto-detect).
 "generic"      - Generic CPU architecture.
-"x86-64"       - Generic x86-64 CPU.
-"x86-64-v2"    - Intel Nehalem and later CPUs.
-"x86-64-v3"    - Intel Haswell and later CPUs.
-"x86-64-v4"    - Intel Ice Lake and later CPUs.
-"athlon64"     - AMD Athlon 64.
-"znver1"       - AMD Zen 1 architecture.
-"znver2"       - AMD Zen 2 architecture.
-"znver3"       - AMD Zen 3 architecture.
-"skylake"      - Intel Skylake architecture.
-"cascadelake"  - Intel Cascade Lake architecture.
-"armv8-a"      - ARMv8-A architecture.
-"cortex-a53"   - ARM Cortex-A53 CPU.
 
-for other specific targets, pick the closest matching CPU architecture.
+Use native for custom builds, generic for release builds.
 
- full list: https://doc.rust-lang.org/rustc/codegen-options/index.html#target-cpu
+ https://doc.rust-lang.org/rustc/codegen-options/index.html#target-cpu
 */
 
 

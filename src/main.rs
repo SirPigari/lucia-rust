@@ -1171,7 +1171,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             Err(error) => {
                 if print_intime_debug {
                     debug_log(
-                        &format!("Error while parsing: {}", error.msg()),
+                        "Error while parsing",
                         &config,
                         Some(use_colors),
                     );

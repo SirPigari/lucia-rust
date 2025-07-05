@@ -1,7 +1,8 @@
 // std/macros.lc
 // This file contains macros for the Lucia programming language's standard library.
-import collections as _collections
-import config as _config
+#ifndef LUCIA_STD_MACROS
+#define LUCIA_STD_MACROS
+#include "_import.lc"
 
 #macro assert($cond, $msg=("Assertion failed")):
     if (!$cond):
@@ -60,3 +61,5 @@ import config as _config
 
 // return null
 null
+
+#endif

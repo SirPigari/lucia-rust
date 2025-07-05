@@ -98,6 +98,7 @@ impl Interpreter {
             cache: HashMap::from([
                 ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
+                ("iterables".to_owned(), Value::Map { keys: vec![], values: vec![] }),
             ]),
             defer_stack: vec![],
             scope: "main".to_owned(),
@@ -876,6 +877,7 @@ impl Interpreter {
         }
 
         if deferable {
+            let old_state = self.state.clone();
             self.state = "defer".to_owned();
             if !self.defer_stack.is_empty() {
                 let defer_statements = self.defer_stack.concat();
@@ -884,7 +886,7 @@ impl Interpreter {
                     self.evaluate(self.current_statement.clone().unwrap());
                 }
             }
-            self.state = "normal".to_owned();
+            self.state = old_state;
         }
 
         Ok(self.return_value.clone())
@@ -1010,6 +1012,7 @@ impl Interpreter {
                 "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement.clone()),
                 "DEFER" => self.handle_defer(statement.clone()),
                 "SCOPE" => self.handle_scope(statement.clone()),
+                "MATCH" => self.handle_match(statement.clone()),
         
                 // Function related
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
@@ -1082,6 +1085,134 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let condition = match statement.get(&Value::String("condition".to_string())) {
+            Some(v) => v,
+            _ => {
+                self.raise("SyntaxError", "Missing 'condition' in match statement");
+                return NULL;
+            }
+        };
+        if self.err.is_some() {
+            return NULL;
+        }
+        let mut matched_once = false;
+
+        let cases = match statement.get(&Value::String("cases".to_string())) {
+            Some(Value::List(c)) => c,
+            _ => {
+                self.raise("SyntaxError", "Expected a list for 'cases' in match statement");
+                return NULL;
+            }
+        };
+
+        for case in cases.iter() {
+            if let Value::Map { keys, values } = case {
+                let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
+                    Some(pos) => values.get(pos).unwrap_or(&Value::Null),
+                    None => {
+                        self.raise("SyntaxError", "Expected 'pattern' in match case");
+                        return NULL;
+                    }
+                };
+        
+                let guard: Option<Statement> = match (
+                    keys.iter().position(|k| k == &Value::String("guard".to_string())),
+                    values.get(keys.iter().position(|k| k == &Value::String("guard".to_string())).unwrap_or(usize::MAX)),
+                ) {
+                    (Some(pos), Some(val)) => match val {
+                        Value::Map { .. } => Some(val.convert_to_statement()),
+                        Value::Null => None,
+                        _ => {
+                            self.raise("SyntaxError", "Expected 'guard' to be a map or null in match case");
+                            return NULL;
+                        }
+                    },
+                    _ => None,
+                };
+        
+                let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
+                    Some(pos) => match values.get(pos) {
+                        Some(Value::List(b)) => b,
+                        _ => {
+                            self.raise("SyntaxError", "Expected 'body' to be a list in match case");
+                            return NULL;
+                        }
+                    },
+                    None => {
+                        self.raise("SyntaxError", "Missing 'body' in match case");
+                        return NULL;
+                    }
+                };
+        
+                let matched = match pattern {
+                    Value::Null => true,
+                    _ => {
+                        let check = Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("left".to_string()),
+                                Value::String("operator".to_string()),
+                                Value::String("right".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("OPERATION".to_string()),
+                                condition.clone(),
+                                Value::String("==".to_string()),
+                                pattern.clone(),
+                            ],
+                            loc: self.get_location_from_current_statement(),
+                        };
+                        self.evaluate(check).is_truthy()
+                    }
+                };                
+        
+                if matched {
+                    if matched_once {
+                        self.raise_with_help(
+                            "RuntimeError",
+                            "Multiple patterns matched in 'match' (fallthrough is not allowed)",
+                            "Did you forgot to use 'continue' or 'break'?",
+                        );
+                        return NULL;
+                    }
+                
+                    if let Some(g) = guard {
+                        if !self.evaluate(g.clone()).is_truthy() {
+                            continue;
+                        }
+                    }
+                    
+                    matched_once = true;
+                
+                    self.interpret(
+                        body.iter()
+                            .map(|item| item.clone().convert_to_statement())
+                            .collect(),
+                        self.source.clone(),
+                        true,
+                    );
+                    match self.state.as_str() {
+                        "break" => {
+                            self.state = "normal".to_string();
+                            return NULL
+                        },
+                        "continue" => {
+                            self.state = "normal".to_string();
+                            continue;
+                        },
+                        _ => {}
+                    }
+                }
+                
+            } else {
+                self.raise("RuntimeError", "Invalid case in 'match' statement - expected map");
+            }
+        }
+    
+        NULL
     }
 
     fn handle_scope(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -3762,53 +3893,74 @@ impl Interpreter {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'iterable' in for loop statement"),
         };
-
+    
         let iterable_value = self.evaluate(iterable.convert_to_statement());
         if !iterable_value.is_iterable() {
             return self.raise("TypeError", "Expected an iterable for 'for' loop");
         }
-
+    
         let body = match statement.get(&Value::String("body".to_string())) {
             Some(Value::List(body)) => body,
             _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
         };
-
+    
         let variable_name = match statement.get(&Value::String("variable".to_string())) {
             Some(Value::String(name)) => name,
             _ => return self.raise("RuntimeError", "Expected a string for 'variable' in for loop statement"),
         };
-
+    
         let mut result = NULL;
+    
         for item in iterable_value.iter() {
-            let mut local_vars = self.variables.clone();
-            local_vars.insert(
-                variable_name.to_string(),
-                Variable::new(variable_name.to_string(), item.clone(), item.type_name(), false, true, true),
+            // save previous value of the loop variable (if any)
+            let previous = self.variables.remove(variable_name);
+    
+            // shadow the loop variable with current item
+            self.variables.insert(
+                variable_name.clone(),
+                Variable::new(variable_name.clone(), item.clone(), item.type_name(), false, true, true),
             );
-            self.variables = local_vars;
-
+    
             for stmt in body {
                 result = self.evaluate(stmt.convert_to_statement());
+    
                 if self.err.is_some() {
+                    // restore old variable before returning
+                    match previous.clone() {
+                        Some(var) => { self.variables.insert(variable_name.clone(), var); },
+                        None => { self.variables.remove(variable_name); },
+                    }
                     return NULL;
                 }
+    
                 if self.is_returning {
+                    match previous.clone() {
+                        Some(var) => { self.variables.insert(variable_name.clone(), var); },
+                        None => { self.variables.remove(variable_name); },
+                    }
                     return result;
                 }
             }
+    
+            // restore the previous variable
+            match previous {
+                Some(var) => { self.variables.insert(variable_name.clone(), var); },
+                None => { self.variables.remove(variable_name); },
+            }
+    
             match self.state.as_str() {
                 "break" => {
                     self.state = "normal".to_string();
                     break;
-                },
+                }
                 "continue" => {
                     self.state = "normal".to_string();
                     continue;
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
-
+    
         result
     }
 
@@ -3858,7 +4010,11 @@ impl Interpreter {
                         return NULL;
                     }
                 };
-                let range_mode = match statement.get(&Value::String("range_mode".to_string())) .cloned() .unwrap_or(Value::String("value".to_string())) {
+
+                let range_mode = match statement.get(&Value::String("range_mode".to_string()))
+                    .cloned()
+                    .unwrap_or(Value::String("value".to_string()))
+                {
                     Value::String(s) => s,
                     _ => {
                         self.raise("TypeError", "Expected 'range_mode' to be a string");
@@ -3887,26 +4043,83 @@ impl Interpreter {
                     return NULL;
                 }
 
-                // omg im a god it works yay
-                // (the pattern reg)
-                match range_mode.as_str() {
+                let evaluated_end = self.evaluate(end_raw.convert_to_statement());
+
+                let cache_key = match range_mode.as_str() {
+                    "value" => Value::List(vec![
+                        Value::List(evaluated_seed.clone()),
+                        evaluated_end.clone(),
+                        Value::String(range_mode.clone()),
+                        Value::Boolean(pattern_flag_bool),
+                    ]),
+                    "length" => {
+                        let length_usize = match &evaluated_end {
+                            Value::Int(i) => match i.to_usize() {
+                                Ok(n) => n,
+                                Err(_) => {
+                                    self.raise("OverflowError", "Length value out of usize range");
+                                    return NULL;
+                                }
+                            },
+                            _ => {
+                                self.raise("TypeError", "Length value must be an integer");
+                                return NULL;
+                            }
+                        };
+                        Value::List(vec![
+                            Value::List(evaluated_seed.clone()),
+                            Value::Int(Int::from_i64(length_usize as i64)),
+                            Value::String(range_mode.clone()),
+                            Value::Boolean(pattern_flag_bool),
+                        ])
+                    },
+                    _ => {
+                        self.raise("RuntimeError", "Invalid 'range_mode', expected 'value' or 'length'");
+                        return NULL;
+                    }
+                };
+
+                if let Some(Value::Map { keys, values }) = self.cache.get_mut("iterables") {
+                    for (k_idx, key) in keys.iter().enumerate() {
+                        if key == &cache_key {
+                            if let Some(cached_value) = values.get(k_idx) {
+                                debug_log(
+                                    &(r"<CachedListCompletion>\A  seed: ".to_string() +
+                                    &format_value(&Value::List(evaluated_seed.clone())) +
+                                    r"\A  end: " +
+                                    &format_value(&evaluated_end) +
+                                    r"\A  range_mode: " +
+                                    &range_mode +
+                                    r"\A  pattern: " +
+                                    &pattern_flag_bool.to_string()),
+                                    &self.config,
+                                    Some(self.use_colors),
+                                );
+                                return cached_value.clone();
+                            } else {
+                                self.raise("RuntimeError", "Cache inconsistency detected");
+                                return NULL;
+                            }
+                        }
+                    }
+                };
+
+                let result: Value = match range_mode.as_str() {
                     "value" => {
-                        let end = self.evaluate(end_raw.convert_to_statement());
-        
                         if !pattern_flag_bool {
                             let len = evaluated_seed.len();
                             if len == 0 {
                                 self.raise("ValueError", "Seed list cannot be empty");
                                 return NULL;
                             }
-                        
+
                             for v in &evaluated_seed {
                                 if !matches!(v, Value::Int(_)) {
                                     self.raise("TypeError", "Seed elements must be Int");
                                     return NULL;
                                 }
                             }
-                            
+
                             let nums_i64: Vec<i64> = {
                                 let mut temp = Vec::with_capacity(evaluated_seed.len());
                                 for v in &evaluated_seed {
@@ -3917,14 +4130,14 @@ impl Interpreter {
                                                 self.raise("OverflowError", "Seed element out of i64 range");
                                                 return NULL;
                                             }
-                                        }                                
+                                        }
                                     } else {
                                         unreachable!();
                                     }
                                 }
                                 temp
                             };
-                        
+
                             if len >= 2 {
                                 let initial_step = nums_i64[1] - nums_i64[0];
                                 for i in 1..(len - 1) {
@@ -3934,8 +4147,8 @@ impl Interpreter {
                                     }
                                 }
                             }
-                        
-                            let end_i64 = match &end {
+
+                            let end_i64 = match &evaluated_end {
                                 Value::Int(i) => i.to_i64().unwrap_or_else(|_| {
                                     self.raise("OverflowError", "End value out of i64 range");
                                     0
@@ -3945,74 +4158,72 @@ impl Interpreter {
                                     return NULL;
                                 }
                             };
-                        
+
                             let step = if len == 1 {
                                 if nums_i64[0] <= end_i64 { 1 } else { -1 }
                             } else {
                                 nums_i64[1] - nums_i64[0]
                             };
-                        
+
                             if step == 0 {
                                 self.raise("ValueError", "Step cannot be zero");
                                 return NULL;
                             }
-                        
+
                             let last_val = nums_i64[len - 1];
                             let diff = end_i64 - last_val;
-                        
+
                             if (step > 0 && diff < 0) || (step < 0 && diff > 0) {
                                 self.raise("RangeError", "End value is unreachable with given seed and step");
                                 return NULL;
                             }
-                        
+
                             if diff % step != 0 {
                                 self.raise("RangeError", "Pattern does not fit into range defined by end");
                                 return NULL;
                             }
-                        
+
                             let total_steps = (diff / step).abs() as usize;
-                        
+
                             let mut result_list = Vec::with_capacity(len + total_steps);
-                        
+
                             result_list.extend_from_slice(&evaluated_seed);
-                        
+
                             let mut current = last_val;
                             for _ in 0..total_steps {
                                 current += step;
                                 result_list.push(Value::Int(Int::from_i64(current)));
                             }
-                        
-                            return Value::List(result_list);
-                        }
-        
-                        let vec_f64 = match predict_sequence(evaluated_seed.clone(), end) {
-                            Ok(v) => v,
-                            Err((err_type, err_msg, err_help)) => {
-                                if err_help.is_empty() {
-                                    return self.raise(err_type, &err_msg);
-                                } else {
-                                    return self.raise_with_help(err_type, &err_msg, &err_help);
-                                }
-                            }
-                        };
-                        let contains_float = evaluated_seed.iter().any(|v| matches!(v, Value::Float(_)));
-        
-                        let result_list: Vec<Value> = if contains_float {
-                            vec_f64.into_iter()
-                                .map(|v| Value::Float(Float::from_f64(v)))
-                                .collect()
+
+                            Value::List(result_list)
                         } else {
-                            vec_f64.into_iter()
-                                .map(|v| Value::Int(Int::from_i64(v as i64)))
-                                .collect()
-                        };
-        
-                        return Value::List(result_list);
+                            let vec_f64 = match predict_sequence(evaluated_seed.clone(), evaluated_end.clone()) {
+                                Ok(v) => v,
+                                Err((err_type, err_msg, err_help)) => {
+                                    if err_help.is_empty() {
+                                        return self.raise(err_type, &err_msg);
+                                    } else {
+                                        return self.raise_with_help(err_type, &err_msg, &err_help);
+                                    }
+                                }
+                            };
+                            let contains_float = evaluated_seed.iter().any(|v| matches!(v, Value::Float(_)));
+
+                            let result_list: Vec<Value> = if contains_float {
+                                vec_f64.into_iter()
+                                    .map(|v| Value::Float(Float::from_f64(v)))
+                                    .collect()
+                            } else {
+                                vec_f64.into_iter()
+                                    .map(|v| Value::Int(Int::from_i64(v as i64)))
+                                    .collect()
+                            };
+
+                            Value::List(result_list)
+                        }
                     },
                     "length" => {
-                        let length_val = self.evaluate(end_raw.convert_to_statement());
-
-                        let length_usize = match length_val {
+                        let length_usize = match &evaluated_end {
                             Value::Int(i) => {
                                 match i.to_usize() {
                                     Ok(n) => n,
@@ -4058,7 +4269,7 @@ impl Interpreter {
                                     .collect()
                             };
 
-                            return Value::List(result_list);
+                            Value::List(result_list)
                         } else {
                             if seed_len == 0 {
                                 self.raise("ValueError", "Seed list cannot be empty");
@@ -4118,16 +4329,34 @@ impl Interpreter {
                                 result_list.push(Value::Int(Int::from_i64(current)));
                             }
 
-                            return Value::List(result_list);
+                            Value::List(result_list)
                         }
                     },
                     _ => {
                         self.raise("RuntimeError", "Invalid 'range_mode', expected 'value' or 'length'");
                         return NULL;
                     }
+                };
+
+                if let Some(Value::Map { keys, values }) = self.cache.get_mut("iterables") {
+                    keys.push(cache_key.clone());
+                    values.push(result.clone());
                 }
 
-                return NULL;
+                debug_log(
+                    &(r"<ListCompletion>\A  seed: ".to_string() +
+                    &format_value(&Value::List(evaluated_seed.clone())) +
+                    r"\A  end: " +
+                    &format_value(&evaluated_end) +
+                    r"\A  range_mode: " +
+                    &range_mode +
+                    r"\A  pattern: " +
+                    &pattern_flag_bool.to_string()),
+                    &self.config,
+                    Some(self.use_colors),
+                );                
+
+                return result;
             }
             _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }

@@ -45,3 +45,45 @@ while (running):
 end
 
 assert_eq!(len(outputs), 20)
+
+
+i: int = 100
+j: int = 69
+
+for (i in [0..3]):
+    j += i
+end
+
+assert_eq!(i, 100)
+assert_eq!(j, 75)
+
+t: int = 0
+while (true):
+    t += 1
+    if (t == 10):
+        break
+    end
+end
+
+assert_eq!(t, 10)
+
+h: list = []
+for (i in [0..10]):
+    if (i == 5):
+        continue
+    end
+    h = h.append(i)
+end
+
+assert_eq!(h, ([0, 1, 2, 3, 4, 6, 7, 8, 9, 10]))
+
+output: str = ""
+
+for (ch in "Hello, World!"):
+    if (ch == ' '):
+        continue
+    end
+    output = output + ch.toString()
+end
+
+assert_eq!(output, ("Hello,World!"))

@@ -1,0 +1,31 @@
+#include <std/macros>
+
+a: str = "Hello, World!"
+
+match (a):
+    "Hello, World!" if (false):
+        throw "This should not be reached"
+    end
+    "hello world":
+        throw "This should not be reached"
+    end
+    (a):
+        print("Matched: ", a)
+        break
+    end
+    _:
+        throw "This should not be reached"
+    end
+end
+
+// fallthrough is not allowed
+assert_err!(
+    match (a):
+        (a):
+            pass
+        end
+        _:
+            throw "This should not be reached"
+        end
+    end
+)

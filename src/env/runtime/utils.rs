@@ -223,7 +223,8 @@ pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
             .replace('\r', "\\r")
             .replace('\t', "\\t")
             .replace('\0', "\\0")
-            .replace('\x1b', "\\e");
+            .replace('\x1b', "\\e")
+            .replace(r"\A", "\n");
         print_colored(&single_line_message, &config.color_scheme.debug, Some(use_colors));
     }
 }
