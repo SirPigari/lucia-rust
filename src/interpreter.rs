@@ -2217,10 +2217,10 @@ impl Interpreter {
                 }
     
                 let display_path = base_module_path
-                .display()
-                .to_string()
-                .trim_start_matches(r"\\?\")
-                .to_string();
+                    .display()
+                    .to_string()
+                    .trim_start_matches(r"\\?\")
+                    .to_string();
             
                 self.stack.pop();
                 return self.raise("ImportError", &format!(
@@ -2267,7 +2267,18 @@ impl Interpreter {
                         let version = manifest_json.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
                         let required_lucia_version = manifest_json.get("required_lucia_version").and_then(|v| v.as_str()).unwrap_or(VERSION);
                         let description = manifest_json.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                        let authors = manifest_json.get("authors").and_then(|v| v.as_array()).map_or(vec![], |arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>());
+                        let license = manifest_json.get("license").and_then(|v| v.as_str()).unwrap_or("unknown");
                         
+                        debug_log(
+                            &format!(
+                                "<Manifest for module '{}': version {}, description: {}, authors: {:?}, license: {}>",
+                                print_name, version, description, authors, license
+                            ),
+                            &self.config,
+                            Some(self.use_colors)
+                        );
+
                         for (field, value) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
                             if manifest_json.get(field).is_some() && !manifest_json.get(field).unwrap().is_string() {
                                 self.stack.pop();
@@ -2296,14 +2307,80 @@ impl Interpreter {
                         );
                         
                         if let Some(deps) = manifest_json.get("dependencies").and_then(|v| v.as_object()) {
-                            for dep_name in deps.keys() {
-                                let dep_path = module_path.join(dep_name);
+                            for (dep_name, dep_version_value) in deps {
+                                let required_version = match dep_version_value.as_str() {
+                                    Some(v) => v,
+                                    None => {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!(
+                                            "Invalid version format for dependency '{}'",
+                                            dep_name
+                                        ));
+                                    }
+                                };
+                        
+                                if let Some(std_lib) = STD_LIBS.get(dep_name.as_str()) {
+                                    if !check_version(VERSION, std_lib.expected_lucia_version) {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!(
+                                            "Standard library '{}' requires Lucia version '{}', but incompatible.",
+                                            dep_name,
+                                            std_lib.expected_lucia_version
+                                        ));
+                                    }
+                                    
+                                    if !check_version(std_lib.version, required_version) {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!(
+                                            "Standard library '{}' version '{}' does not satisfy required '{}'",
+                                            dep_name, std_lib.version, required_version
+                                        ));
+                                    }
+                        
+                                    continue;
+                                }
+                        
+                                let dep_path = libs_dir.join(dep_name);
                                 if !dep_path.exists() {
                                     self.stack.pop();
                                     return self.raise("ImportError", &format!(
                                         "Dependency '{}' listed in manifest not found in '{}'",
                                         dep_name,
                                         module_path.display()
+                                    ));
+                                }
+                        
+                                let dep_manifest_path = dep_path.join("manifest.json");
+                                let dep_manifest_json = match std::fs::read_to_string(&dep_manifest_path)
+                                    .ok()
+                                    .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                                {
+                                    Some(json) => json,
+                                    None => {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!(
+                                            "Failed to read manifest for dependency '{}'",
+                                            dep_name
+                                        ));
+                                    }
+                                };
+                        
+                                let current_version = match dep_manifest_json.get("version").and_then(|v| v.as_str()) {
+                                    Some(v) => v,
+                                    None => {
+                                        self.stack.pop();
+                                        return self.raise("ImportError", &format!(
+                                            "No version field found in manifest for dependency '{}'",
+                                            dep_name
+                                        ));
+                                    }
+                                };
+                        
+                                if !check_version(current_version, required_version) {
+                                    self.stack.pop();
+                                    return self.raise("ImportError", &format!(
+                                        "Dependency '{}' version '{}' does not satisfy required '{}'",
+                                        dep_name, current_version, required_version
                                     ));
                                 }
                             }
