@@ -131,6 +131,7 @@ impl Interpreter {
         insert_builtin("type", Value::Function(native::type_fn()));
         insert_builtin("sum", Value::Function(native::sum_fn()));
         insert_builtin("ord", Value::Function(native::ord_fn()));
+        insert_builtin("char", Value::Function(native::char_fn()));
         insert_builtin("styledstr", Value::Function(native::styledstr_fn()));
         insert_builtin("array", Value::Function(native::array_fn()));
         this.variables.insert(
@@ -1650,7 +1651,7 @@ impl Interpreter {
 
         for (i, target) in targets.iter().enumerate() {
             let val = value_list[i].clone();
-    
+        
             match target {
                 Value::Map { keys, values } => {
                     let mut map: HashMap<String, Value> = HashMap::new();
@@ -1662,34 +1663,60 @@ impl Interpreter {
                             return NULL;
                         }
                     }
-    
+        
                     let typ = map.get("type");
                     let name = map.get("name");
-    
-                    if typ != Some(&Value::String("VARIABLE".to_string())) {
-                        self.raise("TypeError", "Unpack target must be of type VARIABLE");
-                        return NULL;
-                    }
-    
-                    if let Some(Value::String(var_name)) = name {
-                        if let Some(var) = self.variables.get_mut(var_name) {
-                            var.set_value(val);
-                            result_values.push(var.value.clone());
-                        } else {
-                            self.raise("NameError", &format!("Variable '{}' is not defined", var_name));
+        
+                    match typ {
+                        Some(Value::String(t)) if t == "VARIABLE" => {
+                            if let Some(Value::String(var_name)) = name {
+                                if let Some(var) = self.variables.get_mut(var_name) {
+                                    var.set_value(val);
+                                    result_values.push(var.value.clone());
+                                } else {
+                                    self.raise("TypeError", &format!(
+                                        "Variable '{}' must be declared with a type in unpack assignment",
+                                        var_name
+                                    ));
+                                    return NULL;
+                                }
+                            } else {
+                                self.raise("TypeError", "Missing or invalid variable name in unpack target");
+                                return NULL;
+                            }
+                        }
+                        Some(Value::String(t)) if t == "VARIABLE_DECLARATION" => {
+                            let decl_map: HashMap<Value, Value> = keys
+                                .iter()
+                                .cloned()
+                                .zip(values.iter().cloned())
+                                .collect();
+                        
+                            let decl_result = self.handle_variable_declaration(decl_map);
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                        
+                            if let Some(Value::String(var_name)) = map.get("name") {
+                                if let Some(var) = self.variables.get_mut(var_name) {
+                                    var.set_value(val.clone());
+                                }
+                            }
+                        
+                            result_values.push(val);
+                        }                        
+                        _ => {
+                            self.raise("TypeError", "Unpack target must be of type VARIABLE or VARIABLE_DECLARATION");
                             return NULL;
                         }
-                    } else {
-                        self.raise("TypeError", "Missing or invalid variable name in unpack target");
-                        return NULL;
                     }
                 }
                 _ => {
-                    self.raise("TypeError", "Unpack target must be a VARIABLE map");
+                    self.raise("TypeError", "Unpack target must be a map");
                     return NULL;
                 }
             }
-        }
+        }        
         
         if self.err.is_some() {
             return NULL;
@@ -1805,6 +1832,12 @@ impl Interpreter {
                             self.raise("ConversionError", &format!("Failed to convert string '{}' to int", s));
                             Int::from_i64(0)
                         }))
+                    } else if let Value::Boolean(b) = value {
+                        if *b {
+                            Value::Int(Int::from_i64(1))
+                        } else {
+                            Value::Int(Int::from_i64(0))
+                        }
                     } else {
                         self.raise("TypeError", &format!("Cannot convert '{}' to int", value.type_name()))
                     }
@@ -2271,7 +2304,7 @@ impl Interpreter {
                         let required_lucia_version = manifest_json.get("required_lucia_version").and_then(|v| v.as_str()).unwrap_or(VERSION);
                         let description = manifest_json.get("description").and_then(|v| v.as_str()).unwrap_or("");
                         let authors = manifest_json.get("authors").and_then(|v| v.as_array()).map_or(vec![], |arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>());
-                        let license = manifest_json.get("license").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let license = manifest_json.get("license").and_then(|v| v.as_str()).unwrap_or("GPLv3");
                         
                         debug_log(
                             &format!(
@@ -3927,6 +3960,11 @@ impl Interpreter {
     
         let variable = Variable::new(name.to_string(), value.clone(), declared_type.to_string(), is_static, is_public, is_final);
         self.variables.insert(name.to_string(), variable);
+
+        debug_log(
+            &format!("<Declared variable '{}': {} = {}>", name, value.type_name(), format_value(&value)),
+            &self.config, Some(self.use_colors),
+        );
     
         value   
     }

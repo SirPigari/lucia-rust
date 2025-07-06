@@ -19,6 +19,7 @@ use crate::env::runtime::utils::{
     TRUE, FALSE, NULL,
 };
 use crate::env::runtime::variables::Variable;
+use sha2::{Sha256, Digest};
 
 use crate::{insert_native_fn, insert_native_var};
 
@@ -29,6 +30,13 @@ use crate::{insert_native_fn, insert_native_var};
 fn clear_terminal_handler(_args: &HashMap<String, Value>) -> Value {
     clear_terminal();
     Value::Null
+}
+
+fn sha256_hash(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    let result = hasher.finalize();
+    format!("{:x}", result)
 }
 
 fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
@@ -293,6 +301,19 @@ pub fn register() -> HashMap<String, Variable> {
         "valid_alias",
         sanitize_alias_handler,
         vec![Parameter::positional("s", "str")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "sha256",
+        |args: &HashMap<String, Value>| {
+            if let Some(Value::String(input)) = args.get("input") {
+                Value::String(sha256_hash(input))
+            } else {
+                Value::Error("TypeError", "expected a string", None)
+            }
+        },
+        vec![Parameter::positional("input", "str")],
         "str"
     );
 

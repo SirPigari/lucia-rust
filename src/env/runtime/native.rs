@@ -285,6 +285,15 @@ fn ord(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "Expected a string with at least one character", None)
 }
 
+fn char(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::Int(i)) = args.get("i") {
+        if let Some(c) = std::char::from_u32(i.to_i64().unwrap_or(0) as u32) {
+            return Value::String(c.to_string());
+        }
+    }
+    Value::Error("TypeError", "Expected an integer representing a Unicode code point", None)
+}
+
 fn styledstr(args: &HashMap<String, Value>) -> Value {
     let values = match args.get("args") {
         Some(Value::List(list)) => list,
@@ -555,6 +564,19 @@ pub fn ord_fn() -> Function {
             Parameter::positional("s", "str"),
         ],
         "int",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn char_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "char",
+        char,
+        vec![
+            Parameter::positional("i", "int"),
+        ],
+        "str",
         true, true, true,
         None,
     )))

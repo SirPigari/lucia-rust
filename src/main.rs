@@ -914,6 +914,7 @@ fn lucia(args: Vec<String>) {
                 None
             };
             
+            std_env::set_current_dir(&cwd).ok();
             execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag, &dump_ast_flag);
         }
     } else {
@@ -923,6 +924,7 @@ fn lucia(args: Vec<String>) {
             None
         };
 
+        std_env::set_current_dir(&cwd).ok();
         repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag, &dump_ast_flag);
     }
 }

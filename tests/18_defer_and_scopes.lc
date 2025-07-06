@@ -1,10 +1,6 @@
 #include <std/macros>
 output: list[str] = ["first"]
 
-// TODO: make defer and scope keywords in vsix extension
-// TODO: add pass too
-// TODO: add band, lshift, rshift, bor, bnot keywords too
-
 output = output.extend(
     scope defer_test:
         scope_output: list[str] = []

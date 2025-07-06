@@ -1,0 +1,26 @@
+#include <std/macros>
+
+a: int = 10
+b: int = 20
+c: int = 30
+
+(a, b, c) = (b, c, a)
+assert_eq!(a, 20)
+assert_eq!(b, 30)
+assert_eq!(c, 10)
+
+(a, b, c) = (b, c, a + 1)
+assert_eq!(a, 30)
+assert_eq!(b, 10)
+assert_eq!(c, 21)
+
+(final d: int, e: int, mutable f: int) = (a, b, c)
+
+assert_eq!(d, 30)
+assert_eq!(e, 10)
+assert_eq!(f, 21)
+
+f = 40
+assert_eq!(f, 40)
+
+assert_err!(d = 50)

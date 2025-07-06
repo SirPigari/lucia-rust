@@ -1910,7 +1910,18 @@ impl Parser {
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             let left = self.parse_operand();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            let old_pos = self.pos.clone();
+                            self.next();
                             let right = self.parse_expression();
+                            if !self.token_is("SEPARATOR", ")") {
+                                self.pos = old_pos;
+                                self.err = None;
+                                return left;
+                            }
+                            self.next();
                             if self.err.is_some() {
                                 return Statement::Null;
                             }

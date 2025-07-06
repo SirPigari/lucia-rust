@@ -1,0 +1,34 @@
+#include <std/macros>
+
+a: list = [0..5]
+assert_eq!(a, ([0, 1, 2, 3, 4, 5]))
+
+
+forget a[2..4]
+assert_eq!(a, ([0, 1, 4, 5]))
+
+forget a
+
+assert_err!(a)
+
+try:
+    throw "This should throw an error" from "ExpectedError"
+catch (e):
+    assert_eq!(e, (("ExpectedError", "This should throw an error")))
+end
+
+try:
+    0 / 0
+end
+
+try:
+    0 / 0
+end catch (err_type, err_msg):
+    assert_eq!(err_type, "ArithmeticError")
+end
+
+try:
+    i = 10
+end catch (err_type, err_msg, err_help):
+    assert_eq!(err_type, "NameError")
+end
