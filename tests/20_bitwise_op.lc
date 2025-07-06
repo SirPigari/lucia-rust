@@ -1,0 +1,46 @@
+#include <std/macros>
+
+// bit shifts
+assert_eq!(8 lshift 2, 32)
+assert_eq!(16 lshift 4, 256)
+assert_eq!(32 rshift 1, 16)
+assert_eq!(64 rshift 3, 8)
+
+// bitwise not
+assert_eq!(bnot 0, -1)
+assert_eq!(bnot 1, -2)
+assert_eq!(bnot -1, 0)
+
+// bitwise and
+assert_eq!(5 band 3, 1)
+assert_eq!(12 band 10, 8)
+assert_eq!(255 band 128, 128)
+
+// bitwise or
+assert_eq!(5 bor 3, 7)
+assert_eq!(12 bor 10, 14)
+assert_eq!(255 bor 0, 255)
+
+// xor (booleans + others)
+assert_eq!(true xor false, true)
+assert_eq!(true xor true, false)
+assert_eq!(false xor false, false)
+
+assert_eq!(5 xor 5, false)
+assert_eq!(5 xor 3, true)
+assert_eq!(3.0 xor 3.0, false)
+assert_eq!(3.0 xor 2.0, true)
+assert_eq!('hi' xor 'bye', true)
+assert_eq!('hi' xor 'hi', false)
+
+// xnor (booleans + others)
+assert_eq!(true xnor false, false)
+assert_eq!(true xnor true, true)
+assert_eq!(false xnor false, true)
+
+assert_eq!(5 xnor 5, true)
+assert_eq!(5 xnor 3, false)
+assert_eq!(3.0 xnor 3.0, true)
+assert_eq!(3.0 xnor 2.0, false)
+assert_eq!('hi' xnor 'bye', false)
+assert_eq!('hi' xnor 'hi', true)

@@ -288,6 +288,9 @@ impl Interpreter {
                     if t == "null" && e == "bool" {
                         return true;
                     }
+                    if t == "int" && e == "bool" {
+                        return true;
+                    }
                     t == e
                 }
                 _ => false,
@@ -5825,6 +5828,17 @@ impl Interpreter {
                 _ => return self.raise("TypeError", &format!("Cannot apply unary plus to {}", operand.type_name())),
             },
             "!" => Value::Boolean(!operand.is_truthy()),
+            "~" | "bnot" => match operand {
+                Value::Int(a) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert Int: {}", e)),
+                    };
+                    Value::Int(Int::from(!a_i64))
+                }
+                Value::Boolean(b) => Value::Boolean(!b),
+                a => self.raise("TypeError", &format!("Cannot apply bitwise NOT to {}", a.type_name()))
+            },
             _ => return self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
         };
         
@@ -6179,6 +6193,79 @@ impl Interpreter {
                     NULL
                 }
             },
+            "&" | "band" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    };
+                    let b_i64 = match b.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    };
+                    let res = a_i64 & b_i64;
+                    Value::Int(Int::from(res))
+                }
+                _ => self.raise("TypeError", "Bitwise AND requires two integers"),
+            },
+            "|" | "bor" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    };
+                    let b_i64 = match b.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    };
+                    let res = a_i64 | b_i64;
+                    Value::Int(Int::from(res))
+                }
+                _ => self.raise("TypeError", "Bitwise OR requires two integers"),
+            },
+            "<<" | "lshift" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    };
+                    let b_i64 = match b.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    };
+                    let res = match a_i64.checked_shl(b_i64 as u32) {
+                        Some(val) => val,
+                        None => return self.raise("ValueError", "Shift amount too large"),
+                    };
+                    Value::Int(Int::from(res))
+                }
+                _ => self.raise("TypeError", "Left shift requires two integers"),
+            },
+            ">>" | "rshift" => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    };
+                    let b_i64 = match b.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    };
+                    let res = match a_i64.checked_shr(b_i64 as u32) {
+                        Some(val) => val,
+                        None => return self.raise("ValueError", "Shift amount too large"),
+                    };
+                    Value::Int(Int::from(res))
+                }
+                _ => self.raise("TypeError", "Right shift requires two integers"),
+            },
+            "abs" => {
+                match right {
+                    Value::Int(n) => Value::Int(n.abs()),
+                    Value::Float(f) => Value::Float(f.abs()),
+                    _ => self.raise("TypeError", &format!("Cannot apply 'abs' to {}", right.type_name())),
+                }
+            },
             "xor" => {
                 match (left, right) {
                     (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(a ^ b),
@@ -6195,13 +6282,6 @@ impl Interpreter {
                     (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a == b),
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xnor' to {} and {}", a.type_name(), b.type_name())),
-                }
-            },
-            "abs" => {
-                match right {
-                    Value::Int(n) => Value::Int(n.abs()),
-                    Value::Float(f) => Value::Float(f.abs()),
-                    _ => self.raise("TypeError", &format!("Cannot apply 'abs' to {}", right.type_name())),
                 }
             },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),

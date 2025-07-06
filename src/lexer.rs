@@ -25,13 +25,13 @@ impl<'a> Lexer<'a> {
     
         let regex = REGEX.get_or_init(|| {
             let operators = [
-                "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=",
+                "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=", "<<", ">>",
                 "++", "--", "+", "-", "^", "*", "/", ">", "<", "!", "%", "||", "&&",
                 "|", "#", "~", "$", "?", "&", "^=", "%="
             ];
             
             let word_operators = [
-                "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein"
+                "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift", "rshift", "band", "bor", "bnot"
             ];
             
             let operator_pattern = format!(

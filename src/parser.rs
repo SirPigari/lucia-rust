@@ -525,7 +525,7 @@ impl Parser {
                     }
                 }
 
-                "OPERATOR" if ["+", "-", "!", "nein", "isnt", "isn't", "not"].contains(&token.1.as_str()) => {
+                "OPERATOR" if ["+", "-", "!", "~", "nein", "isnt", "isn't", "not", "bnot"].contains(&token.1.as_str()) => {
                     let operator = token.1.clone();
                     self.next();
                     let operand = self.parse_expression();
