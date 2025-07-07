@@ -4,16 +4,20 @@ name: Lucia Rust Test Suite - Windows
 on:
   push:
     branches: [ "main" ]
-    paths-ignore:
-      - 'README.md'
-      - '**.md'
-      - 'LICENSE'
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
   pull_request:
     branches: [ "main" ]
-    paths-ignore:
-      - 'README.md'
-      - '**.md'
-      - 'LICENSE'
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
 
 env:
   CARGO_TERM_COLOR: always
