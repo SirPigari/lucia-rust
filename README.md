@@ -1,7 +1,13 @@
-<img src="src/env/assets/logo_lucia.png" alt="Lucia logo" style="height: 180px;">
+<div align="center">
+  <img src="src/env/assets/logo_lucia.png" alt="Lucia logo" style="height: 180px;">
+  <p>A lightweight, expressive scripting language with Python-like syntax, built in Rust.</p>
+</div>
 
-**Lucia** is a simple programming language, written <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom;"> Rust</a>  
-with syntax inspired by *Python*, *Lua* and *Kotlin*
+---
+
+**Lucia** is designed to be clean, expressive, and simple to learn —  
+yet powerful and fast enough for serious scripting. It draws inspiration from *Python*, *Lua*, and *Kotlin*,  
+and is implemented entirely in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom;"> Rust</a> for performance and safety.
 
 ---
 
@@ -43,6 +49,8 @@ It's designed for speed and safety, without sacrificing elegance.
 - [Syntax](src/env/Docs/language-syntax.md)
 - [Standard libraries API](src/env/Docs/standart-libs.md)
 - [Versioning](src/env/Docs/versioning.md)
+- [Contributing guide](src/env/Docs/contributing.md)
+- [Changelog](src/env/Docs/changelog.md)
 
 ---
 
