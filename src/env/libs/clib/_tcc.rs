@@ -1,6 +1,5 @@
 use std::process::{Command, Stdio};
 use std::io::Write;
-use std::path::{PathBuf};
 use std::env::temp_dir;
 use crate::env::runtime::value::Value;
 use libloading::{Library, Symbol};
@@ -125,7 +124,7 @@ pub fn run(tcc_path: &str, code: &str) -> Result<Value, String> {
     }
 }
 
-pub fn export(tcc_path: &str, file_path: &str, symbol_name: &str, _expected_type: &str) -> Result<Value, String> {
+pub fn export(_tcc_path: &str, file_path: &str, symbol_name: &str, _expected_type: &str) -> Result<Value, String> {
     let lib = unsafe { Library::new(file_path) }
         .map_err(|e| format!("Failed to load library: {}", e))?;
 

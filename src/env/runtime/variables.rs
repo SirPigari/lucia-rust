@@ -2,9 +2,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::make_native_method;
 use crate::env::runtime::functions::Parameter;
 use std::collections::HashMap;
-use std::fmt::{self, Display};
-use std::str::FromStr;
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Float};
 use imagnum::{create_int, create_float};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +16,7 @@ pub struct Variable {
     pub properties: HashMap<String, Variable>,
 }
 
+#[allow(dead_code)]
 impl Variable {
     pub fn new(name: String, value: Value, type_: String, is_static: bool, is_public: bool, is_final: bool) -> Self {
         Self {
@@ -32,7 +31,6 @@ impl Variable {
     }
 
     pub fn init_properties(&mut self) {
-        let val_clone = self.value.clone();
         let to_string = {
             let val_clone = self.value.clone();
             make_native_method(

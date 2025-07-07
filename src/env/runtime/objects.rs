@@ -1,6 +1,5 @@
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::value::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +19,7 @@ pub struct Class {
     pub meta: ObjectMetadata,
 }
 
+#[allow(dead_code)]
 impl Class {
     pub fn new(name: String, meta: ObjectMetadata) -> Self {
         Class { name, meta }
@@ -34,6 +34,7 @@ impl Class {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {
     Class(Class),
@@ -46,6 +47,7 @@ impl PartialOrd for Object {
     }
 }
 
+#[allow(dead_code)]
 impl Object {
     pub fn name(&self) -> &str {
         match self {
@@ -91,7 +93,6 @@ impl Object {
         match self {
             Object::Instance(_, props) => Some(props),
             Object::Class(c) => Some(&c.meta.properties),
-            _ => None,
         }
     }
 

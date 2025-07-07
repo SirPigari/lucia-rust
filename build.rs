@@ -2,7 +2,7 @@ use std::{env, fs, process::Command, path::Path, collections::HashSet};
 use sha2::{Digest, Sha256};
 use toml::Value;
 use uuid::{Builder, Uuid};
-use rand::RngCore;
+use rand::{rng, RngCore};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -84,7 +84,7 @@ fn generate_uuid(git_hash: &str) -> Uuid {
     hasher.update(git_hash.as_bytes());
 
     let mut random_bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
+    rng().fill_bytes(&mut random_bytes);
     hasher.update(&random_bytes);
 
     let hash = hasher.finalize();
@@ -101,7 +101,6 @@ fn generate_uuid(git_hash: &str) -> Uuid {
 fn main() {
     println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu={CPU_OPT}");
 
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let output = Command::new("rustc").arg("-vV").output().ok();
     let rustc_info = output
         .as_ref()

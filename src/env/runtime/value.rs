@@ -3,12 +3,10 @@ use crate::env::runtime::functions::Function;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::Object;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::utils::{to_static, format_float, format_int};
+use crate::env::runtime::utils::{format_float, format_int};
 use crate::env::runtime::tokens::Location;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use std::fmt;
-use std::collections::HashMap;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
 use std::path::PathBuf;
 
@@ -264,7 +262,7 @@ impl Value {
     }
     pub fn is_iterable(&self) -> bool {
         match self {
-            Value::List(_) | Value::Map { .. } => true,
+            Value::List(_) => true,
             Value::String(s) if !s.is_empty() => true,
             Value::Bytes(b) if !b.is_empty() => true,
             Value::Tuple(items) if !items.is_empty() => true,
@@ -294,29 +292,6 @@ impl Value {
             _ => false,
         }
     }
-    pub fn type_name_as_str(&self) -> &'static str {
-        match self {
-            Value::Float(_) => "float",
-            Value::Int(_) => "int",
-            Value::String(_) => "str",
-            Value::Boolean(_) => "bool",
-            Value::Null => "void",
-            Value::Map { .. } => "map",
-            Value::List(_) => "list",
-            Value::Tuple(_) => "tuple",
-            Value::Bytes(_) => "bytes",
-            Value::Function(_) => "function",
-            Value::Module(obj, _) => to_static(obj.name().to_string()),
-            Value::Pointer(ptr) => {
-                let raw = *ptr as *const Value;
-                let recovered = unsafe { std::rc::Rc::from_raw(raw) };
-                let name = recovered.type_name();
-                std::mem::forget(recovered);
-                to_static(format!("&{}", name))
-            }            
-            Value::Error(..) => "error",
-        }
-    }
     pub fn type_name(&self) -> String {
         match self {
             Value::Float(_) => "float".to_string(),
@@ -328,7 +303,7 @@ impl Value {
             Value::List(_) => "list".to_string(),
             Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
-            Value::Function(func) => "function".to_string(),
+            Value::Function(_) => "function".to_string(),
             Value::Module(obj, _) => obj.name().to_string(),
             Value::Pointer(ptr) => {
                 let raw = *ptr as *const Value;
@@ -337,7 +312,7 @@ impl Value {
                 std::mem::forget(recovered);
                 format!("&{}", name)
             }            
-            Value::Error(err_type, _, _) => "error".to_string(),
+            Value::Error(..) => "error".to_string(),
         }
     }
     pub fn is_truthy(&self) -> bool {

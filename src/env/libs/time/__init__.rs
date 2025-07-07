@@ -8,7 +8,7 @@ use crate::env::runtime::utils::to_static;
 use std::thread;
 use std::time::Duration;
 use crate::{insert_native_fn};
-use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, ParseError};
+use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime};
 
 // This module handles time and date functionality.
 // It includes functions to get the current time, format dates, parse date strings, and retrieve specific time components.

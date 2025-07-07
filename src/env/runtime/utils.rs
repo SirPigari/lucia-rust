@@ -1,21 +1,13 @@
 use std::io::{self, Write, stdout};
-use std::fmt::{self, Write as FmtWrite};
-use std::collections::{HashMap, BTreeMap};
-use std::hash::{Hash, Hasher};
-use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
+use std::collections::HashMap;
 use crate::env::runtime::config::{Config};
-use std::any::Any;
-use std::str::FromStr;
 use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
-use std::cmp::Ordering;
-use crate::env::runtime::functions::{Parameter, NativeMethod, NativeFunction, FunctionMetadata, UserFunction};
+use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::types::{Int, Float, Boolean};
+use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::{Value};
-use crate::env::runtime::errors::Error;
-use crate::env::runtime::variables::Variable;
 use serde_json::Value as JsonValue;
 use regex::Regex;
 use crossterm::{
@@ -293,36 +285,6 @@ where
     Value::Function(Function::NativeMethod(Arc::new(method)))
 }
 
-pub fn make_native_function<F>(
-    name: &str,
-    func: F,
-    parameters: Vec<Parameter>,
-    return_type: &str,
-    is_public: bool,
-    is_static: bool,
-    is_final: bool,
-    state: Option<String>,
-) -> Value
-where
-    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
-{
-    let method = NativeFunction {
-        func: Arc::new(func),
-        meta: FunctionMetadata {
-            name: name.to_string(),
-            parameters,
-            return_type: Value::String(return_type.to_string()),
-            is_public,
-            is_static,
-            is_final,
-            is_native: true,
-            state,
-        },
-    };
-
-    Value::Function(Function::Native(Arc::new(method)))
-}
-
 pub fn get_type_default(type_: &str) -> Value {
     if type_.starts_with("&") {
         let inner_type = &type_[1..];
@@ -592,7 +554,7 @@ pub fn format_type(value: &Value) -> String {
             };
 
             let base = map.get("base").and_then(|v| as_str(*v));
-            let variadic = map.get("variadic").and_then(|v| {
+            let _variadic = map.get("variadic").and_then(|v| {
                 if let Value::String(s) = v {
                     Some(s == "true")
                 } else {
@@ -850,6 +812,22 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             state: None,
         },
     );
+    map.insert(
+        "00__set_dir__".to_string(),
+        FunctionMetadata {
+            name: "00__set_dir__".to_string(),
+            parameters: vec![
+                Parameter::positional("d", "str"),
+                Parameter::positional("i", "bool"),
+            ],
+            return_type: Value::String("void".to_string()),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
 
     return map;
 }
@@ -913,7 +891,6 @@ fn version_to_tuple(v: &str) -> Option<(u64, u64, u64)> {
 }
 
 fn cmp_version(a: (u64,u64,u64), b: (u64,u64,u64)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
     if a.0 != b.0 {
         return a.0.cmp(&b.0);
     }
@@ -1007,22 +984,6 @@ pub fn fix_path(raw_path: String) -> String {
         return path[4..].to_string();
     }
     Regex::new(r"\\").unwrap().replace_all(&path, "/").to_string()
-}
-
-pub fn parse_json_string_to_key_value_vecs(json_str: &str) -> Option<(Vec<Value>, Vec<Value>)> {
-    let parsed: JsonValue = serde_json::from_str(json_str).ok()?;
-
-    let obj = parsed.as_object()?;
-
-    let mut keys = Vec::new();
-    let mut values = Vec::new();
-
-    for (k, v) in obj {
-        keys.push(Value::String(k.clone()));
-        values.push(json_to_value(v));
-    }
-
-    Some((keys, values))
 }
 
 fn remove_note_field(input: &str) -> String {

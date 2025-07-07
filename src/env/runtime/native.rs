@@ -1,14 +1,12 @@
-use crate::env::runtime::utils::{to_static, capitalize, format_float, format_int, self};
+use crate::env::runtime::utils::{to_static, format_float, format_int, self};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float};
-use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use serde_json::json;
-use crate::env::runtime::config::{get_config, get_version};
+use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
-use std::str::FromStr;
-
 
 
 // -------------------------------
@@ -386,7 +384,7 @@ fn array(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "Expected 'size' parameter of type int", None)
 }
 
-fn __placeholder__(args: &HashMap<String, Value>) -> Value {
+fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
     Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
 

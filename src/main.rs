@@ -3,10 +3,8 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use std::process::exit;
-use std::collections::HashMap;
-use serde_json::to_string_pretty;
 use colored::*;
 use sys_info;
 
@@ -73,7 +71,6 @@ mod lexer;
 use crate::env::runtime::utils;
 use crate::env::runtime::config::{Config, ColorScheme};
 use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys};
-use crate::env::runtime::types::{Int, Float, Boolean};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -120,6 +117,7 @@ pub fn get_build_info() -> BuildInfo {
     }
 }
 
+#[cold]
 pub fn handle_error(
     error: &Error,
     source: &str,
@@ -597,19 +595,12 @@ fn lucia(args: Vec<String>) {
         exit(1);
     });
 
-    let cwd_str = cwd.to_string_lossy().replace('\\', "/");
-
     let exe_path = std_env::current_exe()
         .and_then(|p| p.canonicalize())
         .unwrap_or_else(|e| {
             eprintln!("Failed to get canonicalized path to executable: {}", e);
             exit(1);
         });
-
-    let exe_file = exe_path
-        .display()
-        .to_string()
-        .replace("\\", "/");
 
     let mut config_path = exe_path
         .parent()
@@ -791,7 +782,7 @@ fn lucia(args: Vec<String>) {
 
     let home_dir_path = PathBuf::from(home_dir.clone());
 
-    if let Err(e) = std_env::set_current_dir(&home_dir_path) {
+    if let Err(_) = std_env::set_current_dir(&home_dir_path) {
         if let Err(err) = activate_environment(&enviroment_dir, true) {
             eprintln!("Failed to activate environment: {}", err);
             exit(1);
@@ -835,6 +826,7 @@ fn lucia(args: Vec<String>) {
         config.debug = true;
         config.debug_mode = "full".to_string();
     }
+    config.debug_mode = debug_mode;
     if quiet_flag {
         config.debug = false;
         config.use_lucia_traceback = false;
@@ -941,14 +933,13 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             .as_ref()
             .map_or(false, |mode| mode == "full" || mode == "minimal");
 
-        let print_intime_debug = debug_mode
-            .as_ref()
-            .map_or(false, |mode| mode == "full" || mode == "normal");
+        // let print_intime_debug = debug_mode
+        //     .as_ref()
+        //     .map_or(false, |mode| mode == "full" || mode == "normal");
 
         let processed_tokens = if !disable_preprocessor {
             let mut preprocessor = Preprocessor::new(
                 home_dir_path.join("libs"),
-                config_path.clone(),
                 file_path.as_str(),
             );
             match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
@@ -986,7 +977,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
 
         let tokens: Vec<Token> = processed_tokens;
         let mut parser =
-            Parser::new(tokens.clone(), config.clone(), file_content.to_string(), use_colors, file_path.as_str());
+            Parser::new(tokens.clone(), use_colors);
 
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
@@ -1045,7 +1036,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
             argv,
         );
-        let out: Value = match interpreter.interpret(statements, file_content.clone(), true) {
+        let _out: Value = match interpreter.interpret(statements, true) {
             Ok(out) => out,
             Err(error) => {
                 debug_log("Error while interpreting:", &config, Some(use_colors));
@@ -1081,7 +1072,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
 
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
-        config_path.clone(),
         "<stdin>",
     );
 
@@ -1185,10 +1175,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
 
         let mut parser = Parser::new(
             tokens,
-            config.clone(),
-            input.to_string(),
             use_colors,
-            "<stdin>",
         );
 
         let statements = match parser.parse_safe() {
@@ -1234,7 +1221,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             );
         }
 
-        let out = match interpreter.interpret(statements, input.clone(), false) {
+        let out = match interpreter.interpret(statements, false) {
             Ok(out) => {
                 if interpreter.is_stopped() {
                     exit(0);

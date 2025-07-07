@@ -5,7 +5,7 @@ use crate::env::runtime::types::Int;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn};
 use std::env::consts;
 use sys_info;
 

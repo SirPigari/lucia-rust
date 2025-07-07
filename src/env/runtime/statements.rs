@@ -1,5 +1,5 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Int};
 use std::collections::HashMap;
 use crate::env::runtime::tokens::Location;
 
@@ -126,9 +126,39 @@ impl Statement {
         }
     }
     pub fn get_value(&self, key: &str) -> Option<Value> {
-        let map = self.convert_to_hashmap();
-        map.get(&Value::String(key.to_string())).cloned()
-    }    
+        match self {
+            Statement::Statement { keys, values, loc } => {
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    if let Value::String(s) = k {
+                        if s == key {
+                            return Some(v.clone());
+                        }
+                    }
+                }
+                match key {
+                    "_loc" => Some(Value::Map {
+                        keys: vec![
+                            Value::String("_file".to_string()),
+                            Value::String("_line_string".to_string()),
+                            Value::String("_line_number".to_string()),
+                            Value::String("_range".to_string())
+                        ],
+                        values: vec![
+                            Value::String(loc.as_ref().map_or("".to_string(), |l| l.file.clone())),
+                            Value::String(loc.as_ref().map_or("".to_string(), |l| l.line_string.clone())),
+                            Value::Int(Int::from(loc.as_ref().map_or(0, |l| l.line_number as i64))),
+                            Value::Tuple(vec![
+                                Value::Int(Int::from(loc.as_ref().map_or(0, |l| l.range.0 as i64))),
+                                Value::Int(Int::from(loc.as_ref().map_or(0, |l| l.range.1 as i64))),
+                            ])
+                        ]
+                    }),
+                    _ => None,
+                }
+            }
+            Statement::Null => None,
+        }
+    }       
     pub fn get_type(&self) -> String {
         let map = self.convert_to_hashmap();
         match map.get(&Value::String("type".to_string())) {

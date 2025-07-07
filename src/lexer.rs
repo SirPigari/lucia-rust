@@ -78,14 +78,12 @@ impl<'a> Lexer<'a> {
         let capture_names: Vec<&str> = regex.capture_names().flatten().collect();
 
         let mut tokens = Vec::new();
-        let mut prev_token: Option<&str> = None;
         let mut byte_index = 0;
 
         while byte_index < self.code.len() {
             if let Some(mat) = regex.find_at(self.code, byte_index) {
                 let token_start = mat.start();
                 let token_end = mat.end();
-                let token_str = &self.code[token_start..token_end];
 
                 let line_number = match self.line_offsets.binary_search(&token_start) {
                     Ok(line) => line,
@@ -136,14 +134,12 @@ impl<'a> Lexer<'a> {
                         if name == "NUMBER" {
                             let clean_val = val.replace('_', "");
                             tokens.push(Token(name.to_string(), clean_val, location.clone()));
-                            prev_token = Some(name);
                             skip_token = true;
                             break;
                         }
 
                         if name != "WHITESPACE" && !skip_token {
                             tokens.push(Token(name.to_string(), val.to_string(), location.clone()));
-                            prev_token = Some(name);
                             skip_token = true;
                             break;
                         }

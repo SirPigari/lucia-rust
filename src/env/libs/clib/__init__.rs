@@ -11,7 +11,7 @@ use std::env as std_env;
 use std::path::{PathBuf, Path};
 use once_cell::sync::Lazy;
 
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn};
 
 use crate::env::libs::clib::_tcc;
 

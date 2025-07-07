@@ -7,7 +7,7 @@ TARGET_EXE := lucia$(if $(IS_WINDOWS_CMD),.exe,)
 TARGET := $(TARGET_DIR)/$(TARGET_EXE)
 
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
-	CARGO_ENV := set RUSTFLAGS=-Awarnings && cargo
+	CARGO_ENV := cargo
 	MKDIR := if not exist "$(subst /,\,$(TARGET_DIR))" mkdir "$(subst /,\,$(TARGET_DIR))"
 	MOVE := move /Y
 	RUN := $(TARGET_EXE)
@@ -17,7 +17,7 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	TEST_LOOP := for %%f in (src\env\Docs\examples\tests\*.lc) do (
 	TEST_FILE := %%f
 else
-	CARGO_ENV := RUSTFLAGS=-Awarnings cargo
+	CARGO_ENV := cargo
 	MKDIR := mkdir -p $(TARGET_DIR)
 	MOVE := mv -f
 	RUN := ./$(TARGET_EXE)

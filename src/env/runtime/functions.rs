@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
 use std::collections::HashMap;
 
@@ -160,36 +159,6 @@ impl Callable for NativeMethod {
     }
 }
 
-impl NativeMethod {
-    pub fn new<F>(
-        name: &str,
-        func: F,
-        parameters: Vec<Parameter>,
-        return_type: &str,
-        is_public: bool,
-        is_static: bool,
-        is_final: bool,
-        state: Option<String>,
-    ) -> Self
-    where
-        F: NativeCallable + 'static,
-    {
-        Self {
-            func: Arc::new(func),
-            meta: FunctionMetadata {
-                name: name.to_string(),
-                parameters,
-                return_type: Value::String(return_type.to_string()),
-                is_public,
-                is_static,
-                is_final,
-                is_native: true,
-                state,
-            },
-        }
-    }
-}
-
 
 // -------------------------------
 // User-defined Method
@@ -222,6 +191,7 @@ impl Callable for UserFunctionMethod {
 // Function Enum
 // -------------------------------
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum Function {
     Native(Arc<NativeFunction>),
@@ -325,6 +295,7 @@ impl PartialOrd for Function {
     }
 }
 
+#[allow(dead_code)]
 impl Parameter {
     pub fn set_mods(mut self, mods: Vec<String>) -> Self {
         self.mods = mods;

@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Int};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{to_static};
 use crate::env::runtime::variables::Variable;
 
 use crate::env::libs::lasm::cpu::CPU;
 
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn};
 
 // This module offers cross-platform, assembly-inspired functions for low-level operations.
 // It covers bitwise operations, memory manipulation, and other essential system-level tasks.

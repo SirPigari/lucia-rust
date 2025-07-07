@@ -1,8 +1,8 @@
 use once_cell::sync::Lazy;
 
-pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(|| Token("".to_string(), "".to_string(), None));
+pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(Token::default);
 
-#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct Location {
     pub file: String,
     pub line_string: String,
@@ -11,10 +11,10 @@ pub struct Location {
 }
 
 impl Location {
-    pub fn new(file: String, line_string: String, line_number: usize, range: (usize, usize)) -> Self {
+    pub fn new(file: impl Into<String>, line_string: impl Into<String>, line_number: usize, range: (usize, usize)) -> Self {
         Self {
-            file,
-            line_string,
+            file: file.into(),
+            line_string: line_string.into(),
             line_number,
             range,
         }
@@ -23,3 +23,9 @@ impl Location {
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct Token(pub String, pub String, pub Option<Location>);
+
+impl Default for Token {
+    fn default() -> Self {
+        Token("".to_string(), "".to_string(), None)
+    }
+}

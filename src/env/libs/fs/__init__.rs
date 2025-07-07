@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, OpenOptions};
+use std::io::{Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::env as std_env;
 
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;

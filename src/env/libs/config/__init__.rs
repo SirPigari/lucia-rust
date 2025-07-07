@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float, Int};
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::types::{Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config, get_from_config};
@@ -13,7 +12,7 @@ use crate::{insert_native_fn, insert_native_var};
 // It includes functions to register and initialize configuration variables.
 // Lucia version 2.0.0, module: config@0.2.6
 
-fn set(args: &HashMap<String, Value>) -> Value {
+fn set(_args: &HashMap<String, Value>) -> Value {
     Value::Error(
         "NotImplementedError",
         "set function is not implemented",

@@ -8,7 +8,6 @@ use crate::env::runtime::utils::to_static;
 
 pub struct Preprocessor {
     lib_dir: PathBuf,
-    config_path: PathBuf,
     defines: HashMap<String, Token>, // IDENTIFIER -> TOKEN
     aliases: HashMap<Token, Token>, // TOKEN -> ALIAS_TOKEN
     macros: HashMap<String, (Vec<(String, Option<Token>)>, Vec<Token>)>, // MACRO_NAME -> (ARGS, BODY)
@@ -16,10 +15,9 @@ pub struct Preprocessor {
 }
 
 impl Preprocessor {
-    pub fn new<P: Into<PathBuf>>(lib_dir: P, config_path: P, file_path: &str) -> Self {
+    pub fn new<P: Into<PathBuf>>(lib_dir: P, file_path: &str) -> Self {
         Self {
             lib_dir: lib_dir.into(),
-            config_path: config_path.into(),
             defines: HashMap::new(),
             aliases: HashMap::new(),
             macros: HashMap::new(),
@@ -590,6 +588,51 @@ impl Preprocessor {
                         }
                     }
 
+                    "[" | "!" => {
+                        let is_negated = tokens[i - 1].1 == "!";
+
+                        if is_negated {
+                            if i >= tokens.len() || tokens[i].1 != "[" {
+                                return Err(Error::new(
+                                    "PreprocessorError",
+                                    "Expected '[' after '!'",
+                                    &self.file_path,
+                                ));
+                            }
+                            i += 1;
+                        }
+
+                        if i >= tokens.len() {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "Expected key inside brackets",
+                                &self.file_path,
+                            ));
+                        }
+
+                        let key = tokens[i].1.clone();
+                        i += 1;
+
+                        if i >= tokens.len() || tokens[i].1 != "]" {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "Expected closing ']' after key",
+                                &self.file_path,
+                            ));
+                        }
+                        i += 1;
+
+                        let loc = last_normal_token_location.clone();
+
+                        result.push(Token("IDENTIFIER".to_string(), "00__set_dir__".to_string(), loc.clone()));
+                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
+                        result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
+                        result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                        result.push(Token("BOOLEAN".to_string(), if is_negated { "false" } else { "true" }.to_string(), loc.clone()));
+                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                        continue;
+                    }
+
                     _ => {
                         return Err(Error::new(
                             "PreprocessorError",
@@ -637,22 +680,20 @@ impl Preprocessor {
                     let mut nested_paren = 0;
                 
                     for tok in call_args_tokens {
-                        if let Token(ref a, ref b, _) = tok
-                            && a == "SEPARATOR"
-                            && b == ","
-                            && nested_paren == 0
-                        {
+                        let Token(ref a, ref b, _) = tok;
+                    
+                        if a == "SEPARATOR" && b == "," && nested_paren == 0 {
                             args_values.push(current_arg);
                             current_arg = Vec::new();
                         } else {
-                            if tok.0 == "SEPARATOR" && tok.1 == "(" {
+                            if a == "SEPARATOR" && b == "(" {
                                 nested_paren += 1;
-                            } else if tok.0 == "SEPARATOR" && tok.1 == ")" {
+                            } else if a == "SEPARATOR" && b == ")" {
                                 nested_paren -= 1;
                             }
                             current_arg.push(tok);
                         }
-                    }
+                    }                    
                     args_values.push(current_arg);
                 
                     if args_values.len() == 1 && args_values[0].is_empty() {
@@ -735,11 +776,10 @@ impl Preprocessor {
                                     &self.file_path,
                                 ));
                             }
+
+                            let Token(a, b, _) = &body[body_i];
                 
-                            if let Token(a, b, _) = &body[body_i]
-                                && a == "OPERATOR"
-                                && b == "!"
-                            {
+                            if a == "OPERATOR" && b == "!" {
                                 body_i += 1;
                                 if body_i >= body.len() {
                                     return Err(Error::new(

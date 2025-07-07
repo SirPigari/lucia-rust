@@ -83,7 +83,7 @@ impl CPU {
         };        
     
         let mut program_without_labels = Vec::new();
-        for (idx, line) in filtered_program.iter().enumerate() {
+        for (_, line) in filtered_program.iter().enumerate() {
             if line.ends_with(':') {
                 let label_name = line.trim_end_matches(':').to_string();
                 self.labels.insert(label_name, program_without_labels.len());

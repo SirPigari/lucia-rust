@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{get_imagnum_error_message, to_static};
 use crate::env::runtime::variables::Variable;
@@ -125,24 +125,6 @@ fn pow(args: &HashMap<String, Value>) -> Value {
         }
         _ => Value::Error("TypeError", "pow(x, y) expects numeric args", None),
     }
-}
-
-fn create_native_fn(
-    name: &str,
-    handler: fn(&HashMap<String, Value>) -> Value,
-    params: Vec<Parameter>,
-    ret_type: &str,
-) -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
-        name,
-        handler,
-        params,
-        ret_type,
-        true,
-        true,
-        true,
-        None,
-    )))
 }
 
 pub fn register() -> HashMap<String, Variable> {

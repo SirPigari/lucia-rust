@@ -1,7 +1,4 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::types::{
-    Float, Int,
-};
 use crate::env::runtime::utils::{
     to_static,
     get_imagnum_error_message,
@@ -297,7 +294,7 @@ pub fn predict_sequence_until_length(
 
     // handle 1-element seed (arithmetic sequence step = ±1)
     if seed_f64.len() == 1 {
-        let start = seed_f64[0];
+        let _start = seed_f64[0];
         let step = 1.0;
 
         while !done!() {

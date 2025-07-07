@@ -1,36 +1,28 @@
-use std::collections::HashMap;
-use crate::env::runtime::config::{Config, ColorScheme};
-use crate::env::runtime::utils::{unescape_string_literal, print_colored, hex_to_ansi, to_static, get_type_default, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
+use crate::env::runtime::utils::{unescape_string_literal, to_static, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::types::{Float, Int, VALID_TYPES};
+use crate::env::runtime::types::{VALID_TYPES};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     statements: Vec<Statement>,
-    config: Config,
     use_colors: bool,
     include_whitespace: bool,
-    source: String,
     err: Option<Error>,
-    file_path: String,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>, config: Config, source: String, use_colors: bool, file_path: &str) -> Self {
+    pub fn new(tokens: Vec<Token>, use_colors: bool) -> Self {
         Self {
             tokens,
             pos: 0,
             statements: vec![],
-            config: config.clone(),
             use_colors,
             include_whitespace: false,
-            source,
             err: None,
-            file_path: file_path.to_string(),
         }
     }
 
@@ -125,11 +117,6 @@ impl Parser {
             if expected_value.is_empty() { expected_type } else { expected_value }
         ));
         (vec![], vec![])
-    }
-
-    fn get_next(&mut self) -> Option<&Token> {
-        self.next();
-        self.token()
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -1004,7 +991,7 @@ impl Parser {
                         body.push(stmt);
                     }
 
-                    let mut else_body = None;
+                    let else_body: Option<Vec<Statement>>;
 
                     if self.token_is("IDENTIFIER", "end") {
                         self.next();
@@ -1184,8 +1171,7 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "fun" || ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
                     let mut modifiers = vec![];
-                    let mut name = "".to_string();
-                    let mut is_function = false;
+                    let (name, is_function);
                 
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
                         while let Some(tok) = self.token() {
@@ -2003,13 +1989,11 @@ impl Parser {
     }    
 
     fn parse_type(&mut self) -> Statement {
-        let mut loc = self.get_loc();
-    
         fn check_type(token: &Token) -> bool {
             token.0 == "IDENTIFIER" && VALID_TYPES.contains(&token.1.as_str())
         }
     
-        let mut parse_single_type = |parser: &mut Self| -> Option<(String, Statement)> {
+        let parse_single_type = |parser: &mut Self| -> Option<(String, Statement)> {
             let mut is_ptr = false;
             let mut is_maybe = false;
     
@@ -2060,7 +2044,7 @@ impl Parser {
                 };
                 parser.next();
     
-                let mut value;
+                let value;
     
                 if parser.token_is("SEPARATOR", ")") {
                     value = get_type_default_as_statement(&base_str);
@@ -2101,7 +2085,7 @@ impl Parser {
                 let mut has_variadic_any = false;
                 let mut has_variadic_typed = None;
     
-                let mut inner_loc = parser.get_loc();
+                let inner_loc = parser.get_loc();
     
                 while let Some(token) = parser.token().cloned() {
                     if token.0 == "SEPARATOR" && token.1 == "]" {
@@ -2294,7 +2278,7 @@ impl Parser {
             ))
         };
     
-        let (mut base_str, mut base_stmt) = match parse_single_type(self) {
+        let (_, base_stmt) = match parse_single_type(self) {
             Some(v) => v,
             None => return Statement::Null,
         };
@@ -2311,7 +2295,7 @@ impl Parser {
         }
     
         if union_types.len() > 1 {
-            loc = self.get_loc();
+            let loc = self.get_loc();
     
             return Statement::Statement {
                 keys: vec![
@@ -2393,40 +2377,14 @@ impl Parser {
         Statement::Null
     }
 
-    fn parse_unary(&mut self) -> Statement {
-        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-        let loc = self.get_loc();
-
-        if token.0 == "OPERATOR" && ["-", "+", "!", "not"].contains(&token.1.as_str()) {
-            let op = token.1.clone();
-            self.next();
-            let operand = self.parse_unary();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("operator".to_string()),
-                    Value::String("operand".to_string()),
-                ],
-                values: vec![
-                    Value::String("UNARY_OPERATION".to_string()),
-                    Value::String(op),
-                    operand.convert_to_map(),
-                ],
-                loc
-            };
-        }
-
-        self.parse_primary()
-    }
-
     fn parse_operand(&mut self) -> Statement {
-        let mut token = self.token().cloned().unwrap_or_else(|| DEFAULT_TOKEN.clone());
-        let mut loc = self.get_loc();
-        let mut token_type = token.0.clone();
-        let mut token_value = token.1.clone();        
-        let mut next_token = self.peek();
-        let mut next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
-        let mut next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
+        let token = self.token().cloned().unwrap_or_else(|| DEFAULT_TOKEN.clone());
+        let loc = self.get_loc();
+        let token_type = token.0.clone();
+        let token_value = token.1.clone();        
+        let next_token = self.peek();
+        let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
+        let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
         
         if token_type == "SEPARATOR" && token_value == "(" {
             self.next();
@@ -2572,53 +2530,12 @@ impl Parser {
         Statement::Null
     }
 
-    fn parse_operation(&mut self) -> Statement {
-        let mut left = self.parse_operand();
-        let loc = self.get_loc();
-        if self.err.is_some() {
-            return Statement::Null;
-        }
-
-        while let Some(token) = self.token() {
-            if token.0 == "OPERATOR" {
-                let operator = token.1.clone();
-                self.next();
-                let right = self.parse_operand();
-
-                if self.err.is_some() {
-                    return Statement::Null;
-                }
-
-                left = Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("left".to_string()),
-                        Value::String("operator".to_string()),
-                        Value::String("right".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("OPERATION".to_string()),
-                        left.convert_to_map(),
-                        Value::String(operator),
-                        right.convert_to_map(),
-                    ],
-                    loc: loc.clone()
-                };
-            } else {
-                break;
-            }
-        }
-
-        left
-    }
-
     fn parse_list(&mut self) -> Statement {
         let loc = self.get_loc();
     
         self.next();
     
         let mut elements = Vec::new();
-        let mut pattern_reg = false;
         let mut found_semicolon = false;
     
         while let Some(token) = self.token() {
@@ -2627,7 +2544,7 @@ impl Parser {
             }
     
             if token.0 == "SEPARATOR" && (token.1 == ".." || token.1 == "...") {
-                pattern_reg = token.1 == "...";
+                let pattern_reg = token.1 == "...";
                 self.next();
     
                 let end_expr = if let Some(next_token) = self.token() {

@@ -1,7 +1,6 @@
-use std::collections::{HashMap, BTreeMap, HashSet};
-use crate::env::runtime::config::{Config, ColorScheme, get_from_config, set_in_config};
+use std::collections::{HashMap, BTreeMap};
+use crate::env::runtime::config::{Config, get_from_config, set_in_config};
 use crate::env::runtime::utils::{
-    print_colored,
     hex_to_ansi,
     format_value,
     find_closest_match,
@@ -10,13 +9,9 @@ use crate::env::runtime::utils::{
     check_ansi,
     unescape_string,
     to_static,
-    make_native_method,
-    make_native_function,
-    get_imagnum_error_message,
     create_function,
     create_note,
     format_type,
-    get_type_default,
     get_type_from_token_name,
     sanitize_alias,
     special_function_meta,
@@ -27,33 +22,28 @@ use crate::env::runtime::utils::{
     fix_and_parse_json,
     json_to_value,
 };
-use crate::env::runtime::pattern_reg::{extract_seed_end, predict_sequence, predict_sequence_until_length};
+use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
-use std::ops::{Add, Sub, Mul, Div, Rem, Neg};
 use crate::env::runtime::native;
-use crate::env::runtime::functions::{Function, FunctionMetadata, NativeFunction, Parameter, ParameterKind, Callable, NativeCallable};
+use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind};
 use crate::env::runtime::libs::STD_LIBS;
 use std::sync::Arc;
-use std::cmp::Ordering;
-use std::sync::Mutex;
 use std::path::{PathBuf, Path};
-use once_cell::sync::Lazy;
 use std::fs;
 use regex::Regex;
 use tokio::runtime::Runtime;
-use serde_json::Value as JsonValue;
 use reqwest;
 use serde_urlencoded;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::Parser;
-use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::tokens::{Location};
 
 const VERSION: &str = env!("VERSION");
 
@@ -65,8 +55,7 @@ pub struct Interpreter {
     is_returning: bool,
     state: String,
     return_value: Value,
-    source: String,
-    stack: Vec<(String, HashMap<String, Value>, HashMap<String, Variable>)>,
+    stack: Vec<(String, Option<Location>)>,
     use_colors: bool,
     current_statement: Option<Statement>,
     variables: HashMap<String, Variable>,
@@ -87,7 +76,6 @@ impl Interpreter {
             return_value: NULL,
             is_returning: false,
             state: "normal".to_owned(),
-            source: String::new(),
             stack: vec![],
             use_colors,
             current_statement: None,
@@ -280,24 +268,6 @@ impl Interpreter {
             (is_ref, is_maybe, rem)
         }
     
-        fn is_type_equal(type_: Value, expected: Value) -> bool {
-            match (type_, expected) {
-                (Value::String(t), Value::String(e)) => {
-                    if e == "any" || t == "any" {
-                        return true;
-                    }
-                    if t == "null" && e == "bool" {
-                        return true;
-                    }
-                    if t == "int" && e == "bool" {
-                        return true;
-                    }
-                    t == e
-                }
-                _ => false,
-            }
-        }
-    
         if let Value::String(type_str) = expected {
             if value.type_name() == *type_str {
                 return true;
@@ -376,7 +346,7 @@ impl Interpreter {
             let type_kind = expected_hashmap.get(&Value::String("type_kind".to_string()));
             match type_kind {
                 Some(Value::String(kind)) if kind == "function" => {
-                    if let Value::Function(func) = value {
+                    if let Value::Function(_func) = value {
                         // TODO: fix function type checking
                         return true;
                     //     let metadata = func.metadata();
@@ -507,20 +477,6 @@ impl Interpreter {
             ));
         }
         false
-    }
-
-    pub fn exit_with_code(&mut self, code: Value) -> Value {
-        self.is_returning = true;
-        self.return_value = match code {
-            Value::Int(i) => Value::Int(i),
-            Value::Float(f) => Value::Float(f),
-            Value::String(s) => Value::String(s),
-            _ => {
-                self.raise("TypeError", "Exit code must be an int, float or string");
-                NULL
-            }
-        };
-        return self.return_value.clone();
     }
 
     pub async fn fetch(
@@ -742,11 +698,10 @@ impl Interpreter {
         let lexer = Lexer::new(&content, to_static(path.display().to_string()));
         let raw_tokens = lexer.tokenize();
 
-        let (pr1, pr2, ep) = self.preprocessor_info.clone();
+        let (pr1, _, ep) = self.preprocessor_info.clone();
         let processed_tokens = if ep {
             let mut preprocessor = Preprocessor::new(
                 pr1,
-                pr2,
                 path.clone().display().to_string().as_str(),
             );
             match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
@@ -763,7 +718,7 @@ impl Interpreter {
         } else {
             raw_tokens
         };
-        let mut parser = Parser::new(processed_tokens, self.config.clone(), content.clone(), self.use_colors, path.display().to_string().as_str());
+        let mut parser = Parser::new(processed_tokens, self.use_colors);
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -783,7 +738,7 @@ impl Interpreter {
             .unwrap_or_else(|_| PathBuf::from("."));
         let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone(), &vec![]);
         interpreter.stack = self.stack.clone();
-        let result = interpreter.interpret(statements, content, true);
+        let result = interpreter.interpret(statements, true);
         self.stack = interpreter.stack.clone();
     
         let properties = interpreter.variables.clone();
@@ -807,22 +762,6 @@ impl Interpreter {
         match result {
             Ok(_) => final_properties,
             Err(e) => {
-                let mut pos = String::new();
-                let loc = if let Some(loc) = &e.loc {
-                    loc
-                } else {
-                    self.raise("RuntimeError", "Missing location on error");
-                    return HashMap::new();
-                };   
-                let line = loc.line_number;            
-                if line != 0 {
-                    let column = loc.range.0;
-                    if column > 0 {
-                        pos = format!(":{}:{}", line, column);
-                    } else {
-                        pos = line.to_string();
-                    }
-                }
                 self.raise_with_ref(
                     "ImportError",
                     &format!("Error while importing '{}'", path.display()),
@@ -833,8 +772,7 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&mut self, statements: Vec<Statement>, source: String, deferable: bool) -> Result<Value, Error> {
-        self.source = String::new();
+    pub fn interpret(&mut self, statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
         self.is_returning = false;
         self.return_value = NULL;
         self.err = None;
@@ -842,8 +780,7 @@ impl Interpreter {
         self.state = "normal".to_owned();
         self.stack.push((
             self.file_path.clone(),
-            HashMap::new(),
-            self.variables.clone(),
+            self.get_location_from_current_statement()
         ));
         for statement in statements {
             if let Some(err) = &self.err {
@@ -851,7 +788,7 @@ impl Interpreter {
                 return Err(err.clone());
             }
 
-            if let Statement::Statement { keys, values, loc } = statement.clone() {
+            if let Statement::Statement { .. } = statement.clone() {
                 self.current_statement = Some(statement.clone());
 
                 let value = self.evaluate(statement.clone());
@@ -892,6 +829,8 @@ impl Interpreter {
             }
             self.state = old_state;
         }
+
+        self.stack.pop();
 
         Ok(self.return_value.clone())
     }
@@ -1126,7 +1065,7 @@ impl Interpreter {
                     keys.iter().position(|k| k == &Value::String("guard".to_string())),
                     values.get(keys.iter().position(|k| k == &Value::String("guard".to_string())).unwrap_or(usize::MAX)),
                 ) {
-                    (Some(pos), Some(val)) => match val {
+                    (Some(_), Some(val)) => match val {
                         Value::Map { .. } => Some(val.convert_to_statement()),
                         Value::Null => None,
                         _ => {
@@ -1191,11 +1130,10 @@ impl Interpreter {
                     
                     matched_once = true;
                 
-                    self.interpret(
+                    let _ = self.interpret(
                         body.iter()
                             .map(|item| item.clone().convert_to_statement())
                             .collect(),
-                        self.source.clone(),
                         true,
                     );
                     match self.state.as_str() {
@@ -1246,8 +1184,7 @@ impl Interpreter {
 
         self.stack.push((
             self.file_path.clone(),
-            HashMap::new(),
-            self.variables.clone(),
+            self.get_location_from_current_statement()
         ));
 
         let stmts: Vec<Statement> = body.iter()
@@ -1297,7 +1234,7 @@ impl Interpreter {
             return NULL;
         }
 
-        scope_interpreter.interpret(stmts, self.source.clone(), true);
+        let _ = scope_interpreter.interpret(stmts, true);
 
         if let Some(err) = scope_interpreter.err {
             self.raise_with_ref(
@@ -1487,11 +1424,11 @@ impl Interpreter {
         let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&NULL);
         let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&NULL);
 
-        if let pointer_type = Value::String("POINTER_ASSIGN".to_string()) {
+        if *pointer_type == Value::String("POINTER_ASSIGN".to_string()) {
             if self.err.is_some() {
                 self.err = None;
             }
-        }
+        }        
     
         let value = self.evaluate(value_opt.convert_to_statement());
     
@@ -1692,7 +1629,7 @@ impl Interpreter {
                                 .zip(values.iter().cloned())
                                 .collect();
                         
-                            let decl_result = self.handle_variable_declaration(decl_map);
+                            let _ = self.handle_variable_declaration(decl_map);
                             if self.err.is_some() {
                                 return NULL;
                             }
@@ -2016,7 +1953,7 @@ impl Interpreter {
             );            
         }
     
-        if self.stack.iter().any(|(name, _, _)| name == &module_name) {
+        if self.stack.iter().any(|(name, _)| name == &module_name) {
             return self.raise(
                 "RecursionError",
                 &format!("Recursive import detected for module '{}'", module_name),
@@ -2025,14 +1962,7 @@ impl Interpreter {
     
         self.stack.push((
             module_name.clone(),
-            statement.iter().filter_map(|(k, v)| {
-                if let Value::String(s) = k {
-                    Some((s.clone(), v.clone()))
-                } else {
-                    None
-                }
-            }).collect::<HashMap<String, Value>>(),
-            self.variables.clone(),
+            self.get_location_from_current_statement()
         ));
     
         if self.variables.contains_key(alias) {
@@ -2050,7 +1980,7 @@ impl Interpreter {
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
             debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
 
-            let expected_lucia_version = lib_info.expected_lucia_version.clone();
+            let expected_lucia_version = lib_info.expected_lucia_version;
 
             if !expected_lucia_version.is_empty() && !check_version(&self.config.version, &expected_lucia_version) {
                 self.stack.pop();
@@ -2315,7 +2245,7 @@ impl Interpreter {
                             Some(self.use_colors)
                         );
 
-                        for (field, value) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
+                        for (field, _) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
                             if manifest_json.get(field).is_some() && !manifest_json.get(field).unwrap().is_string() {
                                 self.stack.pop();
                                 return self.raise("MalformedManifest", &format!("Field '{}' in manifest '{}' must be a string", field, fix_path(manifest_path.display().to_string())));
@@ -3081,8 +3011,6 @@ impl Interpreter {
                 return NULL;
             }
         }
-        
-        NULL
     }
 
     fn handle_if(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -3205,7 +3133,7 @@ impl Interpreter {
                 continue;
             }
     
-            let result = self.evaluate(stmt.convert_to_statement());
+            let _ = self.evaluate(stmt.convert_to_statement());
             if self.err.is_some() {
                 if stmt_type != "TRY_CATCH" {
                     return self.err.take().map_or(NULL, |_| NULL);
@@ -3567,7 +3495,7 @@ impl Interpreter {
                     None => return self.raise("RuntimeError", "Missing 'access' in index access assignment"),
                 };
 
-                let mut index_access = match get_single_index_from_map(&access_val) {
+                let index_access = match get_single_index_from_map(&access_val) {
                     Ok(idx) => idx,
                     Err((kind, msg)) => return self.raise(&kind, &msg),
                 };
@@ -3641,8 +3569,6 @@ impl Interpreter {
                             return NULL;
                         }
                     };
-
-                    return NULL;
                 }
             }
             // fuck my parser
@@ -4086,7 +4012,7 @@ impl Interpreter {
     }
 
     fn handle_iterable(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let Some(iterable) = statement.get(&Value::String("iterable_type".to_string())).cloned() else {
+        let Some(_) = statement.get(&Value::String("iterable_type".to_string())).cloned() else {
             return self.raise("IterableError", "Missing 'iterable' in iterable statement");
         };
         
@@ -4634,7 +4560,7 @@ impl Interpreter {
                 let passed_args_count = positional.len() + named_map.len();
                 let expected_args_count = metadata.parameters.len();
 
-                let mut object_value = object_variable.get_value();
+                let object_value = object_variable.get_value();
 
                 let is_module = matches!(object_value, Value::Module(..));
                 
@@ -4668,8 +4594,6 @@ impl Interpreter {
                 .iter()
                 .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
                 .count();
-            
-                let provided_positional_count = positional.len();
                 
                 let mut matched_positional_count = 0;
                 for param in &metadata.parameters {
@@ -4743,7 +4667,7 @@ impl Interpreter {
                             }
                         }                        
                         ParameterKind::Variadic => {
-                            let mut variadic_args = positional[pos_index..].to_vec();
+                            let variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
                                 if !self.check_type(&arg, param_type, false) {
@@ -4799,7 +4723,7 @@ impl Interpreter {
                     }
                     
                     if named_map.len() == 1 {
-                        let (key, value) = named_map.into_iter().next().unwrap();
+                        let (key, _) = named_map.into_iter().next().unwrap();
                         return self.raise(
                             "TypeError",
                             &format!("Unexpected keyword argument '{}'.{}", key, expect_one_of),
@@ -4833,7 +4757,7 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
 
-                let mut result = NULL;
+                let result;
 
                 let final_args_variables = final_args
                     .iter()
@@ -4845,7 +4769,7 @@ impl Interpreter {
                     .collect::<HashMap<String, Variable<>>>();
             
                 if !is_module {
-                    self.stack.push((method_name.to_string(), final_args.clone(), self.variables.clone()));
+                    self.stack.push((method_name.to_string(), self.get_location_from_current_statement()));
                     if !metadata.is_native {
                         let argv_vec = self.variables.get("argv").map(|var| {
                             match var.get_value() {
@@ -4873,7 +4797,7 @@ impl Interpreter {
                         new_interpreter.variables.extend(merged_variables);
                         new_interpreter.stack = self.stack.clone();
                         let body = func.get_body();
-                        new_interpreter.interpret(body, self.source.clone(), true);
+                        let _ = new_interpreter.interpret(body, true);
                         if new_interpreter.err.is_some() {
                             self.raise_with_ref(
                                 "RuntimeError",
@@ -4926,7 +4850,7 @@ impl Interpreter {
                             );
                         }                    
                         let body = func.get_body();
-                        new_interpreter.interpret(body, self.source.clone(), true);
+                        let _ = new_interpreter.interpret(body, true);
                         if new_interpreter.err.is_some() {
                             self.raise_with_ref(
                                 "RuntimeError",
@@ -5130,12 +5054,12 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "00__set_cfg__",
+            "exit", "fetch", "exec", "eval", "00__set_cfg__", "00__set_dir__"
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
 
-        let mut value = NULL;
+        let value;
 
         if !is_special_function {
             value = match self.variables.get(function_name) {
@@ -5171,7 +5095,7 @@ impl Interpreter {
     
         match value {
             Value::Function(func) => {
-                let mut metadata = &special_functions_meta
+                let metadata = &special_functions_meta
                     .get(function_name)
                     .cloned()
                     .unwrap_or(func.metadata().clone());
@@ -5271,8 +5195,6 @@ impl Interpreter {
                 .iter()
                 .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
                 .count();
-            
-                let provided_positional_count = positional.len();
                 
                 let mut matched_positional_count = 0;
                 for param in &metadata.parameters {
@@ -5349,7 +5271,7 @@ impl Interpreter {
                             }
                         }
                         ParameterKind::Variadic => {
-                            let mut variadic_args = positional[pos_index..].to_vec();
+                            let variadic_args = positional[pos_index..].to_vec();
                 
                             for (i, arg) in variadic_args.iter().enumerate() {
                                 if !self.check_type(&arg, param_type, false) {
@@ -5406,7 +5328,7 @@ impl Interpreter {
                     }
                     
                     if named_map.len() == 1 {
-                        let (key, value) = named_map.into_iter().next().unwrap();
+                        let (key, _) = named_map.into_iter().next().unwrap();
                         return self.raise(
                             "TypeError",
                             &format!("Unexpected keyword argument '{}'.{}", key, expect_one_of),
@@ -5438,9 +5360,9 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
     
-                self.stack.push((function_name.to_string(), final_args_no_mods.clone(), self.variables.clone()));
+                self.stack.push((function_name.to_string(), self.get_location_from_current_statement()));
 
-                let mut result = NULL;
+                let result;
 
                 let final_args_variables = final_args
                 .iter()
@@ -5499,15 +5421,9 @@ impl Interpreter {
                                 let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
-                                let source_string = script_str.to_string();
-                                let file_path_str = &self.file_path;
-
                                 let mut parser = Parser::new(
                                     tokens,
-                                    self.config.clone(),
-                                    source_string,
                                     self.use_colors,
-                                    file_path_str,
                                 );
                                 let statements = parser.parse();
                                 let mut new_interpreter = Interpreter::new(
@@ -5520,7 +5436,7 @@ impl Interpreter {
                                 );
                                 new_interpreter.variables = self.variables.clone();
                                 new_interpreter.stack = self.stack.clone();
-                                new_interpreter.interpret(statements, script_str.clone(), true);
+                                let _ = new_interpreter.interpret(statements, true);
                                 if let Some(err) = new_interpreter.err {
                                     self.raise_with_ref("RuntimeError", "Error in exec script", err);
                                 }
@@ -5540,15 +5456,9 @@ impl Interpreter {
                                 let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
-                                let source_string = script_str.to_string();
-                                let file_path_str = &self.file_path;
-
                                 let mut parser = Parser::new(
                                     tokens,
-                                    self.config.clone(),
-                                    source_string,
                                     self.use_colors,
-                                    file_path_str,
                                 );
                                 let statements = parser.parse();
                                 let mut new_interpreter = Interpreter::new(
@@ -5559,7 +5469,7 @@ impl Interpreter {
                                     self.preprocessor_info.clone(),
                                     &vec![],
                                 );
-                                new_interpreter.interpret(statements, script_str.clone(), true);
+                                let _ = new_interpreter.interpret(statements, true);
                                 if let Some(err) = new_interpreter.err {
                                     self.raise_with_ref("RuntimeError", "Error in exec script", err);
                                 }
@@ -5576,7 +5486,7 @@ impl Interpreter {
                                         if let Ok(num) = num_wrapper.to_i64() {
                                             if num == 26985 {
                                                 let default_val = get_from_config(&self.og_cfg.clone(), key);
-                                                set_in_config(&mut self.config, key, default_val.clone());                                                
+                                                let _ = set_in_config(&mut self.config, key, default_val.clone());                                                
                                                 debug_log(
                                                     &format!("<Reset config: {} to default>", key),
                                                     &self.config,
@@ -5587,7 +5497,7 @@ impl Interpreter {
                                         }
                                     }                                    
 
-                                    set_in_config(&mut self.config, key, value.clone());
+                                    let _ = set_in_config(&mut self.config, key, value.clone());
                                     debug_log(
                                         &format!("<Set config: {} = {}>", key, format_value(value)),
                                         &self.config,
@@ -5596,6 +5506,21 @@ impl Interpreter {
                                     return NULL;
                                 } else {
                                     return self.raise("TypeError", "Expected a value in 'value' argument in set_cfg");
+                                }
+                            } else {
+                                return self.raise("TypeError", "Expected a string in 'key' argument in set_cfg");
+                            }
+                        }
+                        "00__set_dir__" => {
+                            self.stack.pop();
+                            if let Some(Value::String(d)) = final_args_no_mods.get("d") {
+                                match d.as_str() {
+                                    _ => {
+                                        return self.raise(
+                                            "ValueError",
+                                            &format!("Directive '{}' is invalid", d),
+                                        );
+                                    }
                                 }
                             } else {
                                 return self.raise("TypeError", "Expected a string in 'key' argument in set_cfg");
@@ -5637,7 +5562,7 @@ impl Interpreter {
                     new_interpreter.variables = merged_variables;
                     new_interpreter.stack = self.stack.clone();
                     let body = func.get_body();
-                    new_interpreter.interpret(body, self.source.clone(), true);
+                    let _ = new_interpreter.interpret(body, true);
                     if new_interpreter.err.is_some() {
                         self.err = new_interpreter.err.clone();
                         return NULL;
@@ -6467,7 +6392,7 @@ impl Interpreter {
                         
                                         debug_log(&format!("Generated f-string tokens: {:?}", filtered), &self.config, Some(self.use_colors));
                                         
-                                        let parsed = match Parser::new(tokens, self.config.clone(), expr.clone(), self.use_colors, &self.file_path).parse_safe() {
+                                        let parsed = match Parser::new(tokens, self.use_colors).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
                                                 return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));

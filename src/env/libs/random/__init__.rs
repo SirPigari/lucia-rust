@@ -1,19 +1,19 @@
 use std::collections::HashMap;
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng};
 use rand::seq::SliceRandom;
 use std::sync::Arc;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn};
 
 // This module provides random number and selection utilities.
 // It includes functions for generating random integers, floats, making random choices,
 // Lucia version 2.0.0, module: random@0.7.42
 
 fn random_int_handler(args: &HashMap<String, Value>) -> Value {
-    let mut rng = thread_rng();
+    let mut rng = rng();
 
     let min = match args.get("min") {
         Some(Value::Int(i)) => match i.to_i64() {
@@ -35,12 +35,12 @@ fn random_int_handler(args: &HashMap<String, Value>) -> Value {
         return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
-    let val = rng.gen_range(min..=max);
+    let val = rng.random_range(min..=max);
     Value::Int(crate::env::runtime::types::Int::from_i64(val))
 }
 
 fn random_float_handler(args: &HashMap<String, Value>) -> Value {
-    let mut rng = thread_rng();
+    let mut rng = rng();
 
     let min = match args.get("min") {
         Some(Value::Float(f)) => match f.to_f64() {
@@ -62,7 +62,7 @@ fn random_float_handler(args: &HashMap<String, Value>) -> Value {
         return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
-    let val = rng.gen_range(min..=max);
+    let val = rng.random_range(min..=max);
 
     Value::Float(crate::env::runtime::types::Float::from_f64(val))
 }
@@ -70,8 +70,8 @@ fn random_float_handler(args: &HashMap<String, Value>) -> Value {
 fn random_choice_handler(args: &HashMap<String, Value>) -> Value {
     match args.get("list") {
         Some(Value::List(list)) if !list.is_empty() => {
-            let mut rng = thread_rng();
-            let idx = rng.gen_range(0..list.len());
+            let mut rng = rng();
+            let idx = rng.random_range(0..list.len());
             list[idx].clone()
         }
         Some(_) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
@@ -83,12 +83,11 @@ fn shuffle_handler(args: &HashMap<String, Value>) -> Value {
     match args.get("list") {
         Some(Value::List(list)) => {
             let mut cloned = list.clone();
-            let mut rng = thread_rng();
+            let mut rng = rng();
             cloned.shuffle(&mut rng);
             Value::List(cloned)
         }
-        Some(_) => Value::Error("TypeError".into(), "expected a list".into(), None),
-        None => Value::Error("TypeError".into(), "expected a list".into(), None),
+        Some(_) | None => Value::Error("TypeError".into(), "expected a list".into(), None),
     }
 }
 

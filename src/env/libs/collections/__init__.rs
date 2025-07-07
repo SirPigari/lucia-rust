@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{
     to_static,
@@ -13,7 +13,6 @@ use crate::env::runtime::utils::{
     unescape_string,
     capitalize,
     get_type_default,
-    unescape_string_literal,
     replace_accented,
     sanitize_alias,
     TRUE, FALSE, NULL,
@@ -28,7 +27,7 @@ use crate::{insert_native_fn, insert_native_var};
 // Lucia version 2.0.0, module: collections@1.0.0
 
 fn clear_terminal_handler(_args: &HashMap<String, Value>) -> Value {
-    clear_terminal();
+    let _ = clear_terminal();
     Value::Null
 }
 
