@@ -977,7 +977,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
 
         let tokens: Vec<Token> = processed_tokens;
         let mut parser =
-            Parser::new(tokens.clone(), use_colors);
+            Parser::new(tokens.clone());
 
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
@@ -1175,7 +1175,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
 
         let mut parser = Parser::new(
             tokens,
-            use_colors,
         );
 
         let statements = match parser.parse_safe() {

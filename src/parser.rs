@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{unescape_string_literal, to_static, get_type_default_as_statement, get_type_default_as_statement_from_statement, check_ansi};
+use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
@@ -9,18 +9,16 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     statements: Vec<Statement>,
-    use_colors: bool,
     include_whitespace: bool,
     err: Option<Error>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>, use_colors: bool) -> Self {
+    pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
             pos: 0,
             statements: vec![],
-            use_colors,
             include_whitespace: false,
             err: None,
         }
@@ -37,6 +35,7 @@ impl Parser {
         None
     }
 
+    #[cold]
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Statement {
         self.err = Some(Error {
             error_type: error_type.to_string(),
@@ -52,6 +51,7 @@ impl Parser {
         self.token().map_or(false, |t| t.0 == kind && t.1 == value)
     }    
 
+    #[cold]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Statement {
         self.err = Some(Error {
             error_type: error_type.to_string(),
@@ -1815,6 +1815,89 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if token.1 == "type" => {
+                    self.next();
+                    let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                    if type_token.0 != "IDENTIFIER" {
+                        self.raise("SyntaxError", "Expected type name after 'type'");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    let mut vars = vec![];
+                    let mut conditions = vec![];
+                    if self.token_is("SEPARATOR", "[") {
+                        self.next();
+                        while !self.token_is("SEPARATOR", "]") {
+                            let var_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                            if var_token.0 != "IDENTIFIER" {
+                                self.raise("SyntaxError", "Expected variable name in type declaration");
+                                return Statement::Null;
+                            }
+                            vars.push(var_token.1);
+                            self.next();
+                            if self.token_is("SEPARATOR", ",") {
+                                self.next();
+                            } else if !self.token_is("SEPARATOR", "]") {
+                                self.raise("SyntaxError", "Expected ',' or ']' in type variables");
+                                return Statement::Null;
+                            }
+                        }
+                        self.next();
+                    }
+                    if !self.token_is("OPERATOR", "=") {
+                        self.raise("SyntaxError", "Expected '=' after type name");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    let new_type = self.parse_type();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    if new_type.get_type() != "TYPE" {
+                        self.raise("SyntaxError", "Expected a type after '='");
+                        return Statement::Null;
+                    }
+                    if self.token_is("IDENTIFIER", "where") {
+                        self.next();
+                        if !self.token_is("SEPARATOR", "(") {
+                            self.raise("SyntaxError", "Expected '(' after 'where'");
+                            return Statement::Null;
+                        }
+                        self.next();
+                        while !self.token_is("SEPARATOR", ")") {
+                            let condition = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            conditions.push(condition);
+                            if self.token_is("SEPARATOR", ",") {
+                                self.next();
+                            } else if !self.token_is("SEPARATOR", ")") {
+                                self.raise("SyntaxError", "Expected ',' or ')' in type conditions");
+                                return Statement::Null;
+                            }
+                        }
+                        self.next();
+                    }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("name".to_string()),
+                            Value::String("base_type".to_string()),
+                            Value::String("variables".to_string()),
+                            Value::String("conditions".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TYPE_DECLARATION".to_string()),
+                            Value::String(type_token.1),
+                            new_type.convert_to_map(),
+                            Value::List(vars.into_iter().map(Value::String).collect()),
+                            Value::List(conditions.into_iter().map(|s| s.convert_to_map()).collect()),
+                        ],
+                        loc: self.get_loc(),
+                    }
+                }
+
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();
                     let mut values = vec![];
@@ -1988,315 +2071,283 @@ impl Parser {
         }
     }    
 
-    fn parse_type(&mut self) -> Statement {
-        fn check_type(token: &Token) -> bool {
-            token.0 == "IDENTIFIER" && VALID_TYPES.contains(&token.1.as_str())
+    fn parse_single_type(&mut self) -> Option<(String, Statement)> {
+        let mut is_ptr = false;
+        let mut is_maybe = false;
+    
+        while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") {
+            if self.token_is("OPERATOR", "&") {
+                if is_ptr {
+                    self.raise("SyntaxError", "Duplicate '&' in type prefix");
+                    return None;
+                }
+                is_ptr = true;
+            } else {
+                if is_maybe {
+                    self.raise("SyntaxError", "Duplicate '?' in type prefix");
+                    return None;
+                }
+                is_maybe = true;
+            }
+            self.next();
         }
     
-        let parse_single_type = |parser: &mut Self| -> Option<(String, Statement)> {
-            let mut is_ptr = false;
-            let mut is_maybe = false;
+        let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+        if token.0 != "IDENTIFIER" {
+            self.raise("SyntaxError", "Expected type identifier");
+            return None;
+        }
+        self.next();
     
-            while parser.token_is("OPERATOR", "&") || parser.token_is("OPERATOR", "?") {
-                if parser.token_is("OPERATOR", "&") {
-                    if is_ptr {
-                        parser.raise("SyntaxError", "Duplicate '&' in type prefix");
-                        return None;
-                    }
-                    is_ptr = true;
-                } else if parser.token_is("OPERATOR", "?") {
-                    if is_maybe {
-                        parser.raise("SyntaxError", "Duplicate '?' in type prefix");
-                        return None;
-                    }
-                    is_maybe = true;
-                }
-                parser.next();
-            }
+        let name = format!(
+            "{}{}{}",
+            if is_ptr { "&" } else { "" },
+            if is_maybe { "?" } else { "" },
+            token.1
+        );
     
-            let base = parser.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-            if !check_type(&base) {
-                parser.raise("SyntaxError", &format!("Invalid type '{}'", base.1));
-                return None;
-            }
-    
-            let base_str = format!(
-                "{}{}{}",
-                if is_ptr { "&" } else { "" },
-                if is_maybe { "?" } else { "" },
-                base.1
-            );
-    
-            parser.next();
-    
-            if parser.token_is("SEPARATOR", "(") {
-                let to_type = Value::Map {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("type_kind".to_string()),
-                        Value::String("value".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("TYPE".to_string()),
-                        Value::String("simple".to_string()),
-                        Value::String(base_str.clone()),
-                    ],
-                };
-                parser.next();
-    
-                let value;
-    
-                if parser.token_is("SEPARATOR", ")") {
-                    value = get_type_default_as_statement(&base_str);
-                } else {
-                    value = parser.parse_expression();
-                    if parser.err.is_some() {
-                        return None;
-                    }
-                }
-    
-                if !parser.token_is("SEPARATOR", ")") {
-                    parser.raise("SyntaxError", "Expected ')' after type conversion value");
-                    return None;
-                }
-                parser.next();
-    
-                return Some((
-                    base_str,
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("to".to_string()),
-                            Value::String("value".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TYPE_CONVERT".to_string()),
-                            to_type,
-                            value.convert_to_map(),
-                        ],
-                        loc: parser.get_loc(),
-                    },
-                ));
-            }
-    
-            if parser.token_is("SEPARATOR", "[") {
-                parser.next();
-                let mut elements = vec![];
-                let mut has_variadic_any = false;
-                let mut has_variadic_typed = None;
-    
-                let inner_loc = parser.get_loc();
-    
-                while let Some(token) = parser.token().cloned() {
-                    if token.0 == "SEPARATOR" && token.1 == "]" {
-                        break;
-                    }
-                    if token.1 == ".." {
-                        if has_variadic_any || has_variadic_typed.is_some() {
-                            parser.raise("SyntaxError", "Multiple variadic markers are not allowed");
-                            return None;
-                        }
-                        has_variadic_any = true;
-                        parser.next();
-    
-                        if let Some(next_token) = parser.token().cloned() {
-                            if !(next_token.0 == "SEPARATOR" && next_token.1 == "]") {
-                                if check_type(&next_token) {
-                                    parser.raise_with_help(
-                                        "SyntaxError",
-                                        "'..' must be the last element in type list",
-                                        to_static(format!(
-                                            "Did you mean to use '{}...{}{}'?",
-                                            check_ansi("\x1b[4m", &parser.use_colors),
-                                            next_token.1,
-                                            check_ansi("\x1b[24m", &parser.use_colors),
-                                        )),
-                                    );
-                                } else {
-                                    parser.raise(
-                                        "SyntaxError",
-                                        "'..' must be the last element in type list",
-                                    );
-                                }
-                                return None;
-                            }
-                        }
-                        continue;
-                    }
-    
-                    if token.1 == "..." {
-                        if has_variadic_any || has_variadic_typed.is_some() {
-                            parser.raise("SyntaxError", "Multiple variadic markers are not allowed");
-                            return None;
-                        }
-                        parser.next();
-                        if let Some(next_token) = parser.token().cloned() {
-                            if !check_type(&next_token) {
-                                parser.raise("SyntaxError", "Expected a valid type after '...'");
-                                return None;
-                            }
-                            has_variadic_typed = Some(next_token.1.clone());
-                            has_variadic_any = true;
-                            parser.next();
-                            if let Some(next_after) = parser.token() {
-                                if !(next_after.0 == "SEPARATOR" && next_after.1 == "]") {
-                                    parser.raise(
-                                        "SyntaxError",
-                                        "'...type' must be the last element in type list",
-                                    );
-                                    return None;
-                                }
-                            }
-                            continue;
-                        } else {
-                            parser.raise("SyntaxError", "Expected a type after '...'");
-                            return None;
-                        }
-                    }
-    
-                    if !check_type(&token) {
-                        parser.raise("SyntaxError", &format!("Invalid type '{}'", token.1));
-                        return None;
-                    }
-    
-                    if has_variadic_any || has_variadic_typed.is_some() {
-                        parser.raise("SyntaxError", "No types allowed after variadic marker");
-                        return None;
-                    }
-    
-                    elements.push(token.1.clone());
-                    parser.next();
-    
-                    if parser.token_is("SEPARATOR", ",") {
-                        parser.next();
-                    }
-                }
-    
-                parser.check_for("SEPARATOR", "]");
-                parser.next();
-    
-                if elements.is_empty() && !has_variadic_any && has_variadic_typed.is_none() {
-                    parser.raise("SyntaxError", "Empty type annotation is not allowed");
-                    return None;
-                }
-    
-                if base_str == "function" {
-                    let mut return_type = Value::Map {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("type_kind".to_string()),
-                            Value::String("value".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TYPE".to_string()),
-                            Value::String("simple".to_string()),
-                            Value::String("any".to_string()),
-                        ],
-                    }
-                    .convert_to_statement();
-    
-                    if parser.token_is("OPERATOR", "->") {
-                        parser.next();
-                        return_type = parser.parse_expression();
-                        if parser.err.is_some() {
-                            return None;
-                        }
-                        if return_type.get_type() != "TYPE" {
-                            parser.raise("SyntaxError", "Expected a type after '->'");
-                            return None;
-                        }
-                    }
-    
-                    return Some((
-                        base_str.clone(),
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("type_kind".to_string()),
-                                Value::String("elements".to_string()),
-                                Value::String("return_type".to_string()),
-                                Value::String("variadic".to_string()),
-                                Value::String("variadic_type".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("TYPE".to_string()),
-                                Value::String("function".to_string()),
-                                Value::List(elements.into_iter().map(Value::String).collect()),
-                                return_type.convert_to_map(),
-                                Value::Boolean(has_variadic_any),
-                                Value::String(has_variadic_typed.unwrap_or_else(|| "any".to_string())),
-                            ],
-                            loc: inner_loc
-                        },
-                    ));
-                } else if !["map", "tuple", "list"].contains(&base_str.as_str()) {
-                    parser.raise(
-                        "SyntaxError",
-                        &format!("Type '{}' cannot be indexed", base_str),
-                    );
-                }
-    
-                return Some((
-                    base_str.clone(),
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("type_kind".to_string()),
-                            Value::String("base".to_string()),
-                            Value::String("elements".to_string()),
-                            Value::String("variadic".to_string()),
-                            Value::String("variadic_type".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TYPE".to_string()),
-                            Value::String("indexed".to_string()),
-                            Value::String(base_str.clone()),
-                            Value::List(elements.into_iter().map(Value::String).collect()),
-                            Value::Boolean(has_variadic_any),
-                            Value::String(has_variadic_typed.unwrap_or_else(|| "any".to_string())),
-                        ],
-                        loc: inner_loc
-                    },
-                ));
-            }
-    
-            Some((
-                base_str.clone(),
-                Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("type_kind".to_string()),
-                        Value::String("value".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("TYPE".to_string()),
-                        Value::String("simple".to_string()),
-                        Value::String(base_str),
-                    ],
-                    loc: parser.get_loc(),
-                },
-            ))
-        };
-    
-        let (_, base_stmt) = match parse_single_type(self) {
+        Some((
+            name.clone(),
+            Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("type_kind".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE".to_string()),
+                    Value::String("simple".to_string()),
+                    Value::String(name),
+                ],
+                loc: self.get_loc(),
+            },
+        ))
+    }    
+
+    fn parse_type(&mut self) -> Statement {
+        let (base_str, base_stmt) = match self.parse_single_type() {
             Some(v) => v,
             None => return Statement::Null,
         };
     
-        let mut union_types = vec![base_stmt.clone()];
-    
-        while self.token_is("OPERATOR", "|") {
-            self.next();
-            let (_, next_type_stmt) = match parse_single_type(self) {
-                Some(v) => v,
-                None => return Statement::Null,
+        if self.token_is("SEPARATOR", "(") {
+            let to_type = Value::Map {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("type_kind".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE".to_string()),
+                    Value::String("simple".to_string()),
+                    Value::String(base_str.clone()),
+                ],
             };
-            union_types.push(next_type_stmt);
+    
+            self.next();
+            let value = if self.token_is("SEPARATOR", ")") {
+                get_type_default_as_statement(&base_str)
+            } else {
+                let v = self.parse_expression();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+                v
+            };
+    
+            if !self.token_is("SEPARATOR", ")") {
+                self.raise("SyntaxError", "Expected ')' after type conversion value");
+                return Statement::Null;
+            }
+            self.next();
+    
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("to".to_string()),
+                    Value::String("value".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE_CONVERT".to_string()),
+                    to_type,
+                    value.convert_to_map(),
+                ],
+                loc: self.get_loc(),
+            };
         }
     
-        if union_types.len() > 1 {
-            let loc = self.get_loc();
+        if self.token_is("SEPARATOR", "[") {
+            self.next();
+            let mut elements = vec![];
+            let mut has_variadic_any = false;
+            let mut has_variadic_typed = None;
+            let inner_loc = self.get_loc();
     
+            while let Some(token) = self.token().cloned() {
+                if token.0 == "SEPARATOR" && token.1 == "]" {
+                    break;
+                }
+    
+                if token.1 == ".." {
+                    if has_variadic_any || has_variadic_typed.is_some() {
+                        self.raise("SyntaxError", "Multiple variadic markers are not allowed");
+                        return Statement::Null;
+                    }
+                    has_variadic_any = true;
+                    self.next();
+                    continue;
+                }
+    
+                if token.1 == "..." {
+                    if has_variadic_any || has_variadic_typed.is_some() {
+                        self.raise("SyntaxError", "Multiple variadic markers are not allowed");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    let (_, variadic_ty) = match self.parse_single_type() {
+                        Some(v) => v,
+                        None => return Statement::Null,
+                    };
+                    if let Statement::Statement { values, .. } = &variadic_ty {
+                        if let Some(Value::String(s)) = values.get(2) {
+                            has_variadic_typed = Some(s.clone());
+                        }
+                    }
+                    has_variadic_any = true;
+                    continue;
+                }
+    
+                if has_variadic_any || has_variadic_typed.is_some() {
+                    self.raise("SyntaxError", "No types allowed after variadic marker");
+                    return Statement::Null;
+                }
+    
+                let (_, elem_type) = match self.parse_type() {
+                    Statement::Null => return Statement::Null,
+                    s => ("".to_string(), s),
+                };
+                elements.push(elem_type.convert_to_map());
+    
+                if self.token_is("SEPARATOR", ",") {
+                    self.next();
+                }
+            }
+    
+            self.check_for("SEPARATOR", "]");
+            self.next();
+    
+            if elements.is_empty() && !has_variadic_any && has_variadic_typed.is_none() {
+                self.raise("SyntaxError", "Empty type annotation is not allowed");
+                return Statement::Null;
+            }
+    
+            if base_str == "function" {
+                let mut return_type = Value::Map {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("type_kind".to_string()),
+                        Value::String("value".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("TYPE".to_string()),
+                        Value::String("simple".to_string()),
+                        Value::String("any".to_string()),
+                    ],
+                }
+                .convert_to_statement();
+    
+                if self.token_is("OPERATOR", "->") {
+                    self.next();
+                    return_type = self.parse_type();
+                    if return_type.get_type() != "TYPE" {
+                        self.raise("SyntaxError", "Expected a type after '->'");
+                        return Statement::Null;
+                    }
+                }
+    
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("type_kind".to_string()),
+                        Value::String("elements".to_string()),
+                        Value::String("return_type".to_string()),
+                        Value::String("variadic".to_string()),
+                        Value::String("variadic_type".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("TYPE".to_string()),
+                        Value::String("function".to_string()),
+                        Value::List(elements),
+                        return_type.convert_to_map(),
+                        Value::Boolean(has_variadic_any),
+                        Value::String(has_variadic_typed.unwrap_or("any".to_string())),
+                    ],
+                    loc: inner_loc,
+                };
+            } else if !["map", "tuple", "list"].contains(&base_str.as_str()) {
+                self.raise("SyntaxError", &format!("Type '{}' cannot be indexed", base_str));
+                return Statement::Null;
+            }
+    
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("type_kind".to_string()),
+                    Value::String("base".to_string()),
+                    Value::String("elements".to_string()),
+                    Value::String("variadic".to_string()),
+                    Value::String("variadic_type".to_string()),
+                ],
+                values: vec![
+                    Value::String("TYPE".to_string()),
+                    Value::String("indexed".to_string()),
+                    Value::String(base_str.clone()),
+                    Value::List(elements),
+                    Value::Boolean(has_variadic_any),
+                    Value::String(has_variadic_typed.unwrap_or("any".to_string())),
+                ],
+                loc: inner_loc,
+            };
+        }
+    
+        let mut union_types = vec![];
+        union_types.push(base_stmt.clone());
+        
+        while self.token_is("OPERATOR", "|") {
+            self.next();
+            let next_type = self.parse_type();
+            if next_type == Statement::Null {
+                return Statement::Null;
+            }
+        
+            if let Statement::Statement { keys, values, .. } = &next_type {
+                let is_union = keys.iter().zip(values.iter()).any(|(k, v)| {
+                    if let Value::String(k_str) = k {
+                        if k_str == "type_kind" {
+                            if let Value::String(v_str) = v {
+                                return v_str == "union";
+                            }
+                        }
+                    }
+                    false
+                });
+        
+                if is_union {
+                    if let Some(types_index) = keys.iter().position(|k| k == &Value::String("types".to_string())) {
+                        if let Value::List(nested_types) = &values[types_index] {
+                            for t in nested_types {
+                                union_types.push(t.convert_to_statement());
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+        
+            union_types.push(next_type);
+        }
+        
+        if union_types.len() > 1 {
             return Statement::Statement {
                 keys: vec![
                     Value::String("type".to_string()),
@@ -2306,14 +2357,14 @@ impl Parser {
                 values: vec![
                     Value::String("TYPE".to_string()),
                     Value::String("union".to_string()),
-                    Value::List(union_types.into_iter().map(|stmt| stmt.convert_to_map()).collect()),
+                    Value::List(union_types.into_iter().map(|s| s.convert_to_map()).collect()),
                 ],
-                loc
+                loc: self.get_loc(),
             };
         }
-    
-        base_stmt
-    }    
+        
+        base_stmt        
+    }
 
     fn parse_variable(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
@@ -2340,6 +2391,43 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
+                }
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("name".to_string()),
+                        Value::String("var_type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("modifiers".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("VARIABLE_DECLARATION".to_string()),
+                        Value::String(name),
+                        type_.clone().convert_to_map(),
+                        value,
+                        Value::List(vec![]),
+                    ],
+                    loc
+                };
+            } else if self.token_is("OPERATOR", ":=") {
+                let name = token.1.clone();
+                self.next();
+                let type_ = Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("type_kind".to_string()),
+                        Value::String("value".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("TYPE".to_string()),
+                        Value::String("simple".to_string()),
+                        Value::String("auto".to_string()),
+                    ],
+                    loc: loc.clone()
+                };
+                let value = self.parse_expression().convert_to_map();
+                if self.err.is_some() {
+                    return Statement::Null;
                 }
                 return Statement::Statement {
                     keys: vec![

@@ -87,10 +87,21 @@ impl Interpreter {
                 ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("iterables".to_owned(), Value::Map { keys: vec![], values: vec![] }),
+                ("types".to_owned(), Value::Map {
+                    keys: vec![],
+                    values: vec![]
+                }),
             ]),
             defer_stack: vec![],
             scope: "main".to_owned(),
         };
+
+        for type_ in VALID_TYPES {
+            this.cache.get_mut("types").unwrap().insert_into_map(
+                Value::String(type_.to_string()),
+                Value::String(type_.to_string()),
+            );
+        }
         
         this.variables.insert(
             "argv".to_owned(),
@@ -116,7 +127,7 @@ impl Interpreter {
         insert_builtin("input", Value::Function(native::input_fn()));
         insert_builtin("len", Value::Function(native::len_fn()));
         insert_builtin("help", Value::Function(native::help_fn()));
-        insert_builtin("type", Value::Function(native::type_fn()));
+        insert_builtin("type_of", Value::Function(native::type_fn()));
         insert_builtin("sum", Value::Function(native::sum_fn()));
         insert_builtin("ord", Value::Function(native::ord_fn()));
         insert_builtin("char", Value::Function(native::char_fn()));
@@ -223,7 +234,7 @@ impl Interpreter {
         types_mapping.insert("function", "function");
         types_mapping.insert("bytes", "bytes");
         types_mapping.insert("auto", "any");
-    
+
         for obj in self.variables.values() {
             if let Value::Module(obj, _) = &obj.value {
                 types_mapping.insert(&obj.name(), "object");
@@ -458,6 +469,93 @@ impl Interpreter {
                             return true;
                         }
                     }
+                }
+                Some(Value::String(kind)) if kind == "new" => {
+                    let type_name = match expected_hashmap.get(&Value::String("name".to_string())) {
+                        Some(Value::String(name)) => name,
+                        _ => {
+                            self.raise("TypeError", "Expected 'name' to be a string in 'new' type");
+                            return false;
+                        }
+                    };
+                    let base_type = match expected_hashmap.get(&Value::String("base".to_string())) {
+                        Some(base) => base,
+                        _ => {
+                            self.raise("TypeError", "Expected 'base' to be a string in 'new' type");
+                            return false;
+                        }
+                    };
+                    let vars = match expected_hashmap.get(&Value::String("variables".to_string())) {
+                        Some(Value::List(vars)) => vars,
+                        _ => {
+                            self.raise("TypeError", "Expected 'variables' to be a map in 'new' type");
+                            return false;
+                        }
+                    };
+                    let conds = match expected_hashmap.get(&Value::String("conditions".to_string())) {
+                        Some(Value::List(conds)) => conds.iter()
+                            .map(|v| v.convert_to_statement())
+                            .collect::<Vec<Statement>>(),
+                        _ => {
+                            self.raise("TypeError", "Expected 'conditions' to be a list in 'new' type");
+                            return false;
+                        }
+                    };
+
+
+                    if !self.check_type(value, base_type, false) {
+                        if error {
+                            self.raise("TypeError", &format!(
+                                "Type '{}' doesn't match inner type of '{}', which is '{}'",
+                                value.to_string(),
+                                type_name,
+                                base_type.to_string()
+                            ));
+                        }
+                        return false;
+                    }
+                    
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        self.use_colors,
+                        &self.file_path,
+                        &self.cwd,
+                        self.preprocessor_info.clone(),
+                        &[],
+                    );
+                    new_interpreter.set_scope(&format!("{}+scope.{}", self.scope, base_type));
+                    if vars.len() > 0 {
+                        new_interpreter.variables.insert(
+                            vars[0].to_string(),
+                            Variable::new(
+                                vars[0].to_string(),
+                                value.clone(),
+                                value.type_name().to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                    }
+                    let mut status: (bool, usize) = (true, 0);
+                    for (i, cond) in conds.iter().enumerate() {
+                        new_interpreter.current_statement = Some(cond.clone());
+                        let result = new_interpreter.evaluate(cond.clone());
+                        if !result.is_truthy() {
+                            status = (false, i + 1);
+                            break;
+                        }
+                    }                    
+
+                    if !status.0 {
+                        self.raise("TypeError", &format!(
+                            "Conditions for type '{}' not met condition #{}",
+                            type_name,
+                            status.1
+                        ));
+                        return false;
+                    }
+                    return true
                 }
                 _ => {
                     self.raise("TypeError", &format!(
@@ -718,7 +816,7 @@ impl Interpreter {
         } else {
             raw_tokens
         };
-        let mut parser = Parser::new(processed_tokens, self.use_colors);
+        let mut parser = Parser::new(processed_tokens);
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
@@ -994,6 +1092,7 @@ impl Interpreter {
                 // Types
                 "TYPE" => self.handle_type(statement.clone()),
                 "TYPE_CONVERT" => self.handle_type_conversion(statement.clone()),
+                "TYPE_DECLARATION" => self.handle_type_declaration(statement.clone()),
         
                 // Pointers
                 "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.handle_pointer(statement.clone()),
@@ -1028,6 +1127,90 @@ impl Interpreter {
         }
         
         result
+    }
+
+    fn handle_type_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n.clone(),
+            _ => {
+                self.raise("SyntaxError", "Expected a string for 'name' in type declaration");
+                return NULL;
+            }
+        };
+        let base_type = match statement.get(&Value::String("base_type".to_string())) {
+            Some(Value::Map { keys, values }) => Value::Map {
+                keys: keys.to_vec(),
+                values: values.to_vec(),
+            },
+            _ => {
+                self.raise("SyntaxError", "Expected a string for 'base_type' in type declaration");
+                return NULL;
+            }
+        };
+        let variables = match statement.get(&Value::String("variables".to_string())) {
+            Some(Value::List(v)) => v.clone(),
+            _ => {
+                self.raise("SyntaxError", "Expected a list for 'variables' in type declaration");
+                return NULL;
+            }
+        };
+        let conditions = match statement.get(&Value::String("conditions".to_string())) {
+            Some(Value::List(c)) => c.clone(),
+            _ => {
+                self.raise("SyntaxError", "Expected a list for 'conditions' in type declaration");
+                return NULL;
+            }
+        };
+
+        let base_map = base_type.convert_to_hashmap().unwrap_or_else(|| {
+            self.raise("SyntaxError", "Expected a map for 'base_type' in type declaration");
+            return HashMap::new();
+        });
+
+        if self.err.is_some() {
+            return NULL;
+        }
+        
+        let converted_map: HashMap<Value, Value> = base_map
+            .into_iter()
+            .map(|(k, v)| (k.into(), v))
+            .collect();
+        
+        let _ = self.handle_type(converted_map);
+        
+        if self.err.is_some() {
+            return NULL;
+        }        
+
+        // {
+        //     "type_kind": "new",
+        //     "name": name,
+        //     "base": base
+        //     "variables": vars,
+        //     "conditions": conds,
+        // }
+
+        self.cache.get_mut("types").unwrap().insert_into_map(
+            Value::String(name.clone()),
+            Value::Map {
+                keys: vec![
+                    Value::String("type_kind".to_string()),
+                    Value::String("name".to_string()),
+                    Value::String("base".to_string()),
+                    Value::String("variables".to_string()),
+                    Value::String("conditions".to_string()),
+                ],
+                values: vec![
+                    Value::String("new".to_string()),
+                    Value::String(name),
+                    base_type,
+                    Value::List(variables),
+                    Value::List(conditions),
+                ],
+            },
+        );
+
+        NULL
     }
 
     fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1736,8 +1919,117 @@ impl Interpreter {
 
         let target_type = match self.evaluate(target_type_opt.convert_to_statement()) {
             Value::String(s) => s,
-            _ => return self.raise("RuntimeError", "Invalid 'to' in type conversion statement"),
+            Value::Map { keys, values } => {
+                let hm = keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>();
+                let name = match hm.get(&Value::String("name".to_string())) {
+                    Some(Value::String(n)) => n.clone(),
+                    _ => return self.raise("RuntimeError", "Missing 'name' in type conversion map"),
+                };
+                let base = match hm.get(&Value::String("base".to_string())) {
+                    Some(b) => b.clone(),
+                    _ => return self.raise("RuntimeError", "Missing 'base' in type conversion map"),
+                };
+                let variables = match hm.get(&Value::String("variables".to_string())) {
+                    Some(Value::List(v)) => v.clone(),
+                    _ => return self.raise("RuntimeError", "Missing 'variables' in type conversion map"),
+                };
+                let conditions = match hm.get(&Value::String("conditions".to_string())) {
+                    Some(Value::List(c)) => c.clone(),
+                    _ => return self.raise("RuntimeError", "Missing 'conditions' in type conversion map"),
+                };
+                let base_stmt = match base {
+                    Value::String(s) => {
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("type_kind".to_string()),
+                                Value::String("value".to_string())
+                            ],
+                            values: vec![
+                                Value::String("TYPE".to_string()),
+                                Value::String("simple".to_string()),
+                                Value::String(s)
+                            ],
+                            loc: self.get_location_from_current_statement(),
+                        }
+                    },
+                    Value::Map { keys, values } => {
+                        Statement::Statement {
+                            keys: keys.clone(),
+                            values: values.clone(),
+                            loc: self.get_location_from_current_statement(),
+                        }
+                    },
+                    _ => return self.raise("RuntimeError", "Invalid 'base' in type conversion map"),
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let s = Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("value".to_string()),
+                        Value::String("to".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("TYPE_CONVERSION".to_string()),
+                        value_opt.clone(),
+                        base_stmt.convert_to_map(),
+                    ],
+                    loc: self.get_location_from_current_statement(),
+                }.convert_to_hashmap();
+                let converted_value = self.handle_type_conversion(s);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let mut new_interpreter = Interpreter::new(
+                    self.config.clone(),
+                    self.use_colors,
+                    &self.file_path,
+                    &self.cwd,
+                    self.preprocessor_info.clone(),
+                    &[],
+                );
+                new_interpreter.set_scope(&format!("{}+scope.{}", self.scope, name));
+                if variables.len() > 0 {
+                    new_interpreter.variables.insert(
+                        variables[0].to_string(),
+                        Variable::new(
+                            variables[0].to_string(),
+                            converted_value.clone(),
+                            converted_value.type_name().to_string(),
+                            false,
+                            true,
+                            true,
+                        ),
+                    );
+                }
+                let mut status: (bool, usize) = (true, 0);
+                for (i, cond) in conditions.iter().enumerate() {
+                    new_interpreter.current_statement = Some(cond.convert_to_statement());
+                    let result = new_interpreter.evaluate(cond.convert_to_statement());
+                    if !result.is_truthy() {
+                        status = (false, i + 1);
+                        break;
+                    }
+                }
+
+                if !status.0 {
+                    self.raise("TypeError", &format!(
+                        "Conditions for type '{}' not met condition #{} in type conversion",
+                        name,
+                        status.1
+                    ));
+                    return NULL;
+                }
+                return converted_value;
+            }
+            _ => return self.raise("RuntimeError", &format!("Type '{}' is not a valid target type for conversion", value.type_name())),
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let mut handle_type_conversion = |target_type: String, value: &Value| -> Value {
             match target_type.as_str() {
@@ -1765,10 +2057,21 @@ impl Interpreter {
                             )
                         }
                     } else if let Value::String(s) = value {
-                        Value::Int(Int::from_str(&s).unwrap_or_else(|_| {
-                            self.raise("ConversionError", &format!("Failed to convert string '{}' to int", s));
-                            Int::from_i64(0)
-                        }))
+                        let t = Statement::Statement {
+                            keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
+                            values: vec![Value::String("NUMBER".to_string()), Value::String(s.clone())],
+                            loc: self.get_location_from_current_statement(),
+                        };
+                        let result = self.evaluate(t);
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        if let Value::Int(_) = result {
+                            return result;
+                        } else {
+                            self.raise("ConversionError", &format!("Failed to convert string '{}' to int", s.to_string()));
+                            NULL
+                        }
                     } else if let Value::Boolean(b) = value {
                         if *b {
                             Value::Int(Int::from_i64(1))
@@ -2884,10 +3187,29 @@ impl Interpreter {
 
             _ => self.raise("RuntimeError", &format!("Unsupported forget value type: {}", value_type)),
         }
-    }    
+    }
 
     fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
         let default_type = Value::String("any".to_string());
+    
+        let valid_types: Vec<Value> = match self.cache.get("types") {
+            Some(Value::Map { values, .. }) => values.iter().cloned().collect(),
+            _ => {
+                self.raise("RuntimeError", "Type cache is not properly initialized");
+                return NULL;
+            }
+        };
+        
+        let check_type_validity = |type_str: &str| -> bool {
+            let trimmed = type_str.trim_start_matches('&').trim_start_matches('?');
+            valid_types.iter().any(|val| {
+                if let Value::String(s) = val {
+                    s == trimmed
+                } else {
+                    false
+                }
+            })
+        };
     
         let type_kind = match statement.get(&Value::String("type_kind".to_string())) {
             Some(kind) => kind,
@@ -2896,46 +3218,116 @@ impl Interpreter {
                 return NULL;
             }
         };
-        
+    
         let kind_str = match type_kind {
             Value::String(s) => s.as_str(),
             _ => {
-                self.raise("RuntimeError", "Invalid 'kind' for type statement");
+                self.raise("RuntimeError", "Invalid 'type_kind' for type statement");
                 return NULL;
             }
         };
-        
+    
         match kind_str {
             "simple" => {
                 let type_name = statement.get(&Value::String("value".to_string())).unwrap_or(&default_type);
-
+    
                 if let Value::String(s) = type_name {
-                    let s_trimmed = s.trim_start_matches('&');
-                    let maybe = s_trimmed.strip_prefix('?');
-
-                    let inner_type = match maybe {
-                        Some(inner) => inner,
-                        None => s_trimmed,
-                    };
-
-                    if VALID_TYPES.contains(&inner_type) {
+                    if check_type_validity(s) {
                         return Value::String(s.clone());
                     }
 
-                    self.raise(
-                        "TypeError",
-                        &format!(
-                            "Invalid type '{}'. Valid types are: {}",
-                            s,
-                            VALID_TYPES.join(", ")
-                        ),
-                    );
-                    return NULL;
+                    match self.cache.get("types") {
+                        Some(Value::Map { values, keys }) => {
+                            let map = Value::Map {
+                                keys: keys.clone(),
+                                values: values.clone(),
+                            };
+                            let hm = map.map_get(type_name).unwrap_or_else(|| {
+                                if self.variables.contains_key(s) {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Invalid type '{}'", s),
+                                        &format!( "'{}' is a variable name, not a type. If you meant to assign a value, use ':=' instead of ':'.", s),
+                                    );
+                                }
+                
+                                self.raise(
+                                    "TypeError",
+                                    &format!(
+                                        "Invalid type '{}'. Valid types are: {}, ...",
+                                        s,
+                                        VALID_TYPES[0..5].join(", ")
+                                    ),
+                                );
+                                return NULL;
+                            }).convert_to_hashmap().unwrap_or_else(|| {
+                                self.raise("RuntimeError", "Type value is not a map");
+                                return HashMap::new();
+                            });
+
+                            let name = match hm.get("name") {
+                                Some(Value::String(n)) => n,
+                                _ => {self.raise("RuntimeError", "Missing or invalid 'name' in new type statement"); return NULL;},
+                            };
+            
+                            let base = match hm.get("base") {
+                                Some(Value::Map { keys, values }) => {
+                                    let base_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                                    self.handle_type(base_map)
+                                }
+                                _ => self.raise("RuntimeError", "Missing or invalid 'base' in new type statement"),
+                            };
+            
+                            let variables = match hm.get("variables") {
+                                Some(Value::List(vars)) => vars,
+                                _ => {
+                                    self.raise("RuntimeError", "Expected a list for 'variables' in new type statement");
+                                    return NULL;
+                                },
+                            };
+            
+                            let conditions = match hm.get("conditions") {
+                                Some(Value::List(conds)) => conds,
+                                _ => {
+                                    self.raise("RuntimeError", "Expected a list for 'conditions' in new type statement");
+                                    return NULL;
+                                },
+                            };
+
+                            return Value::Map {
+                                keys: vec![
+                                    Value::String("_note".to_string()),
+                                    Value::String("type_kind".to_string()),
+                                    Value::String("name".to_string()),
+                                    Value::String("base".to_string()),
+                                    Value::String("variables".to_string()),
+                                    Value::String("conditions".to_string())
+                                ],
+                                values: vec![
+                                    Value::String(create_note(
+                                        "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
+                                        Some(self.use_colors),
+                                        &self.config.color_scheme.note,
+                                    )),
+                                    Value::String("new".to_string()),
+                                    Value::String(name.clone()),
+                                    base,
+                                    Value::List(variables.clone()),
+                                    Value::List(conditions.clone())
+                                ],
+                            };
+                        }
+                        _ => {
+                            self.raise("RuntimeError", "Type cache is not properly initialized");
+                            return NULL;
+                        }
+                    };
                 } else {
                     self.raise("TypeError", "Type value is not a string");
                     return NULL;
                 }
             }
+    
             "union" => {
                 let types_val = match statement.get(&Value::String("types".to_string())) {
                     Some(t) => t,
@@ -2958,16 +3350,31 @@ impl Interpreter {
                     match t {
                         Value::Map { keys, values } => {
                             let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                            handled_types.push(self.handle_type(map));
+                            let ht = self.handle_type(map);
+                            if ht == NULL {
+                                return NULL;
+                            }
+                            handled_types.push(ht);
+                        }
+                        Value::String(s) => {
+                            if !check_type_validity(s) {
+                                self.raise("TypeError", &format!("Invalid union member type '{}'", s));
+                                return NULL;
+                            }
+                            handled_types.push(Value::String(s.clone()));
                         }
                         _ => {
-                            self.raise("RuntimeError", "Each union member must be a type map");
+                            self.raise("RuntimeError", "Each union member must be a type map or string");
                             return NULL;
                         }
                     }
                 }
 
-                let mut keys = vec![Value::String("_note".to_string()), Value::String("type_kind".to_string()), Value::String("types".to_string())];
+                let mut keys = vec![
+                    Value::String("_note".to_string()),
+                    Value::String("type_kind".to_string()),
+                    Value::String("types".to_string())
+                ];
                 let mut values = vec![
                     Value::String(create_note(
                         "This map is for the interpreter's internal use to track union types. You don't need to worry about it.",
@@ -2990,24 +3397,114 @@ impl Interpreter {
 
                 return Value::Map { keys, values };
             }
-            "function" | "indexed" => {
+    
+            "function" => {
+                if let Some(Value::List(elements)) = statement.get(&Value::String("elements".to_string())) {
+                    for el in elements {
+                        match el {
+                            Value::String(s) => {
+                                if !check_type_validity(s) {
+                                    self.raise("TypeError", &format!("Invalid function parameter type '{}'", s));
+                                    return NULL;
+                                }
+                            }
+                            Value::Map { keys, values } => {
+                                let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                                let handled = self.handle_type(map);
+                                if handled == NULL {
+                                    return NULL;
+                                }
+                            }
+                            _ => {
+                                self.raise("RuntimeError", "Invalid function parameter type element");
+                                return NULL;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(Value::Map { keys, values }) = statement.get(&Value::String("return_type".to_string())) {
+                    let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                    let ret_val = self.handle_type(map);
+                    if ret_val == NULL {
+                        return NULL;
+                    }
+                } else if let Some(Value::String(s)) = statement.get(&Value::String("return_type".to_string())) {
+                    if !check_type_validity(s) {
+                        self.raise("TypeError", &format!("Invalid function return type '{}'", s));
+                        return NULL;
+                    }
+                }
+
                 let mut keys = vec![Value::String("_note".to_string())];
                 let mut values = vec![Value::String(create_note(
                     "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
                     Some(self.use_colors),
                     &self.config.color_scheme.note,
-                ))];                
+                ))];
 
                 keys.extend(statement.keys().cloned());
                 values.extend(statement.values().cloned());
 
-                return Value::Map {
-                    keys,
-                    values,
-                }
+                return Value::Map { keys, values };
             }
+    
+            "indexed" => {
+                if let Some(Value::String(base)) = statement.get(&Value::String("base".to_string())) {
+                    if !check_type_validity(base) {
+                        self.raise("TypeError", &format!("Invalid base type '{}'", base));
+                        return NULL;
+                    }
+                }
+
+                let mut handled_elements = Vec::new();
+
+                if let Some(Value::List(elements)) = statement.get(&Value::String("elements".to_string())) {
+                    for el in elements {
+                        match el {
+                            Value::Map { keys, values } => {
+                                let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                                let handled = self.handle_type(map);
+                                if handled == NULL {
+                                    return NULL;
+                                }
+                                handled_elements.push(handled);
+                            }
+                            Value::String(s) => {
+                                if !check_type_validity(s) {
+                                    self.raise("TypeError", &format!("Invalid type '{}'", s));
+                                    return NULL;
+                                }
+                                handled_elements.push(Value::String(s.clone()));
+                            }
+                            _ => {
+                                self.raise("RuntimeError", "Invalid element in indexed types");
+                                return NULL;
+                            }
+                        }
+                    }
+                }
+
+                let mut keys = vec![Value::String("_note".to_string())];
+                let mut values = vec![Value::String(create_note(
+                    "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
+                    Some(self.use_colors),
+                    &self.config.color_scheme.note,
+                ))];
+
+                keys.extend(statement.keys().cloned());
+                values.extend(statement.values().cloned());
+
+                let elements_key = Value::String("elements".to_string());
+                if let Some(pos) = keys.iter().position(|k| k == &elements_key) {
+                    values[pos] = Value::List(handled_elements);
+                }
+
+                return Value::Map { keys, values };
+            }
+
             _ => {
-                self.raise("RuntimeError", "Invalid 'kind' for type statement");
+                self.raise("RuntimeError", "Invalid 'type_kind' for type statement");
                 return NULL;
             }
         }
@@ -3881,6 +4378,9 @@ impl Interpreter {
         }
     
         if !self.check_type(&value.clone(), &declared_type, false) {
+            if self.err.is_some() {
+                return NULL;
+            }
             return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, format_type(&declared_type), value.type_name()));
         }
     
@@ -3903,40 +4403,48 @@ impl Interpreter {
     
         if let Some(var) = self.variables.get(name) {
             return var.get_value().clone();
-        } else {
-            let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(name);
-            let extensions = ["lc", "lucia", "rs", ""];
-            for ext in extensions.iter() {
-                let candidate = lib_dir.with_extension(ext);
-                if candidate.exists() {
-                    return self.raise_with_help(
-                        "ImportError",
-                        &format!("Variable '{}' is not defined.", name),
-                        &format!("Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.", name, 
-                            check_ansi("\x1b[4m", &self.use_colors),
-                            name,
-                            candidate.display(),
-                            check_ansi("\x1b[24m", &self.use_colors),
-                        ),
-                    );
+        } else if let Some(cache) = self.cache.get_mut("types") {
+            return match cache.map_get(&Value::String(name.to_string())) {
+                Some(v) => {
+                    format_type(&v).into()
+                }
+                _ => {
+                    let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(name);
+                    let extensions = ["lc", "lucia", "rs", ""];
+                    for ext in extensions.iter() {
+                        let candidate = lib_dir.with_extension(ext);
+                        if candidate.exists() {
+                            return self.raise_with_help(
+                                "ImportError",
+                                &format!("Variable '{}' is not defined.", name),
+                                &format!("Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.", name, 
+                                    check_ansi("\x1b[4m", &self.use_colors),
+                                    name,
+                                    candidate.display(),
+                                    check_ansi("\x1b[24m", &self.use_colors),
+                                ),
+                            );
+                        }
+                    }
+            
+                    let available_names: Vec<String> = self.variables.keys().cloned().collect();
+                    if let Some(closest) = find_closest_match(name, &available_names) {
+                        return self.raise_with_help(
+                            "NameError",
+                            &format!("Variable '{}' is not defined.", name),
+                            &format!("Did you mean '{}{}{}'?",
+                                check_ansi("\x1b[4m", &self.use_colors),
+                                closest,
+                                check_ansi("\x1b[24m", &self.use_colors),
+                            ),
+                        );
+                    } else {
+                        return self.raise("NameError", &format!("Variable '{}' is not defined.", name));
+                    }
                 }
             }
-    
-            let available_names: Vec<String> = self.variables.keys().cloned().collect();
-            if let Some(closest) = find_closest_match(name, &available_names) {
-                return self.raise_with_help(
-                    "NameError",
-                    &format!("Variable '{}' is not defined.", name),
-                    &format!("Did you mean '{}{}{}'?",
-                        check_ansi("\x1b[4m", &self.use_colors),
-                        closest,
-                        check_ansi("\x1b[24m", &self.use_colors),
-                    ),
-                );
-            } else {
-                return self.raise("NameError", &format!("Variable '{}' is not defined.", name));
-            }
         }
+        self.raise("NameError", &format!("Variable '{}' is not defined.", name))
     }
     
     fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -5423,7 +5931,6 @@ impl Interpreter {
 
                                 let mut parser = Parser::new(
                                     tokens,
-                                    self.use_colors,
                                 );
                                 let statements = parser.parse();
                                 let mut new_interpreter = Interpreter::new(
@@ -5458,7 +5965,6 @@ impl Interpreter {
 
                                 let mut parser = Parser::new(
                                     tokens,
-                                    self.use_colors,
                                 );
                                 let statements = parser.parse();
                                 let mut new_interpreter = Interpreter::new(
@@ -6270,25 +6776,22 @@ impl Interpreter {
         }
     
         fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
-            u64::from_str_radix(s, base)
-                .map_err(|_| ())?
-                .try_into()
-                .map(Int::from_i64)
-                .or_else(|_| Int::from_str(&s).map_err(|_| ()))
-        }
+            let val = usize::from_str_radix(s, base).map_err(|_| ())?;
+            Int::from_str(&val.to_string()).map_err(|_| ())
+        }        
     
         let result = if s.starts_with("0b") || s.starts_with("0B") {
             parse_int_with_base(&s[2..], 2)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid binary integer format"))
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Binary integer literal too large for usize"))
         } else if s.starts_with("0o") || s.starts_with("0O") {
             parse_int_with_base(&s[2..], 8)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid octal integer format"))
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Octal integer literal too large for usize"))
         } else if s.starts_with("0x") || s.starts_with("0X") {
             parse_int_with_base(&s[2..], 16)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid hex integer format"))
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Hex integer literal too large for usize"))            
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
             let f = match Float::from_str(s) {
                 Ok(f) => f,
@@ -6392,7 +6895,7 @@ impl Interpreter {
                         
                                         debug_log(&format!("Generated f-string tokens: {:?}", filtered), &self.config, Some(self.use_colors));
                                         
-                                        let parsed = match Parser::new(tokens, self.use_colors).parse_safe() {
+                                        let parsed = match Parser::new(tokens).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
                                                 return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));

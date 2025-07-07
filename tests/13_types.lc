@@ -58,7 +58,7 @@ assert_eq!(t[0], 1)
 // auto types
 r: auto = 42
 assert_eq!(r, 42)
-assert_eq!(type(r), "int")
+assert_eq!(type_of(r), "int")
 
 
 // pointer types
@@ -67,7 +67,7 @@ assert_eq!(*k, 42)
 (*k) = 69
 assert_eq!(k, &69)
 assert_eq!(*k, 69)
-assert_eq!(type(k), "&int")
+assert_eq!(type_of(k), "&int")
 
 // maybe types
 m: ?int = *k
@@ -114,3 +114,13 @@ assert_eq!(42 as ?str, "42")
 
 assert_eq!(42 as &int, &42)
 assert_eq!("Hello" as &str, &"Hello")
+
+// custom types
+type PositiveInt[i] = int where (i > 0)
+assert_err!(-1 as PositiveInt)
+type NonEmptyList[l] = list where (len(l) > 0)
+assert_err!([] as NonEmptyList)
+
+type i32[i] = int where (i >= -((1 << 31) - 1), i <= ((1 << 31) - 1))
+assert_eq!(42 as i32, 42)
+assert_err!(1 << 31 as i32)

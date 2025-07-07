@@ -5,6 +5,7 @@ use crate::env::runtime::objects::Object;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{format_float, format_int};
 use crate::env::runtime::tokens::Location;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::fmt;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
@@ -446,13 +447,13 @@ impl Value {
             _ => false,
         }
     }
-    pub fn convert_to_hashmap(&self) -> Option<std::collections::HashMap<String, Value>> {
+    pub fn convert_to_hashmap(&self) -> Option<HashMap<String, Value>> {
         match self {
             Value::Map { keys, values } => {
                 if keys.len() != values.len() {
                     return None;
                 }
-                let mut map = std::collections::HashMap::new();
+                let mut map = HashMap::new();
                 for (key, value) in keys.iter().zip(values.iter()) {
                     if let Value::String(s) = key {
                         map.insert(s.clone(), value.clone());
@@ -467,6 +468,29 @@ impl Value {
     }
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
+    }
+    pub fn insert_into_map(&mut self, key: Value, value: Value) {
+        if let Value::Map { keys, values } = self {
+            if let Some(pos) = keys.iter().position(|k| k == &key) {
+                values[pos] = value;
+            } else {
+                keys.push(key);
+                values.push(value);
+            }
+        } else {
+            *self = Value::Map {
+                keys: vec![key],
+                values: vec![value],
+            };
+        }
+    }    
+    pub fn map_get(&self, key: &Value) -> Option<Value> {
+        if let Value::Map { keys, values } = self {
+            if let Some(index) = keys.iter().position(|k| k == key) {
+                return Some(values[index].clone());
+            }
+        }
+        None
     }
 }
 

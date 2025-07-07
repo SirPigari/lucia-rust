@@ -529,7 +529,7 @@ pub fn help_fn() -> Function {
 
 pub fn type_fn() -> Function {
     Function::Native(Arc::new(NativeFunction::new(
-        "type",
+        "type_of",
         type_name,
         vec![
             Parameter::positional("obj", "any"),

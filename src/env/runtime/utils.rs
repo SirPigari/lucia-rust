@@ -635,6 +635,18 @@ pub fn format_type(value: &Value) -> String {
                     }
                 }
 
+                Some("new") => {
+                    if let Some(b) = map.get("base") {
+                        let val = format_type(b);
+                        if let Some(Value::String(name)) = map.get("name") {
+                            return format!("{}<{}>", name, val);
+                        }
+                        format!("new<{}>", val)
+                    } else {
+                        "unknown".to_string()
+                    }
+                }
+
                 _ => {
                     map.get("type").and_then(|v| as_str(*v)).unwrap_or("unknown").to_string()
                 }

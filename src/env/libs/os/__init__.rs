@@ -5,7 +5,7 @@ use crate::env::runtime::types::Int;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
-use crate::{insert_native_fn};
+use crate::{insert_native_fn, insert_native_var};
 use std::env::consts;
 use sys_info;
 
@@ -253,6 +253,25 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         panic_handler,
         vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())],
         "void"
+    );
+
+    insert_native_var!(
+        map,
+        "word_size",
+        Value::Int(Int::from_i64(std::mem::size_of::<usize>() as i64)),
+        "int"
+    );
+    insert_native_var!(
+        map,
+        "pointer_size",
+        Value::Int(Int::from_i64(std::mem::size_of::<*const ()>() as i64)),
+        "int"
+    );
+    insert_native_var!(
+        map,
+        "arch",
+        Value::String(consts::ARCH.to_string()),
+        "str"
     );
 
     map
