@@ -1,7 +1,7 @@
-# Lucia 2.0.0 (Rust Edition)
+<img src="src/env/assets/logo_lucia.png" alt="Lucia logo" style="height: 180px;">
 
-**Lucia** is a simple and lightweight programming language, now being rewritten in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>  
-Inspired by **Python**, **Lua**, and just a touch of **Java**.
+**Lucia** is a simple programming language, written <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom;"> Rust</a>  
+with syntax inspired by *Python*, *Lua* and *Kotlin*
 
 ---
 
@@ -14,18 +14,48 @@ Inspired by **Python**, **Lua**, and just a touch of **Java**.
 
 ## Why Lucia?
 
-Lucia is designed to be a clean and expressive scripting language that’s easy to pick up, yet powerful enough for real projects.
-It combines simplicity with speed, letting you write code quickly without sacrificing performance or safety.
+Lucia is built to be clean, expressive, and simple to learn —  
+but with enough depth to handle serious scripting needs.  
+
+It's designed for speed and safety, without sacrificing elegance.
 
 ---
 
 ## Features
 
-- Clean, easy-to-read syntax inspired by Python and Lua  
+- Clean, easy-to-read syntax inspired by Python and Lua (Kotlin too)  
+- Static types  
 - Entirely written in Rust for reliability and speed  
 - Designed to run efficiently across all major platforms  
-- Beginner-friendly, with room to grow into advanced use cases  
+- Beginner-friendly, while allowing advanced usage  
+- Integrated package manager [**Lym**](https://github.com/SirPigari/lym)  
 - Open source under GPLv3  
+
+---
+
+## Documentation
+
+---
+
+- [Getting started](src/env/Docs/getting-started.md)
+- [Installation guide](src/env/Docs/installation-guide.md)
+- [Config guide](src/env/Docs/config-guide.md)
+- [Syntax](src/env/Docs/language-syntax.md)
+- [Standard libraries API](src/env/Docs/standart-libs.md)
+- [Versioning](src/env/Docs/versioning.md)
+
+---
+
+## Support the Project
+
+[![Buy me coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-Donate-pink?logo=buy-me-a-coffee&logoColor=pink)](https://coff.ee/sirpigari)
+
+If you don't want to donate, but still want to help:
+
+- Star the repository  
+- Contribute to the codebase  
+- Report issues or suggest features  
+- Share the project with others
 
 ---
 
@@ -37,33 +67,26 @@ It combines simplicity with speed, letting you write code quickly without sacrif
 
 ---
 
-## Getting Started
-
-For installation instructions and example code, see:  
-[`src/env/Docs/getting-started.md`](src/env/Docs/getting-started.md)
-
----
-
 ## Platform Support
 
-Runs on:
+Tested on:
 
-- ![Windows](https://img.shields.io/badge/Windows-Supported-blue?logo=windows)  
+- ![Windows](https://img.shields.io/badge/Windows-Supported-blue?logo=windows&logoColor=white)  
 - ![macOS](https://img.shields.io/badge/macOS-Supported-lightgrey?logo=apple)  
-- ![Ubuntu](https://img.shields.io/badge/Ubuntu-Supported-E95420?logo=ubuntu&logoColor=white)  
+- ![Ubuntu Linux](https://img.shields.io/badge/Ubuntu_Linux-Supported-E95420?logo=ubuntu&logoColor=white)  
 - ![Arch Linux](https://img.shields.io/badge/Arch_Linux-Supported-1793D1?logo=arch-linux&logoColor=white)  
 
 ---
 
 ## Community
 
-Join us on Discord: [discord.gg/placeholder-rn]()
+Join us on Discord: [discord.gg/placeholder-rn](https://discord.gg/placeholder-rn)
 
 ---
 
-## Stable Release (Python version)
+## Legacy
 
-Check out the original, fully functional Python version here:  
+Check out the legacy (Python) version of Lucia:
 [SirPigari/lucia](https://github.com/SirPigari/lucia)
 
 ---
