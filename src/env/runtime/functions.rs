@@ -165,6 +165,7 @@ impl Callable for NativeMethod {
 // -------------------------------
 
 #[derive(Clone, PartialEq, Hash, PartialOrd)]
+#[allow(dead_code)]
 pub struct UserFunctionMethod {
     pub meta: FunctionMetadata,
     pub body: Vec<Statement>,

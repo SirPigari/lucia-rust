@@ -10,7 +10,7 @@ use std::{
 };
 use colored::*;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc, Local, TimeZone};
+use chrono::{DateTime, Utc, Local};
 use sys_info;
 
 #[derive(Deserialize, Serialize)]
