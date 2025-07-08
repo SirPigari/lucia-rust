@@ -5,12 +5,6 @@
 
 ---
 
-**Lucia** is designed to be clean, expressive, and simple to learn —  
-yet powerful and fast enough for serious scripting. It draws inspiration from *Python*, *Lua*, and *Kotlin*,  
-and is implemented entirely in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom;"> Rust</a> for performance and safety.
-
----
-
 [![Linux](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-linux.yml)
 [![macOS](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-macos.yml)
 [![Windows](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml/badge.svg?branch=main)](https://github.com/SirPigari/lucia-rust/actions/workflows/test-windows.yml)
@@ -20,7 +14,7 @@ and is implemented entirely in <a href="https://www.rust-lang.org/"><img src="ht
 
 ## Why Lucia?
 
-Lucia is built to be clean, expressive, and simple to learn —  
+Lucia is built to be clean, expressive, and simple to learn -  
 but with enough depth to handle serious scripting needs.  
 
 It's designed for speed and safety, without sacrificing elegance.
