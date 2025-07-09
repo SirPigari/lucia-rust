@@ -87,10 +87,7 @@ impl Interpreter {
                 ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("iterables".to_owned(), Value::Map { keys: vec![], values: vec![] }),
-                ("types".to_owned(), Value::Map {
-                    keys: vec![],
-                    values: vec![]
-                }),
+                ("types".to_owned(), Value::Map { keys: vec![], values: vec![] }),
             ]),
             defer_stack: vec![],
             scope: "main".to_owned(),
