@@ -31,6 +31,6 @@ fun next(n: int, mutable base: list) -> list:
 end
 
 for (i in [0..n]):
-    base = next(n, base)
     display(n)
+    base = next(n, base)
 end

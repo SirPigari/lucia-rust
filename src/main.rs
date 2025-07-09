@@ -540,16 +540,22 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
 
     if respect_existing_moded && config_path.exists() {
         let config_data = fs::read_to_string(&config_path)?;
-        let mut config: Config = serde_json::from_str(&config_data)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to deserialize config"))?;
+        let config_res: Result<Config, _> = serde_json::from_str(&config_data);
 
-        if config.moded {
-            config.home_dir = env_path_str;
-            let config_str = serde_json::to_string_pretty(&config)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
-            fs::write(&config_path, config_str)
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write config file"))?;
-            return Ok(());
+        match config_res {
+            Ok(mut config) => {
+                if config.moded {
+                    config.home_dir = env_path_str;
+                    let config_str = serde_json::to_string_pretty(&config)
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
+                    fs::write(&config_path, config_str)
+                        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write config file"))?;
+                    return Ok(());
+                }
+            }
+            Err(_) => {
+                eprintln!("Warning: Failed to deserialize config, overwriting with default config.");
+            }
         }
     }
 
@@ -603,18 +609,22 @@ fn lucia(args: Vec<String>) {
             exit(1);
         });
 
-    let mut config_path = exe_path
+        let mut config_path = exe_path
         .parent()
         .map(|p| p.join("..").join("config.json"))
         .ok_or_else(|| {
             eprintln!("Failed to resolve parent of executable path.");
             exit(1);
         })
-        .and_then(|p| p.canonicalize().or_else(|e| {
-            eprintln!("Failed to canonicalize config path: {}", e);
-            exit(1);
-        }))
         .unwrap();
+    
+    if !config_path.exists() {
+        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
+        if let Err(e) = std::fs::write(&config_path, "{}") {
+            eprintln!("Failed to create empty config file: {}", e);
+            exit(1);
+        }
+    }    
 
     let activate_flag = args.contains(&"--activate".to_string());
     let no_color_flag = args.contains(&"--no-color".to_string());

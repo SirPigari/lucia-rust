@@ -217,26 +217,32 @@ impl Interpreter {
 
     // i personally hate this function
     fn check_type(&mut self, value: &Value, expected: &Value, error: bool) -> bool {
-        let valid_types = VALID_TYPES.to_vec();
-        let mut types_mapping = HashMap::new();
-        types_mapping.insert("void", "void");
-        types_mapping.insert("any", "any");
-        types_mapping.insert("float", "float");
-        types_mapping.insert("method", "function");
-        types_mapping.insert("int", "int");
-        types_mapping.insert("bool", "bool");
-        types_mapping.insert("str", "str");
-        types_mapping.insert("list", "list");
-        types_mapping.insert("map", "map");
-        types_mapping.insert("function", "function");
-        types_mapping.insert("bytes", "bytes");
-        types_mapping.insert("auto", "any");
-
+        static TYPES_MAPPING: once_cell::sync::Lazy<std::collections::HashMap<&'static str, &'static str>> = once_cell::sync::Lazy::new(|| {
+            let mut m = std::collections::HashMap::new();
+            m.insert("void", "void");
+            m.insert("any", "any");
+            m.insert("float", "float");
+            m.insert("method", "function");
+            m.insert("int", "int");
+            m.insert("bool", "bool");
+            m.insert("str", "str");
+            m.insert("list", "list");
+            m.insert("map", "map");
+            m.insert("function", "function");
+            m.insert("bytes", "bytes");
+            m.insert("auto", "any");
+            m
+        });
+    
+        let mut types_mapping = TYPES_MAPPING.clone();
+    
         for obj in self.variables.values() {
             if let Value::Module(obj, _) = &obj.value {
                 types_mapping.insert(&obj.name(), "object");
             }
         }
+    
+        let valid_types = &VALID_TYPES;
     
         if let Value::String(s) = expected {
             if s.trim_start().starts_with('{') {
@@ -271,17 +277,16 @@ impl Interpreter {
                     _ => break,
                 }
             }
-    
-            let rem: String = chars.collect();
-            (is_ref, is_maybe, rem)
+            (is_ref, is_maybe, chars.collect())
         }
     
         if let Value::String(type_str) = expected {
             if value.type_name() == *type_str {
                 return true;
             }
-
+    
             let (is_ref_expected, is_maybe, expected_base) = split_type_prefix(type_str);
+    
             if is_maybe && value.type_name() == "void" {
                 return true;
             }
@@ -294,7 +299,6 @@ impl Interpreter {
                         return true;
                     }
                 }
-    
                 if error {
                     self.raise(
                         "TypeError",
@@ -307,10 +311,12 @@ impl Interpreter {
             let actual_type_str = value.type_name();
             let normalized_actual = types_mapping
                 .get(actual_type_str.as_str())
-                .map_or(actual_type_str.as_str(), |v| *v);
+                .copied()
+                .unwrap_or(actual_type_str.as_str());
             let normalized_expected = types_mapping
                 .get(expected_base.as_str())
-                .map_or(to_static(expected_base), |v| v);
+                .copied()
+                .unwrap_or_else(|| to_static(expected_base));
     
             let is_ref_actual = normalized_actual.starts_with('&');
     
@@ -329,7 +335,7 @@ impl Interpreter {
             }
     
             if !valid_types.contains(&normalized_expected) || !valid_types.contains(&normalized_actual) {
-                return self._handle_invalid_type(normalized_expected, valid_types);
+                return self._handle_invalid_type(normalized_expected, valid_types.to_vec());
             }
     
             if normalized_actual == "int" && normalized_expected == "float" && !is_ref_expected {
@@ -348,119 +354,27 @@ impl Interpreter {
     
             return true;
         } else if let Value::Map { keys, values } = expected {
-            let expected_hashmap: HashMap<_, _> =
+            let expected_hashmap: std::collections::HashMap<_, _> =
                 keys.iter().cloned().zip(values.iter().cloned()).collect();
     
-            let type_kind = expected_hashmap.get(&Value::String("type_kind".to_string()));
-            match type_kind {
+            match expected_hashmap.get(&Value::String("type_kind".to_string())) {
                 Some(Value::String(kind)) if kind == "function" => {
-                    if let Value::Function(_func) = value {
-                        // TODO: fix function type checking
+                    if let Value::Function(_) = value {
+                        // TODO: Check function signature
                         return true;
-                    //     let metadata = func.metadata();
-                
-                    //     if metadata.is_native {
-                    //         // native functions are accepted without further checks
-                    //         return true;
-                    //     }
-                
-                    //     // extract expected parameters and return type from expected type map
-                    //     let elements = expected_hashmap.get(&Value::String("elements".to_string()));
-                    //     let return_type = expected_hashmap.get(&Value::String("return_type".to_string()));
-                    //     let mut status = true;
-                
-                    //     // expected parameter types
-                    //     let elements_vec = match elements {
-                    //         Some(Value::List(e)) => e,
-                    //         _ => {
-                    //             self.raise("TypeError", "Expected a list for 'elements' in function type");
-                    //             return false;
-                    //         }
-                    //     };
-                
-                    //     // check each parameter in function metadata against expected parameter type(s)
-                    //     if elements_vec.len() == 1 {
-                    //         let expected_param_type = elements_vec.get(0).unwrap();
-                
-                    //         for param in metadata.parameters.iter() {
-                    //             if !is_type_equal(param.ty.clone(), expected_param_type.clone()) {
-                    //                 if error {
-                    //                     self.raise("TypeError", &format!(
-                    //                         "Parameter '{}' expected type '{}', got '{}'",
-                    //                         param.name,
-                    //                         expected_param_type.to_string(),
-                    //                         param.ty.to_string()
-                    //                     ));
-                    //                 }
-                    //                 status = false;
-                    //             }
-                    //         }
-                    //     } else if elements_vec.len() == metadata.parameters.len() {
-                    //         // when expected has same count as params, compare one-to-one
-                    //         for (param, expected_type) in metadata.parameters.iter().zip(elements_vec.iter()) {
-                    //             if !is_type_equal(param.ty.clone(), expected_type.clone()) {
-                    //                 if error {
-                    //                     self.raise("TypeError", &format!(
-                    //                         "Parameter '{}' expected type '{}', got '{}'",
-                    //                         param.name,
-                    //                         expected_type.to_string(),
-                    //                         param.ty.to_string()
-                    //                     ));
-                    //                 }
-                    //                 status = false;
-                    //             }
-                    //         }
-                    //     } else {
-                    //         if error {
-                    //             self.raise("TypeError", "Parameter count mismatch in function type");
-                    //         }
-                    //         return false;
-                    //     }
-                
-                    //     // check return type
-                    //     if let Some(expected_ret_type) = return_type {
-                    //         let matches = match metadata.return_type.clone() {
-                    //             Value::String(s) => {
-                    //                 let expected_default = get_type_default(&s);
-                    //                 self.check_type(&expected_default, &Value::String(s.clone()), false)
-                    //             }
-                    //             _ => self.check_type(expected_ret_type, &metadata.return_type, false),
-                    //         };
-                
-                    //         if !matches {
-                    //             if error {
-                    //                 self.raise("TypeError", &format!(
-                    //                     "Function '{}' expected return type '{}', got '{}'",
-                    //                     metadata.name,
-                    //                     expected_ret_type.to_string(),
-                    //                     metadata.return_type.to_string()
-                    //                 ));
-                    //             }
-                    //             status = false;
-                    //         }
-                    //     } else {
-                    //         if error {
-                    //             self.raise("TypeError", "Missing 'return_type' in expected function type");
-                    //         }
-                    //         status = false;
-                    //     }
-                
-                    //     return status;
-                    } else {
-                        if error {
-                            self.raise("TypeError", &format!("Expected type 'function', got '{}'", value.to_string()));
-                        }
-                        return false;
                     }
+                    if error {
+                        self.raise("TypeError", &format!("Expected type 'function', got '{}'", value.to_string()));
+                    }
+                    return false;
                 }
                 Some(Value::String(kind)) if kind == "indexed" => {
-                    if let Value::List(_) | Value::String(_) | Value::Bytes(_) = value {
+                    if matches!(value, Value::List(_) | Value::String(_) | Value::Bytes(_)) {
                         return true;
                     }
                 }
                 Some(Value::String(kind)) if kind == "union" => {
                     let types = expected_hashmap.get(&Value::String("types".to_string()));
-                
                     for ty in types.unwrap_or(&Value::List(vec![])).iter() {
                         if self.check_type(value, &ty, false) {
                             return true;
@@ -485,21 +399,20 @@ impl Interpreter {
                     let vars = match expected_hashmap.get(&Value::String("variables".to_string())) {
                         Some(Value::List(vars)) => vars,
                         _ => {
-                            self.raise("TypeError", "Expected 'variables' to be a map in 'new' type");
+                            self.raise("TypeError", "Expected 'variables' to be a list in 'new' type");
                             return false;
                         }
                     };
                     let conds = match expected_hashmap.get(&Value::String("conditions".to_string())) {
                         Some(Value::List(conds)) => conds.iter()
                             .map(|v| v.convert_to_statement())
-                            .collect::<Vec<Statement>>(),
+                            .collect::<Vec<_>>(),
                         _ => {
                             self.raise("TypeError", "Expected 'conditions' to be a list in 'new' type");
                             return false;
                         }
                     };
-
-
+    
                     if !self.check_type(value, base_type, false) {
                         if error {
                             self.raise("TypeError", &format!(
@@ -511,7 +424,7 @@ impl Interpreter {
                         }
                         return false;
                     }
-                    
+    
                     let mut new_interpreter = Interpreter::new(
                         self.config.clone(),
                         self.use_colors,
@@ -521,7 +434,7 @@ impl Interpreter {
                         &[],
                     );
                     new_interpreter.set_scope(&format!("{}+scope.{}", self.scope, base_type));
-                    if vars.len() > 0 {
+                    if !vars.is_empty() {
                         new_interpreter.variables.insert(
                             vars[0].to_string(),
                             Variable::new(
@@ -534,25 +447,20 @@ impl Interpreter {
                             ),
                         );
                     }
-                    let mut status: (bool, usize) = (true, 0);
+    
                     for (i, cond) in conds.iter().enumerate() {
                         new_interpreter.current_statement = Some(cond.clone());
-                        let result = new_interpreter.evaluate(cond.clone());
-                        if !result.is_truthy() {
-                            status = (false, i + 1);
-                            break;
+                        if !new_interpreter.evaluate(cond.clone()).is_truthy() {
+                            self.raise("TypeError", &format!(
+                                "Conditions for type '{}' not met condition #{}",
+                                type_name,
+                                i + 1
+                            ));
+                            return false;
                         }
-                    }                    
-
-                    if !status.0 {
-                        self.raise("TypeError", &format!(
-                            "Conditions for type '{}' not met condition #{}",
-                            type_name,
-                            status.1
-                        ));
-                        return false;
                     }
-                    return true
+    
+                    return true;
                 }
                 _ => {
                     self.raise("TypeError", &format!(
@@ -875,46 +783,52 @@ impl Interpreter {
         self.state = "normal".to_owned();
         self.stack.push((
             self.file_path.clone(),
-            self.get_location_from_current_statement()
+            self.get_location_from_current_statement(),
         ));
+    
         for statement in statements {
             if let Some(err) = &self.err {
-                println!("Error: {}", err.msg);
                 return Err(err.clone());
             }
-
-            if let Statement::Statement { .. } = statement.clone() {
-                self.current_statement = Some(statement.clone());
-
-                let value = self.evaluate(statement.clone());
-                if let Value::Error(err_type, err_msg, ref referr) = value {
-                    if let Some(referr) = referr {
-                        self.raise_with_ref(err_type, &err_msg, referr.clone());
-                    } else {
-                        self.raise(err_type, &err_msg);
-                    }
+    
+            let stmt = match statement {
+                Statement::Statement { .. } => statement,
+                _ => {
+                    return Err(Error::new(
+                        "InvalidStatement",
+                        "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
+                        &self.file_path.to_string(),
+                    ));
                 }
-                if self.is_returning {
-                    return Ok(value.clone());
+            };
+    
+            self.current_statement = Some(stmt.clone());
+    
+            let value = self.evaluate(stmt);
+    
+            if let Value::Error(err_type, err_msg, referr) = &value {
+                if let Some(referr) = referr {
+                    self.raise_with_ref(err_type, &err_msg, referr.clone());
+                } else {
+                    self.raise(err_type, &err_msg);
                 }
-
-                if let Some(err) = &self.err {
-                    return Err(err.clone());
-                }
-
-                self.return_value = value.clone();
-            } else {
-                return Err(Error::new(
-                    "InvalidStatement",
-                    "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
-                    &self.file_path.to_string()
-                ));
             }
+    
+            if self.is_returning {
+                self.return_value = value;
+                return Ok(self.return_value.clone());
+            }
+    
+            if let Some(err) = &self.err {
+                return Err(err.clone());
+            }
+    
+            self.return_value = value;
         }
-
+    
         if deferable {
-            let old_state = self.state.clone();
-            self.state = "defer".to_owned();
+            let old_state = std::mem::replace(&mut self.state, "defer".to_owned());
+    
             if !self.defer_stack.is_empty() {
                 let defer_statements = self.defer_stack.concat();
                 for stmt in defer_statements {
@@ -922,11 +836,12 @@ impl Interpreter {
                     self.evaluate(self.current_statement.clone().unwrap());
                 }
             }
+    
             self.state = old_state;
         }
-
+    
         self.stack.pop();
-
+    
         Ok(self.return_value.clone())
     }
 
@@ -996,109 +911,93 @@ impl Interpreter {
     
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
-
+    
         if self.stack.len() + self.defer_stack.len() > self.config.recursion_limit {
             return self.raise("RecursionError", "Maximum recursion depth exceeded");
         }
     
-        if !self.variables.contains_key("_") {
-            self.variables.insert(
-                "_".to_string(),
-                Variable::new("_".to_string(), NULL.clone(), "any".to_string(), false, true, true),
-            );
-        }
-        
-        if !self.variables.contains_key("_err") {
-            self.variables.insert(
+        self.variables.entry("_".to_string()).or_insert_with(|| {
+            Variable::new("_".to_string(), NULL.clone(), "any".to_string(), false, true, true)
+        });
+    
+        self.variables.entry("_err".to_string()).or_insert_with(|| {
+            Variable::new(
                 "_err".to_string(),
-                Variable::new(
-                    "_err".to_string(),
-                    Value::Tuple(vec![]),
-                    "tuple".to_string(),
-                    false,
-                    true,
-                    true,
-                ),
-            );
-        }
-        
+                Value::Tuple(vec![]),
+                "tuple".to_string(),
+                false,
+                true,
+                true,
+            )
+        });
+    
         if self.err.is_some() {
             return NULL;
         }
     
-        let Statement::Statement { keys, values, .. } = statement else {
+        let Statement::Statement { keys, values, .. } = &statement else {
             return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
         };
-
-        if self.state == "break" {
-            return NULL;
-        } else if self.state == "continue" {
+    
+        if self.state == "break" || self.state == "continue" {
             return NULL;
         }
     
-        let statement: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+        let statement_map: HashMap<Value, Value> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
-        let result = match statement.get(&Value::String("type".to_string())) {
+        static KEY_TYPE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("type".into()));
+    
+        let result = match statement_map.get(&*KEY_TYPE) {
             Some(Value::String(t)) => match t.as_str() {
-                // Control flow
-                "IF" => self.handle_if(statement.clone()),
-                "FOR" => self.handle_for_loop(statement.clone()),
-                "WHILE" => self.handle_while(statement.clone()),
-                "TRY_CATCH" | "TRY" => self.handle_try(statement.clone()),
-                "THROW" => self.handle_throw(statement.clone()),
-                "FORGET" => self.handle_forget(statement.clone()),
-                "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement.clone()),
-                "DEFER" => self.handle_defer(statement.clone()),
-                "SCOPE" => self.handle_scope(statement.clone()),
-                "MATCH" => self.handle_match(statement.clone()),
-        
-                // Function related
-                "FUNCTION_DECLARATION" => self.handle_function_declaration(statement.clone()),
-                "RETURN" => self.handle_return(statement.clone()),
-        
-                // Imports
-                "IMPORT" => self.handle_import(statement.clone()),
-        
-                // Variables and assignment
-                "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement.clone()),
-                "VARIABLE" => self.handle_variable(statement.clone()),
-                "ASSIGNMENT" => self.handle_assignment(statement.clone()),
-                "UNPACK_ASSIGN" => self.handle_unpack_assignment(statement.clone()),
-        
-                // Primitive types
-                "NUMBER" => self.handle_number(statement.clone()),
-                "STRING" => self.handle_string(statement.clone()),
-                "BOOLEAN" => self.handle_boolean(statement.clone()),
-        
-                // Collections and data structures
-                "TUPLE" => self.handle_tuple(statement.clone()),
-                "MAP" => self.handle_map(statement.clone()),
-                "ITERABLE" => self.handle_iterable(statement.clone()),
-        
-                // Operations
-                "OPERATION" => self.handle_operation(statement.clone()),
-                "UNARY_OPERATION" => self.handle_unary_op(statement.clone()),
-                "COMPOUND_ASSIGN" => self.handle_compound_assignment(statement.clone()),
-        
-                // Calls and access
-                "CALL" => self.handle_call(statement.clone()),
-                "METHOD_CALL" => self.handle_method_call(statement.clone()),
-                "PROPERTY_ACCESS" => self.handle_property_access(statement.clone()),
-                "INDEX_ACCESS" => self.handle_index_access(statement.clone()),
-        
-                // Types
-                "TYPE" => self.handle_type(statement.clone()),
-                "TYPE_CONVERT" => self.handle_type_conversion(statement.clone()),
-                "TYPE_DECLARATION" => self.handle_type_declaration(statement.clone()),
-        
-                // Pointers
-                "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.handle_pointer(statement.clone()),
-        
+                "IF" => self.handle_if(statement_map),
+                "FOR" => self.handle_for_loop(statement_map),
+                "WHILE" => self.handle_while(statement_map),
+                "TRY_CATCH" | "TRY" => self.handle_try(statement_map),
+                "THROW" => self.handle_throw(statement_map),
+                "FORGET" => self.handle_forget(statement_map),
+                "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement_map),
+                "DEFER" => self.handle_defer(statement_map),
+                "SCOPE" => self.handle_scope(statement_map),
+                "MATCH" => self.handle_match(statement_map),
+    
+                "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
+                "RETURN" => self.handle_return(statement_map),
+    
+                "IMPORT" => self.handle_import(statement_map),
+    
+                "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement_map),
+                "VARIABLE" => self.handle_variable(statement_map),
+                "ASSIGNMENT" => self.handle_assignment(statement_map),
+                "UNPACK_ASSIGN" => self.handle_unpack_assignment(statement_map),
+    
+                "NUMBER" => self.handle_number(statement_map),
+                "STRING" => self.handle_string(statement_map),
+                "BOOLEAN" => self.handle_boolean(statement_map),
+    
+                "TUPLE" => self.handle_tuple(statement_map),
+                "MAP" => self.handle_map(statement_map),
+                "ITERABLE" => self.handle_iterable(statement_map),
+    
+                "OPERATION" => self.handle_operation(statement_map),
+                "UNARY_OPERATION" => self.handle_unary_op(statement_map),
+                "COMPOUND_ASSIGN" => self.handle_compound_assignment(statement_map),
+    
+                "CALL" => self.handle_call(statement_map),
+                "METHOD_CALL" => self.handle_method_call(statement_map),
+                "PROPERTY_ACCESS" => self.handle_property_access(statement_map),
+                "INDEX_ACCESS" => self.handle_index_access(statement_map),
+    
+                "TYPE" => self.handle_type(statement_map),
+                "TYPE_CONVERT" => self.handle_type_conversion(statement_map),
+                "TYPE_DECLARATION" => self.handle_type_declaration(statement_map),
+    
+                "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.handle_pointer(statement_map),
+    
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         };
-        
+    
         if let Some(err) = self.err.clone() {
             let tuple = Value::Tuple(vec![
                 Value::String(err.error_type),
@@ -1116,13 +1015,13 @@ impl Interpreter {
     
             return NULL;
         }
-        
+    
         if result != NULL {
             if let Some(var) = self.variables.get_mut("_") {
                 var.set_value(result.clone());
             }
         }
-        
+    
         result
     }
 
@@ -4445,7 +4344,11 @@ impl Interpreter {
     }
     
     fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let iterable = match statement.get(&Value::String("iterable".to_string())) {
+        static KEY_ITERABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("iterable".into()));
+        static KEY_BODY: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("body".into()));
+        static KEY_VARIABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("variable".into()));
+    
+        let iterable = match statement.get(&*KEY_ITERABLE) {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'iterable' in for loop statement"),
         };
@@ -4455,20 +4358,22 @@ impl Interpreter {
             return self.raise("TypeError", "Expected an iterable for 'for' loop");
         }
     
-        let body = match statement.get(&Value::String("body".to_string())) {
+        let body = match statement.get(&*KEY_BODY) {
             Some(Value::List(body)) => body,
             _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
         };
     
-        let variable_name = match statement.get(&Value::String("variable".to_string())) {
+        let variable_name = match statement.get(&*KEY_VARIABLE) {
             Some(Value::String(name)) => name,
             _ => return self.raise("RuntimeError", "Expected a string for 'variable' in for loop statement"),
         };
     
+        let var_name_str = variable_name.as_str();
+    
         let mut result = NULL;
     
         for item in iterable_value.iter() {
-            let previous = self.variables.remove(variable_name);
+            let previous = self.variables.get(var_name_str).cloned();
     
             self.variables.insert(
                 variable_name.clone(),
@@ -4479,25 +4384,28 @@ impl Interpreter {
                 result = self.evaluate(stmt.convert_to_statement());
     
                 if self.err.is_some() {
-                    match previous.clone() {
-                        Some(var) => { self.variables.insert(variable_name.clone(), var); },
-                        None => { self.variables.remove(variable_name); },
+                    if let Some(var) = previous {
+                        self.variables.insert(variable_name.clone(), var);
+                    } else {
+                        self.variables.remove(variable_name);
                     }
                     return NULL;
                 }
     
                 if self.is_returning {
-                    match previous.clone() {
-                        Some(var) => { self.variables.insert(variable_name.clone(), var); },
-                        None => { self.variables.remove(variable_name); },
+                    if let Some(var) = previous {
+                        self.variables.insert(variable_name.clone(), var);
+                    } else {
+                        self.variables.remove(variable_name);
                     }
                     return result;
                 }
             }
     
-            match previous {
-                Some(var) => { self.variables.insert(variable_name.clone(), var); },
-                None => { self.variables.remove(variable_name); },
+            if let Some(var) = previous {
+                self.variables.insert(variable_name.clone(), var);
+            } else {
+                self.variables.remove(variable_name);
             }
     
             match self.state.as_str() {

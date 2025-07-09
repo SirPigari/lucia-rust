@@ -1,0 +1,37 @@
+#config debug = false
+
+// Sierpiński triangle using Rule 90 in Lucia
+// made by Markofwitch 2025, the developer of Lucia
+
+rows: int = 64
+cols: int = rows * 2 + 1
+
+base: list = array(cols, 0)
+base[(cols / 2) as int] = 1
+
+fun display(base: list):
+    for (i in [0..len(base) - 1]):
+        if (base[i] == 1):
+            print("#", end="")
+        else:
+            print(".", end="")
+        end
+    end
+    print()
+end
+
+fun next_step(base: list) -> list:
+    n: int = len(base)
+    new_base: list = array(n, 0)
+    for (i in [1..n - 2]):
+        l: int = base[i - 1]
+        r: int = base[i + 1]
+        new_base[i] = (l xor r) as int
+    end
+    return (new_base)
+end
+
+for (i in [0..rows - 1]):
+    display(base)
+    base = next_step(base)
+end
