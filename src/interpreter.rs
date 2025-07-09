@@ -6547,7 +6547,9 @@ impl Interpreter {
                         Ok(a_float) => Value::Boolean(a_float <= b),
                         Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
                     }
-                }                
+                }
+                (Value::Float(a), Value::Float(b)) => Value::Boolean(a <= b),
+                (Value::String(a), Value::String(b)) => Value::Boolean(a <= b),
                 (a, b) => self.raise("TypeError", &format!("Cannot compare {} <= {}", a.type_name(), b.type_name())),
             },
             "&&" => Value::Boolean(left.is_truthy() && right.is_truthy()),
