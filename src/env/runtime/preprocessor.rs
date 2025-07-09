@@ -479,7 +479,7 @@ impl Preprocessor {
                                     &self.file_path,
                                 ))?;
 
-                                let lexer = Lexer::new(&content, to_static(self.file_path.clone()));
+                                let mut lexer = Lexer::new(&content, to_static(self.file_path.clone()), None);
                                 let mut toks = lexer.tokenize()
                                     .into_iter()
                                     .filter(|tok| tok.0 != "WHITESPACE")
@@ -507,7 +507,7 @@ impl Preprocessor {
                                 &self.file_path,
                             ))?;
 
-                            let lexer = Lexer::new(&content, to_static(self.file_path.clone()));
+                            let mut lexer = Lexer::new(&content, to_static(self.file_path.clone()), None);
                             let mut toks = lexer.tokenize()
                                 .into_iter()
                                 .filter(|tok| tok.0 != "WHITESPACE")
@@ -588,6 +588,40 @@ impl Preprocessor {
                         }
                     }
 
+                    "syntax" => {
+                        if i + 1 >= tokens.len() {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "#syntax requires a pattern and a replacement",
+                                &self.file_path,
+                            ));
+                        }
+
+                        let _pattern = &tokens[i].1;
+                        i += 1;
+
+                        if i >= tokens.len() || tokens[i].1 != "->" {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "Expected '->' after #syntax pattern",
+                                &self.file_path,
+                            ));
+                        }
+                        i += 1;
+
+                        if i >= tokens.len() || tokens[i].0 != "STRING" {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "#syntax requires a STRING replacement",
+                                &self.file_path,
+                            ));
+                        }
+
+                        let _replacement = tokens[i].1.clone();
+                        i += 1;
+                        continue;
+                    }
+
                     "[" | "!" => {
                         let is_negated = tokens[i - 1].1 == "!";
 
@@ -641,251 +675,253 @@ impl Preprocessor {
                         ));
                     }
                 }
-            } else if !skipping 
-                && i + 2 < tokens.len()
-                && matches!(tokens[i], Token(ref a, _, _) if a == "IDENTIFIER")
-                && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
-                && matches!(tokens[i + 2], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(") 
-            {
-                // macro_name!(args...)
-                // definitely not stolen from Rust
-                let macro_name = &tokens[i].1;
-                if let Some((param_names, body)) = self.macros.get(macro_name) {
-                    i += 3;
-                
-                    let mut paren_count = 1;
-                    let mut call_args_tokens = Vec::new();
-                
-                    while i < tokens.len() && paren_count > 0 {
-                        let token = &tokens[i];
-                        if token.0 == "SEPARATOR" {
-                            if token.1 == "(" {
-                                paren_count += 1;
-                            } else if token.1 == ")" {
-                                paren_count -= 1;
-                                if paren_count == 0 {
-                                    i += 1;
-                                    break;
+            } else {
+                if !skipping 
+                    && i + 2 < tokens.len()
+                    && matches!(tokens[i], Token(ref a, _, _) if a == "IDENTIFIER")
+                    && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
+                    && matches!(tokens[i + 2], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(") 
+                {
+                    // macro_name!(args...)
+                    // definitely not stolen from Rust
+                    let macro_name = &tokens[i].1;
+                    if let Some((param_names, body)) = self.macros.get(macro_name) {
+                        i += 3;
+                    
+                        let mut paren_count = 1;
+                        let mut call_args_tokens = Vec::new();
+                    
+                        while i < tokens.len() && paren_count > 0 {
+                            let token = &tokens[i];
+                            if token.0 == "SEPARATOR" {
+                                if token.1 == "(" {
+                                    paren_count += 1;
+                                } else if token.1 == ")" {
+                                    paren_count -= 1;
+                                    if paren_count == 0 {
+                                        i += 1;
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        if paren_count > 0 {
-                            call_args_tokens.push(token.clone());
-                        }
-                        i += 1;
-                    }
-                
-                    let mut args_values: Vec<Vec<Token>> = Vec::new();
-                    let mut current_arg = Vec::new();
-                    let mut nested_paren = 0;
-                
-                    for tok in call_args_tokens {
-                        let Token(ref a, ref b, _) = tok;
-                    
-                        if a == "SEPARATOR" && b == "," && nested_paren == 0 {
-                            args_values.push(current_arg);
-                            current_arg = Vec::new();
-                        } else {
-                            if a == "SEPARATOR" && b == "(" {
-                                nested_paren += 1;
-                            } else if a == "SEPARATOR" && b == ")" {
-                                nested_paren -= 1;
+                            if paren_count > 0 {
+                                call_args_tokens.push(token.clone());
                             }
-                            current_arg.push(tok);
+                            i += 1;
                         }
-                    }                    
-                    args_values.push(current_arg);
-                
-                    if args_values.len() == 1 && args_values[0].is_empty() {
-                        args_values.clear();
-                    }
-                
-                    let variadic_pos = param_names.iter().position(|(n, _)| n.ends_with("..."));
-                
-                    if let Some(pos) = variadic_pos {
-                        if args_values.len() < pos {
+                    
+                        let mut args_values: Vec<Vec<Token>> = Vec::new();
+                        let mut current_arg = Vec::new();
+                        let mut nested_paren = 0;
+                    
+                        for tok in call_args_tokens {
+                            let Token(ref a, ref b, _) = tok;
+                        
+                            if a == "SEPARATOR" && b == "," && nested_paren == 0 {
+                                args_values.push(current_arg);
+                                current_arg = Vec::new();
+                            } else {
+                                if a == "SEPARATOR" && b == "(" {
+                                    nested_paren += 1;
+                                } else if a == "SEPARATOR" && b == ")" {
+                                    nested_paren -= 1;
+                                }
+                                current_arg.push(tok);
+                            }
+                        }                    
+                        args_values.push(current_arg);
+                    
+                        if args_values.len() == 1 && args_values[0].is_empty() {
+                            args_values.clear();
+                        }
+                    
+                        let variadic_pos = param_names.iter().position(|(n, _)| n.ends_with("..."));
+                    
+                        if let Some(pos) = variadic_pos {
+                            if args_values.len() < pos {
+                                return Err(Error::new(
+                                    "PreprocessorError",
+                                    &format!(
+                                        "Macro {} expected at least {} arguments before variadic, got {}",
+                                        macro_name,
+                                        pos,
+                                        args_values.len()
+                                    ),
+                                    &self.file_path,
+                                ));
+                            }
+                        } else if args_values.len() > param_names.len() {
                             return Err(Error::new(
                                 "PreprocessorError",
                                 &format!(
-                                    "Macro {} expected at least {} arguments before variadic, got {}",
+                                    "Macro {} expected at most {} arguments, got {}",
                                     macro_name,
-                                    pos,
+                                    param_names.len(),
                                     args_values.len()
                                 ),
                                 &self.file_path,
                             ));
                         }
-                    } else if args_values.len() > param_names.len() {
-                        return Err(Error::new(
-                            "PreprocessorError",
-                            &format!(
-                                "Macro {} expected at most {} arguments, got {}",
-                                macro_name,
-                                param_names.len(),
-                                args_values.len()
-                            ),
-                            &self.file_path,
-                        ));
-                    }
-                
-                    let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::new();
-                
-                    for (idx, (name, default)) in param_names.iter().enumerate() {
-                        if Some(idx) == variadic_pos {
-                            let mut variadic_tokens = Vec::new();
-                            for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
-                                if vi != idx {
-                                    variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), None));
-                                }
-                                variadic_tokens.extend(rest_arg.clone());
-                            }
-                            let variadic_name = &name[..name.len() - 3];
-                            replacement_map.insert(variadic_name, variadic_tokens);
-                            break;
-                        } else {
-                            let value = if idx < args_values.len() {
-                                Some(args_values[idx].clone())
-                            } else {
-                                default.clone().map(|d| vec![d.clone()])
-                            };
                     
-                            if let Some(v) = value {
-                                replacement_map.insert(name.as_str(), v);
+                        let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::new();
+                    
+                        for (idx, (name, default)) in param_names.iter().enumerate() {
+                            if Some(idx) == variadic_pos {
+                                let mut variadic_tokens = Vec::new();
+                                for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
+                                    if vi != idx {
+                                        variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), None));
+                                    }
+                                    variadic_tokens.extend(rest_arg.clone());
+                                }
+                                let variadic_name = &name[..name.len() - 3];
+                                replacement_map.insert(variadic_name, variadic_tokens);
+                                break;
                             } else {
-                                return Err(Error::new(
-                                    "PreprocessorError",
-                                    &format!("Missing required macro argument ${}", name),
-                                    &self.file_path,
-                                ));
+                                let value = if idx < args_values.len() {
+                                    Some(args_values[idx].clone())
+                                } else {
+                                    default.clone().map(|d| vec![d.clone()])
+                                };
+                        
+                                if let Some(v) = value {
+                                    replacement_map.insert(name.as_str(), v);
+                                } else {
+                                    return Err(Error::new(
+                                        "PreprocessorError",
+                                        &format!("Missing required macro argument ${}", name),
+                                        &self.file_path,
+                                    ));
+                                }
                             }
-                        }
-                    }                    
-                
-                    let mut expanded_tokens = Vec::new();
-                    let mut body_i = 0;
-                
-                    while body_i < body.len() {
-                        let token = &body[body_i];
-                
-                        if token.0 == "OPERATOR" && token.1 == "$" {
-                            body_i += 1;
-                            if body_i >= body.len() {
-                                return Err(Error::new(
-                                    "PreprocessorError",
-                                    "Unexpected end of macro body after $",
-                                    &self.file_path,
-                                ));
-                            }
-
-                            let Token(a, b, _) = &body[body_i];
-                
-                            if a == "OPERATOR" && b == "!" {
+                        }                    
+                    
+                        let mut expanded_tokens = Vec::new();
+                        let mut body_i = 0;
+                    
+                        while body_i < body.len() {
+                            let token = &body[body_i];
+                    
+                            if token.0 == "OPERATOR" && token.1 == "$" {
                                 body_i += 1;
                                 if body_i >= body.len() {
                                     return Err(Error::new(
                                         "PreprocessorError",
-                                        "Expected identifier after $!",
+                                        "Unexpected end of macro body after $",
                                         &self.file_path,
                                     ));
                                 }
-                
-                                let next_token = &body[body_i];
-                                if next_token.0 != "IDENTIFIER" {
-                                    return Err(Error::new(
-                                        "PreprocessorError",
-                                        &format!("Expected IDENTIFIER after $!, got {}", next_token.0),
-                                        &self.file_path,
-                                    ));
-                                }
-                
-                                let arg_name = if next_token.1.ends_with("...") {
-                                    &next_token.1[..next_token.1.len() - 3]
+
+                                let Token(a, b, _) = &body[body_i];
+                    
+                                if a == "OPERATOR" && b == "!" {
+                                    body_i += 1;
+                                    if body_i >= body.len() {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            "Expected identifier after $!",
+                                            &self.file_path,
+                                        ));
+                                    }
+                    
+                                    let next_token = &body[body_i];
+                                    if next_token.0 != "IDENTIFIER" {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            &format!("Expected IDENTIFIER after $!, got {}", next_token.0),
+                                            &self.file_path,
+                                        ));
+                                    }
+                    
+                                    let arg_name = if next_token.1.ends_with("...") {
+                                        &next_token.1[..next_token.1.len() - 3]
+                                    } else {
+                                        next_token.1.as_str()
+                                    };
+                    
+                                    if let Some(replacement) = replacement_map.get(arg_name) {
+                                        let joined = replacement
+                                            .iter()
+                                            .map(|t| {
+                                                if t.0 == "STRING" {
+                                                    format!("\"{}\"", t.1)
+                                                } else {
+                                                    t.1.clone()
+                                                }
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join(" ");
+                    
+                                        let loc = token.2.clone().or(None);
+                                        expanded_tokens.push(Token(
+                                            "STRING".to_string(),
+                                            format!("\"{}\"", joined),
+                                            loc,
+                                        ));
+                                    } else {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            &format!("Unknown macro argument $!{}", next_token.1),
+                                            &self.file_path,
+                                        ));
+                                    }
+                    
                                 } else {
-                                    next_token.1.as_str()
-                                };
-                
-                                if let Some(replacement) = replacement_map.get(arg_name) {
-                                    let joined = replacement
-                                        .iter()
-                                        .map(|t| {
-                                            if t.0 == "STRING" {
-                                                format!("\"{}\"", t.1)
-                                            } else {
-                                                t.1.clone()
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(" ");
-                
-                                    let loc = token.2.clone().or(None);
-                                    expanded_tokens.push(Token(
-                                        "STRING".to_string(),
-                                        format!("\"{}\"", joined),
-                                        loc,
-                                    ));
-                                } else {
-                                    return Err(Error::new(
-                                        "PreprocessorError",
-                                        &format!("Unknown macro argument $!{}", next_token.1),
-                                        &self.file_path,
-                                    ));
+                                    let next_token = &body[body_i];
+                                    if next_token.0 != "IDENTIFIER" {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            &format!("Expected IDENTIFIER after $, got {}", next_token.0),
+                                            &self.file_path,
+                                        ));
+                                    }
+                    
+                                    if let Some(replacement) = replacement_map.get(next_token.1.as_str()) {
+                                        expanded_tokens.extend(replacement.clone());
+                                    } else {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            &format!("Unknown macro argument ${}", next_token.1),
+                                            &self.file_path,
+                                        ));
+                                    }
                                 }
-                
+                    
                             } else {
-                                let next_token = &body[body_i];
-                                if next_token.0 != "IDENTIFIER" {
-                                    return Err(Error::new(
-                                        "PreprocessorError",
-                                        &format!("Expected IDENTIFIER after $, got {}", next_token.0),
-                                        &self.file_path,
-                                    ));
-                                }
-                
-                                if let Some(replacement) = replacement_map.get(next_token.1.as_str()) {
-                                    expanded_tokens.extend(replacement.clone());
-                                } else {
-                                    return Err(Error::new(
-                                        "PreprocessorError",
-                                        &format!("Unknown macro argument ${}", next_token.1),
-                                        &self.file_path,
-                                    ));
-                                }
+                                expanded_tokens.push(token.clone());
                             }
-                
-                        } else {
-                            expanded_tokens.push(token.clone());
+                    
+                            body_i += 1;
                         }
+                    
+                        result.extend(expanded_tokens);
+                        continue;
+                    } else {
+                        return Err(Error::new(
+                            "PreprocessorError",
+                            &format!("Macro {} not found", macro_name),
+                            &self.file_path,
+                        ));
+                    }                             
+                } else if !skipping {
+                    let mut token = token.clone();
                 
-                        body_i += 1;
+                    let alias = self.aliases.iter()
+                        .find_map(|(k, v)| if k.0 == token.0 && k.1 == token.1 { Some(v) } else { None });
+                    
+                    if let Some(alias) = alias {
+                        token = alias.clone();
                     }
                 
-                    result.extend(expanded_tokens);
-                    continue;
-                } else {
-                    return Err(Error::new(
-                        "PreprocessorError",
-                        &format!("Macro {} not found", macro_name),
-                        &self.file_path,
-                    ));
-                }                             
-            } else if !skipping {
-                let mut token = token.clone();
-            
-                let alias = self.aliases.iter()
-                    .find_map(|(k, v)| if k.0 == token.0 && k.1 == token.1 { Some(v) } else { None });
-                
-                if let Some(alias) = alias {
-                    token = alias.clone();
-                }
-            
-                if token.0 == "IDENTIFIER" {
-                    if let Some(def) = self.defines.get(&token.1) {
-                        token = def.clone();
+                    if token.0 == "IDENTIFIER" {
+                        if let Some(def) = self.defines.get(&token.1) {
+                            token = def.clone();
+                        }
                     }
+                
+                    result.push(token);
                 }
-            
-                result.push(token);
-            }            
+            }
             
             i += 1;
         }

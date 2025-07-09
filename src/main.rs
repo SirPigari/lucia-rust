@@ -5,6 +5,7 @@ use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use serde::Serialize;
 use std::process::exit;
+use std::collections::HashMap;
 use colored::*;
 use sys_info;
 
@@ -77,7 +78,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::parser::Parser;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::lexer::Lexer;
+use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
 
 const VERSION: &str = env!("VERSION");
@@ -926,7 +927,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
         let file_content = fs::read_to_string(path).expect("Failed to read file");
-        let lexer = Lexer::new(&file_content, to_static(file_path.clone()));
+        let mut lexer = Lexer::new(&file_content, to_static(file_path.clone()), None);
         let raw_tokens = lexer.tokenize();
 
         let print_start_debug = debug_mode
@@ -1080,6 +1081,8 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
 
     let mut line_number = 0;
 
+    let mut syntax_rules: HashMap<String, SyntaxRule> = HashMap::new();
+
     loop {
         line_number += 1;
         print!(
@@ -1131,8 +1134,11 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             continue;
         }
 
-        let lexer = Lexer::new(&input, "<stdin>".into());
+        let mut lexer = Lexer::new(&input, "<stdin>".into(), Some(syntax_rules.clone()));
+
         let raw_tokens = lexer.tokenize();
+
+        syntax_rules = lexer.get_syntax_rules();
 
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 

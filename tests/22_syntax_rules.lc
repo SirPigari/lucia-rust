@@ -1,0 +1,25 @@
+#include <std/macros>
+
+#syntax echo: "@echo\\s+\"((?:\\\\.|[^\"\\\\])*)\"" -> "print(\"$1\")"
+
+@echo "hello world"
+
+// there is no built-in lambda but you can create one like this
+// there is <std/lambda> but it doesnt work rn
+#syntax lambda: "lambda\\s+([^:]+):\\s*(.+)" -> "mutable fun lambda ($1) -> any: return ($2) end"
+
+m: function = lambda x, y: x + y
+
+assert_eq!(m(1, 2), 3)
+
+q: function = lambda x, y: x * y
+
+assert_eq!(q(3, 4), 12)
+
+b: int = 80085
+#syntax ab: "\\ba\\b" -> "b"
+
+assert_eq!(b, 80085)
+
+#remsyntax ab
+assert_err!(a)

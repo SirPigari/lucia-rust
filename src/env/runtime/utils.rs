@@ -229,6 +229,13 @@ pub fn capitalize(s: &str) -> String {
     }
 }
 
+pub fn unescape_string_full(s: &str) -> Result<String, String> {
+    let wrapped = format!("\"{}\"", s);
+    serde_json::from_str::<String>(&wrapped)
+        .map_err(|e| format!("Failed to fully unescape: {}", e))
+}
+
+
 pub fn unescape_string(s: &str) -> Result<String, String> {
     if s.len() < 2 {
         return Err("String too short to unescape".into());
