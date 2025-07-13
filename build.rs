@@ -1,4 +1,4 @@
-use std::{env, fs, process::Command, path::Path, collections::HashSet};
+use std::{env, fs, process::Command, path::Path, collections::HashSet, io::BufRead};
 use sha2::{Digest, Sha256};
 use toml::Value;
 use uuid::{Builder, Uuid};
@@ -98,6 +98,76 @@ fn generate_uuid(git_hash: &str) -> Uuid {
     builder.into_uuid()
 }
 
+fn load_gitignore(manifest_dir: &Path) -> Vec<String> {
+    let gitignore_path = manifest_dir.join(".gitignore");
+    let mut ignore_patterns = Vec::new();
+    if let Ok(contents) = fs::read_to_string(gitignore_path) {
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            ignore_patterns.push(line.to_string());
+        }
+    }
+    ignore_patterns
+}
+
+fn is_ignored(path: &Path, manifest_dir: &Path, ignore_patterns: &[String]) -> bool {
+    if let Ok(rel_path) = path.strip_prefix(manifest_dir) {
+        let rel_path_str = rel_path.to_string_lossy();
+        for pattern in ignore_patterns {
+            if pattern.ends_with('/') {
+                if rel_path_str.starts_with(pattern) {
+                    return true;
+                }
+            } else {
+                if rel_path_str == *pattern || rel_path_str.starts_with(&(pattern.to_owned() + "/")) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: &[String]) -> (usize, usize) {
+    let mut lines = 0;
+    let mut files = 0;
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if is_ignored(&path, manifest_dir, ignore_patterns) {
+                continue;
+            }
+            if path.is_dir() {
+                let (sub_lines, sub_files) = count_lines(&path, exts, manifest_dir, ignore_patterns);
+                lines += sub_lines;
+                files += sub_files;
+            } else {
+                let should_count = if exts.is_empty() {
+                    true
+                } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    exts.contains(&ext)
+                } else {
+                    false
+                };
+
+                if should_count {
+                    if let Ok(file) = fs::File::open(&path) {
+                        let reader = std::io::BufReader::new(file);
+                        lines += reader.lines().count();
+                        files += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    (lines, files)
+}
+
 fn main() {
     println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu={CPU_OPT}");
 
@@ -174,6 +244,18 @@ fn main() {
     println!("cargo:rustc-env=REPO=https://github.com/SirPigari/lucia-rust");
     println!("cargo:rustc-env=BUILD_DATE={}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!("cargo:rustc-env=RUST_EDITION={edition}");
+
+    let path = Path::new(&manifest_dir);
+    let ignore_patterns = load_gitignore(path);
+    let (rust_lines, rust_files) = count_lines(path, &["rs"], path, &ignore_patterns);
+    let (lucia_lines, _) = count_lines(path, &["lc", "lucia"], path, &ignore_patterns);
+    let (total_lines, total_files) = count_lines(path, &["rs", "lc", "lucia", "yml"], path, &ignore_patterns);
+
+    println!("cargo:rustc-env=RUST_LOC={}", rust_lines);
+    println!("cargo:rustc-env=LUCIA_LOC={}", lucia_lines);
+    println!("cargo:rustc-env=TOTAL_LOC={}", total_lines);
+    println!("cargo:rustc-env=RUST_FILES={}", rust_files);
+    println!("cargo:rustc-env=TOTAL_FILES={}", total_files);
 
     const MESSAGES: &[&str] = &[
         "is this easter egg?",

@@ -700,6 +700,53 @@ fn lucia(args: Vec<String>) {
         exit(0);
     }
 
+    if args.contains(&"--info".to_string()) || args.contains(&"-i".to_string()) {
+        let info = get_build_info();
+        let binary_path = std_env::current_exe().unwrap();
+        let binary_size = fs::metadata(&binary_path).unwrap().len();
+    
+        let size_str = if binary_size >= 1024 * 1024 {
+            format!("{:.2} MB", binary_size as f64 / (1024.0 * 1024.0))
+        } else if binary_size >= 1024 {
+            format!("{:.2} KB", binary_size as f64 / 1024.0)
+        } else {
+            format!("{} B", binary_size)
+        };
+    
+        println!("{}", "Binary Info".bold().bright_cyan().underline());
+        println!("{:<35}{}", "Binary Path:".green(), binary_path.display());
+        println!("{:<35}{}", "Binary Size:".green(), size_str);
+        println!("{:<35}{}", "Target Triple:".green(), info.target);
+        println!("{:<35}{}", "Build Profile:".green(), info.profile);
+    
+        println!();
+        println!("{}", "Build Metadata".bold().bright_cyan().underline());
+        println!("{:<35}{}", "Name:".green(), info.name);
+        println!("{:<35}{}", "Version:".green(), info.version);
+        println!("{:<35}{}", "UUID:".green(), info.uuid);
+        println!("{:<35}{}", "Git Hash:".green(), info.git_hash);
+        println!("{:<35}{}", "File Hash:".green(), info.file_hash);
+        println!("{:<35}{}", "Build Date:".green(), info.build_date);
+        println!("{:<35}{}", "Repository:".green(), info.repository);
+    
+        println!();
+        println!("{}", "Environment".bold().bright_cyan().underline());
+        println!("{:<35}{}", "Rustc Version:".green(), info.rustc_version);
+        println!("{:<35}{}", "Rustc Channel:".green(), info.rustc_channel);
+        println!("{:<35}{}", "CI System:".green(), info.ci);
+        println!("{:<35}{}", "Dependencies:".green(), info.dependencies);
+
+        println!();
+        println!("{}", "Code Information".bold().bright_cyan().underline());
+        println!("{:<35}{}", "Rust lines of code:".green(), env!("RUST_LOC"));
+        println!("{:<35}{}", "Lucia lines of code:".green(), env!("LUCIA_LOC"));
+        println!("{:<35}{}", "Total lines of code:".green(), env!("TOTAL_LOC"));
+        println!("{:<35}{}", "Rust files:".green(), env!("RUST_FILES"));
+        println!("{:<35}{}", "Total files:".green(), env!("TOTAL_FILES"));
+        
+        exit(0);
+    }
+
     if config_arg.is_some() {
         let config_path_str = config_arg.unwrap().split('=').nth(1).unwrap_or("");
         if config_path_str.is_empty() {

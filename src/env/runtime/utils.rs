@@ -1115,7 +1115,6 @@ pub fn remove_loc_keys(value: &Value) -> Value {
     }
 }
 
-
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

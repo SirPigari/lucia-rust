@@ -1,6 +1,6 @@
 <div align="center">
   <img src="src/env/assets/logo_lucia.png" alt="Lucia logo" style="height: 180px;">
-  <p>A lightweight, expressive scripting language with Python-like syntax, built in Rust.</p>
+  <p>A lightweight, expressive scripting language with Python-like syntax, built in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>.</p>
 </div>
 
 ---
@@ -40,16 +40,18 @@ It's designed for speed and safety, without sacrificing elegance.
 - [Installation guide](src/env/Docs/installation-guide.md)
 - [Config guide](src/env/Docs/config-guide.md)
 - [Syntax](src/env/Docs/language-syntax.md)
+- [Examples](src/env/Docs/examples/)
 - [Standard libraries API](src/env/Docs/standart-libs.md)
 - [Versioning](src/env/Docs/versioning.md)
 - [Contributing guide](src/env/Docs/contributing.md)
 - [Changelog](src/env/Docs/changelog.md)
+- [Known issues/bugs](src/env/Docs/known-issues.md)
 
 ---
 
 ## Support the Project
 
-[![Buy me coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-Donate-pink?logo=buy-me-a-coffee&logoColor=pink)](https://coff.ee/sirpigari)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-Donate-pink?logo=buy-me-a-coffee&logoColor=pink)](https://coff.ee/sirpigari)
 
 If you don't want to donate, but still want to help:
 
@@ -64,7 +66,7 @@ If you don't want to donate, but still want to help:
 
 - [x] Rewrite basics to Rust
 - [ ] Make full support for any code from Python version
-- [ ] Develop a package manager for better module integration  
+- [x] Develop a package manager for better module integration (lym)  
 
 ---
 
