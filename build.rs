@@ -224,7 +224,7 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let cargo_toml_path = Path::new(&manifest_dir).join("Cargo.toml");
     let cargo_toml_str = fs::read_to_string(&cargo_toml_path).unwrap_or_default();
-    let cargo_toml: Value = cargo_toml_str.parse().unwrap_or(Value::Table(Default::default()));
+    let cargo_toml: Value = toml::from_str(&cargo_toml_str).unwrap_or(Value::Table(Default::default()));
     let edition = cargo_toml
         .get("package")
         .and_then(|pkg| pkg.get("edition"))

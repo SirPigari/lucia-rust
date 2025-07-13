@@ -1,112 +1,45 @@
+// VERY UNSAFE
+// Pointers are experimental and unsafe in Lucia. DO NOT USE THEM UNLESS YOU KNOW WHAT YOU ARE DOING.
+
 use std::collections::HashMap;
+use std::ffi::{CString, CStr};
+use std::ptr;
 use std::sync::Arc;
 
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use libc::{c_char, c_void, size_t};
+
+unsafe extern "C" {
+    pub fn malloc(size: size_t) -> *mut c_void;
+    pub fn free(ptr: *mut c_void);
+    pub fn calloc(nmemb: size_t, size: size_t) -> *mut c_void;
+    pub fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void;
+
+    pub fn strlen(s: *const c_char) -> size_t;
+    pub fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+    pub fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
+    pub fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
+
+    pub fn printf(format: *const c_char, ...) -> i32;
+    pub fn time(tloc: *mut i64) -> i64;
+    pub fn getenv(name: *const c_char) -> *mut c_char;
+    pub fn exit(status: i32) -> !;
+}
+
+use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::to_static;
-use crate::env::runtime::config::{Config, get_from_config};
-use std::env as std_env;
-use std::path::{PathBuf, Path};
-use once_cell::sync::Lazy;
-
+use crate::env::runtime::functions::{Function, NativeFunction};
 use crate::{insert_native_fn};
 
-use crate::env::libs::clib::_tcc;
+const MAX_ALLOC_SIZE: usize = 1 << 30; // 1 GB
 
-// This module provides a way to compile and run C code within the Lucia environment using the Tiny C Compiler (TCC).
-// It includes functions for compiling and executing C code, as well as basic C library functions.
-// Lucia version 2.0.0, module: clib@0.1.69
-
-static TCC_PATH: Lazy<String> = Lazy::new(|| {
-    let exe_path = std_env::current_exe().expect("Failed to get current exe path");
-    let exe_dir = exe_path.parent().expect("Failed to get exe directory");
-
-    let os_subdir = if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else {
-        "linux"
-    };
-
-    let exe_filename = if cfg!(target_os = "windows") {
-        let arch_dir = if cfg!(target_arch = "x86_64") {
-            "win64"
-        } else {
-            "win32"
-        };
-        format!("{}/tcc.exe", arch_dir)
-    } else if cfg!(target_os = "macos") {
-        "tcc".to_string()
-    } else {
-        "tcc".to_string()
-    };
-
-    let full_path: PathBuf = exe_dir.join("tcc").join(os_subdir).join(exe_filename);
-
-    full_path.canonicalize()
-        .unwrap_or(full_path)
-        .to_string_lossy()
-        .into_owned()
-});
-
-pub fn register() -> HashMap<String, Variable> {
-    let mut map = HashMap::new();
-
-    insert_native_fn!(
-        map,
-        "run",
-        run,
-        vec![Parameter::positional("code", "str")],
-        "any"
-    );
-
-    insert_native_fn!(
-        map,
-        "compile",
-        compile,
-        vec![
-            Parameter::positional("code", "str"),
-            Parameter::positional("file_path", "str")
-        ],
-        "void"
-    );
-
-    insert_native_fn!(
-        map,
-        "compile_shared",
-        compile_shared,
-        vec![
-            Parameter::positional("code", "str"),
-            Parameter::positional("file_path", "str")
-        ],
-        "void"
-    );
-
-    insert_native_fn!(
-        map,
-        "check",
-        check,
-        vec![Parameter::positional("code", "str")],
-        "bool"
-    );
-
-    insert_native_fn!(
-        map,
-        "export",
-        export,
-        vec![
-            Parameter::positional("file_path", "str"),
-            Parameter::positional("value", "str"),
-            Parameter::positional("expected_type", "str")
-        ],
-        "any"
-    );
-
-    map
-}
+// This module provides native FFI bindings to the C standard library (libc).
+// It exposes core libc functionality such as memory allocation, string manipulation,
+// and system-level utilities like time and environment access.
+// Lucia version 2.0.0, module: clib@0.2.0
 
 pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
@@ -117,103 +50,255 @@ pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
             to_static(file_path),
         ));
     }
-
-    let lib_path = &*TCC_PATH;
-
-    if !Path::new(lib_path).exists() {
-        return Err(Error::with_help(
-            "RuntimeError",
-            "TCC_PATH is not set or the path does not exist.",
-            &format!("Please ensure TCC_PATH points to the TCC shared library. Current path: {}", lib_path),
-            to_static(file_path),
-        ));
-    }
-
     Ok(())
 }
 
-// ------ Native functions ------
+pub fn register() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
 
-fn tcc_error(msg: &str) -> Value {
-    Value::Error("TccError", to_static(msg.to_string()), None)
+    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("text", "str")], "int");
+
+    insert_native_fn!(map, "malloc", malloc_fn, vec![Parameter::positional("size", "int")], "&any");
+    insert_native_fn!(map, "calloc", calloc_fn, vec![
+        Parameter::positional("count", "int"),
+        Parameter::positional("size", "int")
+    ], "&any");
+    insert_native_fn!(map, "realloc", realloc_fn, vec![
+        Parameter::positional("ptr", "&any"),
+        Parameter::positional("new_size", "int")
+    ], "&any");
+    insert_native_fn!(map, "free", free_fn, vec![Parameter::positional("ptr", "&any")], "void");
+
+    insert_native_fn!(map, "strlen", strlen_fn, vec![Parameter::positional("ptr", "&int")], "int");
+    insert_native_fn!(map, "strcpy", strcpy_fn, vec![
+        Parameter::positional("dst", "&int"),
+        Parameter::positional("src", "&int")
+    ], "&int");
+
+    insert_native_fn!(map, "strcmp", strcmp_fn, vec![
+        Parameter::positional("a", "&int"),
+        Parameter::positional("b", "&int")
+    ], "int");
+
+    insert_native_fn!(map, "memcpy", memcpy_fn, vec![
+        Parameter::positional("dst", "&any"),
+        Parameter::positional("src", "&any"),
+        Parameter::positional("size", "int")
+    ], "&any");
+
+    insert_native_fn!(map, "alloc_string", alloc_string_fn, vec![Parameter::positional("text", "str")], "&any");
+
+    insert_native_fn!(map, "time", time_fn, vec![], "int");
+    insert_native_fn!(map, "getenv", getenv_fn, vec![Parameter::positional("key", "str")], "str");
+
+    insert_native_fn!(map, "exit", exit_fn, vec![Parameter::positional("code", "int")], "void");
+
+    map
 }
 
-fn run(args: &HashMap<String, Value>) -> Value {
-    match args.get("code") {
-        Some(Value::String(code)) => {
-            match _tcc::run(&TCC_PATH, code) {
-                Ok(val) => val,
-                Err(e) => tcc_error(&format!("Failed to run code: {}", e)),
+fn printf_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("text") {
+        Some(Value::String(s)) => match CString::new(s.as_str()) {
+            Ok(cstr) => unsafe {
+                let written = printf(cstr.as_ptr());
+                Value::Int((written as i64).into())
+            },
+            Err(_) => Value::Error("FFIError", "CString conversion failed", None),
+        },
+        _ => Value::Error("TypeError", "Expected 'text' to be a string", None),
+    }
+}
+
+fn malloc_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("size") {
+        Some(Value::Int(n)) => {
+            let Ok(v) = n.to_i64() else {
+                return Value::Error("TypeError", "Expected integer for 'size'", None);
+            };
+            if v <= 0 || v as u64 > MAX_ALLOC_SIZE as u64 {
+                return Value::Error("ValueError", "Requested malloc size is invalid or too large", None);
+            }
+            let size = v as usize;
+            unsafe {
+                let ptr = malloc(size);
+                if ptr.is_null() {
+                    Value::Error("AllocError", "malloc failed", None)
+                } else {
+                    Value::Pointer(ptr as usize)
+                }
             }
         }
-        _ => Value::Error("TypeError", "Argument 'code' must be a string", None),
+        _ => Value::Error("TypeError", "Expected 'size' to be an integer", None),
     }
 }
 
-fn compile(args: &HashMap<String, Value>) -> Value {
-    let code = match args.get("code") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'code' must be a string", None),
-    };
-
-    let file_path = match args.get("file_path") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
-    };
-
-    match _tcc::compile(&TCC_PATH, code, file_path) {
-        Ok(()) => Value::Null,
-        Err(e) => tcc_error(&format!("Failed to compile: {}", e)),
-    }
-}
-
-fn compile_shared(args: &HashMap<String, Value>) -> Value {
-    let code = match args.get("code") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'code' must be a string", None),
-    };
-
-    let file_path = match args.get("file_path") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
-    };
-
-    match _tcc::compile_shared(&TCC_PATH, code, file_path) {
-        Ok(()) => Value::Null,
-        Err(e) => tcc_error(&format!("Failed to compile shared library: {}", e)),
-    }
-}
-
-fn check(args: &HashMap<String, Value>) -> Value {
-    match args.get("code") {
-        Some(Value::String(code)) => {
-            match _tcc::check(&TCC_PATH, code) {
-                Ok(valid) => Value::Boolean(valid),
-                Err(e) => tcc_error(&format!("Check failed: {}", e)),
+fn calloc_fn(args: &HashMap<String, Value>) -> Value {
+    match (args.get("count"), args.get("size")) {
+        (Some(Value::Int(count)), Some(Value::Int(size))) => {
+            let Ok(c) = count.to_i64() else {
+                return Value::Error("TypeError", "Expected integer for 'count'", None);
+            };
+            let Ok(s) = size.to_i64() else {
+                return Value::Error("TypeError", "Expected integer for 'size'", None);
+            };
+            if c <= 0 || s <= 0 || (c as u64).saturating_mul(s as u64) > MAX_ALLOC_SIZE as u64 {
+                return Value::Error("ValueError", "Requested calloc size is too large or invalid", None);
+            }
+            unsafe {
+                let ptr = calloc(c as size_t, s as size_t);
+                if ptr.is_null() {
+                    Value::Error("AllocError", "calloc failed", None)
+                } else {
+                    Value::Pointer(ptr as usize)
+                }
             }
         }
-        _ => Value::Error("TypeError", "Argument 'code' must be a string", None),
+        _ => Value::Error("TypeError", "Expected 'count' and 'size' to be integers", None),
     }
 }
 
-fn export(args: &HashMap<String, Value>) -> Value {
-    let file_path = match args.get("file_path") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'file_path' must be a string", None),
-    };
-
-    let value = match args.get("value") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'value' must be a string", None),
-    };
-
-    let expected_type = match args.get("expected_type") {
-        Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Argument 'expected_type' must be a string", None),
-    };
-
-    match _tcc::export(&TCC_PATH, file_path, value, expected_type) {
-        Ok(val) => val,
-        Err(e) => tcc_error(&format!("Export failed: {}", e)),
+fn realloc_fn(args: &HashMap<String, Value>) -> Value {
+    match (args.get("ptr"), args.get("new_size")) {
+        (Some(Value::Pointer(ptr)), Some(Value::Int(new_size))) => {
+            let Ok(ns) = new_size.to_i64() else {
+                return Value::Error("TypeError", "Expected integer for 'new_size'", None);
+            };
+            if ns <= 0 || ns as u64 > MAX_ALLOC_SIZE as u64 {
+                return Value::Error("ValueError", "Invalid or too large size for realloc", None);
+            }
+            unsafe {
+                let new_ptr = realloc(*ptr as *mut c_void, ns as size_t);
+                if new_ptr.is_null() {
+                    Value::Error("AllocError", "realloc failed", None)
+                } else {
+                    Value::Pointer(new_ptr as usize)
+                }
+            }
+        }
+        _ => Value::Error("TypeError", "Expected 'ptr' (&any) and 'new_size' (int)", None),
     }
+}
+
+fn free_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("ptr") {
+        Some(Value::Pointer(p)) => unsafe {
+            free(*p as *mut c_void);
+            Value::Null
+        },
+        _ => Value::Error("TypeError", "Expected 'ptr' to be a pointer", None),
+    }
+}
+
+fn strlen_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("ptr") {
+        Some(Value::Pointer(p)) => unsafe {
+            let len = strlen(*p as *const c_char);
+            Value::Int((len as i64).into())
+        },
+        _ => Value::Error("TypeError", "Expected 'ptr' to be a pointer", None),
+    }
+}
+
+fn strcpy_fn(args: &HashMap<String, Value>) -> Value {
+    match (args.get("dst"), args.get("src")) {
+        (Some(Value::Pointer(dst)), Some(Value::Pointer(src))) => unsafe {
+            let result = strcpy(*dst as *mut c_char, *src as *const c_char);
+            Value::Pointer(result as usize)
+        },
+        _ => Value::Error("TypeError", "Expected 'dst' and 'src' to be pointers", None),
+    }
+}
+
+fn strcmp_fn(args: &HashMap<String, Value>) -> Value {
+    match (args.get("a"), args.get("b")) {
+        (Some(Value::Pointer(a)), Some(Value::Pointer(b))) => unsafe {
+            let res = strcmp(*a as *const c_char, *b as *const c_char);
+            Value::Int((res as i64).into())
+        },
+        _ => Value::Error("TypeError", "Expected 'a' and 'b' to be pointers", None),
+    }
+}
+
+fn memcpy_fn(args: &HashMap<String, Value>) -> Value {
+    match (args.get("dst"), args.get("src"), args.get("size")) {
+        (Some(Value::Pointer(dst)), Some(Value::Pointer(src)), Some(Value::Int(size))) => {
+            let Ok(sz) = size.to_i64() else {
+                return Value::Error("TypeError", "Expected integer for 'size'", None);
+            };
+            if sz < 0 || sz as u64 > MAX_ALLOC_SIZE as u64 {
+                return Value::Error("ValueError", "memcpy size too large or invalid", None);
+            }
+            unsafe {
+                let out = memcpy(*dst as *mut c_void, *src as *const c_void, sz as usize);
+                Value::Pointer(out as usize)
+            }
+        }
+        _ => Value::Error("TypeError", "Expected 'dst', 'src' (&any) and 'size' (int)", None),
+    }
+}
+
+fn alloc_string_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("text") {
+        Some(Value::String(s)) => {
+            let cstr = match CString::new(s.as_str()) {
+                Ok(cstr) => cstr,
+                Err(_) => return Value::Error("FFIError", "CString conversion failed", None),
+            };
+            let len = cstr.as_bytes_with_nul().len();
+            if len > MAX_ALLOC_SIZE {
+                return Value::Error("ValueError", "String too large to allocate", None);
+            }
+            unsafe {
+                let mem = malloc(len);
+                if mem.is_null() {
+                    return Value::Error("AllocError", "malloc failed", None);
+                }
+                ptr::copy_nonoverlapping(cstr.as_ptr(), mem as *mut i8, len);
+                Value::Pointer(mem as usize)
+            }
+        }
+        _ => Value::Error("TypeError", "Expected 'text' to be a string", None),
+    }
+}
+
+fn time_fn(_: &HashMap<String, Value>) -> Value {
+    unsafe {
+        let t = time(ptr::null_mut());
+        Value::Int((t as i64).into())
+    }
+}
+
+fn getenv_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("key") {
+        Some(Value::String(key)) => {
+            let key_cstr = match CString::new(key.as_str()) {
+                Ok(k) => k,
+                Err(_) => return Value::Error("FFIError", "CString conversion failed", None),
+            };
+            unsafe {
+                let val = getenv(key_cstr.as_ptr());
+                if val.is_null() {
+                    Value::Null
+                } else {
+                    let c_str = CStr::from_ptr(val);
+                    match c_str.to_str() {
+                        Ok(s) => Value::String(s.to_string()),
+                        Err(_) => Value::Error("FFIError", "Invalid UTF-8 from getenv", None),
+                    }
+                }
+            }
+        }
+        _ => Value::Error("TypeError", "Expected 'key' to be a string", None),
+    }
+}
+
+fn exit_fn(args: &HashMap<String, Value>) -> Value {
+    match args.get("code") {
+        Some(Value::Int(code)) => {
+            let c = code.to_i64().unwrap_or(0) as i32;
+            unsafe { exit(c); }
+        }
+        _ => {}
+    }
+    Value::Null
 }

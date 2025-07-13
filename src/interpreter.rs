@@ -1502,7 +1502,7 @@ impl Interpreter {
     fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
         let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&NULL);
         let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&NULL);
-
+    
         if *pointer_type == Value::String("POINTER_ASSIGN".to_string()) {
             if self.err.is_some() {
                 self.err = None;
@@ -1525,28 +1525,24 @@ impl Interpreter {
     
         match pointer_type {
             Value::String(t) if t == "POINTER_REF" => {
-                if self.err.is_some() {
-                    return NULL;
-                }
-            
                 let rc = std::rc::Rc::new(value);
                 let ptr = std::rc::Rc::into_raw(rc) as usize;
-            
+    
                 if ptr == 0 {
                     self.raise("MemoryError", "Failed to create pointer reference");
                     return NULL;
                 }
-            
+    
                 Value::Pointer(ptr)
             }            
     
             Value::String(t) if t == "POINTER_DEREF" => {
                 if let Value::Pointer(ptr_val) = value {
                     let raw = ptr_val as *const Value;
-                    let recovered_rc = unsafe { std::rc::Rc::from_raw(raw) };
-                    let clone = (*recovered_rc).clone();
-                    std::mem::forget(recovered_rc);
-                    clone
+                    // Just dereference raw pointer, don't create Rc from raw again
+                    unsafe {
+                        (*raw).clone()
+                    }
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
                     NULL
@@ -1564,7 +1560,7 @@ impl Interpreter {
                     unsafe {
                         *raw = right.clone();
                     }
-                    return Value::Pointer(ptr_val);
+                    Value::Pointer(ptr_val)
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for assignment");
                     NULL
@@ -1750,7 +1746,7 @@ impl Interpreter {
             self.raise("RuntimeError", "Missing 'values' in map statement");
             &NULL
         });
-        
+    
         let raw_keys = match keys_opt {
             Value::List(v) => v,
             _ => {
@@ -1758,7 +1754,7 @@ impl Interpreter {
                 return NULL;
             }
         };
-        
+    
         let raw_values = match values_opt {
             Value::List(v) => v,
             _ => {
@@ -1775,21 +1771,49 @@ impl Interpreter {
         let mut keys = Vec::with_capacity(raw_keys.len());
         let mut values = Vec::with_capacity(raw_values.len());
     
-        for key in raw_keys {
-            let evaluated_key = self.evaluate(key.convert_to_statement());
-            keys.push(evaluated_key);
-        }
-        for value in raw_values {
-            let evaluated_value = self.evaluate(value.convert_to_statement());
-            values.push(evaluated_value);
-        }
-    
         let mut seen = std::collections::HashSet::new();
-        for key in &keys {
-            if !seen.insert(key) {
-                self.raise("SyntaxError", &format!("Duplicate key in map: {}", key));
+    
+        for (i, raw_key_entry) in raw_keys.iter().enumerate() {
+            let (modifier, raw_key) = match raw_key_entry {
+                Value::Map { keys: mk, values: mv } => {
+                    let mut modifier = None;
+                    let mut key = None;
+                    for (k, v) in mk.iter().zip(mv.iter()) {
+                        match k {
+                            Value::String(s) if s == "modifier" => modifier = Some(v),
+                            Value::String(s) if s == "key" => key = Some(v),
+                            _ => {}
+                        }
+                    }
+                    match (modifier, key) {
+                        (Some(m), Some(k)) => (m.clone(), k.clone()),
+                        _ => {
+                            self.raise("RuntimeError", "Malformed key map entry (missing 'modifier' or 'key')");
+                            return NULL;
+                        }
+                    }
+                }
+                _ => {
+                    self.raise("TypeError", "Map key entry must be a map with 'modifier' and 'key'");
+                    return NULL;
+                }
+            };
+
+            if modifier != Value::Null && modifier == Value::String("final".to_string()) {
+                self.raise("NotImplemented", "Final modifier for keys in maps is not implemented yet");
                 return NULL;
             }
+            
+            let evaluated_key = self.evaluate(raw_key.convert_to_statement());
+            let evaluated_value = self.evaluate(raw_values[i].convert_to_statement());
+    
+            if !seen.insert(evaluated_key.clone()) {
+                self.raise("SyntaxError", &format!("Duplicate key in map: {}", evaluated_key));
+                return NULL;
+            }
+            
+            keys.push(evaluated_key);
+            values.push(evaluated_value);
         }
     
         Value::Map { keys, values }

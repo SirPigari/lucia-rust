@@ -44,7 +44,6 @@ mod env {
         }
         pub mod clib {
             pub mod __init__;
-            pub mod _tcc;
         }
         pub mod regex {
             pub mod __init__;

@@ -584,14 +584,31 @@ impl Parser {
                 }
 
                 "SEPARATOR" if token.1 == "{" => {
+                    let loc = self.get_loc();
                     self.next();
                     let mut keys = vec![];
                     let mut values = vec![];
+
                     while let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
                             self.next();
                             break;
                         }
+
+                        let mut modifier = Value::String("mutable".to_string());
+                        loop {
+                            if let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER" && (tok.1 == "final" || tok.1 == "mutable") {
+                                    modifier = Value::String(tok.1.clone());
+                                    self.next();
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
                         let key = self.parse_expression();
                         if self.err.is_some() {
                             return Statement::Null;
@@ -599,10 +616,18 @@ impl Parser {
 
                         let key_map = key.convert_to_map();
 
-                        if keys.contains(&key_map) {
-                            self.raise("SyntaxError", "Duplicate key in map");
-                            return Statement::Null;
-                        }
+                        // if keys.iter().any(|k| {
+                        //     if let Value::Map { keys: mk, values: mv } = k {
+                        //         mk.iter().zip(mv).any(|(kk, vv)| {
+                        //             kk == &Value::String("key".to_string()) && vv == &key_map
+                        //         })
+                        //     } else {
+                        //         false
+                        //     }
+                        // }) {
+                        //     self.raise("SyntaxError", "Duplicate key in map");
+                        //     return Statement::Null;
+                        // }
 
                         let value;
                         if let Some(next_token) = self.token() {
@@ -621,7 +646,17 @@ impl Parser {
                             return Statement::Null;
                         }
 
-                        keys.push(key_map);
+                        keys.push(Value::Map {
+                            keys: vec![
+                                Value::String("modifier".to_string()),
+                                Value::String("key".to_string()),
+                            ],
+                            values: vec![
+                                modifier,
+                                key_map,
+                            ],
+                        });                        
+
                         values.push(value.convert_to_map());
 
                         if let Some(next_token) = self.token() {
@@ -639,6 +674,7 @@ impl Parser {
                             return Statement::Null;
                         }
                     }
+
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -650,7 +686,7 @@ impl Parser {
                             Value::List(keys),
                             Value::List(values),
                         ],
-                        loc: self.get_loc(),
+                        loc,
                     }
                 }
 

@@ -15,6 +15,7 @@ assert_eq!(m(1, 2), 3)
 q: function = lambda x, y: x * y
 
 assert_eq!(q(3, 4), 12)
+assert_eq!(m(5, 6), 11)
 
 b: int = 80085
 #syntax ab: "\\ba\\b" -> "b"
