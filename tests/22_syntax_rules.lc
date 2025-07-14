@@ -4,8 +4,8 @@
 
 @echo "hello world"
 
-// there is no built-in lambda but you can create one like this
-// there is <std/lambda> but it doesnt work rn
+// use (param) => (expr) for lambdas
+// this test was made before lambdas were implemented
 #syntax lambda: "lambda\\s+([^:]+):\\s*(.+)" -> "mutable fun lambda ($1) -> any: return ($2) end"
 
 m: function = lambda x, y: x + y

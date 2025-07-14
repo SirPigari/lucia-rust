@@ -1,0 +1,17 @@
+#include <std/macros>
+
+m: function = x => x * 2
+assert_eq!(m(5), 10)
+
+q: function = (x, y) => x + y
+assert_eq!(q(3, 4), 7)
+
+b: function = () => 42
+assert_eq!(b(), 42)
+
+r: function = () => ()
+
+assert_eq!(r(), ())
+
+x: int = 10
+assert_err!(x())

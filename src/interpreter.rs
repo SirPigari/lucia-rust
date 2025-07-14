@@ -2917,30 +2917,35 @@ impl Interpreter {
             state: None,
         };
 
-        if self.variables.contains_key(name) {
-            if let Some(var) = self.variables.get(name) {
-                if var.is_final() {
-                    return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
+        if name != "_" {
+            if self.variables.contains_key(name) {
+                if let Some(var) = self.variables.get(name) {
+                    if var.is_final() {
+                        return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
+                    }
                 }
             }
-        }
-
-        self.variables.insert(
-            name.to_string(),
-            Variable::new(
+            self.variables.insert(
                 name.to_string(),
-                create_function(
-                    metadata.clone(),
-                    body_formatted,
+                Variable::new(
+                    name.to_string(),
+                    create_function(
+                        metadata.clone(),
+                        body_formatted,
+                    ),
+                    "function".to_string(),
+                    is_public,
+                    is_static,
+                    is_final,
                 ),
-                "function".to_string(),
-                is_public,
-                is_static,
-                is_final,
-            ),
-        );
-        self.variables.get(name)
-            .map_or(NULL, |var| var.value.clone())
+            );
+            self.variables.get(name)
+                .map_or(NULL, |var| var.value.clone())
+        } else {
+            let function_value = create_function(metadata, body_formatted);
+            self.stack.pop();
+            function_value
+        }
     }
 
     fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {

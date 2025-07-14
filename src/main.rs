@@ -1148,9 +1148,68 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             hex_to_ansi("reset", Some(use_colors))
         );
 
-        let input = utils::read_input("");
+        let mut input = utils::read_input("");
         if input.is_empty() {
             continue;
+        }
+
+        if input.starts_with(':') {
+            let new_input = match &*input {
+                ":exit" => Some("exit()".into()),
+                ":clear" | ":cls" => {
+                    if let Err(_) = clear_terminal() {
+                        handle_error(
+                            &Error::new("IOError", "Failed to clear screen", "<stdin>"),
+                            &input,
+                            &config,
+                            use_colors,
+                        );
+                    }
+                    println!(
+                        "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
+                        hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
+                        config.version,
+                        hex_to_ansi("reset", Some(use_colors))
+                    );
+                    None
+                }
+                ":help" | ":?" => {
+                    println!("{}", "Tip: Use ':macro-help' to see REPL macros.".cyan());
+                    Some("help()".into())
+                }
+                ":macro-help" => {
+                    let macros = vec![
+                        (":exit", "Exit the REPL"),
+                        (":clear / :cls", "Clear the terminal screen"),
+                        (":help / :?", "Show general help"),
+                        (":macro-help", "Show this help message for REPL macros"),
+                    ];
+
+                    let max_len = macros.iter().map(|(m, _)| m.len()).max().unwrap_or(0);
+
+                    println!("{}", "Available REPL macros:".bold().underline().blue());
+
+                    for (name, desc) in macros {
+                        println!(
+                            "  {:width$} - {}",
+                            name.green().bold(),
+                            desc.white(),
+                            width = max_len
+                        );
+                    }
+                    None
+                }
+                _ => {
+                    println!("Unknown REPL macro '{}'", input);
+                    None
+                }
+            };
+
+            if let Some(new_input) = new_input {
+                input = new_input;
+            } else {
+                continue;
+            }
         }
 
         if input == "exit" {
@@ -1158,36 +1217,13 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             continue;
         }
 
-        if input == "clear" || input == "cls" || input == "cls()" {
-            println!("Use 'clear()' to clear.");
-            continue;
-        }
-
         if input == "help" || input == "?" {
-            println!("Use 'help()' for help.");
+            println!("Use ':help' for help.");
             continue;
         }
 
         if input == "\x03" {
             exit(0);
-        }
-
-        if input == "clear()" || input == "\x11" || input == "\x0F" {
-            if let Err(_) = clear_terminal() {
-                handle_error(
-                    &Error::new("IOError", "Failed to clear screen", "<stdin>"),
-                    &input,
-                    &config,
-                    use_colors,
-                );
-            }
-            println!(
-                "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
-                hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
-                config.version,
-                hex_to_ansi("reset", Some(use_colors))
-            );
-            continue;
         }
 
         let mut lexer = Lexer::new(&input, "<stdin>".into(), Some(syntax_rules.clone()));

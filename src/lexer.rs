@@ -53,7 +53,6 @@ impl Lexer {
     
         let rules = &mut self.syntax_rules;
     
-        // 1) Pre-pass to apply all #syntax and #remsyntax directives and update rules
         for line in code.lines() {
             for caps in syntax_line_re.captures_iter(line) {
                 let name = caps.get(1).unwrap().as_str().to_string();
@@ -85,11 +84,9 @@ impl Lexer {
             }
         }
     
-        // 2) Now process lines again for replacement and cleaning
         let mut cleaned_lines = Vec::new();
     
         for line in code.lines() {
-            // find last directive end to keep directives untouched
             let mut last_directive_end = 0;
             for caps in syntax_line_re.captures_iter(line) {
                 let full = caps.get(0).unwrap();
@@ -109,7 +106,6 @@ impl Lexer {
     
             let transformed_line = format!("{}{}", before, after_transformed);
     
-            // remove directives from output
             let transformed_line_cleaned = syntax_line_re.replace_all(&transformed_line, "").to_string();
             let transformed_line_cleaned = remsyntax_re.replace_all(&transformed_line_cleaned, "").to_string();
     
@@ -119,7 +115,6 @@ impl Lexer {
         cleaned_lines.join("\n")
     }
     
-
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut code = self.code.clone();
         
@@ -131,7 +126,7 @@ impl Lexer {
         static REGEX: OnceLock<Regex> = OnceLock::new();
         let regex = REGEX.get_or_init(|| {
             let operators = [
-                "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=", "<<", ">>", ":=",
+                "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=", "<<", ">>", ":=",
                 "++", "--", "+", "-", "^", "*", "/", ">", "<", "!", "%", "||", "&&",
                 "|", "#", "~", "$", "?", "&", "^=", "%="
             ];
@@ -266,5 +261,4 @@ impl Lexer {
         tokens.push(Token("EOF".into(), "\0".into(), None));
         tokens
     }
-    
 }

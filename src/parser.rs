@@ -364,6 +364,129 @@ impl Parser {
                     };
                 }
 
+                ("OPERATOR", "=>") => {
+                    self.next();
+
+                    let body_expr = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+
+                    let params = match &expr {
+                        Statement::Statement { .. } if expr.get_type() == "TUPLE" => {
+                            expr.get_value("items").unwrap_or(Value::List(vec![]))
+                        }
+                        _ => Value::List(vec![expr.convert_to_map()]),
+                    };
+
+                    let mut pos_args = vec![];
+                    if let Value::List(items) = params {
+                        for param_val in items {
+                            match param_val {
+                                Value::Map { keys: k, values: v } => {
+                                    let mut name_opt = None;
+                                    for (key, val) in k.iter().zip(v.iter()) {
+                                        if let Value::String(s) = key {
+                                            if s == "name" {
+                                                if let Value::String(nm) = val {
+                                                    name_opt = Some(nm.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Some(name) = name_opt {
+                                        pos_args.push(Value::Map {
+                                            keys: vec![
+                                                Value::String("name".to_string()),
+                                                Value::String("type".to_string()),
+                                                Value::String("modifiers".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String(name),
+                                                Value::Map {
+                                                    keys: vec![
+                                                        Value::String("type".to_string()),
+                                                        Value::String("value".to_string()),
+                                                        Value::String("type_kind".to_string()),
+                                                    ],
+                                                    values: vec![
+                                                        Value::String("TYPE".to_string()),
+                                                        Value::String("any".to_string()),
+                                                        Value::String("simple".to_string()),
+                                                    ],
+                                                },
+                                                Value::List(vec![]),
+                                            ],
+                                        });
+                                    }
+                                }
+                                Value::String(name) => {
+                                    pos_args.push(Value::Map {
+                                        keys: vec![
+                                            Value::String("name".to_string()),
+                                            Value::String("type".to_string()),
+                                            Value::String("modifiers".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String(name),
+                                            Value::Map {
+                                                keys: vec![
+                                                    Value::String("type".to_string()),
+                                                    Value::String("value".to_string()),
+                                                    Value::String("type_kind".to_string()),
+                                                ],
+                                                values: vec![
+                                                    Value::String("TYPE".to_string()),
+                                                    Value::String("any".to_string()),
+                                                    Value::String("simple".to_string()),
+                                                ],
+                                            },
+                                            Value::List(vec![]),
+                                        ],
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    let body = vec![body_expr];
+                    let body_values: Vec<Value> = body.into_iter().map(|stmt| stmt.convert_to_map()).collect();
+
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("name".to_string()),
+                            Value::String("modifiers".to_string()),
+                            Value::String("pos_args".to_string()),
+                            Value::String("named_args".to_string()),
+                            Value::String("body".to_string()),
+                            Value::String("return_type".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("FUNCTION_DECLARATION".to_string()),
+                            Value::String("_".to_string()),
+                            Value::List(vec!["mutable".to_string().into()]),
+                            Value::List(pos_args),
+                            Value::Map { keys: vec![], values: vec![] },
+                            Value::List(body_values),
+                            Value::Map {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("value".to_string()),
+                                    Value::String("type_kind".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("TYPE".to_string()),
+                                    Value::String("any".to_string()),
+                                    Value::String("simple".to_string()),
+                                ],
+                            },
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+
                 ("OPERATOR", "=") => {
                     self.next();
                     let value = self.parse_expression();
@@ -1012,87 +1135,117 @@ impl Parser {
                     }
                     self.check_for("SEPARATOR", ")");
                     self.next();
-                    self.check_for("SEPARATOR", ":");
-                    self.next();
 
-                    let mut body = vec![];
-                    while let Some(tok) = self.token() {
-                        if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "else") {
-                            break;
-                        }
-                        let stmt = self.parse_expression();
+                    if self.token_is("IDENTIFIER", "then") {
+                        self.next();
+                        let then_expr = self.parse_expression();
                         if self.err.is_some() {
                             return Statement::Null;
                         }
-                        body.push(stmt);
-                    }
-
-                    let else_body: Option<Vec<Statement>>;
-
-                    if self.token_is("IDENTIFIER", "end") {
-                        self.next();
-                        else_body = Some(vec![]);
-                    } else if let Some(tok) = self.token() {
-                        if tok.0 == "IDENTIFIER" && tok.1 == "else" {
+                        let else_expr = if self.token_is("IDENTIFIER", "else") {
                             self.next();
-                    
-                            if let Some(next_tok) = self.token() {
-                                if next_tok.0 == "IDENTIFIER" && next_tok.1 == "if" {
-                                    else_body = Some(vec![self.parse_expression()]);
-                                } else {
-                                    self.check_for("SEPARATOR", ":");
-                                    self.next();
-                    
-                                    let mut else_stmts = vec![];
-                                    while let Some(tok) = self.token() {
-                                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
-                                            break;
+                            let else_expr = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            Some(else_expr)
+                        } else {
+                            None
+                        };
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("body".to_string()),
+                                Value::String("else_body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("IF".to_string()),
+                                condition.convert_to_map(),
+                                Value::List(vec![then_expr.convert_to_map()]),
+                                Value::List(match else_expr {
+                                    Some(e) => vec![e.convert_to_map()],
+                                    None => vec![],
+                                }),
+                            ],
+                            loc: self.get_loc(),
+                        }
+                    } else {
+                        self.check_for("SEPARATOR", ":");
+                        self.next();
+                        let mut body = vec![];
+                        while let Some(tok) = self.token() {
+                            if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "else") {
+                                break;
+                            }
+                            let stmt = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            body.push(stmt);
+                        }
+                        let else_body: Option<Vec<Statement>>;
+                        if self.token_is("IDENTIFIER", "end") {
+                            self.next();
+                            else_body = Some(vec![]);
+                        } else if let Some(tok) = self.token() {
+                            if tok.0 == "IDENTIFIER" && tok.1 == "else" {
+                                self.next();
+                                if let Some(next_tok) = self.token() {
+                                    if next_tok.0 == "IDENTIFIER" && next_tok.1 == "if" {
+                                        else_body = Some(vec![self.parse_expression()]);
+                                    } else {
+                                        self.check_for("SEPARATOR", ":");
+                                        self.next();
+                                        let mut else_stmts = vec![];
+                                        while let Some(tok) = self.token() {
+                                            if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                                break;
+                                            }
+                                            let stmt = self.parse_expression();
+                                            if self.err.is_some() {
+                                                return Statement::Null;
+                                            }
+                                            else_stmts.push(stmt);
                                         }
-                                        let stmt = self.parse_expression();
-                                        if self.err.is_some() {
+                                        else_body = Some(else_stmts);
+                                        if self.token_is("IDENTIFIER", "end") {
+                                            self.next();
+                                        } else {
+                                            self.raise("SyntaxError", "Expected 'end' after else block");
                                             return Statement::Null;
                                         }
-                                        else_stmts.push(stmt);
                                     }
-                                    else_body = Some(else_stmts);
-                    
-                                    if self.token_is("IDENTIFIER", "end") {
-                                        self.next();
-                                    } else {
-                                        self.raise("SyntaxError", "Expected 'end' after else block");
-                                        return Statement::Null;
-                                    }
+                                } else {
+                                    self.raise("SyntaxError", "Unexpected end after 'else'");
+                                    return Statement::Null;
                                 }
                             } else {
-                                self.raise("SyntaxError", "Unexpected end after 'else'");
+                                self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
                                 return Statement::Null;
                             }
                         } else {
                             self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
                             return Statement::Null;
                         }
-                    } else {
-                        self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
-                        return Statement::Null;
-                    }
-
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("condition".to_string()),
-                            Value::String("body".to_string()),
-                            Value::String("else_body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("IF".to_string()),
-                            condition.convert_to_map(),
-                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                            Value::List(match else_body {
-                                Some(stmts) => stmts.into_iter().map(|s| s.convert_to_map()).collect(),
-                                None => vec![],
-                            })                            
-                        ],
-                        loc: self.get_loc(),
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("body".to_string()),
+                                Value::String("else_body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("IF".to_string()),
+                                condition.convert_to_map(),
+                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                Value::List(match else_body {
+                                    Some(stmts) => stmts.into_iter().map(|s| s.convert_to_map()).collect(),
+                                    None => vec![],
+                                }),
+                            ],
+                            loc: self.get_loc(),
+                        }
                     }
                 }
 

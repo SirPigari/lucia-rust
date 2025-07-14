@@ -73,7 +73,7 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     });
 
     m.insert("clib", LibInfo {
-        description: "C standard library bindings for Lucia using TCC.",
+        description: "C standard library bindings for Lucia.",
         version: "0.1.69",
         expected_lucia_version: "^2.0.0",
     });

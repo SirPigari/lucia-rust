@@ -1,0 +1,42 @@
+#include <std/macros>
+import random
+
+state: bool = true
+value: int = if (state) then 42 else 0
+assert_eq!(value, 42)
+
+n: int = random.randint(1, 100)
+limit: int = 50
+result: str = if (n > limit) then "greater" else "less or equal"
+assert_eq!(result, if (n > limit) then "greater" else "less or equal")
+assert!((result == "greater") || (result == "less or equal"))
+
+a: int = 10
+b: int = 20
+max: int = if (a > b) then a else b
+assert_eq!(max, b)
+
+even: bool = if (n % 2 == 0) then true else false
+assert_eq!(even, (n % 2 == 0))
+
+text: str = if (true) then if (false) then "bad" else "ok" else "fail"
+assert_eq!(text, "ok")
+
+func: function = (x) => if (x > 0) then "pos" else "non-pos"
+assert_eq!(func(5), "pos")
+assert_eq!(func(0), "non-pos")
+
+check: function = (x) => if (x % 2 == 0) then "even" else "odd"
+assert_eq!(check(4), "even")
+assert_eq!(check(5), "odd")
+
+flag: bool = false
+result: int | str = if (flag) then 1 else "nope"
+assert_eq!(result, "nope")
+
+score: int = 85
+grade: str = if (score >= 90) then "A" else if (score >= 80) then "B" else "C"
+assert_eq!(grade, "B")
+
+process: function = (x) => if (x > 0) then "positive" else "negative"
+assert_eq!(process(10), "positive")
