@@ -47,6 +47,8 @@ It's designed for speed and safety, without sacrificing elegance.
 - [Changelog](src/env/Docs/changelog.md)
 - [Known issues/bugs](src/env/Docs/known-issues.md)
 
+See [Lucia Docs reader](https://sirpigari.github.io/lucia-apl/docs/reader)
+
 ---
 
 ## Support the Project
