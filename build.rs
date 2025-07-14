@@ -1,4 +1,4 @@
-use std::{env, fs, process::Command, path::Path, collections::HashSet, io::BufRead};
+use std::{env, fs, process::Command, path::Path, collections::HashSet, io::BufRead, io::Write, io::BufReader};
 use sha2::{Digest, Sha256};
 use toml::Value;
 use uuid::{Builder, Uuid};
@@ -168,6 +168,38 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
     (lines, files)
 }
 
+fn join_lc_tests() -> std::io::Result<()> {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let tests_dir = Path::new(&manifest_dir).join("tests");
+    let out_file_path = Path::new(&manifest_dir).join("src/env/assets/tests.lc");
+
+    let mut out_file = fs::File::create(&out_file_path)?;
+
+    if let Ok(entries) = fs::read_dir(&tests_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("lc") {
+                let file = fs::File::open(&path)?;
+                let reader = BufReader::new(file);
+
+                let lines: Vec<_> = reader.lines().collect::<Result<_, _>>()?;
+                let line_count = lines.len();
+
+                let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
+                
+                writeln!(out_file, "/*\n FILE {}, LINES 1:{}\n*/\n", file_name, line_count)?;
+                for line in lines {
+                    writeln!(out_file, "{}", line)?;
+                }
+
+                writeln!(out_file)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn main() {
     println!("cargo:rustc-env=RUSTFLAGS=-C target-cpu={CPU_OPT}");
 
@@ -214,6 +246,10 @@ fn main() {
         let exe = env::current_exe().unwrap_or_default();
         to_hash(&exe)
     };
+
+    join_lc_tests().unwrap_or_else(|e| {
+        eprintln!("Failed to join LC tests: {}", e);
+    });
 
     let deps = get_deps_from_cargo_toml();
 
