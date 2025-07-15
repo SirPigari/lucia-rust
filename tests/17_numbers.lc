@@ -36,3 +36,11 @@ assert_eq!(0b1010, 10)
 assert_eq!(0b1111, 15)
 assert_eq!(0b1010 + 0b1100, 22)
 assert_eq!(0B1010 - 0B0101, 5)
+
+// custom base notation
+assert_eq!(2#1010, 10) // base 2
+assert_eq!(16#1a, 26) // base 16
+assert_eq!(36#z, 35) // base 36
+assert_eq!(62#10, 62) // base 62
+assert_eq!(1#1, 1) // base 1
+assert_eq!(62#i_can_put_anything_here, 3334511810847886609099271355119208) // base 62 with alphanumeric characters

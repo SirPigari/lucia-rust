@@ -21,6 +21,7 @@ use crate::env::runtime::utils::{
     fix_path,
     fix_and_parse_json,
     json_to_value,
+    char_to_digit
 };
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -794,9 +795,10 @@ impl Interpreter {
         self.err = None;
         self.current_statement = None;
         self.state = "normal".to_owned();
+        self.stack.clear();
         self.stack.push((
             self.file_path.clone(),
-            self.get_location_from_current_statement(),
+            None,
         ));
     
         for statement in statements {
@@ -852,7 +854,7 @@ impl Interpreter {
     
             self.state = old_state;
         }
-    
+
         self.stack.pop();
     
         Ok(self.return_value.clone())
@@ -6158,33 +6160,38 @@ impl Interpreter {
             Value::String(operator.clone()),
             right.clone(),
         ];
-    
-        let result = {
-            let cache_root = self.cache
-                .entry("operations".into())
-                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-    
-            if let Some(cached) = deep_get(cache_root, path) {
-                debug_log(
-                    &format!(
-                        "<CachedOperation: {} {} {}>",
-                        format_value(&left),
-                        operator,
-                        format_value(&right)
-                    ),
-                    &self.config,
-                    Some(self.use_colors.clone()),
-                );
-                return cached.clone();
-            }
-    
-            self.make_operation(left.clone(), right.clone(), &operator)
-        };
-    
-        if let Some(cache_root) = self.cache.get_mut("operations") {
-            deep_insert(cache_root, path, result.clone());
+
+        if let Some(cached) = deep_get(
+            self.cache
+                .get("operations")
+                .unwrap_or(&Value::Null),
+            path,
+        ) {
+            debug_log(
+                &format!(
+                    "<CachedOperation: {} {} {}>",
+                    format_value(&left),
+                    operator,
+                    format_value(&right)
+                ),
+                &self.config,
+                Some(self.use_colors.clone()),
+            );
+            return cached.clone();
         }
-    
+
+        let result = self.make_operation(left.clone(), right.clone(), &operator);
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let cache_root = self.cache
+            .entry("operations".into())
+            .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+
+        deep_insert(cache_root, path, result.clone());
+
         result
     }
     
@@ -6733,22 +6740,54 @@ impl Interpreter {
         }
     
         fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
-            let val = usize::from_str_radix(s, base).map_err(|_| ())?;
-            Int::from_str(&val.to_string()).map_err(|_| ())
-        }        
-    
+            use std::ops::{Add, Mul};
+            let zero = Int::from(0);
+            let base_int = Int::from(base as usize);
+
+            s.chars().try_fold(zero.clone(), |acc, c| {
+                let digit = char_to_digit(c).ok_or(())?;
+                if digit >= base {
+                    return Err(());
+                }
+                let digit_int = Int::from(digit as usize);
+                let product = acc.mul(base_int.clone()).map_err(|_| ())?;
+                product.add(digit_int).map_err(|_| ())
+            })
+        }
+
         let result = if s.starts_with("0b") || s.starts_with("0B") {
-            parse_int_with_base(&s[2..], 2)
+            parse_int_with_base(&s[2..].to_lowercase(), 2)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Binary integer literal too large for usize"))
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for binary integer literal."))
         } else if s.starts_with("0o") || s.starts_with("0O") {
-            parse_int_with_base(&s[2..], 8)
+            parse_int_with_base(&s[2..].to_lowercase(), 8)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Octal integer literal too large for usize"))
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for octal integer literal."))
         } else if s.starts_with("0x") || s.starts_with("0X") {
-            parse_int_with_base(&s[2..], 16)
+            parse_int_with_base(&s[2..].to_lowercase(), 16)
                 .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Hex integer literal too large for usize"))            
+                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for hex integer literal."))
+        } else if let Some(hash_pos) = s.find('#') {
+            use std::str::FromStr;
+            let (base_str, digits) = s.split_at(hash_pos);
+            let digits = &digits[1..];
+            let base = match u32::from_str(base_str) {
+                Ok(b) if (1..=62).contains(&b) => b,
+                _ => return self.raise("RuntimeError", "Invalid base for custom base literal (must be 1-62)"),
+            };
+
+            if base == 1 {
+                if digits.chars().all(|c| c == '1') {
+                    let val = Int::from(digits.len());
+                    Ok(val)
+                } else {
+                    return self.raise("RuntimeError", "Invalid digits for base 1 literal, only '1's allowed");
+                }
+            } else {
+                parse_int_with_base(digits, base)
+            }
+            .map(Value::Int)
+            .unwrap_or_else(|_| self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)))        
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
             let f = match Float::from_str(s) {
                 Ok(f) => f,
@@ -6768,6 +6807,7 @@ impl Interpreter {
             }
         } else {
             Int::from_str(s)
+                .map_err(|_| ())
                 .map(Value::Int)
                 .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid integer format"))
         };

@@ -1115,6 +1115,15 @@ pub fn remove_loc_keys(value: &Value) -> Value {
     }
 }
 
+pub fn char_to_digit(c: char) -> Option<u32> {
+    match c {
+        '0'..='9' => Some(c as u32 - '0' as u32),
+        'a'..='z' => Some(c as u32 - 'a' as u32 + 10),
+        'A'..='Z' => Some(c as u32 - 'A' as u32 + 36),
+        _ => None,
+    }
+}
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

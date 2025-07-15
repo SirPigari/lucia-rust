@@ -24,7 +24,7 @@ end
 try:
     0 / 0
 end catch (err_type, err_msg):
-    assert_eq!(err_type, "ArithmeticError")
+    assert_eq!(err_type, "ZeroDivisionError")
 end
 
 try:
