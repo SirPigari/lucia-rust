@@ -34,18 +34,16 @@ It's designed for speed and safety, without sacrificing elegance.
 
 ## Documentation
 
----
-
-- [Getting started](src/env/Docs/getting-started.md)
-- [Installation guide](src/env/Docs/installation-guide.md)
-- [Config guide](src/env/Docs/config-guide.md)
-- [Syntax](src/env/Docs/language-syntax.md)
-- [Examples](src/env/Docs/examples/)
-- [Standard libraries API](src/env/Docs/standart-libs.md)
-- [Versioning](src/env/Docs/versioning.md)
-- [Contributing guide](src/env/Docs/contributing.md)
-- [Changelog](src/env/Docs/changelog.md)
-- [Known issues/bugs](src/env/Docs/known-issues.md)
+- [ ] [Getting started](src/env/Docs/getting-started.md)
+- [x] [Installation guide](src/env/Docs/installation-guide.md)
+- [x] [Config guide](src/env/Docs/config-guide.md)
+- [ ] [Syntax](src/env/Docs/language-syntax.md)
+- [x] [Examples](src/env/Docs/examples/)
+- [ ] [Standard libraries API](src/env/Docs/standart-libs.md)
+- [x] [Versioning](src/env/Docs/versioning.md)
+- [x] [Contributing guide](src/env/Docs/contributing.md)
+- [ ] [Changelog](src/env/Docs/changelog.md)
+- [x] [Known issues/bugs](src/env/Docs/known-issues.md)
 
 See [Lucia Docs reader](https://sirpigari.github.io/lucia-apl/docs/reader)
 
@@ -66,8 +64,8 @@ If you don't want to donate, but still want to help:
 
 ## Roadmap
 
-- [x] Rewrite basics to Rust
-- [ ] Make full support for any code from Python version
+- [x] Rewrite basics to Rust  
+- [ ] Make full support for any code from Python version  
 - [x] Develop a package manager for better module integration (lym)  
 
 ---
@@ -91,7 +89,7 @@ Join us on Discord: [discord.gg/placeholder-rn](https://discord.gg/placeholder-r
 
 ## Legacy
 
-Check out the legacy (Python) version of Lucia:
+Check out the legacy (Python) version of Lucia:  
 [SirPigari/lucia](https://github.com/SirPigari/lucia)
 
 ---

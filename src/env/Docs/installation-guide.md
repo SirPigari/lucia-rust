@@ -1,0 +1,82 @@
+# Installation Guide
+
+Welcome to the installation guide for Lucia! You can install Lucia using one of the following methods:
+
+- Using [**Git Clone**](#method-1-git-clone) method  
+- Using the [**Installer from GitHub**](#method-2-installer-from-github) method
+
+---
+
+### Method 1: Git Clone
+
+To install Lucia by cloning the repository and building from source, follow these steps:
+
+1. Open a terminal window.
+
+2. Clone the Lucia repository:
+
+```bash
+git clone https://github.com/SirPigari/lucia-rust.git lucia
+```
+
+3. Navigate into the cloned directory:
+
+```bash
+cd lucia
+```
+
+4. Build Lucia using Cargo (requires Rust toolchain and Makefile installed):
+
+```bash
+make release
+```
+
+5. Activate the Lucia environment:
+
+```bash
+make activate
+```
+
+6. (Optional) To install the binary system-wide:
+
+```bash
+make install
+```
+
+7. Verify the installation by running:
+
+```bash
+lucia --version
+```
+
+---
+
+### Method 2: Installer from GitHub
+
+Alternatively, you can download and run the pre-built installer:
+
+1. Go to the [Lucia GitHub repository](https://github.com/SirPigari/lucia-rust).
+
+2. Download the latest installer for your OS (Windows, macOS, Linux).
+
+3. Run the installer and follow the on-screen instructions.
+
+4. After installation, open a terminal and verify:
+
+```bash
+lucia --version
+```
+
+---
+
+### Post-Installation Setup
+
+Make sure Lucia is added to your system's PATH. If it isn't, add the directory containing the `lucia` executable manually.
+
+---
+
+### Next Steps
+
+Start writing and running Lucia programs! For a quick start, see the [Getting Started](./getting-started.md) guide.
+
+If you run into any issues, check the [Lucia GitHub Issues](https://github.com/SirPigari/lucia-rust/issues) page for help or to report problems.
