@@ -941,7 +941,7 @@ fn lucia(args: Vec<String>) {
                 use_colors,
             );
             exit(1);
-        } else {
+        } else if config.warnings {
             print_colored(
                 &format!(
                     "Warning: Lucia version mismatch: expected {}, got {}. Running in moded mode.",
@@ -1196,6 +1196,16 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                             desc.white(),
                             width = max_len
                         );
+                    }
+                    None
+                }
+                ":trace" | ":traceback" => {
+                    println!("{}", "Traceback:".bold().underline().cyan());
+                    if interpreter.get_traceback().is_empty() {
+                        println!(" - No traceback available.");
+                    }
+                    for (key, value) in interpreter.get_traceback() {
+                        println!(" - {}: {}", key.cyan(), value);
                     }
                     None
                 }

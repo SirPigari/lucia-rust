@@ -465,7 +465,7 @@ impl Parser {
                         ],
                         values: vec![
                             Value::String("FUNCTION_DECLARATION".to_string()),
-                            Value::String("_".to_string()),
+                            Value::String("<lambda#{}>".to_string()),
                             Value::List(vec!["mutable".to_string().into()]),
                             Value::List(pos_args),
                             Value::Map { keys: vec![], values: vec![] },

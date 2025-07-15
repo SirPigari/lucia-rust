@@ -63,6 +63,7 @@ pub struct Interpreter {
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
     cache: HashMap<String, Value>,
+    internal_storage: HashMap<String, Value>,
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
 }
@@ -87,14 +88,17 @@ impl Interpreter {
                 ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
                 ("iterables".to_owned(), Value::Map { keys: vec![], values: vec![] }),
+            ]),
+            internal_storage: HashMap::from([
                 ("types".to_owned(), Value::Map { keys: vec![], values: vec![] }),
+                ("lambda_counter".to_owned(), Value::Int(Int::from_i64(0))),
             ]),
             defer_stack: vec![],
             scope: "main".to_owned(),
         };
 
         for type_ in VALID_TYPES {
-            this.cache.get_mut("types").unwrap().insert_into_map(
+            this.internal_storage.get_mut("types").unwrap().insert_into_map(
                 Value::String(type_.to_string()),
                 Value::String(type_.to_string()),
             );
@@ -213,6 +217,15 @@ impl Interpreter {
             &self.config,
             Some(self.use_colors),
         );
+    }
+
+    pub fn get_traceback(&self) -> BTreeMap<String, String> {
+        let mut traceback = BTreeMap::new();
+        for (file, loc) in &self.stack {
+            let location = loc.as_ref().map_or("unknown location".to_string(), |l| format!("{}:{}:{}", l.file, l.line_number, l.range.0));
+            traceback.insert(file.clone(), location);
+        }
+        traceback
     }
 
     // i personally hate this function
@@ -1086,7 +1099,7 @@ impl Interpreter {
         //     "conditions": conds,
         // }
 
-        self.cache.get_mut("types").unwrap().insert_into_map(
+        self.internal_storage.get_mut("types").unwrap().insert_into_map(
             Value::String(name.clone()),
             Value::Map {
                 keys: vec![
@@ -2730,7 +2743,7 @@ impl Interpreter {
     }
 
     fn handle_function_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
+        let mut name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(n)) => n,
             _ => return self.raise("RuntimeError", "Missing or invalid 'name' in function declaration"),
         };
@@ -2906,6 +2919,18 @@ impl Interpreter {
 
         let body_formatted: Vec<Statement> = body.iter().map(|v| v.convert_to_statement()).collect();
 
+        let lambda_name;  // stupid lifetimes
+        if name == "<lambda#{}>" {
+            let lambda_counter = self.internal_storage.get_mut("lambda_counter").unwrap();
+            let id = match lambda_counter {
+                Value::Int(i) => i,
+                _ => return self.raise("RuntimeError", "Lambda counter is not an integer"),
+            };
+            *id += 1.into();
+            lambda_name = name.replace("{}", &id.to_string());
+            name = &lambda_name;
+        }
+
         let metadata = FunctionMetadata {
             name: name.to_string(),
             parameters,
@@ -2917,35 +2942,30 @@ impl Interpreter {
             state: None,
         };
 
-        if name != "_" {
-            if self.variables.contains_key(name) {
-                if let Some(var) = self.variables.get(name) {
-                    if var.is_final() {
-                        return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
-                    }
+        if self.variables.contains_key(name) && !name.starts_with("<") {
+            if let Some(var) = self.variables.get(name) {
+                if var.is_final() {
+                    return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
                 }
             }
-            self.variables.insert(
-                name.to_string(),
-                Variable::new(
-                    name.to_string(),
-                    create_function(
-                        metadata.clone(),
-                        body_formatted,
-                    ),
-                    "function".to_string(),
-                    is_public,
-                    is_static,
-                    is_final,
-                ),
-            );
-            self.variables.get(name)
-                .map_or(NULL, |var| var.value.clone())
-        } else {
-            let function_value = create_function(metadata, body_formatted);
-            self.stack.pop();
-            function_value
         }
+        
+        self.variables.insert(
+            name.to_string(),
+            Variable::new(
+                name.to_string(),
+                create_function(
+                    metadata.clone(),
+                    body_formatted,
+                ),
+                "function".to_string(),
+                is_public,
+                is_static,
+                is_final,
+            ),
+        );
+        self.variables.get(name)
+            .map_or(NULL, |var| var.value.clone())
     }
 
     fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -3117,7 +3137,7 @@ impl Interpreter {
     fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
         let default_type = Value::String("any".to_string());
     
-        let valid_types: Vec<Value> = match self.cache.get("types") {
+        let valid_types: Vec<Value> = match self.internal_storage.get("types") {
             Some(Value::Map { values, .. }) => values.iter().cloned().collect(),
             _ => {
                 self.raise("RuntimeError", "Type cache is not properly initialized");
@@ -3161,7 +3181,7 @@ impl Interpreter {
                         return Value::String(s.clone());
                     }
 
-                    match self.cache.get("types") {
+                    match self.internal_storage.get("types") {
                         Some(Value::Map { values, keys }) => {
                             let map = Value::Map {
                                 keys: keys.clone(),
@@ -3663,6 +3683,7 @@ impl Interpreter {
         NULL
     }
 
+    // TODO: Fix nested index assignment and map index assign
     fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
         let left = match statement.get(&Value::String("left".to_string())) {
             Some(v) => v,
@@ -4328,7 +4349,7 @@ impl Interpreter {
     
         if let Some(var) = self.variables.get(name) {
             return var.get_value().clone();
-        } else if let Some(cache) = self.cache.get_mut("types") {
+        } else if let Some(cache) = self.internal_storage.get_mut("types") {
             return match cache.map_get(&Value::String(name.to_string())) {
                 Some(v) => {
                     format_type(&v).into()
