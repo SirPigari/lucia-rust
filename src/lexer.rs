@@ -164,7 +164,7 @@ impl Lexer {
                 ("BOOLEAN", r"\b(true|false|null)\b"),
                 ("NUMBER", &number_pattern),
                 ("OPERATOR", &operator_pattern),
-                ("IDENTIFIER", r"\bnon-static\b|\b[a-zA-Z_]\w*\b"),
+                ("IDENTIFIER", r"\bnon-static\b|[a-zA-Z_]\w*"),
                 ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?]"),
                 ("WHITESPACE", r"\s+"),
                 ("INVALID", r"."),
@@ -221,7 +221,8 @@ impl Lexer {
                     (column_start, column_end),
                 ));
     
-                let cap = regex.captures(&code[token_start..]).unwrap();
+                let match_text = &code[token_start..token_end];
+                let cap = regex.captures(match_text).unwrap();
     
                 let mut skip_token = false;
                 for &name in &capture_names {

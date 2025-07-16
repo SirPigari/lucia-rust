@@ -592,6 +592,15 @@ impl Parser {
                 break;
             }
 
+            if ["=!", "=+", "=-", "=*", "=/", "=^"].contains(&op_str) {
+                self.raise_with_help(
+                    "SyntaxError",
+                    &format!("Unexpected operator: '{}'", op_str),
+                    &format!("Did you mean to use '{}'?", op_str.chars().rev().collect::<String>()),
+                );
+                return Statement::Null;
+            }
+
             if tok_type != "OPERATOR" {
                 break;
             }

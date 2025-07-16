@@ -4074,7 +4074,7 @@ impl Interpreter {
 
                 result
             }
-            _ => self.raise("TypeError", &format!("Cannot modify type '{}'", get_type_from_token_name(left_type))),
+            _ => self.raise("TypeError", &format!("Cannot assign to type '{}'", get_type_from_token_name(left_type))),
         }
     }
 
@@ -6287,14 +6287,6 @@ impl Interpreter {
             "and" => "&&",
             "is" => "==",
             "not" => "!",
-            op if ["=!", "=+", "=-", "=*", "=/", "=^"].contains(&op) => {
-                self.raise_with_help(
-                    "SyntaxError",
-                    &format!("Unexpected operator: '{}'", op),
-                    &format!("Did you mean to use '{}'?", op.chars().rev().collect::<String>()),
-                );
-                return NULL;
-            }
             other => other,
         };
     

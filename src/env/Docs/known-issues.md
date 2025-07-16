@@ -33,6 +33,39 @@ Each issue should follow this structure:
 
 ## Known Issues
 
+### Invalid Tokenization After Number  
+- **ID**: `lucia-0002`  
+- **Severity**: Medium  
+- **Status**: Resolved  
+- **Component**: Lexer  
+- **Discovered in**: `v2.0.0`
+
+- **Description**:  
+  When an identifier immediately follows a number (e.g. `00help()`), the lexer incorrectly tokenizes the identifier into overlapping substrings: `"help"`, `"elp"`, `"lp"`, and `"p"` instead of as a single identifier token.
+
+  ```lucia-repl
+  >>> 00help()
+  Tokens: [("NUMBER", "00"), ("IDENTIFIER", "help"), ("IDENTIFIER", "elp"), ("IDENTIFIER", "lp"), ("IDENTIFIER", "p"), ("SEPARATOR", "("), ("SEPARATOR", ")")]
+  ```
+
+- **Reproduction**:
+  1. Launch the Lucia REPL.
+  2. Input: `00help()`
+  3. Observe incorrect token stream.
+
+- **Expected Behavior**:  
+  The lexer should correctly recognize `help` as a single `IDENTIFIER` token after the number:
+
+  ```lucia-repl
+  Tokens: [("NUMBER", "00"), ("IDENTIFIER", "help"), ("SEPARATOR", "("), ("SEPARATOR", ")")]
+  ```
+
+- **Actual Behavior**:  
+  The identifier is tokenized into multiple overlapping substrings instead of one token.
+
+- **Workaround**:
+  Insert whitespace between the number and the identifier (e.g., `00 help()`) to ensure correct tokenization.
+
 ### Nested index assignment  
 - **ID**: `lucia-0001`  
 - **Severity**: Medium  
