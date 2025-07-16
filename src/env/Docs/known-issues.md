@@ -99,5 +99,5 @@ Each issue should follow this structure:
   temp: list = l[1]
   temp[1] = 3
   l[1] = temp
-  forget temp  // optional
+  // forget temp
   ```
