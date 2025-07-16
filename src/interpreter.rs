@@ -6287,6 +6287,14 @@ impl Interpreter {
             "and" => "&&",
             "is" => "==",
             "not" => "!",
+            op if ["=!", "=+", "=-", "=*", "=/", "=^"].contains(&op) => {
+                self.raise_with_help(
+                    "SyntaxError",
+                    &format!("Unexpected operator: '{}'", op),
+                    &format!("Did you mean to use '{}'?", op.chars().rev().collect::<String>()),
+                );
+                return NULL;
+            }
             other => other,
         };
     

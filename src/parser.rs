@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement};
+use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
@@ -332,23 +332,24 @@ impl Parser {
         if self.err.is_some() {
             return Statement::Null;
         }
-    
+
         if expr.get_type() == "TYPE" {
             return expr;
         }
-    
+
+        expr = self.parse_binops(expr, 0);
+
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
-    
+
             match (tok.0.as_str(), tok.1.as_str()) {
                 ("IDENTIFIER", "as") => {
                     self.next();
-            
                     let type_conv = self.parse_type();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-            
+
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -366,7 +367,6 @@ impl Parser {
 
                 ("OPERATOR", "=>") => {
                     self.next();
-
                     let body_expr = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
@@ -493,7 +493,7 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                
+
                     let expr_type = expr.get_type();
                     if expr_type == "TUPLE" {
                         let targets = expr.get_value("items").unwrap_or(Value::Null);
@@ -511,7 +511,7 @@ impl Parser {
                             loc: self.get_loc(),
                         };
                     }
-                    
+
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -534,7 +534,6 @@ impl Parser {
                         _ => unreachable!(),
                     }.to_string();
                     self.next();
-                    // imagine writing AST instead of code
                     expr = Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -545,54 +544,29 @@ impl Parser {
                             Value::String("ASSIGNMENT".to_string()),
                             expr.convert_to_map(),
                             Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("left".to_string()),
-                                        Value::String("right".to_string()),
-                                        Value::String("operator".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("OPERATION".to_string()),
-                                        expr.convert_to_map(),
-                                        Value::Map {
-                                            keys: vec![
-                                                Value::String("type".to_string()),
-                                                Value::String("value".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String("NUMBER".to_string()),
-                                                Value::String("1".to_string()),
-                                            ],
-                                        },
-                                        Value::String(operator),
-                                    ],
-                                    loc: self.get_loc(),
-                                }.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
-                    };
-                }
-
-                ("OPERATOR", op) if op != "|" => {
-                    let operator = tok.1.clone();
-                    self.next();
-                    let right = self.parse_primary();
-                    if self.err.is_some() {
-                        return Statement::Null;
-                    }
-    
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("OPERATION".to_string()),
-                            expr.convert_to_map(),
-                            Value::String(operator),
-                            right.convert_to_map(),
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("left".to_string()),
+                                    Value::String("right".to_string()),
+                                    Value::String("operator".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("OPERATION".to_string()),
+                                    expr.convert_to_map(),
+                                    Value::Map {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("NUMBER".to_string()),
+                                            Value::String("1".to_string()),
+                                        ],
+                                    },
+                                    Value::String(operator),
+                                ],
+                                loc: self.get_loc(),
+                            }.convert_to_map(),
                         ],
                         loc: self.get_loc(),
                     };
@@ -601,8 +575,82 @@ impl Parser {
                 _ => break,
             }
         }
-    
+
         expr
+    }
+
+    fn parse_binops(&mut self, mut lhs: Statement, min_prec: u8) -> Statement {
+        loop {
+            let tok_opt = self.token().cloned();
+
+            let (tok_type, op_str) = match tok_opt {
+                Some(Token(ref ttype, ref val, _)) => (ttype.as_str(), val.as_str()),
+                None => break,
+            };
+
+            if ["=", "=>", "as", "++", "--", "|"].contains(&op_str) {
+                break;
+            }
+
+            if tok_type != "OPERATOR" {
+                break;
+            }
+
+            let prec = get_precedence(op_str);
+
+            if prec < min_prec {
+                break;
+            }
+
+            self.next();
+
+            let mut rhs = self.parse_primary();
+            if self.err.is_some() {
+                return Statement::Null;
+            }
+
+            loop {
+                let next_tok_opt = self.token().cloned();
+
+                let (next_tok_type, next_op_str) = match next_tok_opt {
+                    Some(Token(ref ttype, ref val, _)) => (ttype.as_str(), val.as_str()),
+                    None => break,
+                };
+
+                if next_tok_type != "OPERATOR" {
+                    break;
+                }
+
+                let next_prec = get_precedence(next_op_str);
+
+                if next_prec > prec {
+                    rhs = self.parse_binops(rhs, next_prec);
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            lhs = Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("left".to_string()),
+                    Value::String("operator".to_string()),
+                    Value::String("right".to_string()),
+                ],
+                values: vec![
+                    Value::String("OPERATION".to_string()),
+                    lhs.convert_to_map(),
+                    Value::String(op_str.to_string()),
+                    rhs.convert_to_map(),
+                ],
+                loc: self.get_loc(),
+            };
+        }
+
+        lhs
     }
 
     fn parse_primary(&mut self) -> Statement {

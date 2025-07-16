@@ -11,20 +11,20 @@
 #endmacro
 
 #macro assert_eq($a, $b, $msg=("Values are not equal")):
-    if ($a != $b):
+    if (($a) != $b):
         throw $msg from "AssertionError"
     end
 #endmacro
 
 #macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=("Values are not approximately equal")):
-    if (|$a - $b| > $epsilon):
+    if ((|($a) - $b|) > $epsilon):
         throw $msg from "AssertionError"
     end
 #endmacro
 
 
 #macro assert_ne($a, $b, $msg=("Values are equal but should not be")):
-    if ($a == $b):
+    if (($a) == $b):
         throw $msg from "AssertionError"
     end
 #endmacro

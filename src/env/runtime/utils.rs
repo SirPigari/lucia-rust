@@ -9,6 +9,9 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::{Value};
 use serde_json::Value as JsonValue;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
+use std::env;
 use regex::Regex;
 use crossterm::{
     execute,
@@ -1122,6 +1125,31 @@ pub fn char_to_digit(c: char) -> Option<u32> {
         'A'..='Z' => Some(c as u32 - 'A' as u32 + 36),
         _ => None,
     }
+}
+
+pub fn get_precedence(op: &str) -> u8 {
+    match op {
+        "++" | "--" | "!" | "~" | "bnot" | "not" => 9,
+        "^" => 8,
+        "*" | "/" | "%" | "*=" | "/=" | "%=" => 7,
+        "+" | "-" | "+=" | "-=" | "^=" => 6,
+        "<<" | ">>" | "lshift" | "rshift" => 5,
+        "&" | "band" => 4,
+        "xor" => 3,
+        "|" | "bor" => 2,
+        ">" | "<" | ">=" | "<=" | "==" | "!="
+        | "is" | "isnt" | "isn't" | "nein" => 1,
+        "&&" | "and" => 0,
+        "||" | "or" => 0,
+        _ => 0,
+    }
+}
+
+pub fn unique_temp_name(suffix: &str) -> PathBuf {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let mut path = env::temp_dir();
+    path.push(format!("lucia_temp_{now}.{suffix}"));
+    path
 }
 
 pub const NULL: Value = Value::Null;

@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use serde::Serialize;
-use std::process::exit;
+use std::process::{exit, Command};
 use std::collections::HashMap;
 use colored::*;
 use sys_info;
@@ -62,15 +62,18 @@ mod env {
             pub mod __init__;
         }
     }
+    pub mod transpiler {
+        pub mod transpiler;
+    }
 }
 
-mod interpreter;
-mod parser;
 mod lexer;
+mod parser;
+mod interpreter;
 
 use crate::env::runtime::utils;
 use crate::env::runtime::config::{Config, ColorScheme};
-use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys};
+use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -79,6 +82,7 @@ use crate::parser::Parser;
 use crate::env::runtime::tokens::{Token, Location};
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
+use crate::env::transpiler::transpiler::Transpiler;
 
 const VERSION: &str = env!("VERSION");
 
@@ -637,6 +641,12 @@ fn lucia(args: Vec<String>) {
     let dump_pp_flag = args.contains(&"--dump-pp".to_string()) || args.contains(&"--dump".to_string());
     let dump_ast_flag = args.contains(&"--dump-ast".to_string()) || args.contains(&"--dump".to_string());
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
+    let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
+    let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
+    let c_compiler = args.iter()
+        .find(|arg| arg.starts_with("--c-compiler="))
+        .map(|arg| arg.trim_start_matches("--c-compiler="))
+        .unwrap_or("gcc");
     let argv_arg = args.iter()
         .find(|arg| arg.starts_with("--argv="))
         .map(|arg| arg.trim_start_matches("--argv="));
@@ -950,6 +960,28 @@ fn lucia(args: Vec<String>) {
                 &config.color_scheme.warning,
                 Some(use_colors),
             );
+        }
+    }
+
+    if compile_flag {
+        if non_flag_args.is_empty() {
+            eprintln!("No files provided to compile. Exiting.");
+            exit(1);
+        }
+        let result = compile(&config, non_flag_args.clone(), cwd, home_dir_path, config_path, dump_pp_flag, dump_ast_flag, run_flag, c_compiler);
+        match result {
+            Ok(message) => {
+                if !quiet_flag {
+                    println!("{}", message);
+                }
+                exit(0);
+            }
+            Err((code, errors)) => {
+                for error in errors {
+                    handle_error(&error, "", &config, use_colors);
+                }
+                exit(code);
+            }
         }
     }
 
@@ -1348,6 +1380,162 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             println!("{}", format_value(&out));
         }
     }
+}
+
+fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: PathBuf, config_path: PathBuf, dump_pp_flag: bool, dump_ast_flag: bool, run_flag: bool, c_compiler: &str) -> Result<String, (i32, Vec<Error>)> {
+    std_env::set_current_dir(&cwd).ok();
+    for file in &files {
+        let mut errors: Vec<Error> = vec![];
+        let path = Path::new(file);
+        if !path.exists() || !path.is_file() {
+            return Err((1, vec![Error::new("FileNotFoundError", &format!("File '{}' does not exist or is not a valid file", file), file)]));
+        }
+        let mut lexer = Lexer::new(&fs::read_to_string(path).unwrap(), file, None);
+        let raw_tokens = lexer.tokenize();
+        let processed_tokens = if !config.use_preprocessor {
+            raw_tokens.clone()
+        } else {
+            let mut preprocessor = Preprocessor::new(
+                home_dir_path.join("libs"),
+                file,
+            );
+            match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
+                Ok(tokens) => tokens,
+                Err(e) => {
+                    return Err((1, vec![e]));
+                }
+            }
+        };
+        if dump_pp_flag && !processed_tokens.is_empty() {
+            dump_pp(
+                processed_tokens.iter().collect(),
+                path.to_str().unwrap_or(""),
+                config,
+                config.supports_color,
+            );
+        }
+        let mut parser = Parser::new(processed_tokens);
+        let ast = match parser.parse_safe() {
+            Ok(stmts) => stmts,
+            Err(error) => {
+                errors.push(error);
+                return Err((1, errors));
+            }
+        };
+        if dump_ast_flag && !ast.is_empty() {
+            let file_path = path.with_extension("ast");
+            dump_ast(
+                ast.iter().collect(),
+                file_path.to_str().unwrap_or(""),
+                config,
+                config.supports_color,
+            );
+        }
+        let mut transpiler = Transpiler::new(
+            ast,
+            config.clone(),
+            cwd.clone(),
+            home_dir_path.clone(),
+            config_path.clone(),
+        );
+        let c_code = match transpiler.transpile() {
+            Ok(code) => code,
+            Err(t_errors) => {
+                errors.extend(t_errors);
+                return Err((1, errors));
+            }
+        };
+
+        let c_path = unique_temp_name("c");
+        let mut c_file = match File::create(&c_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Failed to create temp C file: {e}");
+                return Err((1, errors));
+            }
+        };
+
+        if let Err(e) = write!(c_file, "{}", c_code) {
+            eprintln!("Failed to write to C file: {e}");
+            return Err((1, errors));
+        }
+
+        let binary_path = {
+            let mut p = unique_temp_name(if cfg!(windows) { "exe" } else { "out" });
+            if cfg!(not(windows)) {
+                p.set_extension("");
+            }
+            p
+        };
+
+        let mut compile_cmd = match c_compiler {
+            "gcc" | "clang" | "cc" => {
+                let mut cmd = Command::new(c_compiler);
+                cmd.arg(&c_path)
+                    .arg("-o")
+                    .arg(&binary_path)
+                    .arg("-O2");
+                cmd
+            }
+
+            "tcc" => {
+                let mut cmd = Command::new("tcc");
+                cmd.arg(&c_path)
+                    .arg("-o")
+                    .arg(&binary_path)
+                    .arg("-O");
+                cmd
+            }
+
+            "cl" => {
+                let mut cmd = Command::new("cl");
+                cmd.arg(&c_path)
+                    .arg(format!("/Fe:{}", binary_path.to_string_lossy()))
+                    .arg("/O2")
+                    .arg("/nologo");
+                cmd
+            }
+
+            other => {
+                let mut cmd = Command::new(other);
+                cmd.arg(&c_path)
+                    .arg("-o")
+                    .arg(&binary_path)
+                    .arg("-O2");
+                cmd
+            }
+        };
+
+        let output = match compile_cmd.output() {
+            Ok(out) => out,
+            Err(e) => {
+                eprintln!("Failed to invoke compiler '{c_compiler}': {e}");
+                return Err((1, errors));
+            }
+        };
+
+        if !output.status.success() {
+            eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
+            return Err((1, errors));
+        }
+
+        if run_flag {
+            let status = match Command::new(&binary_path).status() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to run binary: {e}");
+                    return Err((1, errors));
+                }
+            };
+
+            if !status.success() {
+                eprintln!("Program exited with non-zero status: {status}");
+                return Err((1, errors));
+            }
+        }
+        
+    }
+    Ok(String::new())
 }
 
 fn main() {
