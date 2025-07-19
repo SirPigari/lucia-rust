@@ -44,6 +44,7 @@ It's designed for speed and safety, without sacrificing elegance.
 - [x] [Contributing guide](src/env/Docs/contributing.md)
 - [ ] [Changelog](src/env/Docs/changelog.md)
 - [x] [Known issues/bugs](src/env/Docs/known-issues.md)
+- [x] [TODOs](src/env/Docs/todos.md)
 
 See [Lucia Docs reader](https://sirpigari.github.io/lucia-apl/docs/reader)
 

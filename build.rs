@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use toml::Value;
 use uuid::{Builder, Uuid};
 use rand::{rng, RngCore};
+use std::cmp::Ordering;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -31,6 +32,203 @@ fn rerun_if_changed_recursive(dir: &Path) {
             }
         }
     }
+}
+
+fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
+    let mut todos = Vec::new();
+
+    fn collect_todos_from_file(
+        path: &Path,
+        rel_path: &str,
+        todos: &mut Vec<(String, Vec<String>)>,
+    ) {
+        let file = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        let reader = BufReader::new(file);
+        let mut lines_iter = reader.lines().enumerate().peekable();
+
+        while let Some((line_num, Ok(line))) = lines_iter.next() {
+            let trimmed = line.trim_start();
+
+            if trimmed.starts_with("// TODO") {
+                let content = trimmed
+                    .strip_prefix("// TODO")
+                    .unwrap_or("")
+                    .trim_start_matches(':')
+                    .trim();
+
+                let mut collected = vec![content.to_string()];
+                let mut peek = lines_iter.peek();
+
+                while let Some((_, Ok(next_line))) = peek {
+                    let t = next_line.trim_start();
+                    if t.starts_with("//") && !t.contains("TODO") {
+                        collected.push(t.trim_start_matches("//").trim().to_string());
+                        lines_iter.next();
+                        peek = lines_iter.peek();
+                    } else {
+                        break;
+                    }
+                }
+
+                todos.push((format!("{}:{}", rel_path, line_num + 1), collected));
+            }
+        }
+    }
+
+    fn walk_dir_recursively(
+        dir: &Path,
+        manifest_dir: &Path,
+        todos: &mut Vec<(String, Vec<String>)>,
+    ) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk_dir_recursively(&path, manifest_dir, todos);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    let rel_path = path
+                        .strip_prefix(manifest_dir)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    collect_todos_from_file(&path, &rel_path, todos);
+                }
+            }
+        }
+    }
+
+    fn get_git_blame_author_date(file_path: &Path, line: usize) -> Option<(String, String)> {
+        let output = Command::new("git")
+            .args([
+                "blame",
+                "-L",
+                &format!("{line},{line}"),
+                "--date=short",
+                "--",
+                file_path.to_str()?,
+            ])
+            .output()
+            .ok()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout.lines().next()?;
+        if line.contains("Not Committed Yet") {
+            return Some(("uncommitted".to_string(), String::new()));
+        }
+
+        let parts: Vec<&str> = line.split('(').nth(1)?.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let author = parts[0].to_string();
+            let date = parts[1].to_string();
+            Some((author, date))
+        } else {
+            None
+        }
+    }
+
+    walk_dir_recursively(src_dir, manifest_dir, &mut todos);
+
+    let mut todos_with_meta: Vec<(String, Vec<String>, Option<String>)> = todos
+        .into_iter()
+        .map(|(location, lines)| {
+            if let Some((file_path, line_str)) = location.rsplit_once(':') {
+                let line_num: usize = line_str.parse().unwrap_or(1);
+                let full_path = manifest_dir.join(file_path);
+                let blame_info = get_git_blame_author_date(&full_path, line_num);
+
+                let date_opt = match &blame_info {
+                    Some((author, _)) if author == "uncommitted" => None,
+                    Some((_, date)) if !date.is_empty() => Some(date.clone()),
+                    _ => None,
+                };
+
+                (location, lines, date_opt)
+            } else {
+                (location, lines, None)
+            }
+        })
+        .collect();
+
+    todos_with_meta.sort_by(|a, b| {
+        match (&a.2, &b.2) {
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(d1), Some(d2)) => d1.cmp(d2),
+            (None, None) => Ordering::Equal,
+        }
+    });
+
+    let report_path = manifest_dir.join("src/env/Docs/todos.md");
+    if let Some(parent) = report_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let mut file = match fs::File::create(&report_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to write TODO report: {}", e);
+            return;
+        }
+    };
+
+    let _ = writeln!(file, "# TODO Report\n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.\n");
+
+    let total_todos = todos_with_meta.len();
+    let _ = writeln!(file, "_Total TODOs found: {}_\n---\n", total_todos);
+
+    for (location, lines, _) in todos_with_meta {
+        if let Some((file_path, line_str)) = location.rsplit_once(':') {
+            let line_num: usize = line_str.parse().unwrap_or(1);
+
+            let relative_path = Path::new(file_path)
+                .strip_prefix("src/env/Docs")
+                .unwrap_or(Path::new(file_path));
+            let adjusted_path = Path::new("../../../").join(relative_path);
+
+            let full_path = manifest_dir.join(file_path);
+            let blame_info = get_git_blame_author_date(&full_path, line_num);
+            let meta_line = match blame_info {
+                Some((author, _)) if author == "uncommitted" => "**(TODO not committed yet)**".to_string(),
+                Some((author, date)) => format!("_(added by **{}** on **{}**)_", author, date),
+                None => "_(added by unknown)_".to_string(),
+            };
+
+            let col = lines
+                .get(0)
+                .and_then(|l| l.find('/'))
+                .map(|idx| idx + 1)
+                .unwrap_or(1);
+
+            // Use inline code formatting for file:line and clickable link to the source
+            let markdown_link = format!(
+                "[`{}:{col}`]({}#L{})",
+                location,
+                adjusted_path.to_string_lossy().replace('\\', "/"),
+                line_num
+            );
+
+            // Header with link and meta info on same line for compactness
+            let _ = writeln!(file, "## {} {}", markdown_link, meta_line);
+
+        } else {
+            let _ = writeln!(file, "## `{}`", location);
+        }
+
+        // Use a nested bullet list for TODO details
+        for line in lines {
+            if !line.is_empty() {
+                let _ = writeln!(file, "- {}", line);
+            }
+        }
+        let _ = writeln!(file);
+    }
+
+    let _ = writeln!(file, "---\n*Report generated automatically.*\n");
+
+    let _ = file.flush();
 }
 
 fn get_deps_from_cargo_toml() -> String {
@@ -314,6 +512,8 @@ fn main() {
     let build_path = Path::new(&manifest_dir).join("build.rs");
     rerun_if_changed_recursive(&src_path);
     println!("cargo:rerun-if-changed={}", build_path.display());
+
+    scan_todos_and_generate_report(&src_path, &path);
 
     if cfg!(target_os = "windows") {
         use winres::WindowsResource;

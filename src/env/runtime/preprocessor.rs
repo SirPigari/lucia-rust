@@ -865,7 +865,6 @@ impl Preprocessor {
                                             format!("\"{}\"", joined),
                                             loc,
                                         ));
-                                        dbg!(format!("\"{}\"", joined));
                                     } else {
                                         return Err(Error::new(
                                             "PreprocessorError",

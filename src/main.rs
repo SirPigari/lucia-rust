@@ -321,6 +321,7 @@ fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     }
 }
 
+// TODO: Fix indentation and formatting for pp dump
 fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bool) {
     let new_line_keywords = [
         "match", "import", "throw", "try", "catch",
