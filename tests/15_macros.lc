@@ -23,3 +23,11 @@ dbg!(10 + 10)
 dbglog!("This is a debug log message")
 
 dbg!(1, 2, 3, "Hello", 4.5)
+
+i: int = 42
+#macro mangling_test($a):
+    i: int = $a
+    dbg!(i)
+#endmacro
+mangling_test!(100)
+assert_eq!(i, 42)

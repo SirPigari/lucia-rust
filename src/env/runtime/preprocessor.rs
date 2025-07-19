@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, KEYWORDS};
+use rand;
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
@@ -902,8 +903,8 @@ impl Preprocessor {
                         }
 
                         let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), 0)?;
-                        result.extend(recursively_expanded);
-                        continue;                        
+                        result.extend(mangle_tokens(&recursively_expanded));
+                        continue;
                     } else {
                         return Err(Error::new(
                             "PreprocessorError",
@@ -1172,7 +1173,8 @@ impl Preprocessor {
                         result.push(Token("STRING".into(), "\"RecursionError\"".into(), call_loc.clone()));
                     } else {
                         let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), depth + 1)?;
-                        result.extend(recursively_expanded);
+                        let mangled = mangle_tokens(&recursively_expanded);
+                        result.extend(mangled);
                     }
     
                     continue;
@@ -1206,5 +1208,50 @@ impl Preprocessor {
         }
     
         Ok(result)
-    }    
+    }
+}
+
+fn mangle_tokens(tokens: &[Token]) -> Vec<Token> {
+    let mut result = Vec::new();
+    let mut mangled_names: HashMap<String, String> = HashMap::new();
+
+    let mut i = 0;
+    while i < tokens.len() {
+        let token = &tokens[i];
+
+        if token.0 == "IDENTIFIER" {
+            let og_token = &token.1;
+
+            if og_token == "_" {
+                result.push(token.clone());
+                i += 1;
+                continue;
+            }
+
+            let next_token = tokens.get(i + 1);
+
+            let defines_identifier = next_token.map_or(false, |t| t.1 == ":" || t.1 == ":=");
+            let not_keyword = !KEYWORDS.contains(&og_token.as_str());
+
+            if defines_identifier && not_keyword {
+                let uid = rand::random::<u16>();
+                let mangled = format!("__mangle_{}_{}", uid, og_token);
+                mangled_names.insert(og_token.clone(), mangled.clone());
+                result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
+                i += 1;
+                continue;
+            }
+
+            if let Some(mangled) = mangled_names.get(og_token) {
+                result.push(Token("IDENTIFIER".to_string(), mangled.clone(), token.2.clone()));
+                i += 1;
+                continue;
+            }
+        }
+
+        result.push(token.clone());
+        i += 1;
+    }
+
+    result
 }

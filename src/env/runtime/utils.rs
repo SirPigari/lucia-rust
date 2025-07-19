@@ -1152,6 +1152,17 @@ pub fn unique_temp_name(suffix: &str) -> PathBuf {
     path
 }
 
+pub const KEYWORDS: &[&str] = &[
+    "fun", "return", "throw", "end", "catch", "try", "static", "non-static",
+    "public", "private", "final", "mutable", "if", "else", "then", "for",
+    "while", "as", "from", "import", "in", "forget", "and", "or", "not",
+    "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",
+    "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
+    "type", "where", "true", "false", "null", "void", "any", "int",
+    "float", "bool", "str", "map", "list", "function", "bytes", "tuple",
+    "auto",
+];
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

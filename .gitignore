@@ -15,3 +15,7 @@ Cargo.lock
 tests/stdout
 tests/stdout/*
 src/env/assets/tests.lc
+*.ast.json
+*.i
+*.i.json
+*.pp
