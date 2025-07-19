@@ -21,3 +21,5 @@ assert_err!(1 / 0)
 
 dbg!(10 + 10)
 dbglog!("This is a debug log message")
+
+dbg!(1, 2, 3, "Hello", 4.5)

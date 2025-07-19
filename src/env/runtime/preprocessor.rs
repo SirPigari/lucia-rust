@@ -773,16 +773,12 @@ impl Preprocessor {
                             if Some(idx) == variadic_pos {
                                 let mut variadic_tokens = Vec::new();
                         
-                                variadic_tokens.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-                        
                                 for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
                                     if vi != idx {
                                         variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
                                     }
                                     variadic_tokens.extend(rest_arg.clone());
                                 }
-                        
-                                variadic_tokens.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
                         
                                 let variadic_name = &name[..name.len() - 3];
                                 replacement_map.insert(variadic_name, variadic_tokens);
@@ -854,7 +850,7 @@ impl Preprocessor {
                                             .iter()
                                             .map(|t| {
                                                 if t.0 == "STRING" {
-                                                    format!("\"{}\"", t.1)
+                                                    format!("{}", t.1).replace("\"", "\\\"").replace("'", "\\'")
                                                 } else {
                                                     t.1.clone()
                                                 }
@@ -868,6 +864,7 @@ impl Preprocessor {
                                             format!("\"{}\"", joined),
                                             loc,
                                         ));
+                                        dbg!(format!("\"{}\"", joined));
                                     } else {
                                         return Err(Error::new(
                                             "PreprocessorError",
@@ -1043,16 +1040,12 @@ impl Preprocessor {
                         if Some(idx) == variadic_pos {
                             let mut variadic_tokens = Vec::new();
                     
-                            variadic_tokens.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-                    
                             for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
                                 if vi != idx {
                                     variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
                                 }
                                 variadic_tokens.extend(rest_arg.clone());
                             }
-                    
-                            variadic_tokens.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
                     
                             let variadic_name = &name[..name.len() - 3];
                             replacement_map.insert(variadic_name, variadic_tokens);
@@ -1208,7 +1201,7 @@ impl Preprocessor {
     
                 result.push(token);
             }
-                
+
             i += 1;
         }
     
