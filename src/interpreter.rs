@@ -1637,7 +1637,13 @@ impl Interpreter {
                     self.raise("SyntaxError", "Unpack assignment target cannot be an empty string");
                     return NULL;
                 }
-                vec![Value::String(target_str.clone())]
+                if targets.len() != target_str.len() {
+                    vec!(Value::String(target_str))
+                } else {
+                    target_str.chars()
+                        .map(|c| Value::String(c.to_string()))
+                        .collect::<Vec<Value>>()
+                }
             },
             Value::Map { keys, values } => {
                 if keys.is_empty() || values.is_empty() {
@@ -1718,12 +1724,32 @@ impl Interpreter {
                                 .cloned()
                                 .zip(values.iter().cloned())
                                 .collect();
-                        
+
+                            let type_ = match decl_map.get(&Value::String("var_type".to_string())) {
+                                Some(t) => self.evaluate(t.convert_to_statement()),
+                                _ => {
+                                    self.raise("TypeError", "Missing or invalid 'var_type' in variable declaration");
+                                    return NULL;
+                                }
+                            };
+
+                            if type_ != "auto".into() && !self.check_type(&val, &type_, false) {
+                                self.raise("TypeError", &format!(
+                                    "Value '{}' does not match the type '{}'",
+                                    val, type_
+                                ));
+                                return NULL;
+                            }
+                            
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+
                             let _ = self.handle_variable_declaration(decl_map);
                             if self.err.is_some() {
                                 return NULL;
                             }
-                        
+
                             if let Some(Value::String(var_name)) = map.get("name") {
                                 if let Some(var) = self.variables.get_mut(var_name) {
                                     var.set_value(val.clone());

@@ -15,7 +15,7 @@ Lucia is a expressive scripting programming language written in Rust. Contributi
 
 ## Project Structure
 
-```
+```txt
 .github/workflows/              # workflows
 src/
   env/

@@ -1209,7 +1209,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     println!("{}", "Tip: Use ':macro-help' to see REPL macros.".cyan());
                     Some("help()".into())
                 }
-                ":macro-help" => {
+                ":macro-help" | "::" => {
                     let macros = vec![
                         (":exit", "Exit the REPL"),
                         (":clear / :cls", "Clear the terminal screen"),

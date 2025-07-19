@@ -2151,7 +2151,7 @@ impl Parser {
                     if let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == ")" {
                             self.next();
-                            return Statement::Statement {
+                            let tuple_expr = Statement::Statement {
                                 keys: vec![
                                     Value::String("type".to_string()),
                                     Value::String("items".to_string()),
@@ -2162,6 +2162,29 @@ impl Parser {
                                 ],
                                 loc: self.get_loc(),
                             };
+
+                            if let Some(assign_token) = self.token() {
+                                if assign_token.0 == "OPERATOR" && (assign_token.1 == ":=" || assign_token.1 == "=") {
+                                    self.next();
+                                    let value = self.parse_expression();
+
+                                    return Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("targets".to_string()),
+                                            Value::String("value".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("UNPACK_ASSIGN".to_string()),
+                                            Value::List(vec![]),
+                                            value.convert_to_map(),
+                                        ],
+                                        loc: self.get_loc(),
+                                    };
+                                }
+                            }
+
+                            return tuple_expr;
                         }
                     }
 
@@ -2182,6 +2205,105 @@ impl Parser {
 
                     self.check_for("SEPARATOR", ")");
                     self.next();
+
+                    if let Some(assign_token) = self.token() {
+                        if assign_token.0 == "OPERATOR" && (assign_token.1 == ":=") {
+                            self.next();
+                            let value = self.parse_expression();
+
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            let targets = values.into_iter().map(|v| {
+                                let Statement::Statement { keys, values, .. } = &v else {
+                                    self.raise("SyntaxError", "Expected a variable statement in unpack assignment");
+                                    return Value::Null;
+                                };
+
+                                let mut var_type = None;
+                                let mut name_value = None;
+
+                                for (k, v) in keys.iter().zip(values.iter()) {
+                                    if let Value::String(k_str) = k {
+                                        match k_str.as_str() {
+                                            "type" => {
+                                                if let Value::String(v_str) = v {
+                                                    var_type = Some(v_str.as_str());
+                                                }
+                                            }
+                                            "name" => {
+                                                name_value = Some(v.clone());
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+
+                                match var_type {
+                                    Some("VARIABLE_DECLARATION") => v.convert_to_map(),
+                                    Some("VARIABLE") => {
+                                        let name_value = name_value.unwrap_or(Value::String("_".to_string()));
+
+                                        Value::Map {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("name".to_string()),
+                                                Value::String("var_type".to_string()),
+                                                Value::String("value".to_string()),
+                                                Value::String("modifiers".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String("VARIABLE_DECLARATION".to_string()),
+                                                name_value,
+                                                Value::Map {
+                                                    keys: vec![
+                                                        Value::String("type".to_string()),
+                                                        Value::String("type_kind".to_string()),
+                                                        Value::String("value".to_string()),
+                                                    ],
+                                                    values: vec![
+                                                        Value::String("TYPE".to_string()),
+                                                        Value::String("simple".to_string()),
+                                                        Value::String("auto".to_string()),
+                                                    ],
+                                                },
+                                                Value::Map {
+                                                    keys: vec![
+                                                        Value::String("type".to_string()),
+                                                        Value::String("value".to_string()),
+                                                    ],
+                                                    values: vec![
+                                                        Value::String("BOOLEAN".to_string()),
+                                                        Value::String("null".to_string()),
+                                                    ],
+                                                },
+                                                Value::List(vec![]),
+                                            ],
+                                        }
+                                    }
+                                    _ => {
+                                        self.raise("SyntaxError", "Expected a variable or declaration in unpack assignment");
+                                        Value::Null
+                                    }
+                                }
+                            });
+
+                            return Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("targets".to_string()),
+                                    Value::String("value".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("UNPACK_ASSIGN".to_string()),
+                                    Value::List(targets.collect()),
+                                    value.convert_to_map(),
+                                ],
+                                loc: self.get_loc(),
+                            };
+                        }
+                    }
 
                     if is_tuple || values.len() != 1 {
                         Statement::Statement {

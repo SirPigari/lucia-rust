@@ -24,3 +24,33 @@ f = 40
 assert_eq!(f, 40)
 
 assert_err!(d = 50)
+
+(x, y) := "ab"
+assert_eq!(x, "a")
+assert_eq!(y, "b")
+
+assert_err!(
+    (p: int, q) := "ab"
+)
+
+(m, n, o) := "xyz"
+assert_eq!(m, "x")
+assert_eq!(n, "y")
+assert_eq!(o, "z")
+
+assert_err!(
+    (p, q, r) := "xy"
+)
+
+(h) := "abc"
+assert_eq!(h, "abc")
+
+l: list[int] = [1, 2, 3]
+(x: int, y, z) := l
+assert_eq!(x, 1)
+assert_eq!(y, 2)
+assert_eq!(z, 3)
+
+assert_err!(
+    (a: int, b: int) := "aa"
+)
