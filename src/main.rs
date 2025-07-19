@@ -61,6 +61,9 @@ mod env {
         pub mod fs {
             pub mod __init__;
         }
+        pub mod nest {
+            pub mod __init__;
+        }
     }
     pub mod transpiler {
         pub mod transpiler;
@@ -574,7 +577,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: env_path_str,
-        recursion_limit: 9999,
+        recursion_limit: 999,
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),
             warning: "#F5F534".to_string(),

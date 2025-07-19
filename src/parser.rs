@@ -962,36 +962,80 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "for" => {
                     self.next();
+
                     if self.token_is("SEPARATOR", "else") {
                         self.raise("SyntaxError", "Unexpected 'else' after 'for'");
                         return Statement::Null;
                     }
+
                     if !self.token_is("SEPARATOR", "(") {
                         self.raise_with_help("SyntaxError", "Expected '(' after 'for'", "Did you forget to add '('?");
                         return Statement::Null;
                     }
                     self.next();
-                    let variable = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected identifier after 'for'");
-                        DEFAULT_TOKEN.clone()
-                    });
-                    self.next();
+
+                    let variable = if self.token_is("SEPARATOR", "(") {
+                        self.next();
+                        let mut vars = Vec::new();
+                        loop {
+                            if let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER" {
+                                    vars.push(tok.1.clone());
+                                    self.next();
+                                } else {
+                                    self.raise("SyntaxError", "Expected identifier in tuple unpacking");
+                                    return Statement::Null;
+                                }
+
+                                if self.token_is("SEPARATOR", ",") {
+                                    self.next();
+                                    continue;
+                                } else if self.token_is("SEPARATOR", ")") {
+                                    self.next();
+                                    break;
+                                } else {
+                                    self.raise("SyntaxError", "Expected ',' or ')' in tuple unpacking");
+                                    return Statement::Null;
+                                }
+                            } else {
+                                self.raise("SyntaxError", "Unexpected end of input in tuple unpacking");
+                                return Statement::Null;
+                            }
+                        }
+                        Value::List(vars.into_iter().map(Value::String).collect())
+                    } else {
+                        let t = self.token().cloned().map(|tok| Value::String(tok.1)).unwrap_or_else(|| {
+                            self.raise("SyntaxError", "Expected identifier after 'for'");
+                            return Value::Null;
+                        });
+                        self.next();
+                        t
+                    };
+
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+
                     self.check_for("OPERATOR", "in");
                     self.next();
+
                     let iterable = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
+
                     if !self.token_is("SEPARATOR", ")") {
-                        self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?");
+                        self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?"); 
                         return Statement::Null;
                     }
                     self.next();
+
                     if !self.token_is("SEPARATOR", ":") {
                         self.raise_with_help("SyntaxError", "Expected ':' after ')'", "Did you forget to add ':'?");
                         return Statement::Null;
                     }
                     self.next();
+
                     let mut body = vec![];
                     while let Some(tok) = self.token() {
                         if tok.0 == "IDENTIFIER" && tok.1 == "end" {
@@ -1003,11 +1047,13 @@ impl Parser {
                         }
                         body.push(stmt);
                     }
+
                     if !self.token_is("IDENTIFIER", "end") {
                         self.raise_with_help("SyntaxError", "Expected 'end' after 'for' body", "Did you forget to add 'end'?");
                         return Statement::Null;
                     }
                     self.next();
+
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -1017,7 +1063,7 @@ impl Parser {
                         ],
                         values: vec![
                             Value::String("FOR".to_string()),
-                            Value::String(variable.1),
+                            variable,
                             iterable.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],

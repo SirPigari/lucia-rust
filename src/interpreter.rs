@@ -40,6 +40,7 @@ use regex::Regex;
 use tokio::runtime::Runtime;
 use reqwest;
 use serde_urlencoded;
+use std::sync::Mutex;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -1091,15 +1092,7 @@ impl Interpreter {
         
         if self.err.is_some() {
             return NULL;
-        }        
-
-        // {
-        //     "type_kind": "new",
-        //     "name": name,
-        //     "base": base
-        //     "variables": vars,
-        //     "conditions": conds,
-        // }
+        }
 
         self.internal_storage.get_mut("types").unwrap().insert_into_map(
             Value::String(name.clone()),
@@ -1554,7 +1547,6 @@ impl Interpreter {
             Value::String(t) if t == "POINTER_DEREF" => {
                 if let Value::Pointer(ptr_val) = value {
                     let raw = ptr_val as *const Value;
-                    // Just dereference raw pointer, don't create Rc from raw again
                     unsafe {
                         (*raw).clone()
                     }
@@ -2342,6 +2334,25 @@ impl Interpreter {
                     use crate::env::libs::fs::__init__ as fs;
                     let fs_module_props = fs::register();
                     for (name, var) in fs_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "nest" => {
+                    use crate::env::libs::nest::__init__ as nest;
+                    let arc_config = Arc::new(self.config.clone());
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("nest").join("__init__.rs").display().to_string();
+                    let result = nest::init_nest(arc_config, module_path);
+                    if let Err(e) = result {
+                        self.stack.pop();
+                        return self.raise_with_ref(
+                            "ImportError",
+                            "Failed to initialize nest module",
+                            e,
+                        );
+                    }
+                    let interpreter_arc = Arc::new(Mutex::new(&mut *self));
+                    let nest_module_props = nest::register(interpreter_arc);
+                    for (name, var) in nest_module_props {
                         properties.insert(name, var);
                     }
                 }
@@ -4443,6 +4454,9 @@ impl Interpreter {
     
         let variable_name = match statement.get(&*KEY_VARIABLE) {
             Some(Value::String(name)) => name,
+            Some(Value::List(_)) => {
+                return self.raise("NotImplemented", "List destructuring is not supported yet");
+            }
             _ => return self.raise("RuntimeError", "Expected a string for 'variable' in for loop statement"),
         };
     
@@ -4953,7 +4967,7 @@ impl Interpreter {
         );
     }
 
-    fn call_method(
+    pub fn call_method(
         &mut self,
         object_variable: &Variable,
         method_name: &str,
@@ -5538,7 +5552,7 @@ impl Interpreter {
         self.call_function(function_name, pos_args, named_args)
     }
 
-    fn call_function(
+    pub fn call_function(
         &mut self,
         function_name: &str,
         pos_args: Vec<Value>,
@@ -6513,11 +6527,9 @@ impl Interpreter {
                 }
             },
             "^" => match (&left, &right) {
-                // fast path: 0 exponent
                 (_, Value::Int(b)) if b.is_zero() => Value::Float(1.0.into()),
                 (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
 
-                // if either side is negative, fallback to Float
                 (Value::Int(a), Value::Int(b)) if a.negative || b.negative => {
                     let base = match Float::from_int(a) {
                         Ok(f) => f,
@@ -6748,11 +6760,11 @@ impl Interpreter {
     }
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
-        let s = match map.get(&Value::String("value".to_string())) {
+        let s = to_static(match map.get(&Value::String("value".to_string())) {
             Some(Value::String(s)) if !s.is_empty() => s.as_str(),
             Some(Value::String(_)) => return self.raise("RuntimeError", "Empty string provided for number"),
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
-        };
+        }.replace('_', ""));
     
         if let Some(cache_root) = self.cache.get_mut("constants") {
             if let Some(cached) = deep_get(cache_root, &[Value::String(s.into())]) {

@@ -200,6 +200,22 @@ impl Variable {
                         None,
                     )
                 };
+                let trim = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "trim",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => Value::String(s.trim().to_string()),
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "str",
+                        true, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "toBytes".to_string(),
@@ -272,6 +288,17 @@ impl Variable {
                     Variable::new(
                         "join".to_string(),
                         join,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "trim".to_string(),
+                    Variable::new(
+                        "trim".to_string(),
+                        trim,
                         "function".to_string(),
                         false,
                         true,

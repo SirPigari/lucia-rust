@@ -82,7 +82,13 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         description: "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
         version: "1.0.3",
         expected_lucia_version: "^2.0.0",
-    });    
+    });
+
+    m.insert("nest", LibInfo {
+        description: "HTTP client and server utilities.",
+        version: "1.1.0",
+        expected_lucia_version: "^2.0.0",
+    });
 
     m
 });

@@ -50,9 +50,14 @@
     throw $msg from "NotImplemented"
 #endmacro
 
-#macro dbg($value):
+#macro dbg($value...):
     // $!value means the stringified version of the value tokens
-    print($!value, "=", _collections.format_value($value))
+    i: int = 0
+    for (n in [$value]):
+        print($!value[1..-1].split(",")[i].trim(), "=", _collections.format_value(n).trim())
+        i++
+    end
+    null  // otherwise it will return the last value (i)
 #endmacro
 
 #macro dbglog($value):

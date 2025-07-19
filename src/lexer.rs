@@ -234,13 +234,6 @@ impl Lexer {
                             break;
                         }
     
-                        if name == "NUMBER" {
-                            let clean_val = val.replace('_', "");
-                            tokens.push(Token(name.to_string(), clean_val, location.clone()));
-                            skip_token = true;
-                            break;
-                        }
-    
                         if name != "WHITESPACE" && !skip_token {
                             tokens.push(Token(name.to_string(), val.to_string(), location.clone()));
                             skip_token = true;
