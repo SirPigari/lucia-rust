@@ -174,7 +174,7 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
         }
     };
 
-    let _ = writeln!(file, "# TODO Report\n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.\n");
+    let _ = writeln!(file, "# TODO Report\n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.  \n");
 
     let total_todos = todos_with_meta.len();
     let _ = writeln!(file, "_Total TODOs found: {}_\n---\n", total_todos);
@@ -211,10 +211,10 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
             );
 
             // Header with link and meta info on same line for compactness
-            let _ = writeln!(file, "## {} {}", markdown_link, meta_line);
+            let _ = writeln!(file, "### {} {}", markdown_link, meta_line);
 
         } else {
-            let _ = writeln!(file, "## `{}`", location);
+            let _ = writeln!(file, "### `{}`", location);
         }
 
         // Use a nested bullet list for TODO details
