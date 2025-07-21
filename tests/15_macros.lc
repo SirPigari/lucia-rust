@@ -31,3 +31,7 @@ i: int = 42
 #endmacro
 mangling_test!(100)
 assert_eq!(i, 42)
+
+assert_type!(i, int)
+
+assert_err!(assert_type!(i, str, "Expected i to be a string"))

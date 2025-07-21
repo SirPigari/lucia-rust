@@ -1,21 +1,32 @@
 /target/
 Cargo.lock
-.git/
 .vscode/
 /temp/
+
+# Binary outputs
 /src/env/bin/lucia.exe
 /src/env/bin/lucia
-!src/env/bin/
-/src/tests/
 /tests/run_tests.exe
 /tests/run_tests
 /tests/run_benchmarks.exe
 /tests/run_benchmarks
+
+# Test directories and outputs
+/src/tests/
 /tests/benchmark-results/
 tests/stdout
 tests/stdout/*
 src/env/assets/tests.lc
+
+# Intermediate or generated files
 *.ast.json
 *.i
 *.i.json
 *.pp
+
+# Platform-specific files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*~

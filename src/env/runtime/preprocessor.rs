@@ -5,7 +5,6 @@ use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::utils::{to_static, KEYWORDS};
-use rand;
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
@@ -1223,6 +1222,7 @@ impl Preprocessor {
 fn mangle_tokens(tokens: &[Token]) -> Vec<Token> {
     let mut result = Vec::new();
     let mut mangled_names: HashMap<String, String> = HashMap::new();
+    let mut mangle_counter = 0usize;
 
     let mut i = 0;
     while i < tokens.len() {
@@ -1243,7 +1243,14 @@ fn mangle_tokens(tokens: &[Token]) -> Vec<Token> {
             let not_keyword = !KEYWORDS.contains(&og_token.as_str());
 
             if defines_identifier && not_keyword {
-                let uid = rand::random::<u16>();
+                let uid = if let Some(loc) = &token.2 {
+                    format!("{}{}", loc.line_number, loc.range.0)
+                } else {
+                    let id = mangle_counter;
+                    mangle_counter += 1;
+                    format!("gen{}", id)
+                };
+
                 let mangled = format!("__mangle_{}_{}", uid, og_token);
                 mangled_names.insert(og_token.clone(), mangled.clone());
                 result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));

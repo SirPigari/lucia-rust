@@ -308,16 +308,49 @@ fn load_gitignore(manifest_dir: &Path) -> Vec<String> {
     ignore_patterns
 }
 
+fn simple_match(pattern: &str, text: &str) -> bool {
+    let (mut p_idx, mut t_idx) = (0, 0);
+    let (mut star_idx, mut match_idx) = (None, 0);
+
+    while t_idx < text.len() {
+        if p_idx < pattern.len() && (pattern.as_bytes()[p_idx] == b'*' || pattern.as_bytes()[p_idx] == text.as_bytes()[t_idx]) {
+            if pattern.as_bytes()[p_idx] == b'*' {
+                star_idx = Some(p_idx);
+                match_idx = t_idx;
+                p_idx += 1;
+            } else {
+                p_idx += 1;
+                t_idx += 1;
+            }
+        } else if let Some(si) = star_idx {
+            p_idx = si + 1;
+            match_idx += 1;
+            t_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while p_idx < pattern.len() && pattern.as_bytes()[p_idx] == b'*' {
+        p_idx += 1;
+    }
+
+    p_idx == pattern.len()
+}
+
 fn is_ignored(path: &Path, manifest_dir: &Path, ignore_patterns: &[String]) -> bool {
     if let Ok(rel_path) = path.strip_prefix(manifest_dir) {
-        let rel_path_str = rel_path.to_string_lossy();
+        let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
+
         for pattern in ignore_patterns {
-            if pattern.ends_with('/') {
-                if rel_path_str.starts_with(pattern) {
+            let pat = pattern.trim_start_matches('/');
+
+            if pat.ends_with('/') {
+                if rel_path_str.starts_with(pat) {
                     return true;
                 }
             } else {
-                if rel_path_str == *pattern || rel_path_str.starts_with(&(pattern.to_owned() + "/")) {
+                if simple_match(pat, &rel_path_str) {
                     return true;
                 }
             }
@@ -342,7 +375,7 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
                 files += sub_files;
             } else {
                 let should_count = if exts.is_empty() {
-                    true
+                    false
                 } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
                     exts.contains(&ext)
                 } else {
@@ -352,7 +385,35 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
                 if should_count {
                     if let Ok(file) = fs::File::open(&path) {
                         let reader = std::io::BufReader::new(file);
-                        lines += reader.lines().count();
+                        let mut in_block_comment = false;
+                        for line_result in reader.lines() {
+                            if let Ok(line) = line_result {
+                                let line = line.trim();
+
+                                if in_block_comment {
+                                    if line.contains("*/") {
+                                        in_block_comment = false;
+                                    }
+                                    continue;
+                                }
+
+                                if line.is_empty() {
+                                    continue; // skip empty lines
+                                }
+                                if line.starts_with("//") {
+                                    continue; // skip single line comment
+                                }
+                                if line.starts_with("/*") {
+                                    in_block_comment = true;
+                                    if line.contains("*/") {
+                                        // comment ends on same line
+                                        in_block_comment = false;
+                                    }
+                                    continue;
+                                }
+                                lines += 1;
+                            }
+                        }
                         files += 1;
                     }
                 }

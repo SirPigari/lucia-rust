@@ -42,6 +42,12 @@
     end
 #endmacro
 
+#macro assert_type($value, $type_, $msg=("Type mismatch")):
+    if (type_of($value) != $type_):
+        throw $msg from "TypeError"
+    end
+#endmacro
+
 #macro unreachable($msg=("Entered unreachable code")):
     throw $msg from "UnreachableError"
 #endmacro
