@@ -154,9 +154,9 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
 
     todos_with_meta.sort_by(|a, b| {
         match (&a.2, &b.2) {
-            (None, Some(_)) => Ordering::Less,
-            (Some(_), None) => Ordering::Greater,
-            (Some(d1), Some(d2)) => d1.cmp(d2),
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(d1), Some(d2)) => d2.cmp(d1),
             (None, None) => Ordering::Equal,
         }
     });
@@ -174,7 +174,7 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
         }
     };
 
-    let _ = writeln!(file, "# TODO Report\n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.  \n");
+    let _ = writeln!(file, "# TODO Report\n\nDO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.  \n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.  \n");
 
     let total_todos = todos_with_meta.len();
     let _ = writeln!(file, "_Total TODOs found: {}_\n---\n", total_todos);
@@ -202,7 +202,6 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
                 .map(|idx| idx + 1)
                 .unwrap_or(1);
 
-            // Use inline code formatting for file:line and clickable link to the source
             let markdown_link = format!(
                 "[`{}:{col}`]({}#L{})",
                 location,
@@ -210,14 +209,12 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
                 line_num
             );
 
-            // Header with link and meta info on same line for compactness
             let _ = writeln!(file, "### {} {}", markdown_link, meta_line);
 
         } else {
             let _ = writeln!(file, "### `{}`", location);
         }
 
-        // Use a nested bullet list for TODO details
         for line in lines {
             if !line.is_empty() {
                 let _ = writeln!(file, "- {}", line);

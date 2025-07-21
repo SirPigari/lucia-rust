@@ -125,13 +125,7 @@ pub struct UserFunction {
 
 impl Callable for UserFunction {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
-        // TODO: actual interpretation logic here
-        println!(
-            "Calling user-defined function '{}'",
-            self.meta.name
-        );
-
-        Value::Null
+        Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
     fn metadata(&self) -> &FunctionMetadata {
@@ -173,7 +167,7 @@ pub struct UserFunctionMethod {
 
 impl Callable for UserFunctionMethod {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
-        Value::Error("RuntimeErrorError", "This should not be called directly", None)
+        Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
     fn metadata(&self) -> &FunctionMetadata {

@@ -11,7 +11,7 @@ use crate::env::runtime::value::{Value};
 use serde_json::Value as JsonValue;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
-use std::env;
+use std::path::Path;
 use regex::Regex;
 use crossterm::{
     execute,
@@ -1145,11 +1145,11 @@ pub fn get_precedence(op: &str) -> u8 {
     }
 }
 
-pub fn unique_temp_name(suffix: &str) -> PathBuf {
+pub fn unique_temp_name(suffix: &str, home_dir: &Path) -> PathBuf {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let mut path = env::temp_dir();
-    path.push(format!("lucia_temp_{now}.{suffix}"));
-    path
+    let temp_dir = home_dir.join("transpiler").join("temp");
+    std::fs::create_dir_all(&temp_dir).ok();
+    temp_dir.join(format!("lucia_temp_{now}.{suffix}"))
 }
 
 pub const KEYWORDS: &[&str] = &[

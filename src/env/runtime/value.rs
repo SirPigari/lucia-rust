@@ -469,29 +469,6 @@ impl Value {
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
     }
-    pub fn insert_into_map(&mut self, key: Value, value: Value) {
-        if let Value::Map { keys, values } = self {
-            if let Some(pos) = keys.iter().position(|k| k == &key) {
-                values[pos] = value;
-            } else {
-                keys.push(key);
-                values.push(value);
-            }
-        } else {
-            *self = Value::Map {
-                keys: vec![key],
-                values: vec![value],
-            };
-        }
-    }    
-    pub fn map_get(&self, key: &Value) -> Option<Value> {
-        if let Value::Map { keys, values } = self {
-            if let Some(index) = keys.iter().position(|k| k == key) {
-                return Some(values[index].clone());
-            }
-        }
-        None
-    }
 }
 
 impl From<&str> for Value {

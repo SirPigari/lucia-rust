@@ -75,6 +75,7 @@ impl Transpiler {
     }
 
     pub fn transpile(&mut self) -> Result<String, Vec<Error>> {
+        // TODO: Implement the transpiler
         panic!("\x1BTranspiler is not implemented yet");
     }
 }

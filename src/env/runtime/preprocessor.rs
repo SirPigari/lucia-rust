@@ -95,6 +95,10 @@ impl Preprocessor {
                             ));
                         }
 
+                        if &tokens[i].1 == "!" {
+                            i += 1;
+                        }
+
                         let mut args: Vec<(String, Option<Token>)> = Vec::new();
 
                         if i < tokens.len() && matches!(tokens[i], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(") {
@@ -901,7 +905,7 @@ impl Preprocessor {
                             body_i += 1;
                         }
 
-                        let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), 0)?;
+                        let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), 0, &current_dir)?;
                         result.extend(mangle_tokens(&recursively_expanded));
                         continue;
                     } else {
@@ -943,6 +947,7 @@ impl Preprocessor {
         skipping: bool,
         call_loc: Option<Location>,
         depth: usize,
+        current_dir: &Path,
     ) -> Result<Vec<Token>, Error> {
         let mut result = Vec::new();
         let mut i = 0;
@@ -1171,8 +1176,13 @@ impl Preprocessor {
                         result.push(Token("IDENTIFIER".into(), "from".into(), call_loc.clone()));
                         result.push(Token("STRING".into(), "\"RecursionError\"".into(), call_loc.clone()));
                     } else {
-                        let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), depth + 1)?;
-                        let mangled = mangle_tokens(&recursively_expanded);
+                        let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), depth + 1, &current_dir)?;
+                        let mut new_preprocessor = Preprocessor::new(
+                            self.lib_dir.clone(),
+                            &self.file_path.clone(),
+                        );
+                        let recursively_expanded_preprocessor = new_preprocessor.process(recursively_expanded, &current_dir)?;
+                        let mangled = mangle_tokens(&recursively_expanded_preprocessor);
                         result.extend(mangled);
                     }
     

@@ -15,8 +15,6 @@ use crate::env::runtime::utils::{
     get_type_from_token_name,
     sanitize_alias,
     special_function_meta,
-    deep_insert,
-    deep_get,
     check_version,
     fix_path,
     fix_and_parse_json,
@@ -33,6 +31,7 @@ use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind};
 use crate::env::runtime::libs::STD_LIBS;
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State};
 use std::sync::Arc;
 use std::path::{PathBuf, Path};
 use std::fs;
@@ -55,7 +54,7 @@ pub struct Interpreter {
     og_cfg: Config,
     err: Option<Error>,
     is_returning: bool,
-    state: String,
+    state: State,
     return_value: Value,
     stack: Vec<(String, Option<Location>)>,
     use_colors: bool,
@@ -64,8 +63,8 @@ pub struct Interpreter {
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
-    cache: HashMap<String, Value>,
-    internal_storage: HashMap<String, Value>,
+    cache: Cache,
+    internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
 }
@@ -78,7 +77,7 @@ impl Interpreter {
             err: None,
             return_value: NULL,
             is_returning: false,
-            state: "normal".to_owned(),
+            state: State::Normal,
             stack: vec![],
             use_colors,
             current_statement: None,
@@ -86,22 +85,22 @@ impl Interpreter {
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
             preprocessor_info,
-            cache: HashMap::from([
-                ("operations".to_owned(), Value::Map { keys: vec![], values: vec![] }),
-                ("constants".to_owned(), Value::Map { keys: vec![], values: vec![] }),
-                ("iterables".to_owned(), Value::Map { keys: vec![], values: vec![] }),
-            ]),
-            internal_storage: HashMap::from([
-                ("types".to_owned(), Value::Map { keys: vec![], values: vec![] }),
-                ("lambda_counter".to_owned(), Value::Int(Int::from_i64(0))),
-            ]),
+            cache: Cache {
+                operations: HashMap::new(),
+                constants: HashMap::new(),
+                iterables: HashMap::new(),
+            },
+            internal_storage: InternalStorage {
+                types: HashMap::new(),
+                lambda_counter: 0,
+            },
             defer_stack: vec![],
             scope: "main".to_owned(),
         };
 
         for type_ in VALID_TYPES {
-            this.internal_storage.get_mut("types").unwrap().insert_into_map(
-                Value::String(type_.to_string()),
+            this.internal_storage.types.insert(
+                type_.to_string(),
                 Value::String(type_.to_string()),
             );
         }
@@ -149,7 +148,7 @@ impl Interpreter {
     }
 
     pub fn is_stopped(&self) -> bool {
-        self.state == "exit"
+        self.state == State::Exit
     }
 
     fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
@@ -194,7 +193,7 @@ impl Interpreter {
     }
 
     pub fn exit(&mut self, code: Value) {
-        self.state = "defer".to_owned();
+        self.state = State::Defer;
         if !self.defer_stack.is_empty() {
             let defer_statements = self.defer_stack.concat();
             for stmt in defer_statements {
@@ -202,7 +201,7 @@ impl Interpreter {
                 self.evaluate(self.current_statement.clone().unwrap());
             }
         }
-        self.state = "exit".to_owned();
+        self.state = State::Exit;
         self.is_returning = true;
         self.stack.clear();
         self.return_value = match code {
@@ -795,7 +794,7 @@ impl Interpreter {
         self.return_value = NULL;
         self.err = None;
         self.current_statement = None;
-        self.state = "normal".to_owned();
+        self.state = State::Normal;
         self.stack.clear();
         self.stack.push((
             self.file_path.clone(),
@@ -843,8 +842,8 @@ impl Interpreter {
         }
     
         if deferable {
-            let old_state = std::mem::replace(&mut self.state, "defer".to_owned());
-    
+            let old_state = std::mem::replace(&mut self.state, State::Defer);
+
             if !self.defer_stack.is_empty() {
                 let defer_statements = self.defer_stack.concat();
                 for stmt in defer_statements {
@@ -955,7 +954,7 @@ impl Interpreter {
             return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
         };
     
-        if self.state == "break" || self.state == "continue" {
+        if self.state == State::Break || self.state == State::Continue {
             return NULL;
         }
     
@@ -1094,8 +1093,8 @@ impl Interpreter {
             return NULL;
         }
 
-        self.internal_storage.get_mut("types").unwrap().insert_into_map(
-            Value::String(name.clone()),
+        self.internal_storage.types.insert(
+            name.clone(),
             Value::Map {
                 keys: vec![
                     Value::String("type_kind".to_string()),
@@ -1223,13 +1222,13 @@ impl Interpreter {
                             .collect(),
                         true,
                     );
-                    match self.state.as_str() {
-                        "break" => {
-                            self.state = "normal".to_string();
+                    match self.state {
+                        State::Break => {
+                            self.state = State::Normal;
                             return NULL
                         },
-                        "continue" => {
-                            self.state = "normal".to_string();
+                        State::Continue => {
+                            self.state = State::Normal;
                             continue;
                         },
                         _ => {}
@@ -1380,10 +1379,10 @@ impl Interpreter {
         };
     
         if control_type == "CONTINUE" {
-            self.state = "continue".to_string();
+            self.state = State::Continue;
             return NULL;
         } else if control_type == "BREAK" {
-            self.state = "break".to_string();
+            self.state = State::Break;
             return NULL;
         } else {
             self.raise("SyntaxError", &format!("Unsupported control type: {}", control_type));
@@ -1419,13 +1418,13 @@ impl Interpreter {
                     return result;
                 }
             }
-            match self.state.as_str() {
-                "break" => {
-                    self.state = "normal".to_string();
+            match self.state {
+                State::Break => {
+                    self.state = State::Normal;
                     break;
                 },
-                "continue" => {
-                    self.state = "normal".to_string();
+                State::Continue => {
+                    self.state = State::Normal;
                     continue;
                 },
                 _ => {},
@@ -2760,7 +2759,7 @@ impl Interpreter {
             None => return self.raise("RuntimeError", "Missing 'value' in return statement"),
         };
 
-        self.state = "defer".to_owned();
+        self.state = State::Defer;
         if !self.defer_stack.is_empty() {
             let defer_statements = self.defer_stack.concat();
             for stmt in defer_statements {
@@ -2768,8 +2767,8 @@ impl Interpreter {
                 self.evaluate(self.current_statement.clone().unwrap());
             }
         }
-        self.state = "normal".to_owned();
-    
+        self.state = State::Normal;
+
         let evaluated_value = self.evaluate(value.convert_to_statement());
         if self.err.is_some() {
             return NULL;
@@ -2960,12 +2959,8 @@ impl Interpreter {
 
         let lambda_name;  // stupid lifetimes
         if name == "<lambda#{}>" {
-            let lambda_counter = self.internal_storage.get_mut("lambda_counter").unwrap();
-            let id = match lambda_counter {
-                Value::Int(i) => i,
-                _ => return self.raise("RuntimeError", "Lambda counter is not an integer"),
-            };
-            *id += 1.into();
+            let id: usize = self.internal_storage.lambda_counter;
+            self.internal_storage.lambda_counter = id + 1;
             lambda_name = name.replace("{}", &id.to_string());
             name = &lambda_name;
         }
@@ -3176,8 +3171,8 @@ impl Interpreter {
     fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
         let default_type = Value::String("any".to_string());
     
-        let valid_types: Vec<Value> = match self.internal_storage.get("types") {
-            Some(Value::Map { values, .. }) => values.iter().cloned().collect(),
+        let valid_types: Vec<Value> = match self.internal_storage.types.values().cloned().collect::<Vec<_>>() {
+            ref v if !v.is_empty() => v.clone(),
             _ => {
                 self.raise("RuntimeError", "Type cache is not properly initialized");
                 return NULL;
@@ -3220,92 +3215,94 @@ impl Interpreter {
                         return Value::String(s.clone());
                     }
 
-                    match self.internal_storage.get("types") {
-                        Some(Value::Map { values, keys }) => {
-                            let map = Value::Map {
-                                keys: keys.clone(),
-                                values: values.clone(),
-                            };
-                            let hm = map.map_get(type_name).unwrap_or_else(|| {
-                                if self.variables.contains_key(s) {
-                                    return self.raise_with_help(
-                                        "TypeError",
-                                        &format!("Invalid type '{}'", s),
-                                        &format!( "'{}' is a variable name, not a type. If you meant to assign a value, use ':=' instead of ':'.", s),
-                                    );
-                                }
-                
-                                self.raise(
+                    let type_val = match self.internal_storage.types.get(s) {
+                        Some(val) => val,
+                        None => {
+                            if self.variables.contains_key(s) {
+                                return self.raise_with_help(
                                     "TypeError",
-                                    &format!(
-                                        "Invalid type '{}'. Valid types are: {}, ...",
-                                        s,
-                                        VALID_TYPES[0..5].join(", ")
-                                    ),
+                                    &format!("Invalid type '{}'", s),
+                                    &format!("'{}' is a variable name, not a type. If you meant to assign a value, use ':=' instead of ':'.", s),
                                 );
-                                return NULL;
-                            }).convert_to_hashmap().unwrap_or_else(|| {
-                                self.raise("RuntimeError", "Type value is not a map");
-                                return HashMap::new();
-                            });
+                            }
 
-                            let name = match hm.get("name") {
-                                Some(Value::String(n)) => n,
-                                _ => {self.raise("RuntimeError", "Missing or invalid 'name' in new type statement"); return NULL;},
-                            };
-            
-                            let base = match hm.get("base") {
-                                Some(Value::Map { keys, values }) => {
-                                    let base_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                                    self.handle_type(base_map)
-                                }
-                                _ => self.raise("RuntimeError", "Missing or invalid 'base' in new type statement"),
-                            };
-            
-                            let variables = match hm.get("variables") {
-                                Some(Value::List(vars)) => vars,
-                                _ => {
-                                    self.raise("RuntimeError", "Expected a list for 'variables' in new type statement");
-                                    return NULL;
-                                },
-                            };
-            
-                            let conditions = match hm.get("conditions") {
-                                Some(Value::List(conds)) => conds,
-                                _ => {
-                                    self.raise("RuntimeError", "Expected a list for 'conditions' in new type statement");
-                                    return NULL;
-                                },
-                            };
-
-                            return Value::Map {
-                                keys: vec![
-                                    Value::String("_note".to_string()),
-                                    Value::String("type_kind".to_string()),
-                                    Value::String("name".to_string()),
-                                    Value::String("base".to_string()),
-                                    Value::String("variables".to_string()),
-                                    Value::String("conditions".to_string())
-                                ],
-                                values: vec![
-                                    Value::String(create_note(
-                                        "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
-                                        Some(self.use_colors),
-                                        &self.config.color_scheme.note,
-                                    )),
-                                    Value::String("new".to_string()),
-                                    Value::String(name.clone()),
-                                    base,
-                                    Value::List(variables.clone()),
-                                    Value::List(conditions.clone())
-                                ],
-                            };
-                        }
-                        _ => {
-                            self.raise("RuntimeError", "Type cache is not properly initialized");
+                            self.raise(
+                                "TypeError",
+                                &format!(
+                                    "Invalid type '{}'. Valid types are: {}, ...",
+                                    s,
+                                    VALID_TYPES[0..5].join(", ")
+                                ),
+                            );
                             return NULL;
                         }
                     };
+
+                    let hm = match type_val.convert_to_hashmap() {
+                        Some(hm) => hm,
+                        None => {
+                            self.raise("RuntimeError", "Type value is not a map");
+                            return NULL;
+                        }
+                    };
+
+                    let name = match hm.get("name") {
+                        Some(Value::String(n)) => n.clone(),
+                        _ => {
+                            self.raise("RuntimeError", "Missing or invalid 'name' in new type statement");
+                            return NULL;
+                        }
+                    };
+
+                    let base = match hm.get("base") {
+                        Some(Value::Map { keys, values }) => {
+                            let base_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+                            self.handle_type(base_map)
+                        }
+                        _ => {
+                            self.raise("RuntimeError", "Missing or invalid 'base' in new type statement");
+                            return NULL;
+                        }
+                    };
+
+                    let variables = match hm.get("variables") {
+                        Some(Value::List(vars)) => vars.clone(),
+                        _ => {
+                            self.raise("RuntimeError", "Expected a list for 'variables' in new type statement");
+                            return NULL;
+                        }
+                    };
+
+                    let conditions = match hm.get("conditions") {
+                        Some(Value::List(conds)) => conds.clone(),
+                        _ => {
+                            self.raise("RuntimeError", "Expected a list for 'conditions' in new type statement");
+                            return NULL;
+                        }
+                    };
+
+                    Value::Map {
+                        keys: vec![
+                            Value::String("_note".to_string()),
+                            Value::String("type_kind".to_string()),
+                            Value::String("name".to_string()),
+                            Value::String("base".to_string()),
+                            Value::String("variables".to_string()),
+                            Value::String("conditions".to_string()),
+                        ],
+                        values: vec![
+                            Value::String(create_note(
+                                "This map is for the interpreter's internal use to track types. You don't need to worry about it.",
+                                Some(self.use_colors),
+                                &self.config.color_scheme.note,
+                            )),
+                            Value::String("new".to_string()),
+                            Value::String(name),
+                            base,
+                            Value::List(variables),
+                            Value::List(conditions),
+                        ],
+                    }
                 } else {
                     self.raise("TypeError", "Type value is not a string");
                     return NULL;
@@ -4388,13 +4385,12 @@ impl Interpreter {
     
         if let Some(var) = self.variables.get(name) {
             return var.get_value().clone();
-        } else if let Some(cache) = self.internal_storage.get_mut("types") {
-            return match cache.map_get(&Value::String(name.to_string())) {
-                Some(v) => {
-                    format_type(&v).into()
-                }
-                _ => {
-                    let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(name);
+        } else {
+            let cache = &self.internal_storage.types;
+            return match cache.get(&name.to_string()) {
+                Some(v) => format_type(v).into(),
+                None => {
+                    let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&name);
                     let extensions = ["lc", "lucia", "rs", ""];
                     for ext in extensions.iter() {
                         let candidate = lib_dir.with_extension(ext);
@@ -4402,7 +4398,9 @@ impl Interpreter {
                             return self.raise_with_help(
                                 "ImportError",
                                 &format!("Variable '{}' is not defined.", name),
-                                &format!("Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.", name, 
+                                &format!(
+                                    "Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.",
+                                    name,
                                     check_ansi("\x1b[4m", &self.use_colors),
                                     name,
                                     candidate.display(),
@@ -4411,13 +4409,14 @@ impl Interpreter {
                             );
                         }
                     }
-            
+
                     let available_names: Vec<String> = self.variables.keys().cloned().collect();
                     if let Some(closest) = find_closest_match(name, &available_names) {
                         return self.raise_with_help(
                             "NameError",
                             &format!("Variable '{}' is not defined.", name),
-                            &format!("Did you mean '{}{}{}'?",
+                            &format!(
+                                "Did you mean '{}{}{}'?",
                                 check_ansi("\x1b[4m", &self.use_colors),
                                 closest,
                                 check_ansi("\x1b[24m", &self.use_colors),
@@ -4429,7 +4428,6 @@ impl Interpreter {
                 }
             }
         }
-        self.raise("NameError", &format!("Variable '{}' is not defined.", name))
     }
     
     fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -4500,13 +4498,13 @@ impl Interpreter {
                 self.variables.remove(variable_name);
             }
     
-            match self.state.as_str() {
-                "break" => {
-                    self.state = "normal".to_string();
+            match self.state {
+                State::Break => {
+                    self.state = State::Normal;
                     break;
                 }
-                "continue" => {
-                    self.state = "normal".to_string();
+                State::Continue => {
+                    self.state = State::Normal;
                     continue;
                 }
                 _ => {}
@@ -4631,7 +4629,7 @@ impl Interpreter {
                     }
                 };
 
-                if let Some(Value::Map { keys, values }) = self.cache.get_mut("iterables") {
+                if let Some(Value::Map { keys, values }) = self.cache.iterables.get_mut(&cache_key) {
                     for (k_idx, key) in keys.iter().enumerate() {
                         if key == &cache_key {
                             if let Some(cached_value) = values.get(k_idx) {
@@ -4654,7 +4652,7 @@ impl Interpreter {
                             }
                         }
                     }
-                };
+                }
 
                 let result: Value = match range_mode.as_str() {
                     "value" => {
@@ -4890,10 +4888,7 @@ impl Interpreter {
                     }
                 };
 
-                if let Some(Value::Map { keys, values }) = self.cache.get_mut("iterables") {
-                    keys.push(cache_key.clone());
-                    values.push(result.clone());
-                }
+                self.cache.iterables.insert(cache_key, result.clone());
 
                 debug_log(
                     &(r"<ListCompletion>\A  seed: ".to_string() +
@@ -4967,6 +4962,7 @@ impl Interpreter {
         );
     }
 
+    // TODO: Refactor this method to pass mutable reference of Variable to the method
     pub fn call_method(
         &mut self,
         object_variable: &Variable,
@@ -6200,13 +6196,32 @@ impl Interpreter {
             Value::String(operator.clone()),
             right.clone(),
         ];
+        
+        let cache_key = path.iter()
+            .map(|v| format_value(v))
+            .collect::<Vec<_>>()
+            .join("::");
 
-        if let Some(cached) = deep_get(
-            self.cache
-                .get("operations")
-                .unwrap_or(&Value::Null),
-            path,
-        ) {
+        // if let Some(cached) = deep_get(
+        //     self.cache
+        //         .get("operations")
+        //         .unwrap_or(&Value::Null),
+        //     path,
+        // ) {
+        //     debug_log(
+        //         &format!(
+        //             "<CachedOperation: {} {} {}>",
+        //             format_value(&left),
+        //             operator,
+        //             format_value(&right)
+        //         ),
+        //         &self.config,
+        //         Some(self.use_colors.clone()),
+        //     );
+        //     return cached.clone();
+        // }
+
+        if let Some(cached) = self.cache.operations.get(&cache_key) {
             debug_log(
                 &format!(
                     "<CachedOperation: {} {} {}>",
@@ -6226,11 +6241,13 @@ impl Interpreter {
             return NULL;
         }
 
-        let cache_root = self.cache
-            .entry("operations".into())
-            .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+        // let cache_root = self.cache
+        //     .entry("operations".into())
+        //     .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
 
-        deep_insert(cache_root, path, result.clone());
+        // deep_insert(cache_root, path, result.clone());
+
+        self.cache.operations.insert(cache_key, result.clone());
 
         result
     }
@@ -6247,46 +6264,34 @@ impl Interpreter {
                 return NULL;
             }
         };
-    
+
         let operator: &str = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s.as_str(),
             _ => return self.raise("TypeError", "Expected a string for operator"),
-        };        
+        };
 
         let operator = match operator {
             "isnt" | "isn't" | "nein" | "not" => "!",
             other => other,
-        };        
-    
-        let path = &[
-            Value::String("unary".to_string()),
-            Value::String(operator.to_string()),
-            operand.clone(),
-        ];
-        
-        let cached_opt = {
-            let cache_root = self.cache
-                .entry("operations".into())
-                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-    
-            deep_get(cache_root, path).cloned()
         };
-        
-        if let Some(cached) = cached_opt {
+
+        let cache_key = format!("{}{}", operator, format_value(&operand));
+
+        if let Some(cached) = self.cache.operations.get(&cache_key) {
             debug_log(
                 &format!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand)),
                 &self.config,
                 Some(self.use_colors.clone()),
             );
-            return cached;
+            return cached.clone();
         }
-        
+
         debug_log(
             &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
             &self.config,
             Some(self.use_colors.clone()),
         );
-        
+
         let result = match operator {
             "-" => match operand {
                 Value::Int(n) => Value::Int(-n),
@@ -6308,15 +6313,13 @@ impl Interpreter {
                     Value::Int(Int::from(!a_i64))
                 }
                 Value::Boolean(b) => Value::Boolean(!b),
-                a => self.raise("TypeError", &format!("Cannot apply bitwise NOT to {}", a.type_name()))
+                a => return self.raise("TypeError", &format!("Cannot apply bitwise NOT to {}", a.type_name())),
             },
             _ => return self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
         };
-        
-        if let Some(cache_root) = self.cache.get_mut("operations") {
-            deep_insert(cache_root, path, result.clone());
-        }
-        
+
+        self.cache.operations.insert(cache_key, result.clone());
+
         result
     }
 
@@ -6766,17 +6769,15 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
         }.replace('_', ""));
     
-        if let Some(cache_root) = self.cache.get_mut("constants") {
-            if let Some(cached) = deep_get(cache_root, &[Value::String(s.into())]) {
-                debug_log(
-                    &format!("<CachedConstantNumber: {}>", s),
-                    &self.config,
-                    Some(self.use_colors.clone()),
-                );
-                return cached.clone();
-            }
+        if let Some(cached) = self.cache.constants.get(s) {
+            debug_log(
+                &format!("<CachedConstantNumber: {}>", s),
+                &self.config,
+                Some(self.use_colors.clone()),
+            );
+            return cached.clone();
         }
-    
+
         fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
             use std::ops::{Add, Mul};
             let zero = Int::from(0);
@@ -6864,11 +6865,7 @@ impl Interpreter {
         };        
     
         if cacheable {
-            let cache_root = self.cache
-                .entry("constants".into())
-                .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-            
-            deep_insert(cache_root, &[Value::String(s.into())], result.clone());
+            self.cache.constants.insert(s.to_string(), result.clone());
         }
     
         result

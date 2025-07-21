@@ -3,7 +3,6 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
-use serde::Serialize;
 use std::process::{exit, Command};
 use std::collections::HashMap;
 use colored::*;
@@ -25,6 +24,7 @@ mod env {
         pub mod objects;
         pub mod libs;
         pub mod tokens;
+        pub mod internal_structs;
     }
     pub mod libs {
         pub mod math {
@@ -74,38 +74,21 @@ mod lexer;
 mod parser;
 mod interpreter;
 
-use crate::env::runtime::utils;
 use crate::env::runtime::config::{Config, ColorScheme};
-use crate::utils::{hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::utils::{read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
-use crate::parser::Parser;
+use crate::env::runtime::internal_structs::BuildInfo;
 use crate::env::runtime::tokens::{Token, Location};
+use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
 use crate::env::transpiler::transpiler::Transpiler;
 
 const VERSION: &str = env!("VERSION");
-
-#[derive(Serialize)]
-pub struct BuildInfo {
-    pub name: &'static str,
-    pub version: &'static str,
-    pub uuid: &'static str,
-    pub rustc_version: &'static str,
-    pub rustc_channel: &'static str,
-    pub target: &'static str,
-    pub repository: &'static str,
-    pub git_hash: &'static str,
-    pub file_hash: &'static str,
-    pub profile: &'static str,
-    pub ci: &'static str,
-    pub build_date: &'static str,
-    pub dependencies: &'static str,
-}
 
 pub fn get_build_info() -> BuildInfo {
     BuildInfo {
@@ -317,7 +300,7 @@ pub fn handle_error(
 fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
     if config.debug {
-        utils::print_colored(message, &config.color_scheme.debug, Some(use_colors));
+        print_colored(message, &config.color_scheme.debug, Some(use_colors));
     }
 }
 
@@ -1303,7 +1286,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             hex_to_ansi("reset", Some(use_colors))
         );
 
-        let mut input = utils::read_input("");
+        let mut input = read_input("");
         if input.is_empty() {
             continue;
         }
@@ -1569,7 +1552,8 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
             }
         };
 
-        let c_path = unique_temp_name("c");
+        let c_path = unique_temp_name("c", &home_dir_path);
+
         let mut c_file = match File::create(&c_path) {
             Ok(f) => f,
             Err(e) => {
@@ -1584,11 +1568,13 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
         }
 
         let binary_path = {
-            let mut p = unique_temp_name(if cfg!(windows) { "exe" } else { "out" });
-            if cfg!(not(windows)) {
-                p.set_extension("");
+            let mut path = PathBuf::from(file);
+            if cfg!(windows) {
+                path.set_extension("exe");
+            } else {
+                path.set_extension("");
             }
-            p
+            path
         };
 
         let mut compile_cmd = match c_compiler {

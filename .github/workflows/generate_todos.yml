@@ -1,0 +1,36 @@
+# .github/workflows/generate_todos.yml
+name: Generate TODO Report
+
+on:
+  schedule:
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+jobs:
+  generate-todos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Make
+        run: sudo apt-get update && sudo apt-get install -y make
+
+      - name: Run make build
+        run: make build
+
+      - name: Commit and push updated todos.md
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          if git diff --quiet src/env/Docs/todos.md; then
+            echo "No changes to todos.md"
+          else
+            git add src/env/Docs/todos.md
+            git commit -m "chore: generate todos report"
+            git push
+          fi
