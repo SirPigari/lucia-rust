@@ -2,13 +2,16 @@
 
 #macro hello($name):
     // f-strings wont work here you would need to assign $name to a variable first
-    print("Hello, " + $name + "!")
+    // print("Hello, " + $name + "!")
+    // muahahah they work now
+    print(f"Hello, $name$!")
 #endmacro
 
 
 hello!("Lucia")
 
 assert!(1 + 1 == 2)
+assert!(!false)
 assert_eq!(2 * 2, 4)
 
 try:
@@ -28,6 +31,7 @@ i: int = 42
 #macro mangling_test($a):
     i: int = $a
     dbg!(i)
+    assert_eq!(i, 100)
 #endmacro
 mangling_test!(100)
 assert_eq!(i, 42)
@@ -35,3 +39,15 @@ assert_eq!(i, 42)
 assert_type!(i, int)
 
 assert_err!(assert_type!(i, str, "Expected i to be a string"))
+
+// time_it macro runs the code and then returns a tuple with the result and the elapsed time in apollo time
+// this macro is in development and may not work as expected
+// this is just test if macros can run complex code inside them
+(_, elapsed: int) = time_it!(
+    for (i in [0..6969]):
+        i * i
+    end
+)
+formatted_time: float = _time.format_apollo_time_ms(elapsed)
+
+print(formatted_time, elapsed)

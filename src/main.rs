@@ -25,6 +25,7 @@ mod env {
         pub mod libs;
         pub mod tokens;
         pub mod internal_structs;
+        pub mod precompile;
     }
     pub mod libs {
         pub mod math {
@@ -307,7 +308,7 @@ fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
 // TODO: Fix indentation and formatting for pp dump
 fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bool) {
     let new_line_keywords = [
-        "match", "import", "throw", "try", "catch",
+        "match", "import", "throw", "try", "catch", "for", "while"
     ];
 
     let mut i_buffer = String::from("[\n");
@@ -316,7 +317,7 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     let mut prev_kind: Option<&str> = None;
     let mut prev_val: Option<&str> = None;
     let mut indent_level: usize = 0;
-    let indent_str = "    ";  // 4 spaces
+    let indent_str = "    "; // 4 spaces
 
     fn write_indent(buf: &mut String, level: usize, indent_str: &str) {
         for _ in 0..level {
@@ -370,9 +371,7 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
 
                 pp_buffer.push(':');
 
-                let block_starter = next_val.map(|v| {
-                    !VALID_TYPES.contains(&v)
-                }).unwrap_or(false);
+                let block_starter = next_val.map(|v| !VALID_TYPES.contains(&v)).unwrap_or(false);
 
                 if block_starter && last_char == Some(')') {
                     pp_buffer.push('\n');
@@ -393,27 +392,10 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
         if last_char == Some('\n') {
             write_indent(&mut pp_buffer, indent_level, indent_str);
         } else {
-            let need_space = {
-                if kind == "IDENTIFIER" {
-                    match prev_val {
-                        Some("(") | Some("[") | Some("{") | Some("!") => false,
-                        _ => {
-                            match (prev_kind, kind.as_str()) {
-                                (_, "SEPARATOR") if val == "(" && KEYWORDS.contains(&prev_val.unwrap_or(&String::new())) => true,
-                                (_, "SEPARATOR") if val == ")" => false,
-                                (Some("OPERATOR"), _) if val != "&" && val != "|" => true,
-                                (_, "OPERATOR") if val != "&" && val != "|" => true,
-                                (Some("SEPARATOR"), _) if val == "(" || val == "[" => false,
-                                (_, "SEPARATOR") if val == ")" || val == "]" || val == "," || val == ":" => false,
-                                (Some("IDENTIFIER"), "SEPARATOR") if val == "(" => false,
-                                (Some(prev), _) if prev != "SEPARATOR" => true,
-                                _ => true,
-                            }
-                        }
-                    }
-                } else {
-                    match (prev_kind, kind.as_str()) {
-                        (Some("SEPARATOR"), "BOOLEAN") if ["[", "{", "("].contains(&prev_val.unwrap_or(&String::new())) => false,
+            let need_space = if kind == "IDENTIFIER" {
+                match prev_val {
+                    Some("(") | Some("[") | Some("{") | Some("!") => false,
+                    _ => match (prev_kind, kind.as_str()) {
                         (_, "SEPARATOR") if val == "(" && KEYWORDS.contains(&prev_val.unwrap_or(&String::new())) => true,
                         (_, "SEPARATOR") if val == ")" => false,
                         (Some("OPERATOR"), _) if val != "&" && val != "|" => true,
@@ -423,7 +405,20 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
                         (Some("IDENTIFIER"), "SEPARATOR") if val == "(" => false,
                         (Some(prev), _) if prev != "SEPARATOR" => true,
                         _ => true,
-                    }
+                    },
+                }
+            } else {
+                match (prev_kind, kind.as_str()) {
+                    (Some("SEPARATOR"), "BOOLEAN") if ["[", "{", "("].contains(&prev_val.unwrap_or(&String::new())) => false,
+                    (_, "SEPARATOR") if val == "(" && KEYWORDS.contains(&prev_val.unwrap_or(&String::new())) => true,
+                    (_, "SEPARATOR") if val == ")" => false,
+                    (Some("OPERATOR"), _) if val != "&" && val != "|" => true,
+                    (_, "OPERATOR") if val != "&" && val != "|" => true,
+                    (Some("SEPARATOR"), _) if val == "(" || val == "[" => false,
+                    (_, "SEPARATOR") if val == ")" || val == "]" || val == "," || val == ":" => false,
+                    (Some("IDENTIFIER"), "SEPARATOR") if val == "(" => false,
+                    (Some(prev), _) if prev != "SEPARATOR" => true,
+                    _ => true,
                 }
             };
 

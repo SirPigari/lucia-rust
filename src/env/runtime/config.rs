@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::Int;
 use crate::env::runtime::utils::to_static;
+use std::default::Default;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -34,6 +35,36 @@ pub struct ColorScheme {
     pub note: String,
     pub output_text: String,
     pub info: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            version: env!("VERSION").to_string(),
+            moded: false,
+            debug: false,
+            debug_mode: "normal".to_string(),
+            supports_color: true,
+            use_lucia_traceback: true,
+            warnings: true,
+            use_preprocessor: true,
+            allow_fetch: true,
+            allow_unsafe: false,
+            home_dir: "lucia/src/env/".to_string(),
+            recursion_limit: 999,
+            color_scheme: ColorScheme {
+                exception: "#F44350".to_string(),
+                warning: "#F5F534".to_string(),
+                help: "#21B8DB".to_string(),
+                debug: "#434343".to_string(),
+                comment: "#757575".to_string(),
+                input_arrows: "#136163".to_string(),
+                note: "#1CC58B".to_string(),
+                output_text: "#BCBEC4".to_string(),
+                info: "#9209B3".to_string(),
+            },
+        }
+    }
 }
 
 pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(), String> {

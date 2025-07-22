@@ -5,15 +5,52 @@ use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::utils::{to_static, KEYWORDS};
+use crate::env::runtime::precompile::precompile;
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
+
+struct MangleContext {
+    mangled_names: Vec<HashMap<String, String>>, // ORIGINAL_NAME -> MANGLED_NAME
+    counter: usize,
+    current_mangle_index: usize,
+}
+
+impl MangleContext {
+    fn new() -> Self {
+        Self {
+            mangled_names: vec![HashMap::new()],
+            counter: 0,
+            current_mangle_index: 0,
+        }
+    }
+
+    fn enter_scope(&mut self) {
+        self.mangled_names.push(HashMap::new());
+        self.current_mangle_index += 1;
+    }
+    fn exit_scope(&mut self) {
+        if self.current_mangle_index > 0 {
+            self.mangled_names.pop();
+            self.current_mangle_index -= 1;
+        }
+    }
+    fn mangle(&mut self, original: &str, mangle: &str) -> String {
+        self.mangled_names[self.current_mangle_index].insert(original.to_string(), mangle.to_string());
+        self.counter += 1;
+        mangle.to_string()
+    }
+    fn get_mangled(&self, original: &str) -> Option<&String> {
+        self.mangled_names[self.current_mangle_index].get(original)
+    }
+}
 
 pub struct Preprocessor {
     lib_dir: PathBuf,
     defines: HashMap<String, Token>, // IDENTIFIER -> TOKEN
     aliases: HashMap<Token, Token>, // TOKEN -> ALIAS_TOKEN
     macros: HashMap<String, (Vec<(String, Option<Token>)>, Vec<Token>)>, // MACRO_NAME -> (ARGS, BODY)
+    mangle_context: MangleContext,
     file_path: String,
 }
 
@@ -24,6 +61,7 @@ impl Preprocessor {
             defines: HashMap::new(),
             aliases: HashMap::new(),
             macros: HashMap::new(),
+            mangle_context: MangleContext::new(),
             file_path: file_path.to_string(),
         }
     }
@@ -682,6 +720,40 @@ impl Preprocessor {
                         ));
                     }
                 }
+            } else if token.0 == "IDENTIFIER" && token.1 == "precompile" {
+                i += 1;
+                if i >= tokens.len() || tokens[i].0 != "SEPARATOR" || tokens[i].1 != "(" {
+                    return Err(Error::new(
+                        "PreprocessorError",
+                        "Expected '(' after 'precompile'",
+                        &self.file_path,
+                    ));
+                }
+                i += 1;
+
+                let mut precompile_tokens = Vec::new();
+                while i < tokens.len() && !(tokens[i].0 == "SEPARATOR" && tokens[i].1 == ")") {
+                    precompile_tokens.push(tokens[i].clone());
+                    i += 1;
+                }
+
+                if i >= tokens.len() || tokens[i].0 != "SEPARATOR" || tokens[i].1 != ")" {
+                    return Err(Error::new(
+                        "PreprocessorError",
+                        "Unclosed precompile directive",
+                        &self.file_path,
+                    ));
+                }
+                if precompile_tokens.is_empty() {
+                    return Err(Error::new(
+                        "PreprocessorError",
+                        "precompile directive requires at least one token",
+                        &self.file_path,
+                    ));
+                }
+
+                let precompiled_tokens = precompile(precompile_tokens)?;
+                result.extend(precompiled_tokens);
             } else {
                 if !skipping 
                     && i + 2 < tokens.len()
@@ -695,10 +767,10 @@ impl Preprocessor {
                     let call_loc = tokens[i].2.clone();
                     if let Some((param_names, body)) = self.macros.get(macro_name) {
                         i += 3;
-                    
+
                         let mut paren_count = 1;
                         let mut call_args_tokens = Vec::new();
-                    
+
                         while i < tokens.len() && paren_count > 0 {
                             let token = &tokens[i];
                             if token.0 == "SEPARATOR" {
@@ -717,14 +789,14 @@ impl Preprocessor {
                             }
                             i += 1;
                         }
-                    
+
                         let mut args_values: Vec<Vec<Token>> = Vec::new();
                         let mut current_arg = Vec::new();
                         let mut nested_paren = 0;
-                    
+
                         for tok in call_args_tokens {
                             let Token(ref a, ref b, _) = tok;
-                        
+
                             if a == "SEPARATOR" && b == "," && nested_paren == 0 {
                                 args_values.push(current_arg);
                                 current_arg = Vec::new();
@@ -736,15 +808,15 @@ impl Preprocessor {
                                 }
                                 current_arg.push(tok);
                             }
-                        }                    
+                        }
                         args_values.push(current_arg);
-                    
+
                         if args_values.len() == 1 && args_values[0].is_empty() {
                             args_values.clear();
                         }
-                    
+
                         let variadic_pos = param_names.iter().position(|(n, _)| n.ends_with("..."));
-                    
+
                         if let Some(pos) = variadic_pos {
                             if args_values.len() < pos {
                                 return Err(Error::new(
@@ -770,20 +842,20 @@ impl Preprocessor {
                                 &self.file_path,
                             ));
                         }
-                    
+
                         let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::new();
-                    
+
                         for (idx, (name, default)) in param_names.iter().enumerate() {
                             if Some(idx) == variadic_pos {
                                 let mut variadic_tokens = Vec::new();
-                        
+
                                 for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
                                     if vi != idx {
                                         variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
                                     }
                                     variadic_tokens.extend(rest_arg.clone());
                                 }
-                        
+
                                 let variadic_name = &name[..name.len() - 3];
                                 replacement_map.insert(variadic_name, variadic_tokens);
                                 break;
@@ -791,9 +863,9 @@ impl Preprocessor {
                                 let value = if idx < args_values.len() {
                                     Some(args_values[idx].clone())
                                 } else {
-                                    default.clone().map(|d| vec![d.clone()])
+                                    default.clone().map(|d| vec![expand_macros_in_default_string(&d, &replacement_map)])
                                 };
-                        
+
                                 if let Some(v) = value {
                                     replacement_map.insert(name.as_str(), v);
                                 } else {
@@ -805,13 +877,13 @@ impl Preprocessor {
                                 }
                             }
                         }
-                    
+
                         let mut expanded_tokens = Vec::new();
                         let mut body_i = 0;
-                    
+
                         while body_i < body.len() {
                             let token = &body[body_i];
-                    
+
                             if token.0 == "OPERATOR" && token.1 == "$" {
                                 body_i += 1;
                                 if body_i >= body.len() {
@@ -823,7 +895,7 @@ impl Preprocessor {
                                 }
 
                                 let Token(a, b, _) = &body[body_i];
-                    
+
                                 if a == "OPERATOR" && b == "!" {
                                     body_i += 1;
                                     if body_i >= body.len() {
@@ -833,7 +905,7 @@ impl Preprocessor {
                                             &self.file_path,
                                         ));
                                     }
-                    
+
                                     let next_token = &body[body_i];
                                     if next_token.0 != "IDENTIFIER" {
                                         return Err(Error::new(
@@ -842,13 +914,13 @@ impl Preprocessor {
                                             &self.file_path,
                                         ));
                                     }
-                    
+
                                     let arg_name = if next_token.1.ends_with("...") {
                                         &next_token.1[..next_token.1.len() - 3]
                                     } else {
                                         next_token.1.as_str()
                                     };
-                    
+
                                     if let Some(replacement) = replacement_map.get(arg_name) {
                                         let joined = replacement
                                             .iter()
@@ -861,7 +933,7 @@ impl Preprocessor {
                                             })
                                             .collect::<Vec<_>>()
                                             .join(" ");
-                    
+
                                         let loc = token.2.clone().or(None);
                                         expanded_tokens.push(Token(
                                             "STRING".to_string(),
@@ -875,7 +947,7 @@ impl Preprocessor {
                                             &self.file_path,
                                         ));
                                     }
-                    
+
                                 } else {
                                     let next_token = &body[body_i];
                                     if next_token.0 != "IDENTIFIER" {
@@ -885,7 +957,7 @@ impl Preprocessor {
                                             &self.file_path,
                                         ));
                                     }
-                    
+
                                     if let Some(replacement) = replacement_map.get(next_token.1.as_str()) {
                                         expanded_tokens.extend(replacement.clone());
                                     } else {
@@ -896,16 +968,21 @@ impl Preprocessor {
                                         ));
                                     }
                                 }
-                    
+                            } else if token.0 == "STRING" && !token.1.is_empty() {
+                                expanded_tokens.push(expand_macros_in_default_string(token, &replacement_map));
                             } else {
                                 expanded_tokens.push(token.clone());
                             }
-                    
+
                             body_i += 1;
                         }
 
+                        self.mangle_context.enter_scope();
+
                         let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), 0, &current_dir)?;
-                        result.extend(mangle_tokens(&recursively_expanded));
+                        result.extend(self.mangle_tokens(&recursively_expanded));
+
+                        self.mangle_context.exit_scope();
                         continue;
                     } else {
                         return Err(Error::new(
@@ -914,6 +991,7 @@ impl Preprocessor {
                             &self.file_path,
                         ));
                     }
+
                 } else if !skipping {
                     let mut token = token.clone();
                 
@@ -941,7 +1019,7 @@ impl Preprocessor {
     }
 
     fn expand_tokens_with_macros(
-        &self,
+        &mut self,
         tokens: &[Token],
         skipping: bool,
         call_loc: Option<Location>,
@@ -950,7 +1028,7 @@ impl Preprocessor {
     ) -> Result<Vec<Token>, Error> {
         let mut result = Vec::new();
         let mut i = 0;
-    
+
         while i < tokens.len() {
             if !skipping
                 && i + 2 < tokens.len()
@@ -958,14 +1036,13 @@ impl Preprocessor {
                 && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
                 && matches!(tokens[i + 2], Token(ref a, ref b, _) if a == "SEPARATOR" && b == "(")
             {
-                // macro_name!(args...)
                 let macro_name = &tokens[i].1;
                 if let Some((param_names, body)) = self.macros.get(macro_name) {
                     i += 3;
-    
+
                     let mut paren_count = 1;
                     let mut call_args_tokens = Vec::new();
-    
+
                     while i < tokens.len() && paren_count > 0 {
                         let token = &tokens[i];
                         if token.0 == "SEPARATOR" {
@@ -984,14 +1061,14 @@ impl Preprocessor {
                         }
                         i += 1;
                     }
-    
+
                     let mut args_values: Vec<Vec<Token>> = Vec::new();
                     let mut current_arg = Vec::new();
                     let mut nested_paren = 0;
-    
+
                     for tok in call_args_tokens {
                         let Token(ref a, ref b, _) = tok;
-    
+
                         if a == "SEPARATOR" && b == "," && nested_paren == 0 {
                             args_values.push(current_arg);
                             current_arg = Vec::new();
@@ -1005,13 +1082,13 @@ impl Preprocessor {
                         }
                     }
                     args_values.push(current_arg);
-    
+
                     if args_values.len() == 1 && args_values[0].is_empty() {
                         args_values.clear();
                     }
-    
+
                     let variadic_pos = param_names.iter().position(|(n, _)| n.ends_with("..."));
-    
+
                     if let Some(pos) = variadic_pos {
                         if args_values.len() < pos {
                             return Err(Error::new(
@@ -1037,20 +1114,20 @@ impl Preprocessor {
                             &self.file_path,
                         ));
                     }
-    
+
                     let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::new();
-    
+
                     for (idx, (name, default)) in param_names.iter().enumerate() {
                         if Some(idx) == variadic_pos {
                             let mut variadic_tokens = Vec::new();
-                    
+
                             for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
                                 if vi != idx {
                                     variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
                                 }
                                 variadic_tokens.extend(rest_arg.clone());
                             }
-                    
+
                             let variadic_name = &name[..name.len() - 3];
                             replacement_map.insert(variadic_name, variadic_tokens);
                             break;
@@ -1058,9 +1135,9 @@ impl Preprocessor {
                             let value = if idx < args_values.len() {
                                 Some(args_values[idx].clone())
                             } else {
-                                default.clone().map(|d| vec![d.clone()])
+                                default.clone().map(|d| vec![expand_macros_in_default_string(&d, &replacement_map)])
                             };
-                    
+
                             if let Some(v) = value {
                                 replacement_map.insert(name.as_str(), v);
                             } else {
@@ -1072,13 +1149,13 @@ impl Preprocessor {
                             }
                         }
                     }
-    
+
                     let mut expanded_tokens = Vec::new();
                     let mut body_i = 0;
-    
+
                     while body_i < body.len() {
                         let token = &body[body_i];
-    
+
                         if token.0 == "OPERATOR" && token.1 == "$" {
                             body_i += 1;
                             if body_i >= body.len() {
@@ -1088,9 +1165,9 @@ impl Preprocessor {
                                     &self.file_path,
                                 ));
                             }
-    
+
                             let Token(a, b, _) = &body[body_i];
-    
+
                             if a == "OPERATOR" && b == "!" {
                                 body_i += 1;
                                 if body_i >= body.len() {
@@ -1100,7 +1177,7 @@ impl Preprocessor {
                                         &self.file_path,
                                     ));
                                 }
-    
+
                                 let next_token = &body[body_i];
                                 if next_token.0 != "IDENTIFIER" {
                                     return Err(Error::new(
@@ -1109,13 +1186,13 @@ impl Preprocessor {
                                         &self.file_path,
                                     ));
                                 }
-    
+
                                 let arg_name = if next_token.1.ends_with("...") {
                                     &next_token.1[..next_token.1.len() - 3]
                                 } else {
                                     next_token.1.as_str()
                                 };
-    
+
                                 if let Some(replacement) = replacement_map.get(arg_name) {
                                     let joined = replacement
                                         .iter()
@@ -1128,7 +1205,7 @@ impl Preprocessor {
                                         })
                                         .collect::<Vec<_>>()
                                         .join(" ");
-    
+
                                     let loc = token.2.clone().or(call_loc.clone());
                                     expanded_tokens.push(Token(
                                         "STRING".to_string(),
@@ -1151,7 +1228,7 @@ impl Preprocessor {
                                         &self.file_path,
                                     ));
                                 }
-    
+
                                 if let Some(replacement) = replacement_map.get(next_token.1.as_str()) {
                                     expanded_tokens.extend(replacement.clone());
                                 } else {
@@ -1162,29 +1239,33 @@ impl Preprocessor {
                                     ));
                                 }
                             }
+                        } else if token.0 == "STRING" && !token.1.is_empty() {
+                            expanded_tokens.push(expand_macros_in_default_string(token, &replacement_map));
                         } else {
                             expanded_tokens.push(token.clone());
                         }
-    
+
                         body_i += 1;
                     }
-    
+
                     if depth >= MAX_MACRO_RECURSION_DEPTH {
                         result.push(Token("IDENTIFIER".into(), "throw".into(), call_loc.clone()));
                         result.push(Token("STRING".into(), "\"Maximum recursion depth exceeded in macro invocation\"".into(), call_loc.clone()));
                         result.push(Token("IDENTIFIER".into(), "from".into(), call_loc.clone()));
                         result.push(Token("STRING".into(), "\"RecursionError\"".into(), call_loc.clone()));
                     } else {
+                        self.mangle_context.enter_scope();
                         let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), depth + 1, &current_dir)?;
                         let mut new_preprocessor = Preprocessor::new(
                             self.lib_dir.clone(),
                             &self.file_path.clone(),
                         );
                         let recursively_expanded_preprocessor = new_preprocessor.process(recursively_expanded, &current_dir)?;
-                        let mangled = mangle_tokens(&recursively_expanded_preprocessor);
+                        let mangled = self.mangle_tokens(&recursively_expanded_preprocessor);
                         result.extend(mangled);
+                        self.mangle_context.exit_scope();
                     }
-    
+
                     continue;
                 } else {
                     return Err(Error::new(
@@ -1195,79 +1276,133 @@ impl Preprocessor {
                 }
             } else if !skipping {
                 let mut token = tokens[i].clone();
-    
+
                 let alias = self.aliases.iter()
                     .find_map(|(k, v)| if k.0 == token.0 && k.1 == token.1 { Some(v) } else { None });
-    
+
                 if let Some(alias) = alias {
                     token = alias.clone();
                 }
-    
+
                 if token.0 == "IDENTIFIER" {
                     if let Some(def) = self.defines.get(&token.1) {
                         token = def.clone();
                     }
                 }
-    
+
                 result.push(token);
             }
 
             i += 1;
         }
-    
+
         Ok(result)
+    }
+
+    fn mangle_tokens(&mut self, tokens: &[Token]) -> Vec<Token> {
+        let mut result = Vec::new();
+
+        let mut i = 0;
+        while i < tokens.len() {
+            let token = &tokens[i];
+
+            if token.0 == "IDENTIFIER" {
+                let og_token = &token.1;
+
+                if og_token == "_" {
+                    result.push(token.clone());
+                    i += 1;
+                    continue;
+                }
+
+                let next_token = tokens.get(i + 1);
+
+                let defines_identifier = next_token.map_or(false, |t| t.1 == ":" || t.1 == ":=" || t.1 == "in");
+                let not_keyword = !KEYWORDS.contains(&og_token.as_str());
+
+                if defines_identifier && not_keyword {
+                    let uid = if let Some(loc) = &token.2 {
+                        format!("{}{}", loc.line_number, loc.range.0)
+                    } else {
+                        let id = self.mangle_context.counter;
+                        format!("gen{}", id)
+                    };
+
+                    let mangled = format!("__mangle_{}_{}", uid, og_token);
+                    self.mangle_context.mangle(og_token, &mangled);
+                    result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
+                    i += 1;
+                    continue;
+                }
+
+                if let Some(mangled) = self.mangle_context.get_mangled(og_token) {
+                    result.push(Token("IDENTIFIER".to_string(), mangled.clone(), token.2.clone()));
+                    i += 1;
+                    continue;
+                }
+            }
+
+            result.push(token.clone());
+            i += 1;
+        }
+
+        result
     }
 }
 
-fn mangle_tokens(tokens: &[Token]) -> Vec<Token> {
-    let mut result = Vec::new();
-    let mut mangled_names: HashMap<String, String> = HashMap::new();
-    let mut mangle_counter = 0usize;
-
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = &tokens[i];
-
-        if token.0 == "IDENTIFIER" {
-            let og_token = &token.1;
-
-            if og_token == "_" {
-                result.push(token.clone());
-                i += 1;
-                continue;
-            }
-
-            let next_token = tokens.get(i + 1);
-
-            let defines_identifier = next_token.map_or(false, |t| t.1 == ":" || t.1 == ":=");
-            let not_keyword = !KEYWORDS.contains(&og_token.as_str());
-
-            if defines_identifier && not_keyword {
-                let uid = if let Some(loc) = &token.2 {
-                    format!("{}{}", loc.line_number, loc.range.0)
-                } else {
-                    let id = mangle_counter;
-                    mangle_counter += 1;
-                    format!("gen{}", id)
-                };
-
-                let mangled = format!("__mangle_{}_{}", uid, og_token);
-                mangled_names.insert(og_token.clone(), mangled.clone());
-                result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
-                i += 1;
-                continue;
-            }
-
-            if let Some(mangled) = mangled_names.get(og_token) {
-                result.push(Token("IDENTIFIER".to_string(), mangled.clone(), token.2.clone()));
-                i += 1;
-                continue;
-            }
-        }
-
-        result.push(token.clone());
-        i += 1;
+fn expand_macros_in_default_string(
+    token: &Token,
+    replacement_map: &HashMap<&str, Vec<Token>>,
+) -> Token {
+    if token.0 != "STRING" {
+        return token.clone();
     }
 
-    result
+    let val = &token.1;
+    if val.len() < 3 || !(val.starts_with('f') || val.starts_with('F')) {
+        return token.clone();
+    }
+
+    let quote_char = val.chars().nth(1).unwrap_or('\0');
+    if quote_char != '"' && quote_char != '\'' {
+        return token.clone();
+    }
+
+    let string_inside = &val[2..val.len() - 1];
+    let mut replaced = String::new();
+    let mut rest = string_inside;
+
+    while let Some(start_pos) = rest.find('$') {
+        replaced.push_str(&rest[..start_pos]);
+        rest = &rest[start_pos + 1..];
+
+        if let Some(end_pos) = rest.find('$') {
+            let key = &rest[..end_pos];
+            rest = &rest[end_pos + 1..];
+
+            if let Some(repl) = replacement_map.get(key) {
+                replaced.push('{');
+                replaced.push_str(
+                    &repl.iter().map(|t| t.1.clone()).collect::<Vec<_>>().join(" ")
+                );
+                replaced.push('}');
+            } else {
+                replaced.push('$');
+                replaced.push_str(key);
+                replaced.push('$');
+            }
+        } else {
+            replaced.push('$');
+            replaced.push_str(rest);
+            rest = "";
+        }
+    }
+
+    replaced.push_str(rest);
+
+    Token(
+        "STRING".to_string(),
+        format!("f{}{}{}", quote_char, replaced, quote_char),
+        token.2.clone(),
+    )
 }

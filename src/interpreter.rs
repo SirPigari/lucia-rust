@@ -3041,11 +3041,10 @@ impl Interpreter {
                     Some(Value::String(n)) => n,
                     _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable forget"),
                 };
-    
-                if self.variables.remove(name).is_some() {
-                    NULL
-                } else {
-                    self.raise("NameError", &format!("Variable '{}' not found for forget", name))
+
+                match self.variables.remove(name) {
+                    Some(value) => value.get_value().clone(),
+                    None => self.raise("NameError", &format!("Variable '{}' not found for forget", name)),
                 }
             }
 
@@ -3162,6 +3161,29 @@ impl Interpreter {
                 }
 
                 changed_value
+            }
+
+            "TUPLE" => {
+                let items_val = match value_map.get(&Value::String("items".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'items' in tuple forget"),
+                };
+
+                let items = match items_val {
+                    Value::List(list) => list,
+                    _ => return self.raise("RuntimeError", "'items' must be a list in tuple forget"),
+                };
+
+                let mut results = Vec::new();
+
+                for item in items {
+                    let mut stmt = HashMap::new();
+                    stmt.insert(Value::String("value".to_string()), item.clone());
+                    let forgotten_value = self.handle_forget(stmt);
+                    results.push(forgotten_value);
+                }
+
+                Value::Tuple(results)
             }
 
             _ => self.raise("RuntimeError", &format!("Unsupported forget value type: {}", value_type)),

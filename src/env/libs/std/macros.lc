@@ -4,27 +4,33 @@
 #define LUCIA_STD_MACROS
 #include "_import.lc"
 
+// macro definitions can have a additional '!' after the name but its optional
+// i added it because i was forgeting if it was there or not
+//           V - here could be a '!'
 #macro assert($cond, $msg=("Assertion failed")):
     if (!$cond):
         throw $msg from "AssertionError"
     end
 #endmacro
 
-#macro assert_eq($a, $b, $msg=("Values are not equal")):
-    if (($a) != $b):
+// in macro f-strings you can use the $arg$ for the value of the arg
+// gets replaced by {arg_value} in the string
+// also the string MUST be f-string, otherwise it will not work
+#macro assert_eq($a, $b, $msg=(f"Values are not equal, expected: $a$, got: $b$")):
+    if (($a) != ($b)):
         throw $msg from "AssertionError"
     end
 #endmacro
 
-#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=("Values are not approximately equal")):
-    if ((|($a) - $b|) > $epsilon):
+#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $a$, got: $b$ (within $epsilon$)")):
+    if ((|($a) - ($b)|) > $epsilon):
         throw $msg from "AssertionError"
     end
 #endmacro
 
 
-#macro assert_ne($a, $b, $msg=("Values are equal but should not be")):
-    if (($a) == $b):
+#macro assert_ne($a, $b, $msg=(f"Values are equal but should not be, expected: $a$, got: $b$")):
+    if (($a) == ($b)):
         throw $msg from "AssertionError"
     end
 #endmacro
@@ -42,7 +48,18 @@
     end
 #endmacro
 
-#macro assert_type($value, $type_, $msg=("Type mismatch")):
+// this is shorter but the above is more readable
+// #macro assert_err($expr, $msg=("Expected an error but got success")):
+//     mutable _error_occurred: ?tuple = null
+//     try:
+//         $expr
+//     catch (_error_occurred): end
+//     if (!_error_occurred):
+//         throw $msg from "AssertionError"
+//     end
+// #endmacro
+
+#macro assert_type($value, $type_, $msg=(f"Type mismatch")):
     if (type_of($value) != $type_):
         throw $msg from "TypeError"
     end
@@ -57,17 +74,33 @@
 #endmacro
 
 #macro dbg($value...):
-    // $!value means the stringified version of the value tokens
+    // when a variadic arg in macros is used, the value of it isnt a tuple or a list, its just the values separated by commas
+    // its on the macro to decide the type
+    // here we use a list (denoted by the [])
+    values: list = [$value]
     i: int = 0
-    for (n in [$value]):
+    for (n in values):
+        // $!value means the stringified version of the value tokens
         print($!value.split(",")[i].trim(), "=", _collections.format_value(n).trim())
         i++
     end
-    null  // otherwise it will return the last value (i)
+    forget (values, i)
+    null  // otherwise it will return the last value (values, i)
 #endmacro
 
 #macro dbglog($value):
     styledprint($value, fg_color=_config.color_scheme["debug"])
+#endmacro
+
+// TODO: Fix apollo time in time module (src/env/libs/time/__init__.rs)
+#macro time_it($expr):
+    scope time_it_scope (_time, _collections, _config): 
+        start_time: int = _time.current_apollo_time()
+        result: any = ($expr)
+        end_time: int = _time.current_apollo_time()
+        elapsed: int = end_time - start_time
+        return (result, elapsed)
+    end
 #endmacro
 
 // return null
