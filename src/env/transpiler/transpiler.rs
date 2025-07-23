@@ -76,6 +76,9 @@ impl Transpiler {
 
     pub fn transpile(&mut self) -> Result<String, Vec<Error>> {
         // TODO: Implement the transpiler
+        // NOTE: Transpile to C language
+        // i want to also implement transpiling to javascript just for fun because everyone hates js
+        // stick to C for now
         panic!("\x1BTranspiler is not implemented yet");
     }
 }

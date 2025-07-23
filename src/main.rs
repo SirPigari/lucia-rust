@@ -26,6 +26,7 @@ mod env {
         pub mod tokens;
         pub mod internal_structs;
         pub mod precompile;
+        pub mod token_cache;
     }
     pub mod libs {
         pub mod math {
@@ -84,6 +85,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::BuildInfo;
 use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::token_cache::{save_tokens_to_cache, load_tokens_from_cache};
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
@@ -1111,36 +1113,52 @@ fn lucia(args: Vec<String>) {
     }
 }
 
-fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
+fn execute_file(
+    path: &Path,
+    file_path: String,
+    config: &Config,
+    use_colors: bool,
+    disable_preprocessor: bool,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    debug_mode: Option<String>,
+    argv: &Vec<String>,
+    dump_pp_flag: &bool,
+    dump_ast_flag: &bool,
+) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
+        let cache_dir = home_dir_path.join("cache");
+
         let file_content = fs::read_to_string(path).expect("Failed to read file");
-        let mut lexer = Lexer::new(&file_content, to_static(file_path.clone()), None);
-        let raw_tokens = lexer.tokenize();
-
-        let print_start_debug = debug_mode
-            .as_ref()
-            .map_or(false, |mode| mode == "full" || mode == "minimal");
-
-        // let print_intime_debug = debug_mode
-        //     .as_ref()
-        //     .map_or(false, |mode| mode == "full" || mode == "normal");
 
         let processed_tokens = if !disable_preprocessor {
-            let mut preprocessor = Preprocessor::new(
-                home_dir_path.join("libs"),
-                file_path.as_str(),
-            );
-            match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    handle_error(&e, &file_content, &config, use_colors);
-                    exit(1);
+            if let Ok(Some(cached_tokens)) = load_tokens_from_cache(&cache_dir, &file_path, "processed") {
+                if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
+                    debug_log("Loaded processed tokens from cache", &config, Some(use_colors));
                 }
+                cached_tokens
+            } else {
+                let mut preprocessor = Preprocessor::new(
+                    home_dir_path.join("libs"),
+                    file_path.as_str(),
+                );
+                let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
+                let tokens = match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+                    Ok(tokens) => tokens,
+                    Err(e) => {
+                        handle_error(&e, &file_content, &config, use_colors);
+                        exit(1);
+                    }
+                };
+                if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens) {
+                    debug_log(&format!("Failed to save tokens cache: {}", e), &config, Some(use_colors));
+                }
+                tokens
             }
         } else {
-            raw_tokens.clone()
+            Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize()
         };
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
@@ -1152,6 +1170,10 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             );
         }
 
+        let print_start_debug = debug_mode
+            .as_ref()
+            .map_or(false, |mode| mode == "full" || mode == "minimal");
+
         if print_start_debug {
             let filtered = processed_tokens
                 .iter()
@@ -1161,13 +1183,12 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 })
                 .map(|token| (&token.0, &token.1))
                 .collect::<Vec<_>>();
-        
+
             debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
         }
 
         let tokens: Vec<Token> = processed_tokens;
-        let mut parser =
-            Parser::new(tokens.clone());
+        let mut parser = Parser::new(tokens.clone());
 
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
@@ -1179,10 +1200,10 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
         };
 
         if *dump_ast_flag && !statements.is_empty() {
-            let file_path = path.with_extension("ast");
+            let ast_file_path = path.with_extension("ast");
             dump_ast(
                 statements.iter().collect(),
-                file_path.to_str().unwrap_or(""),
+                ast_file_path.to_str().unwrap_or(""),
                 &config,
                 use_colors,
             );
@@ -1218,6 +1239,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
                 .canonicalize()
                 .unwrap_or_else(|_| PathBuf::from("."))
         };
+
         let mut interpreter = Interpreter::new(
             config.clone(),
             use_colors,
@@ -1226,6 +1248,7 @@ fn execute_file(path: &Path, file_path: String, config: &Config, use_colors: boo
             (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
             argv,
         );
+
         let _out: Value = match interpreter.interpret(statements, true) {
             Ok(out) => out,
             Err(error) => {

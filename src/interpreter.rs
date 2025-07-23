@@ -1268,11 +1268,6 @@ impl Interpreter {
             }
         };
 
-        self.stack.push((
-            self.file_path.clone(),
-            self.get_location_from_current_statement()
-        ));
-
         let stmts: Vec<Statement> = body.iter()
             .filter_map(|v| {
                 match v {
@@ -1291,6 +1286,18 @@ impl Interpreter {
         } else {
             self.file_path.clone()
         };
+
+
+        self.stack.push((
+            new_file_path.clone(),
+            self.get_location_from_current_statement()
+        ));
+
+        debug_log(
+            &format!("<Entering scope '{}'>", name),
+            &self.config.clone(),
+            Some(self.use_colors),
+        );
 
         let mut scope_interpreter = Interpreter::new(
             self.config.clone(),
@@ -1317,12 +1324,19 @@ impl Interpreter {
         }
 
         if body.is_empty() {
+            self.stack.pop();
+            debug_log(
+                &format!("<Exiting scope '{}'>", name),
+                &self.config.clone(),
+                Some(self.use_colors),
+            );
             return NULL;
         }
 
         let _ = scope_interpreter.interpret(stmts, true);
 
         if let Some(err) = scope_interpreter.err {
+            self.stack.pop();
             self.raise_with_ref(
                 "RuntimeError",
                 &format!("Error in scope '{}'", name),
@@ -1330,6 +1344,12 @@ impl Interpreter {
             );
             return NULL;
         }
+
+        debug_log(
+            &format!("<Exiting scope '{}'>", name),
+            &self.config.clone(),
+            Some(self.use_colors),
+        );
 
         self.stack.pop();
         if scope_interpreter.is_returning {

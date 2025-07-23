@@ -88,7 +88,7 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
                 let path = entry.path();
                 if path.is_dir() {
                     walk_dir_recursively(&path, manifest_dir, todos);
-                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") || path.extension().and_then(|s| s.to_str()) == Some("lc") {
                     let rel_path = path
                         .strip_prefix(manifest_dir)
                         .unwrap_or(&path)

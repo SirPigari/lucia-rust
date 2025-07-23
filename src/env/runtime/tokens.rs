@@ -1,8 +1,10 @@
 use once_cell::sync::Lazy;
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
 
 pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(Token::default);
 
-#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
 pub struct Location {
     pub file: String,
     pub line_string: String,
@@ -21,7 +23,7 @@ impl Location {
     }
 }
 
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
 pub struct Token(pub String, pub String, pub Option<Location>);
 
 impl Default for Token {
