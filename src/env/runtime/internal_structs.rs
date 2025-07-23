@@ -1,6 +1,7 @@
 use crate::env::runtime::value::Value;
 use std::collections::HashMap;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State {
@@ -11,7 +12,7 @@ pub enum State {
     Continue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Cache {
     pub operations: HashMap<String, Value>,
     pub constants: HashMap<String, Value>,

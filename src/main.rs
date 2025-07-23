@@ -26,7 +26,7 @@ mod env {
         pub mod tokens;
         pub mod internal_structs;
         pub mod precompile;
-        pub mod token_cache;
+        pub mod cache;
     }
     pub mod libs {
         pub mod math {
@@ -77,7 +77,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme};
-use crate::env::runtime::utils::{read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::utils::{fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -85,7 +85,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::BuildInfo;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::token_cache::{save_tokens_to_cache, load_tokens_from_cache};
+use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, load_interpreter_cache, save_interpreter_cache};
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
@@ -760,7 +760,7 @@ fn lucia(args: Vec<String>) {
         },
         None => (true, false),
     };
-    let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string());
+    let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string()) || args.contains(&"--clear-cache".to_string()) || args.contains(&"--cls-cache".to_string());
     let c_compiler = args.iter()
         .find(|arg| arg.starts_with("--c-compiler="))
         .map(|arg| arg.trim_start_matches("--c-compiler="))
@@ -799,7 +799,8 @@ fn lucia(args: Vec<String>) {
             ("--quiet, -q", "Suppress debug and warning messages"),
             ("--debug, -d", "Enable debug mode"),
             ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal)"),
-            ("--exit, -e", "Exit after execution"),
+            ("--exit, -e", "Exit if no files are provided"),
+            ("--info, -i", "Show build and environment information"),
             ("--help, -h", "Show this help message"),
             ("--version, -v", "Show version information"),
             ("--build-info", "Show build information"),
@@ -810,6 +811,11 @@ fn lucia(args: Vec<String>) {
             ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
             ("--allow-unsafe", "Allow unsafe operations"),
             ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
+            ("--compile, -c", "Compile the source code to a binary"),
+            ("--run, -r", "Run the source code after compiling"),
+            ("--cache=<true|false>", "Enable or disable caching (default: true)"),
+            ("--clean-cache, -cc", "Clear the cache directory"),
+            ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
             ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
         ];
     
@@ -1113,7 +1119,7 @@ fn lucia(args: Vec<String>) {
             if cache_dir.ends_with("cache") {
                 let _ = fs::remove_dir(&cache_dir);
             } else {
-                println!("Cache directory '{}' cleaned successfully.", cache_dir.display());
+                println!("Cache directory '{}' cleaned successfully.", fix_path(cache_dir.display().to_string()));
             }
         }
     }
@@ -1132,7 +1138,7 @@ fn lucia(args: Vec<String>) {
             }
 
             if !path.exists() {
-                eprintln!("Error: File '{}' does not exist or is not a valid file", path.display());
+                eprintln!("Error: File '{}' does not exist or is not a valid file", fix_path(path.display().to_string()));
                 exit(1);
             };
 
@@ -1242,7 +1248,7 @@ fn execute_file(
     dump_ast_flag: &bool,
 ) {
     if path.exists() && path.is_file() {
-        debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
+        debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config, Some(use_colors));
 
         let cache_dir = home_dir_path.join(".cache");
         if !cache_dir.exists() {
@@ -1262,7 +1268,18 @@ fn execute_file(
             }
         }
 
-        let file_content = fs::read_to_string(path).expect("Failed to read file");
+        let file_content = match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) => {
+                handle_error(&Error::with_help(
+                    "FileReadError",
+                    to_static(format!("Failed to read file '{}': {}", path.display(), e)),
+                    "Check if the file exists and is readable.",
+                    to_static(file_path.clone()),
+                ), "", config, use_colors);
+                exit(1);
+            }
+        };
 
         let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
 
@@ -1426,8 +1443,21 @@ fn execute_file(
             argv,
         );
 
+        if config.use_cache {
+            if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir) {
+                interpreter.set_cache(cache);
+            }
+        }
+
         let _out: Value = match interpreter.interpret(statements, true) {
-            Ok(out) => out,
+            Ok(out) => {
+                if config.use_cache {
+                    if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache()) {
+                        debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                    }
+                }
+                out
+            }
             Err(error) => {
                 debug_log("Error while interpreting:", &config, Some(use_colors));
                 handle_error(&error, &file_content, &config, use_colors);
@@ -1459,6 +1489,13 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         ),
         argv,
     );
+
+    if config.use_cache {
+        let cache_dir = home_dir_path.join(".cache");
+        if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir) {
+            interpreter.set_cache(cache);
+        }
+    }
 
     let mut preprocessor = Preprocessor::new(
         home_dir_path.join("libs"),
@@ -1664,6 +1701,12 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         let out = match interpreter.interpret(statements, false) {
             Ok(out) => {
                 if interpreter.is_stopped() {
+                    if config.use_cache {
+                        let cache_dir = home_dir_path.join(".cache");
+                        if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache()) {
+                            debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                        }
+                    }
                     exit(0);
                 }
                 out

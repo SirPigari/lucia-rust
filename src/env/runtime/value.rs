@@ -9,7 +9,13 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::fmt;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
+use serde::de::{Deserialize, Deserializer};
 use std::path::PathBuf;
+use bincode::{
+    enc::{Encode, Encoder},
+    de::{BorrowDecode, Decode, Decoder},
+    error::{EncodeError, DecodeError},
+};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -78,6 +84,177 @@ impl Serialize for Value {
                 s.end()
             }
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{Visitor, MapAccess, SeqAccess};
+        use std::fmt;
+
+        struct ValueVisitor;
+
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a valid Lucia runtime Value")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(Value::Boolean(v))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(Value::Int(Int::from(v)))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(Value::Int(Int::from(v as i64)))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(Value::Float(Float::from(v)))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(Value::String(v.to_string()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
+                Ok(Value::String(v))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(Value::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(Value::Null)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut values = Vec::new();
+                while let Some(elem) = seq.next_element()? {
+                    values.push(elem);
+                }
+                Ok(Value::List(values))
+            }
+
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut keys = Vec::new();
+                let mut values = Vec::new();
+
+                while let Some((k, v)) = access.next_entry()? {
+                    keys.push(k);
+                    values.push(v);
+                }
+
+                Ok(Value::Map { keys, values })
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+impl Encode for Value {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        use Value::*;
+
+        match self {
+            Float(f) => {
+                0u8.encode(encoder)?;
+                f.to_string().encode(encoder)
+            }
+            Int(i) => {
+                1u8.encode(encoder)?;
+                i.to_string().encode(encoder)
+            }
+            String(s) => {
+                2u8.encode(encoder)?;
+                s.encode(encoder)
+            }
+            Boolean(b) => {
+                3u8.encode(encoder)?;
+                b.encode(encoder)
+            }
+            Null => {
+                4u8.encode(encoder)
+            }
+            Map { keys, values } => {
+                5u8.encode(encoder)?;
+                keys.encode(encoder)?;
+                values.encode(encoder)
+            }
+            Tuple(v) => {
+                6u8.encode(encoder)?;
+                v.encode(encoder)
+            }
+            List(v) => {
+                7u8.encode(encoder)?;
+                v.encode(encoder)
+            }
+            Bytes(b) => {
+                8u8.encode(encoder)?;
+                b.encode(encoder)
+            }
+            Function(_) | Module(_, _) | Error(_, _, _) => {
+                4u8.encode(encoder) // fallback to Null
+            }
+            Pointer(ptr) => {
+                11u8.encode(encoder)?;
+                ptr.encode(encoder)
+            }
+        }
+    }
+}
+
+impl<C> Decode<C> for Value {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let tag = u8::decode(decoder)?;
+
+        match tag {
+            0 => {
+                let s = String::decode(decoder)?;
+                let f = Float::from_str(&s).map_err(|_| DecodeError::Other("parse Float failed".into()))?;
+                Ok(Value::Float(f))
+            }
+            1 => {
+                let s = String::decode(decoder)?;
+                let i = Int::from_str(&s).map_err(|_| DecodeError::Other("parse Int failed".into()))?;
+                Ok(Value::Int(i))
+            }
+            2 => Ok(Value::String(String::decode(decoder)?)),
+            3 => Ok(Value::Boolean(bool::decode(decoder)?)),
+            4 => Ok(Value::Null),
+            5 => {
+                let keys = Vec::<Value>::decode(decoder)?;
+                let values = Vec::<Value>::decode(decoder)?;
+                Ok(Value::Map { keys, values })
+            }
+            6 => Ok(Value::Tuple(Vec::<Value>::decode(decoder)?)),
+            7 => Ok(Value::List(Vec::<Value>::decode(decoder)?)),
+            8 => Ok(Value::Bytes(Vec::<u8>::decode(decoder)?)),
+            9 | 10 | 12 => Ok(Value::Null),
+            11 => Ok(Value::Pointer(usize::decode(decoder)?)),
+            _ => Err(DecodeError::Other("invalid tag".into())),
+        }
+    }
+}
+
+impl<'de, C> BorrowDecode<'de, C> for Value {
+    fn borrow_decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Decode::decode(decoder)
     }
 }
 

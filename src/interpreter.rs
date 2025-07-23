@@ -151,6 +151,14 @@ impl Interpreter {
         self.state == State::Exit
     }
 
+    pub fn set_cache(&mut self, cache: Cache) {
+        self.cache = cache;
+    }
+
+    pub fn get_cache(&self) -> &Cache {
+        &self.cache
+    }
+
     fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
         let mut val = val.clone();
         if val.is_statement() {

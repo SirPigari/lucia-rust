@@ -1,7 +1,10 @@
 use crate::env::runtime::utils::{to_static};
 use crate::env::runtime::tokens::Location;
 
-#[derive(Debug, Clone, PartialOrd, PartialEq)]
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
+
+#[derive(Debug, Clone, PartialOrd, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Error {
     pub error_type: String,
     pub msg: String,

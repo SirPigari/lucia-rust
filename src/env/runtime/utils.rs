@@ -12,7 +12,6 @@ use serde_json::Value as JsonValue;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 use std::path::Path;
-use regex::Regex;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
@@ -1005,7 +1004,10 @@ pub fn fix_path(raw_path: String) -> String {
     if path.starts_with(r"\\?\") {
         return path[4..].to_string();
     }
-    Regex::new(r"\\").unwrap().replace_all(&path, "/").to_string()
+    path.to_string().replace("\\", "/")
+        .replace("//", "/")
+        .replace(":/", "://")
+        .to_string()
 }
 
 fn remove_note_field(input: &str) -> String {
