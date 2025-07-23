@@ -21,6 +21,7 @@ The `config.json` file is located in the root directory of your Lucia environmen
   "use_lucia_traceback": true,
   "warnings": true,
   "use_preprocessor": true,
+  "use_cache": false,
   "allow_fetch": true,
   "allow_unsafe": false,
   "home_dir": "lucia/src/env",
@@ -78,7 +79,7 @@ The `config.json` file is located in the root directory of your Lucia environmen
 ### 6. `warnings`
 
 - **Type:** `bool`  
-- **Description:** Enables or disables warnings.
+- **Description:** Enables or disables warnings.  
 - **Note:** May get removed in future.
 
 ### 7. `use_preprocessor`
@@ -86,32 +87,37 @@ The `config.json` file is located in the root directory of your Lucia environmen
 - **Type:** `bool`  
 - **Description:** Enables preprocessor directives like `#include` or `#alias`.
 
-### 8. `allow_fetch`
+### 8. `use_cache`
+- **Type:** `bool`
+- **Description:** If true uses .cache dir to store the cache  
+- **Note:** Experimental
+
+### 9. `allow_fetch`
 
 - **Type:** `bool`  
 - **Description:** Enables the `fetch` function to retrieve external data.
 
-### 9. `allow_unsafe`
+### 10. `allow_unsafe`
 
 - **Type:** `bool`  
 - **Description:** Enables use of unsafe operations within Lucia code, which may be needed for certain low-level features.
 
-### 10. `home_dir`
+### 11. `home_dir`
 
 - **Type:** `string`  
 - **Description:** Directory path where the Lucia environment lives. Used to find resources and assets.
 
-### 11. `recursion_limit`
+### 12. `recursion_limit`
 
 - **Type:** `int`  
-- **Description:** Maximum allowed recursion depth in Lucia programs. Default is `9999`.
+- **Description:** Maximum allowed recursion depth in Lucia programs. Default is `999`.
 
-### 12. `version`
+### 13. `version`
 
 - **Type:** `string`  
 - **Description:** Current version of Lucia. Should be updated with each new release (currently `"2.0.0"`).
 
-### 13. `color_scheme`
+### 14. `color_scheme`
 
 - **Type:** `object`  
 - **Description:** Defines terminal colors for various output elements. Each property specifies a hex color string.
@@ -128,4 +134,4 @@ The `config.json` file is located in the root directory of your Lucia environmen
 | `output_text`  | Color for output text            |
 | `info`         | Color for informational messages |
 
--**Note:** `comment` and `warning` may get removed in future.
+- **Note:** `comment` and `warning` may get removed in future.

@@ -17,7 +17,7 @@ _Total TODOs found: 7_
 - i want to also implement transpiling to javascript just for fun because everyone hates js
 - stick to C for now
 
-### [`src/interpreter.rs:5015:1`](../../../src/interpreter.rs#L5015) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5017:1`](../../../src/interpreter.rs#L5017) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
@@ -26,10 +26,10 @@ _Total TODOs found: 7_
 ### [`src/main.rs:310:1`](../../../src/main.rs#L310) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:3772:1`](../../../src/interpreter.rs#L3772) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:3774:1`](../../../src/interpreter.rs#L3774) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
-### [`src/interpreter.rs:385:1`](../../../src/interpreter.rs#L385) _(added by **SirPigari** on **2025-07-09**)_
+### [`src/interpreter.rs:387:1`](../../../src/interpreter.rs#L387) _(added by **SirPigari** on **2025-07-09**)_
 - Check function signature
 
 ---

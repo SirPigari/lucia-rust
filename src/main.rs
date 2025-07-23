@@ -85,7 +85,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::BuildInfo;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, load_interpreter_cache, save_interpreter_cache};
+use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache};
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
@@ -674,7 +674,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_lucia_traceback: true,
         warnings: true,
         use_preprocessor: true,
-        use_cache: true,
+        use_cache: false,
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: env_path_str,
@@ -758,7 +758,7 @@ fn lucia(args: Vec<String>) {
                 }
             }
         },
-        None => (true, false),
+        None => (false, false),
     };
     let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string()) || args.contains(&"--clear-cache".to_string()) || args.contains(&"--cls-cache".to_string());
     let c_compiler = args.iter()

@@ -128,10 +128,12 @@ pub fn load_tokens_from_cache(
     }
 }
 
+#[allow(dead_code)]
 fn interpreter_cache_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join("interpreter_cache.bin")
 }
 
+#[allow(dead_code)]
 pub fn load_interpreter_cache(cache_dir: &Path) -> std::io::Result<Option<Cache>> {
     let path = interpreter_cache_path(cache_dir);
 
@@ -143,6 +145,7 @@ pub fn load_interpreter_cache(cache_dir: &Path) -> std::io::Result<Option<Cache>
     }
 }
 
+#[allow(dead_code)]
 pub fn save_interpreter_cache(cache_dir: &Path, new_cache: &Cache) -> std::io::Result<()> {
     let path = interpreter_cache_path(cache_dir);
 

@@ -47,7 +47,7 @@ impl Default for Config {
             debug_mode: "normal".to_string(),
             supports_color: true,
             use_lucia_traceback: true,
-            use_cache: true,
+            use_cache: false,
             warnings: true,
             use_preprocessor: true,
             allow_fetch: true,
