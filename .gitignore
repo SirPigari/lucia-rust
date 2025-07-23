@@ -30,3 +30,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 *~
+
+# Lucia cache
+/src/env/cache/
+/src/env/.cache/

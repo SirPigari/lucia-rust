@@ -674,6 +674,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_lucia_traceback: true,
         warnings: true,
         use_preprocessor: true,
+        use_cache: true,
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: env_path_str,
@@ -746,6 +747,20 @@ fn lucia(args: Vec<String>) {
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
     let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
+    let cache: (bool, bool) = match args.iter().find(|arg| arg.starts_with("--cache=")) {
+        Some(arg) => {
+            let val_str = arg.trim_start_matches("--cache=");
+            match val_str.parse::<bool>() {
+                Ok(val) => (val, true),
+                Err(_) => {
+                    eprintln!("Invalid value for --cache, defaulting to true.");
+                    (true, true)
+                }
+            }
+        },
+        None => (true, false),
+    };
+    let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string());
     let c_compiler = args.iter()
         .find(|arg| arg.starts_with("--c-compiler="))
         .map(|arg| arg.trim_start_matches("--c-compiler="))
@@ -1002,6 +1017,106 @@ fn lucia(args: Vec<String>) {
         config.use_lucia_traceback = false;
         config.warnings = false;
     }
+    if cache.1 {
+        config.use_cache = cache.0;
+    }
+
+    if cls_cache_flag {
+        config.use_cache = false;
+
+        let cache_dirs = vec![
+            (home_dir_path.join("cache"), true),    // optional
+            (home_dir_path.join(".cache"), false),  // must exist
+        ];
+
+        for (cache_dir, optional) in cache_dirs {
+            if !cache_dir.exists() {
+                if optional {
+                    continue;
+                } else {
+                    eprintln!("Required cache directory '.cache' does not exist.");
+                    exit(1);
+                }
+            }
+
+            if !cache_dir.is_dir() {
+                eprintln!("'{}' is not a directory.", cache_dir.display());
+                exit(1);
+            }
+
+            let mut error_found = false;
+
+            match fs::read_dir(&cache_dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+
+                        if path.is_file() {
+                            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                                let _ = fs::remove_file(&path);
+                            } else {
+                                eprintln!("Found non-.bin file in '{}': {:?}, aborting.", cache_dir.display(), path);
+                                error_found = true;
+                                break;
+                            }
+                        } else if path.is_dir() {
+                            let mut valid_subdir = true;
+
+                            match fs::read_dir(&path) {
+                                Ok(sub_entries) => {
+                                    for sub_entry in sub_entries.flatten() {
+                                        let sub_path = sub_entry.path();
+                                        if sub_path.is_dir() {
+                                            eprintln!("Found nested directory in subdir '{:?}', aborting.", sub_path);
+                                            error_found = true;
+                                            valid_subdir = false;
+                                            break;
+                                        }
+                                        if sub_path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                                            let _ = fs::remove_file(&sub_path);
+                                        } else {
+                                            eprintln!("Found non-.bin file in subdir '{:?}', aborting.", sub_path);
+                                            error_found = true;
+                                            valid_subdir = false;
+                                            break;
+                                        }
+                                    }
+
+                                    if valid_subdir && !error_found {
+                                        let _ = fs::remove_dir(&path);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to read subdir '{}': {}", path.display(), e);
+                                    error_found = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            eprintln!("Unknown entry in cache: {:?}", path);
+                            error_found = true;
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read cache directory '{}': {}", cache_dir.display(), e);
+                    exit(1);
+                }
+            }
+
+            if error_found {
+                eprintln!("Aborting cache clean due to invalid files in '{}'.", cache_dir.display());
+                exit(1);
+            }
+
+            if cache_dir.ends_with("cache") {
+                let _ = fs::remove_dir(&cache_dir);
+            } else {
+                println!("Cache directory '{}' cleaned successfully.", cache_dir.display());
+            }
+        }
+    }
 
     let args: Vec<String> = std_env::args().collect();
 
@@ -1129,36 +1244,98 @@ fn execute_file(
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {:?}", path), &config, Some(use_colors));
 
-        let cache_dir = home_dir_path.join("cache");
+        let cache_dir = home_dir_path.join(".cache");
+        if !cache_dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+                debug_log(&format!("Failed to create cache directory: {}", e), &config, Some(use_colors));
+            } else if cfg!(windows) {
+                let status = Command::new("attrib")
+                    .args(&["+h", cache_dir.to_str().unwrap()])
+                    .status();
+                if let Ok(status) = status {
+                    if !status.success() {
+                        debug_log("Failed to set hidden attribute on cache directory", &config, Some(use_colors));
+                    }
+                } else {
+                    debug_log("Failed to run attrib command to hide cache directory", &config, Some(use_colors));
+                }
+            }
+        }
 
         let file_content = fs::read_to_string(path).expect("Failed to read file");
 
+        let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
+
         let processed_tokens = if !disable_preprocessor {
-            if let Ok(Some(cached_tokens)) = load_tokens_from_cache(&cache_dir, &file_path, "processed") {
+            if !config.use_cache {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
-                    debug_log("Loaded processed tokens from cache", &config, Some(use_colors));
+                    debug_log("Cache disabled, reprocessing tokens", &config, Some(use_colors));
                 }
-                cached_tokens
-            } else {
                 let mut preprocessor = Preprocessor::new(
                     home_dir_path.join("libs"),
                     file_path.as_str(),
                 );
-                let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
-                let tokens = match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
+                match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
                     Ok(tokens) => tokens,
                     Err(e) => {
                         handle_error(&e, &file_content, &config, use_colors);
                         exit(1);
                     }
-                };
-                if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens) {
-                    debug_log(&format!("Failed to save tokens cache: {}", e), &config, Some(use_colors));
                 }
-                tokens
+            } else {
+                let cached_processed = match load_tokens_from_cache(&cache_dir, &file_path, "processed") {
+                    Ok(opt) => opt,
+                    Err(e) => {
+                        debug_log(&format!("Failed to load processed tokens cache: {}", e), &config, Some(use_colors));
+                        None
+                    }
+                };
+                let cached_raw = match load_tokens_from_cache(&cache_dir, &file_path, "raw") {
+                    Ok(opt) => opt,
+                    Err(e) => {
+                        debug_log(&format!("Failed to load raw tokens cache: {}", e), &config, Some(use_colors));
+                        None
+                    }
+                };
+
+                let use_cache = match (cached_processed.as_ref(), cached_raw.as_ref()) {
+                    (Some(processed), Some(raw)) if *raw == raw_tokens => {
+                        if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
+                            debug_log("Loaded processed tokens from cache (raw tokens matched)", &config, Some(use_colors));
+                        }
+                        Some(processed.clone())
+                    },
+                    _ => None,
+                };
+
+                if let Some(tokens) = use_cache {
+                    tokens
+                } else {
+                    if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
+                        debug_log("Raw tokens changed or cache missing, reprocessing and updating cache", &config, Some(use_colors));
+                    }
+                    let mut preprocessor = Preprocessor::new(
+                        home_dir_path.join("libs"),
+                        file_path.as_str(),
+                    );
+                    let tokens = match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
+                        Ok(tokens) => tokens,
+                        Err(e) => {
+                            handle_error(&e, &file_content, &config, use_colors);
+                            exit(1);
+                        }
+                    };
+                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens) {
+                        debug_log(&format!("Failed to save processed tokens cache: {}", e), &config, Some(use_colors));
+                    }
+                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "raw", &raw_tokens) {
+                        debug_log(&format!("Failed to save raw tokens cache: {}", e), &config, Some(use_colors));
+                    }
+                    tokens
+                }
             }
         } else {
-            Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize()
+            raw_tokens
         };
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
