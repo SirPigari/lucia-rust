@@ -85,7 +85,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::BuildInfo;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache};
+use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
