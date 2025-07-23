@@ -50,11 +50,32 @@ pub fn save_tokens_to_cache(
     let compressed = compress(&serialized, 1)
         .expect("failed to compress tokens");
 
-    let mut file = fs::File::create(path)?;
-    // Write decompressed size as 8 bytes little endian
+    let mut file = fs::File::create(&path)?;
     file.write_all(&(serialized.len() as u64).to_le_bytes())?;
-    // Write compressed data
     file.write_all(&compressed)?;
+
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        if let Some(path_str) = path.to_str() {
+            let status = Command::new("compact")
+                .args(&["/C", "/I", "/Q", path_str])
+                .status();
+
+            if let Err(e) = status {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("failed to compact file: {}", e),
+                ));
+            }
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Path is not valid UTF-8",
+            ));
+        }
+    }
+
     Ok(())
 }
 
