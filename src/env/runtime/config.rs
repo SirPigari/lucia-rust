@@ -6,6 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::Int;
 use crate::env::runtime::utils::to_static;
 use std::default::Default;
+use crate::env::runtime::internal_structs::CacheFormat;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -16,7 +17,7 @@ pub struct Config {
     pub use_lucia_traceback: bool,
     pub warnings: bool,
     pub use_preprocessor: bool,
-    pub use_cache: bool,
+    pub cache_format: CacheFormat,
     pub allow_fetch: bool,
     pub allow_unsafe: bool,
     pub home_dir: String,
@@ -47,7 +48,7 @@ impl Default for Config {
             debug_mode: "normal".to_string(),
             supports_color: true,
             use_lucia_traceback: true,
-            use_cache: false,
+            cache_format: CacheFormat::NoCache,
             warnings: true,
             use_preprocessor: true,
             allow_fetch: true,
@@ -127,12 +128,14 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected a boolean value for 'use_preprocessor'".to_string())
             }
         }
-        "use_cache" => {
-            if let Value::Boolean(val) = value {
-                config.use_cache = val;
+        "cache_format" => {
+            if let Value::String(val) = value {
+                config.cache_format = CacheFormat::from_str(&val).ok_or_else(|| {
+                    format!("Invalid cache format: {}", val)
+                })?;
                 Ok(())
             } else {
-                Err("Expected a boolean value for 'use_cache'".to_string())
+                Err("Expected a string value for 'cache_format'".to_string())
             }
         }
         "allow_fetch" => {
@@ -214,7 +217,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "use_lucia_traceback" => Value::Boolean(config.use_lucia_traceback),
         "warnings" => Value::Boolean(config.warnings),
         "use_preprocessor" => Value::Boolean(config.use_preprocessor),
-        "use_cache" => Value::Boolean(config.use_cache),
+        "cache_format" => Value::String(config.cache_format.to_string()),
         "allow_fetch" => Value::Boolean(config.allow_fetch),
         "allow_unsafe" => Value::Boolean(config.allow_unsafe),
         "home_dir" => Value::String(config.home_dir.clone()),

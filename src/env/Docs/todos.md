@@ -16,6 +16,7 @@ _Total TODOs found: 7_
 - NOTE: Transpile to C language
 - i want to also implement transpiling to javascript just for fun because everyone hates js
 - stick to C for now
+- fuck it compile to Rust its better anyway
 
 ### [`src/interpreter.rs:5015:1`](../../../src/interpreter.rs#L5015) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method

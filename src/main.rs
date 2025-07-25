@@ -83,7 +83,7 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::internal_structs::BuildInfo;
+use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
@@ -674,7 +674,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         use_lucia_traceback: true,
         warnings: true,
         use_preprocessor: true,
-        use_cache: false,
+        cache_format: CacheFormat::NoCache,
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: env_path_str,
@@ -747,18 +747,18 @@ fn lucia(args: Vec<String>) {
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
     let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
-    let cache: (bool, bool) = match args.iter().find(|arg| arg.starts_with("--cache=")) {
+    let cache: (CacheFormat, bool) = match args.iter().find(|arg| arg.starts_with("--cache=")) {
         Some(arg) => {
             let val_str = arg.trim_start_matches("--cache=");
-            match val_str.parse::<bool>() {
-                Ok(val) => (val, true),
-                Err(_) => {
-                    eprintln!("Invalid value for --cache, defaulting to true.");
-                    (true, true)
+            match CacheFormat::from_str(val_str) {
+                Some(val) => (val, true),
+                None => {
+                    eprintln!("Invalid value for --cache, defaulting to 'bin_le'.");
+                    (CacheFormat::BinLe, true)
                 }
             }
         },
-        None => (false, false),
+        None => (CacheFormat::NoCache, false),
     };
     let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string()) || args.contains(&"--clear-cache".to_string()) || args.contains(&"--cls-cache".to_string());
     let c_compiler = args.iter()
@@ -813,7 +813,7 @@ fn lucia(args: Vec<String>) {
             ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
             ("--compile, -c", "Compile the source code to a binary"),
             ("--run, -r", "Run the source code after compiling"),
-            ("--cache=<true|false>", "Enable or disable caching (default: true)"),
+            ("--cache=<format>", "Enable or disable caching (default: 'no_cache') (check config-guide.md)"),
             ("--clean-cache, -cc", "Clear the cache directory"),
             ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
             ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
@@ -1024,11 +1024,11 @@ fn lucia(args: Vec<String>) {
         config.warnings = false;
     }
     if cache.1 {
-        config.use_cache = cache.0;
+        config.cache_format = cache.0;
     }
 
     if cls_cache_flag {
-        config.use_cache = false;
+        config.cache_format = CacheFormat::NoCache;
 
         let cache_dirs = vec![
             (home_dir_path.join("cache"), true),    // optional
@@ -1284,7 +1284,7 @@ fn execute_file(
         let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
 
         let processed_tokens = if !disable_preprocessor {
-            if !config.use_cache {
+            if !config.cache_format.is_enabled() {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
                     debug_log("Cache disabled, reprocessing tokens", &config, Some(use_colors));
                 }
@@ -1300,14 +1300,14 @@ fn execute_file(
                     }
                 }
             } else {
-                let cached_processed = match load_tokens_from_cache(&cache_dir, &file_path, "processed") {
+                let cached_processed = match load_tokens_from_cache(&cache_dir, &file_path, "processed", config.cache_format) {
                     Ok(opt) => opt,
                     Err(e) => {
                         debug_log(&format!("Failed to load processed tokens cache: {}", e), &config, Some(use_colors));
                         None
                     }
                 };
-                let cached_raw = match load_tokens_from_cache(&cache_dir, &file_path, "raw") {
+                let cached_raw = match load_tokens_from_cache(&cache_dir, &file_path, "raw", config.cache_format) {
                     Ok(opt) => opt,
                     Err(e) => {
                         debug_log(&format!("Failed to load raw tokens cache: {}", e), &config, Some(use_colors));
@@ -1342,10 +1342,10 @@ fn execute_file(
                             exit(1);
                         }
                     };
-                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens) {
+                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens, config.cache_format) {
                         debug_log(&format!("Failed to save processed tokens cache: {}", e), &config, Some(use_colors));
                     }
-                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "raw", &raw_tokens) {
+                    if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "raw", &raw_tokens, config.cache_format) {
                         debug_log(&format!("Failed to save raw tokens cache: {}", e), &config, Some(use_colors));
                     }
                     tokens
@@ -1443,16 +1443,16 @@ fn execute_file(
             argv,
         );
 
-        if config.use_cache {
-            if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir) {
+        if config.cache_format.is_enabled() {
+            if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
                 interpreter.set_cache(cache);
             }
         }
 
         let _out: Value = match interpreter.interpret(statements, true) {
             Ok(out) => {
-                if config.use_cache {
-                    if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache()) {
+                if config.cache_format.is_enabled() {
+                    if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
                         debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
                     }
                 }
@@ -1490,9 +1490,9 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         argv,
     );
 
-    if config.use_cache {
+    if config.cache_format.is_enabled() {
         let cache_dir = home_dir_path.join(".cache");
-        if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir) {
+        if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
             interpreter.set_cache(cache);
         }
     }
@@ -1701,9 +1701,9 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         let out = match interpreter.interpret(statements, false) {
             Ok(out) => {
                 if interpreter.is_stopped() {
-                    if config.use_cache {
+                    if config.cache_format.is_enabled() {
                         let cache_dir = home_dir_path.join(".cache");
-                        if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache()) {
+                        if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
                             debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
                         }
                     }

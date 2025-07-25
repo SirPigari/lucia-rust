@@ -79,6 +79,7 @@ impl Transpiler {
         // NOTE: Transpile to C language
         // i want to also implement transpiling to javascript just for fun because everyone hates js
         // stick to C for now
+        // fuck it compile to Rust its better anyway
         panic!("\x1BTranspiler is not implemented yet");
     }
 }

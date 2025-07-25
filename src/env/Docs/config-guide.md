@@ -21,7 +21,7 @@ The `config.json` file is located in the root directory of your Lucia environmen
   "use_lucia_traceback": true,
   "warnings": true,
   "use_preprocessor": true,
-  "use_cache": false,
+  "cache_format": "no_cache",
   "allow_fetch": true,
   "allow_unsafe": false,
   "home_dir": "lucia/src/env",
@@ -87,10 +87,23 @@ The `config.json` file is located in the root directory of your Lucia environmen
 - **Type:** `bool`  
 - **Description:** Enables preprocessor directives like `#include` or `#alias`.
 
-### 8. `use_cache`
-- **Type:** `bool`
-- **Description:** If true uses .cache dir to store the cache  
-- **Note:** Experimental
+### 8. `cache_format`
+- **Type:** `string`
+- **Description:** Specifies the format used for storing compilation caches in the `.cache/` directory (or `cache/` in older versions).  
+  Determines how cache data is serialized and optionally compressed. Faster formats reduce build time; slower ones save disk space.
+
+| Value            | Description                                                  | Speed        |
+|------------------|--------------------------------------------------------------|--------------|
+| `no_cache`       | Disables caching entirely                                    | N/A          |
+| `bin_le`         | Uncompressed binary (little endian)                          | Fastest      |
+| `bin_be`         | Uncompressed binary (big endian)                             | Fastest      |
+| `zstd_le_fast`   | Zstd-compressed binary (little endian), fast compression     | Fast         |
+| `zstd_be_fast`   | Zstd-compressed binary (big endian), fast compression        | Fast         |
+| `zstd_le_best`   | Zstd-compressed binary (little endian), slow compression     | Slow         |
+| `zstd_be_best`   | Zstd-compressed binary (big endian), slow compression        | Slow         |
+| `json`           | Human-readable JSON, very slow I/O                           | Slowest      |
+
+- **Note:** Cache is experimental currently
 
 ### 9. `allow_fetch`
 
