@@ -968,11 +968,11 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    if !self.token_is("SEPARATOR", "(") {
-                        self.raise_with_help("SyntaxError", "Expected '(' after 'for'", "Did you forget to add '('?");
-                        return Statement::Null;
+                    let mut parentheses = false;
+                    if self.token_is("SEPARATOR", "(") {
+                        parentheses = true;
+                        self.next();
                     }
-                    self.next();
 
                     let variable = if self.token_is("SEPARATOR", "(") {
                         self.next();
@@ -1024,11 +1024,13 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    if !self.token_is("SEPARATOR", ")") {
-                        self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?"); 
-                        return Statement::Null;
+                    if parentheses {
+                        if !self.token_is("SEPARATOR", ")") {
+                            self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?");
+                            return Statement::Null;
+                        }
+                        self.next();
                     }
-                    self.next();
 
                     if !self.token_is("SEPARATOR", ":") {
                         self.raise_with_help("SyntaxError", "Expected ':' after ')'", "Did you forget to add ':'?");

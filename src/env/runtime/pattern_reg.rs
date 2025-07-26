@@ -3,7 +3,8 @@ use crate::env::runtime::utils::{
     to_static,
     get_imagnum_error_message,
 };
-
+use crate::env::runtime::internal_structs::PatternMethod;
+use std::f64::consts::PI;
 
 pub fn extract_seed_end(
     seed: Vec<Value>,
@@ -40,7 +41,7 @@ pub fn extract_seed_end(
 pub fn predict_sequence(
     seed: Vec<Value>,
     end: Value,
-) -> Result<Vec<f64>, (&'static str, &'static str, &'static str)> {
+) -> Result<(Vec<f64>, PatternMethod), (&'static str, &'static str, &'static str)> {
     let (mut seed_f64, end_f64) = extract_seed_end(seed, end)?;
 
     if seed_f64.is_empty() {
@@ -54,7 +55,7 @@ pub fn predict_sequence(
     if seed_f64.len() == 1 {
         let start = seed_f64[0];
         if end_f64 == start {
-            return Ok(vec![start]);
+            return Ok((vec![start], PatternMethod::Arithmetic));
         }
     
         let step = if end_f64 > start { 1.0 } else { -1.0 };
@@ -74,10 +75,10 @@ pub fn predict_sequence(
             res.push(val);
             val += step;
         }
-        return Ok(res);
+        return Ok((res, PatternMethod::Arithmetic));
     }
     
-
+    // Fibonacci
     if try_fibonacci(&seed_f64) {
         while *seed_f64.last().unwrap() < end_f64 {
             let len = seed_f64.len();
@@ -103,9 +104,10 @@ pub fn predict_sequence(
                 ));
             }
         }
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Fibonacci));
     }
 
+    // Geometric
     if let Some(ratios) = try_geometric(&seed_f64) {
         let ratio = ratios[0];
         while *seed_f64.last().unwrap() < end_f64 {
@@ -121,9 +123,10 @@ pub fn predict_sequence(
                 ));
             }
         }
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Geometric));
     }
 
+    // Linear
     if let Some(diff) = try_linear(&seed_f64) {
         loop {
             let last = *seed_f64.last().unwrap();
@@ -145,9 +148,10 @@ pub fn predict_sequence(
     
             seed_f64.push(next);
         }
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Linear));
     }
 
+    // Factorial
     if try_factorial(&seed_f64) {
         let mut i = seed_f64.len();
         while *seed_f64.last().unwrap() < end_f64 {
@@ -164,9 +168,10 @@ pub fn predict_sequence(
                 return Err(("PatternError", "Factorial sequence does not reach the exact end value", help_msg));
             }
         }
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Factorial));
     }
 
+    // Quadratic
     if let Some(second_diff) = try_quadratic(&seed_f64) {
         while *seed_f64.last().unwrap() < end_f64 {
             let len = seed_f64.len();
@@ -191,9 +196,11 @@ pub fn predict_sequence(
                 ));
             }
         }
-        return Ok(seed_f64);
+        let (a, b, c) = solve_quadratic_coeffs(&seed_f64).unwrap_or((0.0, 0.0, 0.0));
+        return Ok((seed_f64, PatternMethod::Quadratic { a, b, c }));
     }
 
+    // Exponential
     if let Some(base_ratio) = try_exponential(&seed_f64) {
         while *seed_f64.last().unwrap() < end_f64 {
             let next = seed_f64.last().unwrap() * base_ratio;
@@ -204,9 +211,61 @@ pub fn predict_sequence(
                 return Err(("PatternError", "Exponential sequence does not reach the exact end value", ""));
             }
         }
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Exponential));
     }
 
+    // Alternating
+    if try_alternating(&seed_f64) {
+        while seed_f64.len() == 0 || *seed_f64.last().unwrap() != end_f64 {
+            let next = -seed_f64.last().unwrap();
+            seed_f64.push(next);
+
+            if (next > end_f64 && *seed_f64.first().unwrap() < end_f64)
+                || (next < end_f64 && *seed_f64.first().unwrap() > end_f64)
+            {
+                break;
+            }
+        }
+
+        if *seed_f64.last().unwrap() != end_f64 {
+            return Err((
+                "PatternError",
+                "Alternating sequence does not reach the exact end value",
+                "",
+            ));
+        }
+
+        return Ok((seed_f64, PatternMethod::Alternating));
+    }
+
+    // Trigonometric
+    if let Some(f) = try_trigonometric(&seed_f64) {
+        let mut i = seed_f64.len();
+        while seed_f64.len() == 0 || *seed_f64.last().unwrap() != end_f64 {
+            let next = f(i as f64);
+            seed_f64.push(next);
+
+            if (next > end_f64 && *seed_f64.first().unwrap() < end_f64)
+                || (next < end_f64 && *seed_f64.first().unwrap() > end_f64)
+            {
+                break;
+            }
+
+            i += 1;
+        }
+
+        if *seed_f64.last().unwrap() != end_f64 {
+            return Err((
+                "PatternError",
+                "Trigonometric sequence does not reach the exact end value",
+                "",
+            ));
+        }
+
+        return Ok((seed_f64, PatternMethod::Trigonometric));
+    }
+
+    // Polynomial (Newton's finite differences)
     let mut diffs = finite_differences(&seed_f64);
 
     fn newton_next_element(diffs: &[Vec<f64>], n: usize) -> f64 {
@@ -225,7 +284,7 @@ pub fn predict_sequence(
 
     loop {
         let n = seed_f64.len();
-        let next = newton_next_element(&diffs, n);
+        let next = check_finite(newton_next_element(&diffs, n))?;
         let last = *seed_f64.last().unwrap();
 
         if (last <= end_f64 && next > end_f64) || (last >= end_f64 && next < end_f64) {
@@ -255,14 +314,14 @@ pub fn predict_sequence(
         ));
     }
     
-
-    Ok(seed_f64)
+    let coeffs = diffs.iter().map(|diff| diff[0]).collect::<Vec<f64>>();
+    Ok((seed_f64, PatternMethod::Polynomial(coeffs)))
 }
 
 pub fn predict_sequence_until_length(
     seed: Vec<Value>,
     length: usize,
-) -> Result<Vec<f64>, (&'static str, &'static str, &'static str)> {
+) -> Result<(Vec<f64>, PatternMethod), (&'static str, &'static str, &'static str)> {
     let mut seed_f64 = Vec::with_capacity(seed.len());
 
     for v in &seed {
@@ -283,7 +342,7 @@ pub fn predict_sequence_until_length(
     }
 
     if seed_f64.len() == length {
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Arithmetic));
     }
 
     macro_rules! done {
@@ -301,7 +360,7 @@ pub fn predict_sequence_until_length(
             seed_f64.push(seed_f64.last().unwrap() + step);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Arithmetic));
     }
 
     // Fibonacci
@@ -312,7 +371,7 @@ pub fn predict_sequence_until_length(
             seed_f64.push(next);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Fibonacci));
     }
 
     // Geometric
@@ -323,7 +382,7 @@ pub fn predict_sequence_until_length(
             seed_f64.push(next);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Geometric));
     }
 
     // Linear
@@ -333,7 +392,7 @@ pub fn predict_sequence_until_length(
             seed_f64.push(next);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Linear));
     }
 
     // Factorial
@@ -345,7 +404,7 @@ pub fn predict_sequence_until_length(
             i += 1;
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Factorial));
     }
 
     // Quadratic
@@ -356,7 +415,8 @@ pub fn predict_sequence_until_length(
             seed_f64.push(next);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        let (a, b, c) = solve_quadratic_coeffs(&seed_f64).unwrap_or((0.0, 0.0, 0.0));
+        return Ok((seed_f64, PatternMethod::Quadratic { a, b, c }));
     }
 
     // Exponential
@@ -366,7 +426,28 @@ pub fn predict_sequence_until_length(
             seed_f64.push(next);
         }
         seed_f64.truncate(length);
-        return Ok(seed_f64);
+        return Ok((seed_f64, PatternMethod::Exponential));
+    }
+
+    // Alternating
+    if try_alternating(&seed_f64) {
+        while !done!() {
+            let next = -seed_f64.last().unwrap();
+            seed_f64.push(next);
+        }
+        seed_f64.truncate(length);
+        return Ok((seed_f64, PatternMethod::Alternating));
+    }
+
+    // Trigonometric
+    if let Some(f) = try_trigonometric(&seed_f64) {
+        let mut i = seed_f64.len();
+        while !done!() {
+            seed_f64.push(f(i as f64));
+            i += 1;
+        }
+        seed_f64.truncate(length);
+        return Ok((seed_f64, PatternMethod::Trigonometric));
     }
 
     // Polynomial (Newton's finite differences)
@@ -388,18 +469,22 @@ pub fn predict_sequence_until_length(
 
     while !done!() {
         let n = seed_f64.len();
-        let next = newton_next_element(&diffs, n);
+        let next = check_finite(newton_next_element(&diffs, n))?;
         seed_f64.push(next);
         diffs = finite_differences(&seed_f64);
     }
 
     seed_f64.truncate(length);
-    Ok(seed_f64)
+    let coeffs = diffs.iter().map(|diff| diff[0]).collect::<Vec<f64>>();
+    Ok((seed_f64, PatternMethod::Polynomial(coeffs)))
 }
 
-
 fn is_close(a: f64, b: f64, epsilon: f64) -> bool {
-    (a - b).abs() < epsilon
+    if a.is_nan() || b.is_nan() {
+        false
+    } else {
+        (a - b).abs() < epsilon
+    }
 }
 
 fn try_geometric(seq: &[f64]) -> Option<Vec<f64>> {
@@ -485,6 +570,52 @@ fn try_quadratic(seq: &[f64]) -> Option<f64> {
     }
 }
 
+fn solve_quadratic_coeffs(seq: &[f64]) -> Option<(f64, f64, f64)> {
+    if seq.len() < 3 {
+        return None;
+    }
+    let y0 = seq[0];
+    let y1 = seq[1];
+    let y2 = seq[2];
+
+    let a = (y2 - 2.0 * y1 + y0) / 2.0;
+    let b = y1 - y0 - a;
+    let c = y0;
+
+    Some((a, b, c))
+}
+
+fn try_alternating(seq: &[f64]) -> bool {
+    if seq.len() < 2 {
+        return false;
+    }
+
+    for i in 1..seq.len() {
+        if !is_close(seq[i], -seq[i - 1], 1e-10) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn try_trigonometric(seq: &[f64]) -> Option<fn(f64) -> f64> {
+    if seq.len() < 4 {
+        return None;
+    }
+
+    let sin_like = (0..seq.len()).all(|i| is_close(seq[i], (i as f64 * PI / 2.0).sin(), 1e-3));
+    if sin_like {
+        return Some(|x| (x * PI / 2.0).sin());
+    }
+
+    let cos_like = (0..seq.len()).all(|i| is_close(seq[i], (i as f64 * PI / 2.0).cos(), 1e-3));
+    if cos_like {
+        return Some(|x| (x * PI / 2.0).cos());
+    }
+
+    None
+}
 
 fn finite_differences(seq: &[f64]) -> Vec<Vec<f64>> {
     let mut table = vec![seq.to_vec()];
@@ -494,4 +625,16 @@ fn finite_differences(seq: &[f64]) -> Vec<Vec<f64>> {
         table.push(next_diff);
     }
     table
+}
+
+fn check_finite(value: f64) -> Result<f64, (&'static str, &'static str, &'static str)> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err((
+            "PatternError",
+            "Sequence value overflowed f64 limit",
+            "",
+        ))
+    }
 }

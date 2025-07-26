@@ -16,6 +16,8 @@ assert_eq!(([7...12]),                    ([7, 8, 9, 10, 11, 12]))              
 assert_eq!(([12...7]),                    ([12, 11, 10, 9, 8, 7]))                                              // simple descending
 assert_eq!(([0, 1, 1, 2, 3, 5, 8...34]),  ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34]))                                  // fibonacci (long)
 assert_eq!(([1, 8, 27, 64...216]),        ([1, 8, 27, 64, 125, 216]))                                           // cubic numbers (n³)
+assert_eq!(([1, -1, 1, -1...1]),          ([1, -1, 1, -1, 1]))                                                  // alternating signs
+assert_eq!(([3, -3, 3, -3...; 8]),        ([3, -3, 3, -3, 3, -3, 3, -3]))                                       // alternating signs (long)
 
 assert_eq!(([0, 1, 1, 2...; 50]), 
           ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 
@@ -24,3 +26,5 @@ assert_eq!(([0, 1, 1, 2...; 50]),
             102334155, 165580141, 267914296, 433494437, 701408733, 1134903170, 1836311903, 
             2971215073, 4807526976, 7778742049]))
 assert_err!(([1, 1, 2..; 10])) // RangeError: Seed values do not have consistent step
+assert_err!(([7, 15, 37, 42, 137...; 200])) // PatternError: Sequence value overflowed f64 limit
+assert_err!(([1, 2, 3, 4, 5, 6, 7, 8, 9, 10...; 5])) // ValueError: Length must be greater than or equal to seed length

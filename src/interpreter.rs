@@ -31,7 +31,7 @@ use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind};
 use crate::env::runtime::libs::STD_LIBS;
-use crate::env::runtime::internal_structs::{Cache, InternalStorage, State};
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod};
 use std::sync::Arc;
 use std::path::{PathBuf, Path};
 use std::fs;
@@ -4679,6 +4679,8 @@ impl Interpreter {
                     }
                 };
 
+                let mut pattern_method: Option<PatternMethod> = None;
+
                 if let Some(Value::Map { keys, values }) = self.cache.iterables.get_mut(&cache_key) {
                     for (k_idx, key) in keys.iter().enumerate() {
                         if key == &cache_key {
@@ -4797,7 +4799,7 @@ impl Interpreter {
 
                             Value::List(result_list)
                         } else {
-                            let vec_f64 = match predict_sequence(evaluated_seed.clone(), evaluated_end.clone()) {
+                            let (vec_f64, pm) = match predict_sequence(evaluated_seed.clone(), evaluated_end.clone()) {
                                 Ok(v) => v,
                                 Err((err_type, err_msg, err_help)) => {
                                     if err_help.is_empty() {
@@ -4807,6 +4809,7 @@ impl Interpreter {
                                     }
                                 }
                             };
+                            pattern_method = Some(pm);
                             let contains_float = evaluated_seed.iter().any(|v| matches!(v, Value::Float(_)));
 
                             let result_list: Vec<Value> = if contains_float {
@@ -4846,7 +4849,7 @@ impl Interpreter {
                         }
 
                         if pattern_flag_bool {
-                            let vec_f64 = match predict_sequence_until_length(evaluated_seed.clone(), length_usize) {
+                            let (vec_f64, pm) = match predict_sequence_until_length(evaluated_seed.clone(), length_usize) {
                                 Ok(v) => v,
                                 Err((err_type, err_msg, err_help)) => {
                                     if err_help.is_empty() {
@@ -4856,6 +4859,7 @@ impl Interpreter {
                                     }
                                 }
                             };
+                            pattern_method = Some(pm);
 
                             let contains_float = evaluated_seed.iter().any(|v| matches!(v, Value::Float(_)));
 
@@ -4940,18 +4944,21 @@ impl Interpreter {
 
                 self.cache.iterables.insert(cache_key, result.clone());
 
-                debug_log(
-                    &(r"<ListCompletion>\A  seed: ".to_string() +
-                    &format_value(&Value::List(evaluated_seed.clone())) +
-                    r"\A  end: " +
-                    &format_value(&evaluated_end) +
-                    r"\A  range_mode: " +
-                    &range_mode +
-                    r"\A  pattern: " +
-                    &pattern_flag_bool.to_string()),
-                    &self.config,
-                    Some(self.use_colors),
-                );                
+                let pattern_method_str = match pattern_method {
+                    Some(pm) => format!(r"\A  method used: {}", pm.full()),
+                    None => "".to_string(),
+                };
+
+                let log_message = format!(
+                    r"<ListCompletion>\A  seed: {}\A  end: {}\A  range_mode: {}\A  pattern: {}{}",
+                    format_value(&Value::List(evaluated_seed.clone())),
+                    format_value(&evaluated_end),
+                    range_mode,
+                    pattern_flag_bool,
+                    pattern_method_str
+                );
+
+                debug_log(log_message.as_str(), &self.config, Some(self.use_colors));
 
                 return result;
             }

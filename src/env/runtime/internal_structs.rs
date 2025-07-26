@@ -3,6 +3,93 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use bincode::{Encode, Decode};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatternMethod {
+    Arithmetic,
+    Fibonacci,
+    Geometric,
+    Linear,
+    Factorial,
+    Quadratic { a: f64, b: f64, c: f64 },
+    Exponential,
+    Polynomial(Vec<f64>),
+    Alternating,
+    Trigonometric,
+}
+
+impl PatternMethod {
+    pub fn display(&self) -> &'static str {
+        match self {
+            PatternMethod::Arithmetic => "arithmetic",
+            PatternMethod::Fibonacci => "fibonacci",
+            PatternMethod::Geometric => "geometric",
+            PatternMethod::Linear => "linear",
+            PatternMethod::Factorial => "factorial",
+            PatternMethod::Quadratic { .. } => "quadratic",
+            PatternMethod::Exponential => "exponential",
+            PatternMethod::Polynomial (_) => "polynomial",
+            PatternMethod::Alternating => "alternating",
+            PatternMethod::Trigonometric => "trigonometric",
+        }
+    }
+
+    pub fn full(&self) -> String {
+        let math_str = match self {
+            PatternMethod::Quadratic { a, b, c } => {
+                let mut parts = Vec::new();
+                if *a != 0.0 {
+                    parts.push(format!("{}x²", a));
+                }
+                if *b != 0.0 {
+                    parts.push(format!("{}x", if *b > 0.0 { format!("+ {}", b) } else { b.to_string() }));
+                }
+                if *c != 0.0 {
+                    parts.push(format!("{}", if *c > 0.0 { format!("+ {}", c) } else { c.to_string() }));
+                }
+                if parts.is_empty() {
+                    parts.push("0".to_string());
+                }
+                parts.join(" ")
+            }
+            PatternMethod::Polynomial(coeffs) => {
+                let degree = coeffs.len() - 1;
+                let mut parts = Vec::new();
+                for (i, coeff) in coeffs.iter().enumerate() {
+                    if *coeff == 0.0 {
+                        continue;
+                    }
+                    let power = degree - i;
+                    let sign = if parts.is_empty() {
+                        ""
+                    } else if *coeff > 0.0 {
+                        "+ "
+                    } else {
+                        "- "
+                    };
+                    let abs_coeff = coeff.abs();
+                    let part = match power {
+                        0 => format!("{}{}", sign, abs_coeff),
+                        1 => format!("{}{}x", sign, abs_coeff),
+                        _ => format!("{}{}x^{}", sign, abs_coeff, power),
+                    };
+                    parts.push(part);
+                }
+                if parts.is_empty() {
+                    parts.push("0".to_string());
+                }
+                parts.join(" ")
+            }
+            _ => String::new(),
+        };
+
+        if math_str.is_empty() {
+            self.display().to_string()
+        } else {
+            format!("{} ({})", self.display(), math_str)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State {
     Normal,

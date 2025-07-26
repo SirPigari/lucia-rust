@@ -11,7 +11,7 @@ Each issue should follow this structure:
 - **ID**: `lucia-XXXX`  
 - **Severity**: [Low | Medium | High | Critical]  
 - **Status**: [Open | In Progress | Resolved | Wontfix]  
-- **Component**: [Lexer | Preprocessor | Parser | Interpreter | REPL | other]  
+- **Component**: [Lexer | Preprocessor | Parser | Interpreter | REPL | Pattern reg | other]  
 - **Discovered in**: `vX.Y.Z`
 
 - **Description**:  
@@ -32,6 +32,30 @@ Each issue should follow this structure:
 ---
 
 ## Known Issues
+
+### Pattern reg f64 limit
+- **ID**: `lucia-0003`  
+- **Severity**: Low  
+- **Status**: Resolved  
+- **Component**: Pattern reg  
+- **Discovered in**: `v2.0.0.`
+
+- **Description**:  
+  Pattern generates 0 after f64 limit is overcomed
+
+- **Reproduction**:  
+  ```lucia
+  [7, 15, 37, 42, 137...; 800]
+  ```
+
+- **Expected Behavior**:  
+  Throws an error
+
+- **Actual Behavior**:  
+  Generates zeros.
+
+- **Workaround**:  
+  None.
 
 ### Invalid Tokenization After Number  
 - **ID**: `lucia-0002`  
