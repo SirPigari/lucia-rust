@@ -33,7 +33,7 @@ use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind,
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
 use regex::Regex;
@@ -68,6 +68,7 @@ pub struct Interpreter {
     internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
+    pub stop_flag: Option<Arc<AtomicBool>>,
 }
 
 impl Interpreter {
@@ -97,6 +98,7 @@ impl Interpreter {
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
+            stop_flag: None,
         };
 
         for type_ in VALID_TYPES {
@@ -932,9 +934,23 @@ impl Interpreter {
 
         NULL
     }
+
+    fn check_stop_flag(&mut self) -> bool {
+        if let Some(stop_flag) = &self.stop_flag {
+            if stop_flag.load(Ordering::Relaxed) {
+                self.is_returning = true;
+                return true;
+            }
+        }
+        false
+    }
     
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
+
+        if self.check_stop_flag() {
+            return NULL;
+        }
     
         if self.stack.len() + self.defer_stack.len() > self.config.recursion_limit {
             return self.raise("RecursionError", "Maximum recursion depth exceeded");
@@ -966,6 +982,10 @@ impl Interpreter {
         let Statement::Statement { keys, values, .. } = &statement else {
             return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
         };
+
+        if self.check_stop_flag() {
+            return NULL;
+        }
     
         if self.state == State::Break || self.state == State::Continue {
             return NULL;
@@ -1026,6 +1046,10 @@ impl Interpreter {
             },
             _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
         };
+
+        if self.check_stop_flag() {
+            return NULL;
+        }
     
         if let Some(err) = self.err.clone() {
             let tuple = Value::Tuple(vec![
@@ -1042,6 +1066,10 @@ impl Interpreter {
                 var.set_value(tuple);
             }
     
+            return NULL;
+        }
+
+        if self.check_stop_flag() {
             return NULL;
         }
     
@@ -4783,6 +4811,10 @@ impl Interpreter {
     
         for item in iterable_value.iter() {
             let previous = self.variables.get(var_name_str).cloned();
+
+            if self.check_stop_flag() {
+                return NULL;
+            }
 
             if let Value::Error (err_type, err_msg, ref_err) = item {
                 if let Some(re) = ref_err {

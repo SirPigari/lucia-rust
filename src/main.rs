@@ -6,6 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::collections::HashMap;
 use colored::*;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Duration;
 use sys_info;
 
 mod env {
@@ -78,7 +83,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme};
-use crate::env::runtime::utils::{fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::utils::{ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -1470,7 +1475,18 @@ fn execute_file(
     }
 }
 
-fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
+fn repl(
+    config: Config,
+    use_colors: bool,
+    disable_preprocessor: bool,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    debug_mode: Option<String>,
+    cwd: PathBuf,
+    argv: &Vec<String>,
+    dump_pp_flag: &bool,
+    dump_ast_flag: &bool,
+) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
         hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
@@ -1498,17 +1514,15 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         }
     }
 
-    let mut preprocessor = Preprocessor::new(
-        home_dir_path.join("libs"),
-        "<stdin>",
-    );
+    let mut preprocessor = Preprocessor::new(home_dir_path.join("libs"), "<stdin>");
 
     let print_start_debug = matches!(debug_mode.as_deref(), Some("full" | "minimal"));
     let print_intime_debug = matches!(debug_mode.as_deref(), Some("full" | "normal"));
 
     let mut line_number = 0;
-
     let mut syntax_rules: HashMap<String, SyntaxRule> = HashMap::new();
+
+    let stop_flag = Arc::new(AtomicBool::new(false));
 
     loop {
         line_number += 1;
@@ -1604,6 +1618,11 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         }
 
         if input == "\x03" {
+            println!("Use 'exit()' to exit.");
+            continue;
+        }
+
+        if input == "\x04" {
             exit(0);
         }
 
@@ -1646,25 +1665,19 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 })
                 .map(|token| (&token.0, &token.1))
                 .collect::<Vec<_>>();
-        
+
             debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
-        }        
+        }
 
         let tokens = processed_tokens;
 
-        let mut parser = Parser::new(
-            tokens,
-        );
+        let mut parser = Parser::new(tokens);
 
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
                 if print_intime_debug {
-                    debug_log(
-                        "Error while parsing",
-                        &config,
-                        Some(use_colors),
-                    );
+                    debug_log("Error while parsing", &config, Some(use_colors));
                 }
                 handle_error(&error.clone(), &input, &config, use_colors);
                 continue;
@@ -1699,30 +1712,58 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             );
         }
 
-        let out = match interpreter.interpret(statements, false) {
-            Ok(out) => {
-                if interpreter.is_stopped() {
-                    if config.cache_format.is_enabled() {
-                        let cache_dir = home_dir_path.join(".cache");
-                        if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
-                            debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
-                        }
-                    }
-                    exit(0);
-                }
-                out
+        stop_flag.store(false, Ordering::Relaxed);
+
+        let stop_flag_clone = stop_flag.clone();
+
+        interpreter.stop_flag = Some(stop_flag_clone);
+
+        let mut interpreter_clone = interpreter.clone();
+        let statements_clone = statements.clone();
+
+        let handle = thread::spawn(move || {
+            let result = interpreter_clone.interpret(statements_clone, true);
+            let state = interpreter_clone.state.clone();
+            (result, state)
+        });
+
+        loop {
+            if stop_flag.load(Ordering::Relaxed) {
+                break;
             }
-            Err(error) => {
-                if print_intime_debug {
-                    debug_log("Error while interpreting:", &config, Some(use_colors));
-                }
-                handle_error(&error.clone(), &input, &config, use_colors);
-                continue;
+            if ctrl_t_pressed() {
+                stop_flag.store(true, Ordering::Relaxed);
+                handle_error(
+                    &Error::new("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", "<stdin>"),
+                    &input,
+                    &config,
+                    use_colors,
+                );
+                break;
             }
-        };
+            if handle.is_finished() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        let (out_raw, state) = handle.join().unwrap();
+        interpreter.state = state;
+
+        let out = out_raw.unwrap_or(Value::Null);
 
         if !matches!(out, Value::Null) {
             println!("{}", format_value(&out));
+        }
+
+        if interpreter.is_stopped() {
+            if config.cache_format.is_enabled() {
+                let cache_dir = home_dir_path.join(".cache");
+                if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
+                    debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                }
+            }
+            exit(0);
         }
     }
 }

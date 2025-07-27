@@ -13,10 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 use std::path::Path;
 use std::str::FromStr;
+use std::time::Duration;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
     cursor::MoveTo,
+    event,
 };
 use imagnum::math::{
     ERR_UNIMPLEMENTED,
@@ -1282,6 +1284,17 @@ pub fn convert_value_to_type(
 
         _ => Err(("NotImplemented", "Type conversion not implemented", "")),
     }
+}
+
+pub fn ctrl_t_pressed() -> bool {
+    if event::poll(Duration::from_millis(0)).unwrap_or(false) {
+        if let event::Event::Key(event::KeyEvent { code, modifiers, .. }) = event::read().unwrap() {
+            if code == event::KeyCode::Char('t') && modifiers.contains(event::KeyModifiers::CONTROL) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub const KEYWORDS: &[&str] = &[
