@@ -5,7 +5,7 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 8_
+_Total TODOs found: 7_
 ---
 
 ### [`src/env/libs/std/macros.lc:95:36`](../../../src/env/libs/std/macros.lc#L95) _(added by **SirPigari** on **2025-07-22**)_
@@ -32,10 +32,6 @@ _Total TODOs found: 8_
 
 ### [`src/interpreter.rs:388:1`](../../../src/interpreter.rs#L388) _(added by **SirPigari** on **2025-07-09**)_
 - Check function signature
-
-### [`src/env/assets/tests.lc:1197:1`](../../../src/env/assets/tests.lc#L1197) _(added by unknown)_
-- Add 'gen' keyword to vsix extension
-- and add 'generator' type to vsix extension
 
 ---
 *Report generated automatically.*

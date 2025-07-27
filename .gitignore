@@ -16,7 +16,7 @@ Cargo.lock
 /tests/benchmark-results/
 tests/stdout
 tests/stdout/*
-src/env/assets/tests.lc
+src/env/assets/tests.lucia
 
 # Intermediate or generated files
 *.ast.json

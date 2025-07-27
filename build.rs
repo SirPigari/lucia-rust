@@ -427,7 +427,7 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
 fn join_lc_tests() -> std::io::Result<()> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let tests_dir = Path::new(&manifest_dir).join("tests");
-    let out_file_path = Path::new(&manifest_dir).join("src/env/assets/tests.lc");
+    let out_file_path = Path::new(&manifest_dir).join("src/env/assets/tests.lucia");
 
     let mut out_file = fs::File::create(&out_file_path)?;
 
