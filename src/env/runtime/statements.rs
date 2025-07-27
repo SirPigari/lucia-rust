@@ -125,6 +125,70 @@ impl Statement {
             },
         }
     }
+    pub fn convert_from_hashmap(map: &HashMap<Value, Value>) -> Statement {
+        if map.is_empty() {
+            return Statement::Null;
+        }
+
+        let mut keys = Vec::new();
+        let mut values = Vec::new();
+        let mut loc: Option<Location> = None;
+
+        for (k, v) in map {
+            if let Value::String(s) = k {
+                if s == "_loc" {
+                    if let Value::Map { keys: loc_keys, values: loc_values } = v {
+                        let mut file = "".to_string();
+                        let mut line_string = "".to_string();
+                        let mut line_number = 0;
+                        let mut range = (0, 0);
+
+                        for (lk, lv) in loc_keys.iter().zip(loc_values.iter()) {
+                            match (lk, lv) {
+                                (Value::String(s), Value::String(val)) if s == "_file" => {
+                                    file = val.clone();
+                                }
+                                (Value::String(s), Value::String(val)) if s == "_line_string" => {
+                                    line_string = val.clone();
+                                }
+                                (Value::String(s), Value::Int(n)) if s == "_line_number" => {
+                                    line_number = n.to_string().parse().unwrap_or(0);
+                                }
+                                (Value::String(s), Value::Tuple(vals)) if s == "_range" && vals.len() == 2 => {
+                                    if let (Value::Int(start), Value::Int(end)) = (&vals[0], &vals[1]) {
+                                        range = (
+                                            start.to_string().parse().unwrap_or(0),
+                                            end.to_string().parse().unwrap_or(0),
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        loc = Some(Location {
+                            file,
+                            line_string,
+                            line_number,
+                            range,
+                        });
+                    }
+                } else {
+                    keys.push(k.clone());
+                    values.push(v.clone());
+                }
+            } else {
+                keys.push(k.clone());
+                values.push(v.clone());
+            }
+        }
+
+        if keys.is_empty() && values.is_empty() {
+            Statement::Null
+        } else {
+            Statement::Statement { keys, values, loc }
+        }
+    }
     pub fn get_value(&self, key: &str) -> Option<Value> {
         match self {
             Statement::Statement { keys, values, loc } => {
@@ -165,5 +229,11 @@ impl Statement {
             Some(Value::String(s)) => s.clone(),
             _ => "any".to_string(),
         }
-    }    
+    }
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Statement::Statement { keys, values, .. } => keys.is_empty() && values.is_empty(),
+            Statement::Null => true,
+        }
+    }
 }

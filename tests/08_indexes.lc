@@ -1,6 +1,6 @@
 #include <std/macros>
 
-l: list = [0..10]
+l: list = [0..10].collect()
 m: str = "i love lucia"  // its not what you think i swear
 
 // simple indexing

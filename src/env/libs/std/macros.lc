@@ -99,7 +99,7 @@
         result: any = ($expr)
         end_time: int = _time.current_apollo_time()
         elapsed: int = end_time - start_time
-        return (result, elapsed)
+        return ((result, elapsed))
     end
 #endmacro
 

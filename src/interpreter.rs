@@ -29,7 +29,8 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use crate::env::runtime::native;
-use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind};
+use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod};
 use std::sync::Arc;
@@ -52,14 +53,14 @@ const VERSION: &str = env!("VERSION");
 pub struct Interpreter {
     config: Config,
     og_cfg: Config,
-    err: Option<Error>,
-    is_returning: bool,
-    state: State,
-    return_value: Value,
+    pub err: Option<Error>,
+    pub is_returning: bool,
+    pub return_value: Value,
+    pub state: State,
     stack: Vec<(String, Option<Location>)>,
     use_colors: bool,
-    current_statement: Option<Statement>,
-    variables: HashMap<String, Variable>,
+    pub current_statement: Option<Statement>,
+    pub variables: HashMap<String, Variable>,
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
@@ -957,6 +958,10 @@ impl Interpreter {
         if self.err.is_some() {
             return NULL;
         }
+
+        if statement.is_empty() {
+            return NULL;
+        }
     
         let Statement::Statement { keys, values, .. } = &statement else {
             return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
@@ -969,7 +974,7 @@ impl Interpreter {
         let statement_map: HashMap<Value, Value> = keys.iter().cloned().zip(values.iter().cloned()).collect();
     
         static KEY_TYPE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("type".into()));
-    
+
         let result = match statement_map.get(&*KEY_TYPE) {
             Some(Value::String(t)) => match t.as_str() {
                 "IF" => self.handle_if(statement_map),
@@ -984,6 +989,7 @@ impl Interpreter {
                 "MATCH" => self.handle_match(statement_map),
     
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
+                "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
                 "RETURN" => self.handle_return(statement_map),
     
                 "IMPORT" => self.handle_import(statement_map),
@@ -1046,6 +1052,251 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_generator_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in function declaration"),
+        };
+    
+        let pos_args = match statement.get(&Value::String("pos_args".to_string())) {
+            Some(Value::List(p)) => p,
+            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in function declaration"),
+        };
+
+        let named_args = match statement.get(&Value::String("named_args".to_string())) {
+            Some(Value::Map { keys, values }) => {
+                Value::Map {
+                    keys: keys.clone(),
+                    values: values.clone(),
+                }
+            }
+            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in function declaration"),
+        };
+    
+        let body = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b,
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in function declaration"),
+        };
+
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(m)) => m,
+            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in function declaration"),
+        };
+    
+        let return_type = match statement.get(&Value::String("return_type".to_string())) {
+            Some(Value::Map { keys, values } ) => Value::Map {
+                keys: keys.clone(),
+                values: values.clone(),
+            },
+            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in function declaration"),
+        };
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let mut is_public = false;
+        let mut is_static = false;
+        let mut is_final = false;
+
+        for modifier in modifiers {
+            if let Value::String(modifier_str) = modifier {
+                match modifier_str.as_str() {
+                    "public" => is_public = true,
+                    "static" => is_static = true,
+                    "final" => is_final = true,
+                    "private" => is_public = false,
+                    "non-static" => is_static = false,
+                    "mutable" => is_final = false,
+                    _ => return self.raise("SyntaxError", &format!("Unknown function modifier: {}", modifier_str)),
+                }
+            } else {
+                return self.raise("TypeError", "Function modifiers must be strings");
+            }
+        }
+
+        let mut parameters = Vec::new();
+
+        for arg in pos_args {
+            if let Value::Map { keys, values } = arg {
+                let name = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::String(n) => n,
+                        _ => return self.raise("RuntimeError", "'name' must be a string in function parameter"),
+                    },
+                    None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
+                };
+        
+                let type_str_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                    Some(pos) => {
+                        let type_val = &values[pos];
+                        self.evaluate(type_val.convert_to_statement())
+                    }
+                    None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
+                };
+        
+                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::List(l) => l.iter().filter_map(|v| {
+                            if let Value::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        }).collect(),
+                        _ => vec![],
+                    },
+                    None => vec![],
+                };
+        
+                match &type_str_value {
+                    Value::Map { .. } => {
+                        parameters.push(Parameter::positional_pt(name.as_str(), &type_str_value).set_mods(mods));
+                    }
+                    Value::String(s) => {
+                        parameters.push(Parameter::positional(name.as_str(), s.as_str()).set_mods(mods));
+                    }
+                    _ => return self.raise("RuntimeError", "Invalid type for function parameter 'type'"),
+                }
+            } else {
+                return self.raise("TypeError", "Expected a map for function parameter");
+            }
+        }
+        
+        let named_args_hashmap = named_args.convert_to_hashmap().unwrap_or_else(|| {
+            self.raise("TypeError", "Expected a map for named arguments");
+            HashMap::new()
+        });
+        
+        for (name_str, info) in named_args_hashmap {
+            if let Value::Map { keys, values } = info {
+                let type_val = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                    Some(pos) => &values[pos],
+                    None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
+                };
+        
+                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
+                    Some(pos) => match &values[pos] {
+                        Value::List(l) => l.iter().filter_map(|v| {
+                            if let Value::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        }).collect(),
+                        _ => vec![],
+                    },
+                    None => vec![],
+                };
+        
+                let type_eval = self.evaluate(type_val.convert_to_statement());
+        
+                let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
+                    Some(pos) => {
+                        let val = &values[pos];
+                        self.evaluate(val.convert_to_statement())
+                    }
+                    None => NULL,
+                };
+        
+                match &type_eval {
+                    Value::Map { .. } => {
+                        parameters.push(Parameter::positional_optional_pt(
+                            name_str.as_str(),
+                            &type_eval,
+                            value,
+                        ).set_mods(mods));
+                    }
+                    Value::String(s) => {
+                        parameters.push(Parameter::positional_optional(
+                            name_str.as_str(),
+                            s.as_str(),
+                            value,
+                        ).set_mods(mods));
+                    }
+                    _ => return self.raise("RuntimeError", "Invalid type for named argument 'type'"),
+                }
+            } else {
+                return self.raise("TypeError", "Expected a map for named argument");
+            }
+        }        
+
+        let body_formatted: Arc<Vec<Statement>> = Arc::new(body.iter().map(|v| v.convert_to_statement()).collect());
+        let ret_type = Arc::new(return_type);
+
+        let config = self.config.clone();
+        let use_colors = self.use_colors;
+        let file_path = self.file_path.clone();
+        let cwd = self.cwd.clone();
+        let preprocessor_info = self.preprocessor_info.clone();
+        let scope = self.scope.clone();
+
+        let gen_name = if is_static {
+            format!("__static_gen_{}", name)
+        } else {
+            format!("__gen_{}", name)
+        };
+        let scope_str = format!("{}+scope.{}", scope, gen_name);
+        let gen_name_arc = Arc::new(gen_name.clone());
+
+        let generate_gen = move |args: &HashMap<String, Value>| -> Value {
+            let mut gen_interpreter = Interpreter::new(
+                config.clone(),
+                use_colors,
+                &file_path,
+                &cwd,
+                preprocessor_info.clone(),
+                &[],
+            );
+            gen_interpreter.set_scope(&scope_str);
+            gen_interpreter.variables.extend(args.iter().map(|(k, v)| {
+                (k.clone(), Variable::new(k.clone(), v.clone(), v.type_name().to_string(), false, true, true))
+            }));
+            let gen_type = GeneratorType::Custom(CustomGenerator {
+                body: (*body_formatted).clone(),
+                interpreter: Box::new(gen_interpreter),
+                ret_type: Box::new((*ret_type).clone()),
+                iteration: 0,
+                done: false,
+                index: 0,
+                loop_stack: Vec::new(),
+            });
+            let generator = Generator::new((*gen_name_arc).clone(), gen_type, is_static);
+            Value::Generator(generator)
+        };
+
+        if self.variables.contains_key(name) && !name.starts_with("<") {
+            if let Some(var) = self.variables.get(name) {
+                if var.is_final() {
+                    return self.raise("AssigmentError", &format!("Cannot redefine final generator '{}'", name));
+                }
+            }
+        }
+        
+        self.variables.insert(
+            name.to_string(),
+            Variable::new(
+                name.to_string(),
+                Value::Function(Function::Native(Arc::new(NativeFunction::new(
+                    name,
+                    generate_gen,
+                    parameters,
+                    "generator",
+                    is_public,
+                    is_static,
+                    is_final,
+                    None,
+                )))),
+                "generator".to_string(),
+                is_public,
+                is_static,
+                is_final,
+            ),
+        );
+        self.variables.get(name)
+            .map_or(NULL, |var| var.value.clone())
     }
 
     fn handle_type_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2102,6 +2353,21 @@ impl Interpreter {
                         Value::List(t.into_iter().map(|v| v.clone()).collect())
                     } else if let Value::String(s) = value {
                         Value::List(s.chars().map(|c| Value::String(c.to_string())).collect())
+                    } else if let Value::Generator(generator) = value {
+                        if !generator.is_infinite() {
+                            let v = generator.to_vec();
+                            if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                                self.err = Some(match ref_err {
+                                    Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
+                                    None => Error::new(err_type, err_msg, &self.file_path),
+                                });
+                                return NULL;
+                            }
+                            Value::List(v)
+                        } else {
+                            self.raise("TypeError", "Cannot convert infinite generator to list");
+                            NULL
+                        }
                     } else {
                         self.raise("TypeError", &format!("Cannot convert '{}' to list", value.type_name()))
                     }
@@ -3810,7 +4076,7 @@ impl Interpreter {
         if self.err.is_some() {
             return NULL;
         }
-    
+
         match left_type.as_str() {
             "VARIABLE" => {
                 let name = match left_hashmap.get(&Value::String("name".to_string())) {
@@ -4491,8 +4757,11 @@ impl Interpreter {
         };
     
         let iterable_value = self.evaluate(iterable.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
         if !iterable_value.is_iterable() {
-            return self.raise("TypeError", "Expected an iterable for 'for' loop");
+            return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
         }
     
         let body = match statement.get(&*KEY_BODY) {
@@ -4514,6 +4783,15 @@ impl Interpreter {
     
         for item in iterable_value.iter() {
             let previous = self.variables.get(var_name_str).cloned();
+
+            if let Value::Error (err_type, err_msg, ref_err) = item {
+                if let Some(re) = ref_err {
+                    self.err = Some(Error::with_ref(err_type, err_msg, re.clone(), &self.file_path.clone()));
+                } else {
+                    self.err = Some(Error::new(err_type, err_msg, &self.file_path.clone()));
+                }
+                return NULL;
+            }
     
             self.variables.insert(
                 variable_name.clone(),
@@ -4631,6 +4909,11 @@ impl Interpreter {
                     }
                 }).collect();
 
+                let is_inf = match statement.get(&Value::String("is_infinite".to_string())) {
+                    Some(Value::Boolean(b)) => *b,
+                    _ => false,
+                };
+
                 let pattern_flag_bool: bool = match pattern_flag {
                     Value::Boolean(b) => b,
                     _ => {
@@ -4662,8 +4945,12 @@ impl Interpreter {
                                 }
                             },
                             _ => {
-                                self.raise("TypeError", "Length value must be an integer");
-                                return NULL;
+                                if is_inf {
+                                    usize::MAX
+                                } else {
+                                    self.raise("TypeError", "Length value must be an integer");
+                                    return NULL;
+                                }
                             }
                         };
                         Value::List(vec![
@@ -4710,94 +4997,118 @@ impl Interpreter {
                     "value" => {
                         if !pattern_flag_bool {
                             let len = evaluated_seed.len();
+
                             if len == 0 {
                                 self.raise("ValueError", "Seed list cannot be empty");
                                 return NULL;
                             }
 
+                            let mut nums_int = Vec::with_capacity(evaluated_seed.len());
+
                             for v in &evaluated_seed {
-                                if !matches!(v, Value::Int(_)) {
+                                if let Value::Int(i) = v {
+                                    nums_int.push(i.clone());
+                                } else {
                                     self.raise("TypeError", "Seed elements must be Int");
                                     return NULL;
                                 }
                             }
 
-                            let nums_i64: Vec<i64> = {
-                                let mut temp = Vec::with_capacity(evaluated_seed.len());
-                                for v in &evaluated_seed {
-                                    if let Value::Int(i) = v {
-                                        match i.to_i64() {
-                                            Ok(n) => temp.push(n),
-                                            Err(_) => {
-                                                self.raise("OverflowError", "Seed element out of i64 range");
-                                                return NULL;
-                                            }
-                                        }
-                                    } else {
-                                        unreachable!();
-                                    }
-                                }
-                                temp
-                            };
-
                             if len >= 2 {
-                                let initial_step = nums_i64[1] - nums_i64[0];
+                                let initial_step = match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                    Ok(res) => res,
+                                    Err(_) => {
+                                        self.raise("OverflowError", "Step calculation overflow");
+                                        return NULL;
+                                    }
+                                };
                                 for i in 1..(len - 1) {
-                                    if nums_i64[i + 1] - nums_i64[i] != initial_step {
+                                    let diff = match (&nums_int[i + 1]).clone() - nums_int[i].clone() {
+                                        Ok(res) => res,
+                                        Err(_) => {
+                                            self.raise("OverflowError", "Step calculation overflow");
+                                            return NULL;
+                                        }
+                                    };
+
+                                    if diff != initial_step {
                                         self.raise("RangeError", "Seed values do not have consistent step");
                                         return NULL;
                                     }
                                 }
                             }
 
-                            let end_i64 = match &evaluated_end {
-                                Value::Int(i) => i.to_i64().unwrap_or_else(|_| {
-                                    self.raise("OverflowError", "End value out of i64 range");
-                                    0
-                                }),
-                                _ => {
-                                    self.raise("TypeError", "End value must be Int");
-                                    return NULL;
-                                }
+                            let end_int = if let Value::Int(i) = &evaluated_end {
+                                i.clone()
+                            } else {
+                                self.raise("TypeError", "End value must be Int");
+                                return NULL;
                             };
 
                             let step = if len == 1 {
-                                if nums_i64[0] <= end_i64 { 1 } else { -1 }
+                                if nums_int[0] <= end_int {
+                                    Int::from(1)
+                                } else {
+                                    Int::from(-1)
+                                }
                             } else {
-                                nums_i64[1] - nums_i64[0]
+                                match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                    Ok(res) => res,
+                                    Err(_) => {
+                                        self.raise("OverflowError", "Step calculation overflow");
+                                        return NULL;
+                                    }
+                                }
                             };
 
-                            if step == 0 {
+                            if step == Int::from(0) {
                                 self.raise("ValueError", "Step cannot be zero");
                                 return NULL;
                             }
 
-                            let last_val = nums_i64[len - 1];
-                            let diff = end_i64 - last_val;
+                            let last_val = &nums_int[len - 1];
+                            let start_val = &nums_int[0];
+                            let diff = match (&end_int).clone() - last_val.clone() {
+                                Ok(res) => res,
+                                Err(_) => {
+                                    self.raise("OverflowError", "Difference calculation overflow");
+                                    return NULL;
+                                }
+                            };
 
-                            if (step > 0 && diff < 0) || (step < 0 && diff > 0) {
+
+                            if (step > Int::from(0) && diff < Int::from(0)) || (step < Int::from(0) && diff > Int::from(0)) {
                                 self.raise("RangeError", "End value is unreachable with given seed and step");
                                 return NULL;
                             }
 
-                            if diff % step != 0 {
+                            let rem = (diff.clone() % step.clone()).unwrap_or_else(|_| {
+                                self.raise("ArithmeticError", "Remainder operation failed");
+                                Int::from(0)
+                            });
+
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+
+                            if rem != Int::from(0) {
                                 self.raise("RangeError", "Pattern does not fit into range defined by end");
                                 return NULL;
                             }
 
-                            let total_steps = (diff / step).abs() as usize;
+                            let start_val = Value::Int(start_val.clone());
+                            let step_val = Value::Int(step);
+                            let range_iter = RangeValueIter::new(&start_val, &evaluated_end, &step_val);
 
-                            let mut result_list = Vec::with_capacity(len + total_steps);
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(range_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
 
-                            result_list.extend_from_slice(&evaluated_seed);
-
-                            let mut current = last_val;
-                            for _ in 0..total_steps {
-                                current += step;
-                                result_list.push(Value::Int(Int::from_i64(current)));
-                            }
-
-                            Value::List(result_list)
+                            Value::Generator(generator)
                         } else {
                             let (vec_f64, pm) = match predict_sequence(evaluated_seed.clone(), evaluated_end.clone()) {
                                 Ok(v) => v,
@@ -4837,8 +5148,12 @@ impl Interpreter {
                                 }
                             },
                             _ => {
-                                self.raise("TypeError", "Length value must be an integer");
-                                return NULL;
+                                if is_inf {
+                                    usize::MAX
+                                } else {
+                                    self.raise("TypeError", "Length value must be an integer");
+                                    return NULL;
+                                }
                             }
                         };
 
@@ -4875,65 +5190,151 @@ impl Interpreter {
 
                             Value::List(result_list)
                         } else {
-                            if seed_len == 0 {
-                                self.raise("ValueError", "Seed list cannot be empty");
-                                return NULL;
-                            }
-
-                            for v in &evaluated_seed {
-                                if !matches!(v, Value::Int(_)) {
-                                    self.raise("TypeError", "Seed elements must be Int");
+                            if is_inf {
+                                let seed_len = evaluated_seed.len();
+                                if seed_len == 0 {
+                                    self.raise("ValueError", "Seed list cannot be empty");
                                     return NULL;
                                 }
-                            }
 
-                            let nums_i64: Vec<i64> = {
-                                let mut temp = Vec::with_capacity(evaluated_seed.len());
+                                let mut nums_int = Vec::with_capacity(seed_len);
                                 for v in &evaluated_seed {
                                     if let Value::Int(i) = v {
-                                        match i.to_i64() {
-                                            Ok(n) => temp.push(n),
-                                            Err(_) => {
-                                                self.raise("OverflowError", "Seed element out of i64 range");
-                                                return NULL;
-                                            }
-                                        }
+                                        nums_int.push(i.clone());
                                     } else {
-                                        unreachable!();
-                                    }
-                                }
-                                temp
-                            };
-
-                            if seed_len >= 2 {
-                                let initial_step = nums_i64[1] - nums_i64[0];
-                                for i in 1..(seed_len - 1) {
-                                    if nums_i64[i + 1] - nums_i64[i] != initial_step {
-                                        self.raise("RangeError", "Seed values do not have consistent step");
+                                        self.raise("TypeError", "Seed elements must be Int");
                                         return NULL;
                                     }
                                 }
+
+                                if seed_len >= 2 {
+                                    let initial_step = match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                        Ok(res) => res,
+                                        Err(_) => {
+                                            self.raise("OverflowError", "Step calculation overflow");
+                                            return NULL;
+                                        }
+                                    };
+                                    for i in 1..(seed_len - 1) {
+                                        let diff = match (&nums_int[i + 1]).clone() - nums_int[i].clone() {
+                                            Ok(res) => res,
+                                            Err(_) => {
+                                                self.raise("OverflowError", "Step calculation overflow");
+                                                return NULL;
+                                            }
+                                        };
+
+                                        if diff != initial_step {
+                                            self.raise("RangeError", "Seed values do not have consistent step");
+                                            return NULL;
+                                        }
+                                    }
+                                }
+
+                                let step = if seed_len == 1 {
+                                    Int::from(1)
+                                } else {
+                                    match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                        Ok(res) => res,
+                                        Err(_) => {
+                                            self.raise("OverflowError", "Step calculation overflow");
+                                            return NULL;
+                                        }
+                                    }
+                                };
+
+                                if step == Int::from(0) {
+                                    self.raise("ValueError", "Step cannot be zero");
+                                    return NULL;
+                                }
+
+                                let start_val = Value::Int(nums_int[seed_len - 1].clone());
+                                let step_val = Value::Int(step.clone());
+
+                                let inf_iter = InfRangeIter::new(start_val, step_val);
+
+                                let generator = Generator::new_anonymous(
+                                    GeneratorType::Native(NativeGenerator {
+                                        iter: Box::new(inf_iter),
+                                        iteration: 0,
+                                    }),
+                                    false,
+                                );
+
+                                Value::Generator(generator)
+                            } else {
+                                let seed_len = evaluated_seed.len();
+                                if seed_len == 0 {
+                                    self.raise("ValueError", "Seed list cannot be empty");
+                                    return NULL;
+                                }
+
+                                let mut nums_int = Vec::with_capacity(seed_len);
+                                for v in &evaluated_seed {
+                                    if let Value::Int(i) = v {
+                                        nums_int.push(i.clone());
+                                    } else {
+                                        self.raise("TypeError", "Seed elements must be Int");
+                                        return NULL;
+                                    }
+                                }
+
+                                if seed_len >= 2 {
+                                    let initial_step = match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                        Ok(res) => res,
+                                        Err(_) => {
+                                            self.raise("OverflowError", "Step calculation overflow");
+                                            return NULL;
+                                        }
+                                    };
+                                    for i in 1..(seed_len - 1) {
+                                        let diff = match (&nums_int[i + 1]).clone() - nums_int[i].clone() {
+                                            Ok(res) => res,
+                                            Err(_) => {
+                                                self.raise("OverflowError", "Step calculation overflow");
+                                                return NULL;
+                                            }
+                                        };
+
+                                        if diff != initial_step {
+                                            self.raise("RangeError", "Seed values do not have consistent step");
+                                            return NULL;
+                                        }
+                                    }
+                                }
+
+                                let step_usize = if seed_len == 1 {
+                                    1
+                                } else {
+                                    match (&nums_int[1]).clone() - (&nums_int[0]).clone() {
+                                        Ok(res) => res.to_usize().unwrap_or(1),
+                                        Err(_) => {
+                                            self.raise("OverflowError", "Step calculation overflow");
+                                            return NULL;
+                                        }
+                                    }
+                                };
+
+                                if step_usize == 0 {
+                                    self.raise("ValueError", "Step cannot be zero");
+                                    return NULL;
+                                }
+
+                                let start_val = nums_int[0].clone();
+                                let end_val = Int::from(length_usize);
+
+                                let range_length_iter = RangeLengthIter::new(start_val, end_val, step_usize);
+
+                                let generator = Generator::new_anonymous(
+                                    GeneratorType::Native(NativeGenerator {
+                                        iter: Box::new(range_length_iter),
+                                        iteration: 0,
+                                    }),
+                                    false,
+                                );
+
+                                Value::Generator(generator)
                             }
-
-                            let step = if seed_len == 1 { 1 } else { nums_i64[1] - nums_i64[0] };
-
-                            if step == 0 {
-                                self.raise("ValueError", "Step cannot be zero");
-                                return NULL;
-                            }
-
-                            let remaining = length_usize - seed_len;
-
-                            let mut result_list = Vec::with_capacity(length_usize);
-                            result_list.extend_from_slice(&evaluated_seed);
-
-                            let mut current = nums_i64[seed_len - 1];
-                            for _ in 0..remaining {
-                                current += step;
-                                result_list.push(Value::Int(Int::from_i64(current)));
-                            }
-
-                            Value::List(result_list)
                         }
                     },
                     _ => {
@@ -4949,12 +5350,19 @@ impl Interpreter {
                     None => "".to_string(),
                 };
 
+                let is_inf_str = if is_inf {
+                    r"\A  infinite: true".to_string()
+                } else {
+                    "".to_string()
+                };
+
                 let log_message = format!(
-                    r"<ListCompletion>\A  seed: {}\A  end: {}\A  range_mode: {}\A  pattern: {}{}",
+                    r"<ListCompletion>\A  seed: {}\A  end: {}\A  range_mode: {}\A  pattern: {}{}{}",
                     format_value(&Value::List(evaluated_seed.clone())),
                     format_value(&evaluated_end),
                     range_mode,
                     pattern_flag_bool,
+                    is_inf_str,
                     pattern_method_str
                 );
 
@@ -6897,7 +7305,7 @@ impl Interpreter {
             }            
     
             match f.to_f64() {
-                Ok(val) if val == 0.0 => Value::Int(Int::from_i64(0)),
+                Ok(val) if val == 0.0 => Value::Float(0.0.into()),
                 Ok(_) => Value::Float(f),
                 Err(_) => Value::Float(f),
             }

@@ -1,8 +1,9 @@
 #include <std/macros>
 
+// idk if .. should be here its really a generator not a list but ill keep it
 assert_eq!(([1, 2, 3]),                   ([1, 2, 3]))                                                          // just a list
-assert_eq!(([1..10]),                     ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))                                    // inclusive range
-assert_eq!(([2, 4..20]),                  ([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]))                               // inclusive range with step
+assert_eq!(([1..10].collect()),           ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))                                    // inclusive range
+assert_eq!(([2, 4..20].collect()),        ([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]))                               // inclusive range with step
 
 assert_eq!(([1, 1, 2, 6...120]),          ([1, 1, 2, 6, 24, 120]))                                              // factorial partial
 assert_eq!(([2, 6, 12...30]),             ([2, 6, 12, 20, 30]))                                                 // quadratic (2nd diff constant)
@@ -18,6 +19,7 @@ assert_eq!(([0, 1, 1, 2, 3, 5, 8...34]),  ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34]))  
 assert_eq!(([1, 8, 27, 64...216]),        ([1, 8, 27, 64, 125, 216]))                                           // cubic numbers (n³)
 assert_eq!(([1, -1, 1, -1...1]),          ([1, -1, 1, -1, 1]))                                                  // alternating signs
 assert_eq!(([3, -3, 3, -3...; 8]),        ([3, -3, 3, -3, 3, -3, 3, -3]))                                       // alternating signs (long)
+assert_eq!(([7, 15, 37, 42, 137...; 10]), ([7, 15, 37, 42, 137, 567, 1715, 4102, 8387, 15367]))                 // polynomial pattern (7x^9 + 8x^8 + 14x^7 - 31x^6 + 138x^5)
 
 assert_eq!(([0, 1, 1, 2...; 50]), 
           ([0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 
@@ -26,5 +28,5 @@ assert_eq!(([0, 1, 1, 2...; 50]),
             102334155, 165580141, 267914296, 433494437, 701408733, 1134903170, 1836311903, 
             2971215073, 4807526976, 7778742049]))
 assert_err!(([1, 1, 2..; 10])) // RangeError: Seed values do not have consistent step
-assert_err!(([7, 15, 37, 42, 137...; 200])) // PatternError: Sequence value overflowed f64 limit
+assert_err!(([69, 420, 80085, 5318008...; 200])) // PatternError: Sequence value overflowed f64 limit
 assert_err!(([1, 2, 3, 4, 5, 6, 7, 8, 9, 10...; 5])) // ValueError: Length must be greater than or equal to seed length

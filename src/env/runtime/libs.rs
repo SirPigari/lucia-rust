@@ -126,6 +126,35 @@ macro_rules! insert_native_fn {
     }};
 }
 
+#[macro_export]
+macro_rules! insert_native_fn_state {
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr) => {{
+        let native_fn = NativeFunction::new(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            true,
+            true,
+            Some($state),
+        );
+
+        let func = Function::Native(Arc::new(native_fn));
+
+        $map.insert(
+            $name.to_string(),
+            Variable::new(
+                $name.to_string(),
+                Value::Function(func),
+                "function".to_string(),
+                true,
+                true,
+                true,
+            ),
+        );
+    }};
+}
 
 #[macro_export]
 macro_rules! insert_native_var {

@@ -12,6 +12,7 @@ use serde_json::Value as JsonValue;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 use std::path::Path;
+use std::str::FromStr;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
@@ -157,16 +158,27 @@ pub fn format_value(value: &Value) -> String {
         }
 
         Value::Function(func) => {
-            format!("<function '{}' at {:p}>", func.get_name(), func.ptr())
+            let addr = func.ptr() as *const () as usize;
+            format!("<function '{}' at 0x{:X}>", func.get_name(), addr)
         }
-        
+
+        Value::Generator(generator) => {
+            let addr = generator.ptr() as *const () as usize;
+            match generator.name() {
+                Some(name) => format!("<generator '{}' at 0x{:X}>", name, addr),
+                None => format!("<generator at 0x{:X}>", addr),
+            }
+        }
+
         Value::Module(obj, _) => {
-            format!("<module '{}' at {:p}>", obj.name(), obj.ptr())
+            let addr = obj.ptr() as *const () as usize;
+            format!("<module '{}' at 0x{:X}>", obj.name(), addr)
         }
 
         Value::Pointer(ptr) => {
             let raw_ptr = *ptr as *const ();
-            format!("<pointer to {:p}>", raw_ptr)
+            let addr = raw_ptr as usize;
+            format!("<pointer to 0x{:X}>", addr)
         }
 
         Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
@@ -1154,15 +1166,133 @@ pub fn unique_temp_name(suffix: &str, home_dir: &Path) -> PathBuf {
     temp_dir.join(format!("lucia_temp_{now}.{suffix}"))
 }
 
+pub fn convert_value_to_type(
+    target_type: &str,
+    value: &Value,
+) -> Result<Value, (&'static str, &'static str, &'static str)> {
+    match target_type {
+        "str" => Ok(match value {
+            Value::String(s) => Value::String(s.clone()),
+            _ => Value::String(value.to_string()),
+        }),
+
+        "int" => {
+            if let Value::Int(i) = value {
+                Ok(Value::Int(i.clone()))
+            } else if let Value::Float(f) = value {
+                if f.is_integer_like() {
+                    f.to_int()
+                        .map_or_else(
+                            |_| Err(("ConversionError", "Failed to convert float to int", "")),
+                            |i| Ok(Value::Int(i)),
+                        )
+                } else {
+                    let rounded = f.round(0);
+                    rounded
+                        .to_int()
+                        .map_or_else(
+                            |_| Err(("ConversionError", "Failed to convert rounded float to int", "")),
+                            |i| Ok(Value::Int(i)),
+                        )
+                }
+            } else if let Value::String(s) = value {
+                match u128::from_str(s) {
+                    Ok(num) => Ok(Value::Int(Int::from_str(&num.to_string()).unwrap())),
+                    Err(_) => Err(("ConversionError", "Failed to convert string to int", "Ensure string is a valid unsigned integer")),
+                }
+            } else if let Value::Boolean(b) = value {
+                Ok(if *b {
+                    Value::Int(Int::from_i64(1))
+                } else {
+                    Value::Int(Int::from_i64(0))
+                })
+            } else {
+                Err(("TypeError", "Cannot convert value to int", ""))
+            }
+        }
+
+        "float" => {
+            if let Value::Float(f) = value {
+                Ok(Value::Float(f.clone()))
+            } else if let Value::Int(i) = value {
+                i.to_float()
+                    .map_or_else(
+                        |_| Err(("ConversionError", "Failed to convert int to float", "")),
+                        |f| Ok(Value::Float(f)),
+                    )
+            } else if let Value::String(s) = value {
+                Float::from_str(&s)
+                    .map_or_else(
+                        |_| Err(("ConversionError", "Failed to convert string to float", "Ensure valid float")),
+                        |f| Ok(Value::Float(f)),
+                    )
+            } else {
+                Err(("TypeError", "Cannot convert value to float", ""))
+            }
+        }
+
+        "bool" => Ok(if value.is_truthy() {
+            Value::Boolean(true)
+        } else {
+            Value::Boolean(false)
+        }),
+
+        "void" => {
+            if value.is_null() {
+                Ok(NULL)
+            } else {
+                Err(("TypeError", "Cannot convert non-null value to void", ""))
+            }
+        }
+
+        "any" => Ok(value.clone()),
+
+        "list" => match value {
+            Value::List(l) => Ok(Value::List(l.clone())),
+            Value::Tuple(t) => Ok(Value::List(t.iter().cloned().collect())),
+            Value::String(s) => Ok(Value::List(s.chars().map(|c| Value::String(c.to_string())).collect())),
+            _ => Err(("TypeError", "Cannot convert value to list", "")),
+        },
+
+        "map" => match value {
+            Value::Map { keys, values } => Ok(Value::Map {
+                keys: keys.clone(),
+                values: values.clone(),
+            }),
+            _ => Err(("TypeError", "Cannot convert value to map", "")),
+        },
+
+        "bytes" => match value {
+            Value::Bytes(b) => Ok(Value::Bytes(b.clone())),
+            Value::String(s) => Ok(Value::Bytes(s.clone().into_bytes())),
+            _ => Err(("TypeError", "Cannot convert value to bytes", "")),
+        },
+
+        "function" => match value {
+            Value::Function(func) => Ok(Value::Function(func.clone())),
+            _ => Err(("TypeError", "Cannot convert value to function", "")),
+        },
+
+        "tuple" => match value {
+            Value::Tuple(t) => Ok(Value::Tuple(t.clone())),
+            Value::List(l) => Ok(Value::Tuple(l.iter().cloned().collect())),
+            Value::String(s) => Ok(Value::Tuple(s.chars().map(|c| Value::String(c.to_string())).collect())),
+            _ => Err(("TypeError", "Cannot convert value to tuple", "")),
+        },
+
+        _ => Err(("NotImplemented", "Type conversion not implemented", "")),
+    }
+}
+
 pub const KEYWORDS: &[&str] = &[
-    "fun", "return", "throw", "end", "catch", "try", "static", "non-static",
+    "fun", "gen", "return", "throw", "end", "catch", "try", "static", "non-static",
     "public", "private", "final", "mutable", "if", "else", "then", "for",
     "while", "as", "from", "import", "in", "forget", "and", "or", "not",
     "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",
     "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
     "type", "where", "true", "false", "null", "void", "any", "int",
     "float", "bool", "str", "map", "list", "function", "bytes", "tuple",
-    "auto",
+    "auto", "generator"
 ];
 
 pub const NULL: Value = Value::Null;

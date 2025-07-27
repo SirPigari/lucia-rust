@@ -1,0 +1,71 @@
+#include <std/macros>
+
+// TODO:
+// Add 'gen' keyword to vsix extension
+// and add 'generator' type to vsix extension
+
+// since fibonacci is already as a pattern reg
+gen tribonacci(n: int) -> int:
+    (a, b, c) := (0, 1, 1)
+    for _ in [0..n]:
+        return (a) // return is used to yield a value in a generator
+        (a, b, c) = (b, c, a + b + c)
+    end
+    break // to exit generator, optional
+end
+
+tribonacci_gen: generator = tribonacci(10)
+assert_eq!(tribonacci_gen.collect(), ([0, 1, 1, 2, 4, 7, 13, 24, 44, 81, 149]))
+
+g: generator = [0..5]  // ranges (..) are now generators, but pattern reg (...) is still a list
+assert_eq!(g.collect(), ([0, 1, 2, 3, 4, 5]))
+
+sum := 0
+
+// ..; without an index is now infinite range (doesnt work with ...; logically)
+// also why is ';' called 'semicolon' and not a 'coloncomma'
+for i in [0, 2..;]:
+    if (i == 50):
+        break
+    end
+    sum += i
+end
+assert_eq!(sum, 600)
+
+t: generator = [0, 3, 6..; 5]
+assert_eq!(t.collect_into(float), ([0.0, 3.0, 6.0, 9.0, 12.0]))
+
+assert_eq!(t.next(), 0)
+assert_eq!(t.next(), 3)
+assert_eq!(t.next(), 6)
+assert_eq!(t.next(), 9)
+assert_eq!(t.next(), 12)
+assert_eq!(t.is_done(), true)  // is_done() checks if the generator has finished iterating
+assert_err!(t.next())  // StopIteration: No more items in generator
+
+// static generators
+static gen static_gen():
+    for i in [0..5]:
+        return i
+    end
+end
+
+k := static_gen()
+assert_eq!(k.next(), 0)
+assert_err!(k.next())  // StaticGeneratorError: Cannot iterate a static generator more than once
+
+
+i := static_gen()
+assert_eq!(i.collect(), ([0, 1, 2, 3, 4, 5]))  // use of the static
+assert_err!(i.next())  // StaticGeneratorError: Cannot iterate a static generator more than once
+
+p := static_gen()
+assert_eq!(p.peek(), 0)  // peek() returns the next item without consuming it
+assert_eq!(p.next(), 0)  // allowing you to check the next item without wasting the static generator
+assert_err!(p.peek())   // StaticGeneratorError: Cannot iterate a static generator more than once 
+
+o := [1..5]
+assert_eq!(o.next(), 1)
+assert_eq!(o.peek(), 2)  // peek() returns the next item without consuming it
+assert_eq!(o.next(), 2)
+assert_eq!(o.collect().into(float), ([3.0, 4.0, 5.0]))  // collect() consumes the generator and returns the remaining items

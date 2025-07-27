@@ -37,6 +37,6 @@ assert_eq!(sum(2, 3), 5.0)
 i: int = precompile(1 + 2)
 assert_eq!(i, 3)  // precompile cannot be used in macros
 
-for (i in precompile([0..100])):
+for (i in precompile([0...100])):
     print(i)  // precompile is evaluated at preprocessor time
 end

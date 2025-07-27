@@ -1,6 +1,6 @@
 #include <std/macros>
 
-a: list = [0..5]
+a: list = [0..5].collect()
 assert_eq!(a, ([0, 1, 2, 3, 4, 5]))
 
 

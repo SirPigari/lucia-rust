@@ -16,6 +16,7 @@ mod env {
         pub mod errors;
         pub mod value;
         pub mod functions;
+        pub mod generators;
         pub mod variables;
         pub mod native;
         pub mod statements;
@@ -1952,11 +1953,11 @@ fn main() {
                     } else if total_ram_bytes > 8 * 1024 * 1024 * 1024 {
                         32 * 1024 * 1024
                     } else {
-                        8 * 1024 * 1024
+                        16 * 1024 * 1024
                     }
                 }
                 Err(_) => {
-                    8 * 1024 * 1024
+                    16 * 1024 * 1024
                 }
             }
         });

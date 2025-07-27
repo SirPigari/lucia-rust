@@ -1,5 +1,6 @@
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::functions::Function;
+use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::Object;
 use crate::env::runtime::errors::Error;
@@ -17,7 +18,7 @@ use bincode::{
     error::{EncodeError, DecodeError},
 };
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd)]
 pub enum Value {
     Float(Float),
     Int(Int),
@@ -32,9 +33,26 @@ pub enum Value {
     List(Vec<Value>),
     Bytes(Vec<u8>),
     Function(Function),
+    Generator(Generator),
     Module(Object, PathBuf),
     Pointer(usize),
     Error(&'static str, &'static str, Option<Error>),
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Generator(_) => write!(f, "Generator(...)"),
+            Value::Function(func) => write!(f, "Function('{}')", func.get_name()),
+            Value::Module(obj, _) => write!(f, "Module('{}')", obj.name()),
+            Value::Pointer(ptr) => {
+                let addr = *ptr as *const () as usize;
+                write!(f, "Pointer(0x{:X})", addr)
+            },
+            Value::Error(kind, msg, _) => write!(f, "Error({}, {})", kind, msg),
+            _ => write!(f, "{:?}", self.to_string()),
+        }
+    }
 }
 
 impl Serialize for Value {
@@ -68,6 +86,9 @@ impl Serialize for Value {
             Value::Function(_) => {
                 serializer.serialize_str("Function(opaque)")
             }
+            Value::Generator(_) => {
+                serializer.serialize_str("Generator(opaque)")
+            }
             Value::Module(..) => {
                 serializer.serialize_str("Object(opaque)")
             }
@@ -79,8 +100,9 @@ impl Serialize for Value {
             }
             Value::Pointer(ptr) => {
                 let mut s = serializer.serialize_struct("Pointer", 1)?;
-                let raw_ptr = *ptr as *const ();  
-                s.serialize_field("address", &format!("{:p}", raw_ptr))?;
+                let raw_ptr = *ptr as *const ();
+                let addr = raw_ptr as usize;
+                s.serialize_field("address", &format!("0x{:X}", addr))?;
                 s.end()
             }
         }
@@ -208,7 +230,7 @@ impl Encode for Value {
                 8u8.encode(encoder)?;
                 b.encode(encoder)
             }
-            Function(_) | Module(_, _) | Error(_, _, _) => {
+            Function(_) | Module(_, _) | Error(_, _, _) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
             }
             Pointer(ptr) => {
@@ -296,6 +318,11 @@ impl Hash for Value {
                 func.get_name().hash(state);
                 func.get_parameters().hash(state);
                 func.get_return_type().hash(state);
+            }
+
+            Value::Generator(generator) => {
+                generator.name().hash(state);
+                generator.ptr().hash(state);
             }
 
             Value::Module(obj, path) => {
@@ -445,6 +472,7 @@ impl Value {
             Value::Bytes(b) if !b.is_empty() => true,
             Value::Tuple(items) if !items.is_empty() => true,
             Value::Map { keys, values } if !keys.is_empty() && !values.is_empty() => true,
+            Value::Generator(_) => true,
             _ => false,
         }
     }
@@ -459,6 +487,8 @@ impl Value {
             Value::Bytes(b) => Box::new(b.clone().into_iter().map(|byte| Value::Int(Int::from(byte as i32)))),
 
             Value::Tuple(items) => Box::new(items.clone().into_iter()),
+
+            Value::Generator(generator) => Box::new(generator.make_iter()),
 
             _ => Box::new(std::iter::empty()),
         }
@@ -482,6 +512,7 @@ impl Value {
             Value::Tuple(_) => "tuple".to_string(),
             Value::Bytes(_) => "bytes".to_string(),
             Value::Function(_) => "function".to_string(),
+            Value::Generator(_) => "generator".to_string(),
             Value::Module(obj, _) => obj.name().to_string(),
             Value::Pointer(ptr) => {
                 let raw = *ptr as *const Value;
@@ -504,6 +535,7 @@ impl Value {
             Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Function(_) => true,
+            Value::Generator(_) => true,
             Value::Module(..) => true,
             Value::Error(_, _, _) => true,
             Value::Pointer(_) => true,
@@ -548,10 +580,24 @@ impl Value {
             }
             Value::Pointer(ptr) => {
                 let raw_ptr = *ptr as *const ();
-                format!("<pointer to {:p}>", raw_ptr)
-            }            
-            Value::Function(func) => format!("<function '{}' at {:p}>", func.get_name(), func.ptr()),
-            Value::Module(obj, _) => format!("<module '{}' at {:p}>", obj.name(), obj.ptr()),
+                let addr = raw_ptr as usize;
+                format!("<pointer to 0x{:X}>", addr)
+            }
+            Value::Function(func) => {
+                let addr = func.ptr() as *const () as usize;
+                format!("<function '{}' at 0x{:X}>", func.get_name(), addr)
+            }
+            Value::Generator(generator) => {
+                let addr = generator.ptr() as *const () as usize;
+                match generator.name() {
+                    Some(name) => format!("<generator '{}' at 0x{:X}>", name, addr),
+                    None => format!("<generator at 0x{:X}>", addr),
+                }
+            }
+            Value::Module(obj, _) => {
+                let addr = obj.ptr() as *const () as usize;
+                format!("<module '{}' at 0x{:X}>", obj.name(), addr)
+            }
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
@@ -576,18 +622,30 @@ impl Value {
             }
     
             Value::Function(func) => {
-                let description = format!("<function '{}' at {:p}>", func.get_name(), func.ptr());
+                let addr = func.ptr() as *const () as usize;
+                let description = format!("<function '{}' at 0x{:X}>", func.get_name(), addr);
+                Some(description.into_bytes())
+            }
+
+            Value::Generator(generator) => {
+                let addr = generator.ptr() as *const () as usize;
+                let description = match generator.name() {
+                    Some(name) => format!("<generator '{}' at 0x{:X}>", name, addr),
+                    None => format!("<generator at 0x{:X}>", addr),
+                };
                 Some(description.into_bytes())
             }
 
             Value::Module(obj, _) => {
-                let description = format!("<module '{}' at {:p}>", obj.name(), obj.ptr());
+                let addr = obj.ptr() as *const () as usize;
+                let description = format!("<module '{}' at 0x{:X}>", obj.name(), addr);
                 Some(description.into_bytes())
             }
 
             Value::Pointer(ptr) => {
                 let raw_ptr = *ptr as *const ();
-                let description = format!("<pointer to {:p}>", raw_ptr);
+                let addr = raw_ptr as usize;
+                let description = format!("<pointer to 0x{:X}>", addr);
                 Some(description.into_bytes())
             }
     
@@ -645,6 +703,17 @@ impl Value {
     }
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
+    }
+    pub fn iterable_to_vec(&self) -> Vec<Value> {
+        match self {
+            Value::List(items) => items.clone(),
+            Value::String(s) => s.chars().map(|c| Value::String(c.to_string())).collect(),
+            Value::Bytes(b) => b.iter().map(|&byte| Value::Int(Int::from(byte as i32))).collect(),
+            Value::Tuple(items) => items.clone(),
+            Value::Map { keys, values } => keys.iter().zip(values.iter()).map(|(k, v)| Value::Map { keys: vec![k.clone()], values: vec![v.clone()] }).collect(),
+            Value::Generator(generator) => generator.make_iter().collect(),
+            _ => vec![],
+        }
     }
 }
 

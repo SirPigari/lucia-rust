@@ -32,12 +32,12 @@ fun parameterFunction(a: int, b: str) -> void:
 end
 
 fun defaultParameterFunction(a: int = 10, b: str = "default") -> void:
-    print("This function has default parameters: a =", a.toString(), ", b =", b)
+    print("This function has default parameters: a =", a.to_string(), ", b =", b)
 end
 
 fun combinedFunction(a: int, b: str = "default") -> str:
     print("This function combines parameters and returns a string")
-    return ("Combined: " + a.toString() + ", " + b.toString())
+    return ("Combined: " + a.to_string() + ", " + b.to_string())
 end
 
 public static final fun recursiveFunction(n: int) -> int:

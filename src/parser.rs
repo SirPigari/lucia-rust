@@ -1463,10 +1463,10 @@ impl Parser {
                     }
                 }
 
-                "IDENTIFIER" if token.1 == "fun" || ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
+                "IDENTIFIER" if ["fun", "gen", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
                     let mut modifiers = vec![];
-                    let (name, is_function);
-                
+                    let (name, is_function, is_generator);
+
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
                         while let Some(tok) = self.token() {
                             if tok.0 == "IDENTIFIER" && ["public", "private", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str()) {
@@ -1476,23 +1476,30 @@ impl Parser {
                                 break;
                             }
                         }
-                    }                    
-                
+                    }
+
                     if self.token_is("IDENTIFIER", "fun") {
                         is_function = true;
+                        is_generator = false;
+                        self.next();
+                    } else if self.token_is("IDENTIFIER", "gen") {
+                        is_function = false;
+                        is_generator = true;
                         self.next();
                     } else {
                         is_function = false;
+                        is_generator = false;
                     }
-                    name = self.token().cloned().unwrap().1;
+
+                    name = self.token().cloned().unwrap().1.clone();
                     self.next();
-                    
-                    if is_function && name.is_empty() {
-                        self.raise("SyntaxError", "Function declaration must have a name");
+
+                    if (is_function || is_generator) && name.is_empty() {
+                        self.raise("SyntaxError", if is_function { "Function declaration must have a name" } else { "Generator declaration must have a name" });
                         return Statement::Null;
                     }
 
-                    if is_function {
+                    if is_function || is_generator {
                         self.check_for("SEPARATOR", "(");
                         self.next();
                         let mut pos_args = vec![];
@@ -1500,28 +1507,28 @@ impl Parser {
 
                         while let Some(mut current_tok) = self.token().cloned() {
                             let mut param_modifiers = vec![];
-                        
+
                             while current_tok.0 == "IDENTIFIER" &&
-                                  (current_tok.1 == "mutable" || current_tok.1 == "final" || current_tok.1 == "static" || current_tok.1 == "non-static")
+                                (current_tok.1 == "mutable" || current_tok.1 == "final" || current_tok.1 == "static" || current_tok.1 == "non-static")
                             {
                                 param_modifiers.push(current_tok.1.clone());
                                 self.next();
-                        
+
                                 if let Some(next_tok) = self.token() {
                                     current_tok = next_tok.clone();
                                 } else {
                                     break;
                                 }
                             }
-                        
+
                             if current_tok.0 == "SEPARATOR" && current_tok.1 == ")" {
                                 break;
                             }
-                        
+
                             if current_tok.0 == "IDENTIFIER" {
                                 let arg_name = current_tok.1.clone();
                                 self.next();
-                        
+
                                 let mut arg_type = Value::Map {
                                     keys: vec![
                                         Value::String("type".to_string()),
@@ -1534,7 +1541,7 @@ impl Parser {
                                         Value::String("simple".to_string()),
                                     ],
                                 };
-                        
+
                                 if self.token_is("SEPARATOR", ":") {
                                     self.next();
                                     let type_expr = self.parse_type();
@@ -1543,16 +1550,16 @@ impl Parser {
                                     }
                                     arg_type = type_expr.convert_to_map();
                                 }
-                        
+
                                 let modifiers_value = Value::List(param_modifiers.into_iter().map(Value::String).collect());
-                        
+
                                 if self.token_is("OPERATOR", "=") {
                                     self.next();
                                     let def_val = self.parse_expression();
                                     if self.err.is_some() {
                                         return Statement::Null;
                                     }
-                        
+
                                     let wrapped_named_arg = Value::Map {
                                         keys: vec![
                                             Value::String("type".to_string()),
@@ -1575,12 +1582,12 @@ impl Parser {
                                         Value::String(arg_name.clone()),
                                         arg_type,
                                     ];
-                        
+
                                     if let Value::List(_) = modifiers_value {
                                         keys.push(Value::String("modifiers".to_string()));
                                         values.push(modifiers_value);
                                     }
-                        
+
                                     let arg_stmt = Statement::Statement {
                                         keys,
                                         values,
@@ -1625,14 +1632,14 @@ impl Parser {
                             return Statement::Null;
                         }
                         if return_type.get_type() != "TYPE" {
-                            self.raise("SyntaxError", "Expected a type after '->'");
+                            self.raise("SyntaxError", if is_function { "Expected a type after '->'" } else { "Expected a type after '->' in generator" });
                             return Statement::Null;
                         }
 
                         if self.token_is("SEPARATOR", ":") {
                             self.next();
                         } else if !self.token_is("IDENTIFIER", "end") {
-                            self.raise("SyntaxError", "Expected ':' or 'end' after function parameters");
+                            self.raise("SyntaxError", if is_function { "Expected ':' or 'end' after function parameters" } else { "Expected ':' or 'end' after generator parameters" });
                             return Statement::Null;
                         }
 
@@ -1662,7 +1669,7 @@ impl Parser {
                                 Value::String("return_type".to_string()),
                             ],
                             values: vec![
-                                Value::String("FUNCTION_DECLARATION".to_string()),
+                                if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
                                 Value::String(name),
                                 Value::List(modifiers.into_iter().map(Value::String).collect()),
                                 Value::List(pos_args.into_iter().map(|s| s.convert_to_map()).collect()),
@@ -1752,9 +1759,24 @@ impl Parser {
                             loc: self.get_loc(),
                         };
                     }
+                    let mut parenthesis = false;
+                    if self.token_is("SEPARATOR", "(") {
+                        self.next();
+                        parenthesis = true;
+                    }
                     let value = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
+                    }
+                    if !self.token_is("SEPARATOR", ")") && parenthesis {
+                        self.raise_with_help(
+                            "SyntaxError",
+                            "Expected ')' after expression in 'return (...)'",
+                            "Maybe you forgot to add ')'?"
+                        );
+                        return Statement::Null;
+                    } else if parenthesis {
+                        self.next();
                     }
                     Statement::Statement {
                         keys: vec![
@@ -3055,6 +3077,31 @@ impl Parser {
                     if next_token.0 == "SEPARATOR" && next_token.1 == ";" {
                         found_semicolon = true;
                         self.next();
+
+                        if self.token_is("SEPARATOR", "]") {
+                            self.next();
+                            return Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("iterable_type".to_string()),
+                                    Value::String("seed".to_string()),
+                                    Value::String("end".to_string()),
+                                    Value::String("pattern_reg".to_string()),
+                                    Value::String("range_mode".to_string()),
+                                    Value::String("is_infinite".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("ITERABLE".to_string()),
+                                    Value::String("LIST_COMPLETION".to_string()),
+                                    Value::List(elements),
+                                    Value::Null,
+                                    Value::Boolean(pattern_reg),
+                                    Value::String("length".to_string()),
+                                    Value::Boolean(true),
+                                ],
+                                loc,
+                            };
+                        }
     
                         let expr = self.parse_expression();
                         if self.err.is_some() {

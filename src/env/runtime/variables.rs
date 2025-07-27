@@ -1,5 +1,5 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::make_native_method;
+use crate::env::runtime::utils::{make_native_method, convert_value_to_type};
 use crate::env::runtime::functions::Parameter;
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float};
@@ -34,7 +34,7 @@ impl Variable {
         let to_string = {
             let val_clone = self.value.clone();
             make_native_method(
-                "toString",
+                "to_string",
                 move |_args| {
                     match val_clone.to_string() {
                         s if !s.is_empty() => Value::String(s),
@@ -49,9 +49,9 @@ impl Variable {
         };
     
         self.properties.insert(
-            "toString".to_string(),
+            "to_string".to_string(),
             Variable::new(
-                "toString".to_string(),
+                "to_string".to_string(),
                 to_string,
                 "function".to_string(),
                 false,
@@ -65,7 +65,7 @@ impl Variable {
                 let to_bytes = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "toBytes",
+                        "to_bytes",
                         move |_args| {
                             match val_clone.to_bytes() {
                                 Some(bytes) => Value::Bytes(bytes),
@@ -125,7 +125,7 @@ impl Variable {
                 let to_int = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "toInt",
+                        "to_int",
                         move |_args| {
                             match &val_clone {
                                 Value::String(s) => Value::Int(create_int(s)),
@@ -141,7 +141,7 @@ impl Variable {
                 let to_float = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "toFloat",
+                        "to_float",
                         move |_args| {
                             match &val_clone {
                                 Value::String(s) => Value::Float(create_float(s)),
@@ -218,9 +218,9 @@ impl Variable {
                 };
 
                 self.properties.insert(
-                    "toBytes".to_string(),
+                    "to_bytes".to_string(),
                     Variable::new(
-                        "toBytes".to_string(),
+                        "to_bytes".to_string(),
                         to_bytes,
                         "function".to_string(),
                         false,
@@ -229,9 +229,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "endsWith".to_string(),
+                    "endswith".to_string(),
                     Variable::new(
-                        "endsWith".to_string(),
+                        "endswith".to_string(),
                         endswith,
                         "function".to_string(),
                         false,
@@ -240,9 +240,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "startsWith".to_string(),
+                    "startswith".to_string(),
                     Variable::new(
-                        "startsWith".to_string(),
+                        "startswith".to_string(),
                         startswith,
                         "function".to_string(),
                         false,
@@ -251,9 +251,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "toInt".to_string(),
+                    "to_int".to_string(),
                     Variable::new(
-                        "toInt".to_string(),
+                        "to_int".to_string(),
                         to_int,
                         "function".to_string(),
                         false,
@@ -262,9 +262,9 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
-                    "toFloat".to_string(),
+                    "to_float".to_string(),
                     Variable::new(
-                        "toFloat".to_string(),
+                        "to_float".to_string(),
                         to_float,
                         "function".to_string(),
                         false,
@@ -310,7 +310,7 @@ impl Variable {
                 let to_float = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "toFloat",
+                        "to_float",
                         move |_args| {
                             match &val_clone {
                                 Value::Int(i) => match i.to_float() {
@@ -447,9 +447,9 @@ impl Variable {
                 };
                 
                 self.properties.insert(
-                    "toFloat".to_string(),
+                    "to_float".to_string(),
                     Variable::new(
-                        "toFloat".to_string(),
+                        "to_float".to_string(),
                         to_float,
                         "function".to_string(),
                         false,
@@ -473,7 +473,7 @@ impl Variable {
                 let to_int = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "toInt",
+                        "to_int",
                         move |_args| {
                             match &val_clone {
                                 Value::Float(f) => match f.to_int() {
@@ -651,9 +651,9 @@ impl Variable {
                 };
             
                 self.properties.insert(
-                    "toInt".to_string(),
+                    "to_int".to_string(),
                     Variable::new(
-                        "toInt".to_string(),
+                        "to_int".to_string(),
                         to_int,
                         "function".to_string(),
                         false,
@@ -728,6 +728,40 @@ impl Variable {
                         None,
                     )
                 };
+
+                let into = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "into",
+                        move |args| {
+                            let type_ = args
+                                .get("type")
+                                .and_then(|v| if let Value::String(t) = v { Some(t.clone()) } else { None })
+                                .unwrap_or_else(|| "any".to_string());
+
+                            let item_vec = match &val_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+
+                            let mut list = Vec::with_capacity(item_vec.len());
+                            for item in item_vec {
+                                match convert_value_to_type(&type_, &item) {
+                                    Ok(converted) => list.push(converted),
+                                    Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                                }
+                            }
+
+                            Value::List(list)
+                        },
+                        vec![
+                            Parameter::positional("type", "str"),
+                        ],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -740,7 +774,6 @@ impl Variable {
                         true,
                     ),
                 );
-            
                 self.properties.insert(
                     "extend".to_string(),
                     Variable::new(
@@ -752,12 +785,23 @@ impl Variable {
                         true,
                     ),
                 );
+                self.properties.insert(
+                    "into".to_string(),
+                    Variable::new(
+                        "into".to_string(),
+                        into,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
             }            
             Value::Pointer(_) => {
                 let extract_ptr = {
                     let val_clone = self.value.clone();
                     make_native_method(
-                        "extractPtr",
+                        "extract_ptr",
                         move |_args| {
                             match &val_clone {
                                 Value::Pointer(ptr) => Value::Int(create_int(&ptr.to_string())),
@@ -772,10 +816,190 @@ impl Variable {
                 };
                 
                 self.properties.insert(
-                    "extractPtr".to_string(),
+                    "extract_ptr".to_string(),
                     Variable::new(
-                        "extractPtr".to_string(),
+                        "extract_ptr".to_string(),
                         extract_ptr,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
+            Value::Generator(_) => {
+                let collect = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "collect",
+                        move |_args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if !generator.is_infinite() {
+                                    let v = generator.to_vec();
+                                    if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                                        return Value::Error(err_type, err_msg, ref_err.clone());
+                                    }
+                                    return Value::List(v);
+                                } else {
+                                    return Value::Error("TypeError", "Cannot convert infinite generator to list", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let collect_into = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "collect_into",
+                        move |args| {
+                            let type_ = args
+                                .get("type")
+                                .and_then(|v| if let Value::String(t) = v { Some(t.clone()) } else { None })
+                                .unwrap_or_else(|| "any".to_string());
+
+                            let item_vec = match &val_clone {
+                                Value::Generator(generator) if !generator.is_infinite() => {
+                                    let v = generator.to_vec();
+                                    if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                                        return Value::Error(err_type, err_msg, ref_err.clone());
+                                    }
+                                    v
+                                }
+                                Value::Generator(_) => return Value::Error("TypeError", "Cannot convert infinite generator to list", None),
+                                _ => return Value::Error("TypeError", "Expected a generator", None),
+                            };
+
+                            let mut list = Vec::with_capacity(item_vec.len());
+                            for item in item_vec {
+                                match convert_value_to_type(&type_, &item) {
+                                    Ok(converted) => list.push(converted),
+                                    Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                                }
+                            }
+
+                            Value::List(list)
+                        },
+                        vec![Parameter::positional("type", "str")],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let next = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "next",
+                        move |_args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if let Some(next_value) = generator.next() {
+                                    return next_value;
+                                } else {
+                                    return Value::Error("StopIteration", "No more items in generator", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "any",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let is_done = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "is_done",
+                        move |_args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                return Value::Boolean(generator.is_done());
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let peek = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "peek",
+                        move |_args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if let Some(peeked_value) = generator.peek() {
+                                    return peeked_value;
+                                } else {
+                                    return Value::Error("StopIteration", "No more items in generator", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "any",
+                        true, true, true,
+                        None,
+                    )
+                };
+                
+                self.properties.insert(
+                    "collect".to_string(),
+                    Variable::new(
+                        "collect".to_string(),
+                        collect,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "collect_into".to_string(),
+                    Variable::new(
+                        "collect_into".to_string(),
+                        collect_into,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "next".to_string(),
+                    Variable::new(
+                        "next".to_string(),
+                        next,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "is_done".to_string(),
+                    Variable::new(
+                        "is_done".to_string(),
+                        is_done,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "peek".to_string(),
+                    Variable::new(
+                        "peek".to_string(),
+                        peek,
                         "function".to_string(),
                         false,
                         true,
