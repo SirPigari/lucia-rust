@@ -1301,10 +1301,74 @@ impl Preprocessor {
 
     fn mangle_tokens(&mut self, tokens: &[Token]) -> Vec<Token> {
         let mut result = Vec::new();
-
         let mut i = 0;
+
         while i < tokens.len() {
             let token = &tokens[i];
+
+            if token.0 == "KEYWORD" && token.1 == "for" {
+                let next = tokens.get(i + 1);
+                if let Some(next_tok) = next {
+                    if next_tok.0 == "IDENTIFIER" {
+                        let og_token = &next_tok.1;
+                        if og_token == "_" || KEYWORDS.contains(&og_token.as_str()) {
+                            result.push(token.clone());
+                            result.push(next_tok.clone());
+                        } else {
+                            let uid = if let Some(loc) = &next_tok.2 {
+                                format!("{}{}", loc.line_number, loc.range.0)
+                            } else {
+                                let id = self.mangle_context.counter;
+                                format!("gen{}", id)
+                            };
+                            let mangled = format!("__mangle_{}_{}", uid, og_token);
+                            self.mangle_context.mangle(og_token, &mangled);
+                            result.push(token.clone());
+                            result.push(Token("IDENTIFIER".to_string(), mangled, next_tok.2.clone()));
+                        }
+                        i += 2;
+                        continue;
+                    } else if next_tok.0 == "SYMBOL" && next_tok.1 == "(" {
+                        let mut j = i + 2;
+                        let mut paren_level = 1;
+                        while j < tokens.len() {
+                            let t = &tokens[j];
+                            if t.0 == "SYMBOL" && t.1 == "(" {
+                                paren_level += 1;
+                            } else if t.0 == "SYMBOL" && t.1 == ")" {
+                                paren_level -= 1;
+                            } else if t.0 == "KEYWORD" && t.1 == "in" && paren_level == 1 {
+                                break;
+                            }
+                            j += 1;
+                        }
+                        result.push(token.clone());
+                        result.push(next_tok.clone());
+                        let vars_tokens = &tokens[i + 2..j];
+                        for vt in vars_tokens.iter() {
+                            if vt.0 == "IDENTIFIER" && vt.1 != "_" && !KEYWORDS.contains(&vt.1.as_str()) {
+                                let og_token = &vt.1;
+                                let uid = if let Some(loc) = &vt.2 {
+                                    format!("{}{}", loc.line_number, loc.range.0)
+                                } else {
+                                    let id = self.mangle_context.counter;
+                                    format!("gen{}", id)
+                                };
+                                let mangled = format!("__mangle_{}_{}", uid, og_token);
+                                self.mangle_context.mangle(og_token, &mangled);
+                                result.push(Token("IDENTIFIER".to_string(), mangled, vt.2.clone()));
+                            } else {
+                                result.push(vt.clone());
+                            }
+                        }
+                        if let Some(in_token) = tokens.get(j) {
+                            result.push(in_token.clone());
+                        }
+                        i = j + 1;
+                        continue;
+                    }
+                }
+            }
 
             if token.0 == "IDENTIFIER" {
                 let og_token = &token.1;

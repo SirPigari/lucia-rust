@@ -604,6 +604,23 @@ impl InfRangeIter {
     }
 }
 
+#[derive(Clone)]
+pub struct VecIter {
+    pub vec: Vec<Value>,
+    pub index: usize,
+    pub done: bool,
+}
+
+impl VecIter {
+    pub fn new(vec: &[Value]) -> Self {
+        Self {
+            vec: vec.to_vec(),
+            index: 0,
+            done: false,
+        }
+    }
+}
+
 impl Iterator for RangeValueIter {
     type Item = Value;
 
@@ -687,6 +704,25 @@ impl Iterator for InfRangeIter {
     }
 }
 
+impl Iterator for VecIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done || self.index >= self.vec.len() {
+            return None;
+        }
+
+        let val = self.vec[self.index].clone();
+        self.index += 1;
+
+        if self.index >= self.vec.len() {
+            self.done = true;
+        }
+
+        Some(val)
+    }
+}
+
 impl GeneratorIterator for RangeValueIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
@@ -716,5 +752,15 @@ impl GeneratorIterator for InfRangeIter {
 
     fn is_infinite(&self) -> bool {
         true
+    }
+}
+
+impl GeneratorIterator for VecIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
     }
 }

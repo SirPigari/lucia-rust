@@ -4778,12 +4778,12 @@ impl Interpreter {
         static KEY_ITERABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("iterable".into()));
         static KEY_BODY: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("body".into()));
         static KEY_VARIABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("variable".into()));
-    
+
         let iterable = match statement.get(&*KEY_ITERABLE) {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'iterable' in for loop statement"),
         };
-    
+
         let iterable_value = self.evaluate(iterable.convert_to_statement());
         if self.err.is_some() {
             return NULL;
@@ -4791,32 +4791,45 @@ impl Interpreter {
         if !iterable_value.is_iterable() {
             return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
         }
-    
+
         let body = match statement.get(&*KEY_BODY) {
             Some(Value::List(body)) => body,
             _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
         };
-    
-        let variable_name = match statement.get(&*KEY_VARIABLE) {
-            Some(Value::String(name)) => name,
-            Some(Value::List(_)) => {
-                return self.raise("NotImplemented", "List destructuring is not supported yet");
-            }
-            _ => return self.raise("RuntimeError", "Expected a string for 'variable' in for loop statement"),
+
+        let variable_value = match statement.get(&*KEY_VARIABLE) {
+            Some(Value::String(name)) => Value::List(vec![Value::String(name.clone())]),
+            Some(Value::List(names)) => Value::List(names.clone()),
+            _ => return self.raise("RuntimeError", "Expected a string or list for 'variable' in for loop statement"),
         };
-    
-        let var_name_str = variable_name.as_str();
-    
+
+        let variable_names: Vec<String> = match &variable_value {
+            Value::List(vars) => {
+                let mut names = Vec::new();
+                for v in vars {
+                    if let Value::String(s) = v {
+                        names.push(s.clone());
+                    } else {
+                        return self.raise("RuntimeError", "Variable names must be strings");
+                    }
+                }
+                names
+            }
+            _ => unreachable!(),
+        };
+
         let mut result = NULL;
-    
+
         for item in iterable_value.iter() {
-            let previous = self.variables.get(var_name_str).cloned();
+            let previous_vars: Vec<Option<Variable>> = variable_names.iter()
+                .map(|name| self.variables.get(name).cloned())
+                .collect();
 
             if self.check_stop_flag() {
                 return NULL;
             }
 
-            if let Value::Error (err_type, err_msg, ref_err) = item {
+            if let Value::Error(err_type, err_msg, ref_err) = item {
                 if let Some(re) = ref_err {
                     self.err = Some(Error::with_ref(err_type, err_msg, re.clone(), &self.file_path.clone()));
                 } else {
@@ -4824,40 +4837,67 @@ impl Interpreter {
                 }
                 return NULL;
             }
-    
-            self.variables.insert(
-                variable_name.clone(),
-                Variable::new(variable_name.clone(), item.clone(), item.type_name(), false, true, true),
-            );
-    
+
+            // Destructure if item is a list or tuple, else single assignment if only one var name
+            if variable_names.len() == 1 {
+                // Single variable assignment
+                self.variables.insert(
+                    variable_names[0].clone(),
+                    Variable::new(variable_names[0].clone(), item.clone(), item.type_name(), false, true, true),
+                );
+            } else {
+                // Multiple variables: check item is list or tuple and match lengths
+                let values_to_assign = match item {
+                    Value::List(inner) => inner,
+                    Value::Tuple(inner) => inner,
+                    _ => {
+                        return self.raise("TypeError", &format!("Cannot destructure non-list/tuple value into multiple variables"));
+                    }
+                };
+
+                if values_to_assign.len() != variable_names.len() {
+                    return self.raise("ValueError", &format!("Mismatched number of variables and values to destructure ({} vs {})", variable_names.len(), values_to_assign.len()));
+                }
+
+                for (name, val) in variable_names.iter().zip(values_to_assign.iter()) {
+                    self.variables.insert(
+                        name.clone(),
+                        Variable::new(name.clone(), val.clone(), val.type_name(), false, true, true),
+                    );
+                }
+            }
+
             for stmt in body {
                 result = self.evaluate(stmt.convert_to_statement());
-    
+
                 if self.err.is_some() {
-                    if let Some(var) = previous {
-                        self.variables.insert(variable_name.clone(), var);
-                    } else {
-                        self.variables.remove(variable_name);
+                    for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
+                        match prev_var {
+                            Some(var) => self.variables.insert(name.clone(), var.clone()),
+                            None => self.variables.remove(name),
+                        };
                     }
                     return NULL;
                 }
-    
+
                 if self.is_returning {
-                    if let Some(var) = previous {
-                        self.variables.insert(variable_name.clone(), var);
-                    } else {
-                        self.variables.remove(variable_name);
+                    for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
+                        match prev_var {
+                            Some(var) => self.variables.insert(name.clone(), var.clone()),
+                            None => self.variables.remove(name),
+                        };
                     }
                     return result;
                 }
             }
-    
-            if let Some(var) = previous {
-                self.variables.insert(variable_name.clone(), var);
-            } else {
-                self.variables.remove(variable_name);
+
+            for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
+                match prev_var {
+                    Some(var) => self.variables.insert(name.clone(), var.clone()),
+                    None => self.variables.remove(name),
+                };
             }
-    
+
             match self.state {
                 State::Break => {
                     self.state = State::Normal;
@@ -4870,7 +4910,7 @@ impl Interpreter {
                 _ => {}
             }
         }
-    
+
         result
     }
 

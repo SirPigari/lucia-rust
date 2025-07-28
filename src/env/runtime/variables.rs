@@ -1,6 +1,7 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, convert_value_to_type};
 use crate::env::runtime::functions::Parameter;
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter};
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float};
 use imagnum::{create_int, create_float};
@@ -762,6 +763,66 @@ impl Variable {
                         None,
                     )
                 };
+
+                let into_gen = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "into_gen",
+                        move |_args| {
+                            let vec = match &val_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+                            
+                            let vec_iter = VecIter::new(&vec);
+
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(vec_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(generator)
+                        },
+                        vec![],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let enumerate = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "enumerate",
+                        move |_args| {
+                            let vec = match &val_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+                            let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
+                                Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
+                            }).collect::<Vec<Value>>();
+                            let vec_iter = VecIter::new(&vec_enumerated);
+
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(vec_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(generator)
+                        },
+                        vec![],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -796,7 +857,101 @@ impl Variable {
                         true,
                     ),
                 );
-            }            
+                self.properties.insert(
+                    "into_gen".to_string(),
+                    Variable::new(
+                        "into_gen".to_string(),
+                        into_gen,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "enumerate".to_string(),
+                    Variable::new(
+                        "enumerate".to_string(),
+                        enumerate,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
+            Value::Tuple(_) => {
+                let to_list = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "to_list",
+                        move |_args| {
+                            if let Value::Tuple(tuple) = &val_clone {
+                                return Value::List(tuple.to_vec());
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let enumerate = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "enumerate",
+                        move |_args| {
+                            let vec = match &val_clone {
+                                Value::Tuple(v) => v.clone(),
+                                _ => return Value::Error("TypeError", "Expected a tuple", None),
+                            };
+                            let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
+                                Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
+                            }).collect::<Vec<Value>>();
+                            let vec_iter = VecIter::new(&vec_enumerated);
+
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(vec_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(generator)
+                        },
+                        vec![],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
+                
+                self.properties.insert(
+                    "to_list".to_string(),
+                    Variable::new(
+                        "to_list".to_string(),
+                        to_list,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "enumerate".to_string(),
+                    Variable::new(
+                        "enumerate".to_string(),
+                        enumerate,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }     
             Value::Pointer(_) => {
                 let extract_ptr = {
                     let val_clone = self.value.clone();
@@ -950,6 +1105,43 @@ impl Variable {
                         None,
                     )
                 };
+
+                let enumerate = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "enumerate",
+                        move |_args| {
+                            let vec = match &val_clone {
+                                Value::Generator(g) => {
+                                    if !g.is_infinite() {
+                                        g.to_vec()
+                                    } else {
+                                        return Value::Error("TypeError", "Cannot enumerate infinite generator", None);
+                                    }
+                                }
+                                _ => return Value::Error("TypeError", "Expected a generator", None),
+                            };
+                            let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
+                                Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
+                            }).collect::<Vec<Value>>();
+                            let vec_iter = VecIter::new(&vec_enumerated);
+
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(vec_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(generator)
+                        },
+                        vec![],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
                 
                 self.properties.insert(
                     "collect".to_string(),
@@ -1000,6 +1192,17 @@ impl Variable {
                     Variable::new(
                         "peek".to_string(),
                         peek,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "enumerate".to_string(),
+                    Variable::new(
+                        "enumerate".to_string(),
+                        enumerate,
                         "function".to_string(),
                         false,
                         true,

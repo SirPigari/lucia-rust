@@ -16,20 +16,20 @@
 // in macro f-strings you can use the $arg$ for the value of the arg
 // gets replaced by {arg_value} in the string
 // also the string MUST be f-string, otherwise it will not work
-#macro assert_eq($a, $b, $msg=(f"Values are not equal, expected: $a$, got: $b$")):
+#macro assert_eq($a, $b, $msg=(f"Values are not equal, expected: $b$, got: $a$")):
     if (($a) != ($b)):
         throw $msg from "AssertionError"
     end
 #endmacro
 
-#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $a$, got: $b$ (within $epsilon$)")):
+#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $b$, got: $a$ (within $epsilon$)")):
     if ((|($a) - ($b)|) > $epsilon):
         throw $msg from "AssertionError"
     end
 #endmacro
 
 
-#macro assert_ne($a, $b, $msg=(f"Values are equal but should not be, expected: $a$, got: $b$")):
+#macro assert_ne($a, $b, $msg=(f"Values are equal but should not be, expected: $b$, got: $a$")):
     if (($a) == ($b)):
         throw $msg from "AssertionError"
     end
@@ -78,14 +78,12 @@
     // its on the macro to decide the type
     // here we use a list (denoted by the [])
     values: list = [$value]
-    i: int = 0
-    for (n in values):
+    for ((i, n) in values.enumerate()):
         // $!value means the stringified version of the value tokens
         print($!value.split(",")[i].trim(), "=", _collections.format_value(n).trim())
-        i++
     end
-    forget (values, i)
-    null  // otherwise it will return the last value (values, i)
+    forget values
+    null  // otherwise it will return the last value (values)
 #endmacro
 
 #macro dbglog($value):

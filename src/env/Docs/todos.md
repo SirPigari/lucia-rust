@@ -8,7 +8,7 @@ Be free to fix them or add new ones.
 _Total TODOs found: 7_
 ---
 
-### [`src/env/libs/std/macros.lc:95:36`](../../../src/env/libs/std/macros.lc#L95) _(added by **SirPigari** on **2025-07-22**)_
+### [`src/env/libs/std/macros.lc:93:36`](../../../src/env/libs/std/macros.lc#L93) _(added by **SirPigari** on **2025-07-22**)_
 - Fix apollo time in time module (src/env/libs/time/__init__.rs)
 
 ### [`src/env/transpiler/transpiler.rs:78:1`](../../../src/env/transpiler/transpiler.rs#L78) _(added by **SirPigari** on **2025-07-21**)_
@@ -18,7 +18,7 @@ _Total TODOs found: 7_
 - stick to C for now
 - fuck it compile to Rust its better anyway
 
-### [`src/interpreter.rs:5462:1`](../../../src/interpreter.rs#L5462) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5502:1`](../../../src/interpreter.rs#L5502) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
