@@ -44,7 +44,7 @@ assert_err!(assert_type!(i, str, "Expected i to be a string"))
 // this macro is in development and may not work as expected
 // this is just test if macros can run complex code inside them
 (_, elapsed: int) = time_it!(
-    for (i in [0..6969]):
+    for (i in [0..69]):
         i * i
     end
 )

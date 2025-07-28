@@ -1,7 +1,7 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, convert_value_to_type};
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter};
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float};
 use imagnum::{create_int, create_float};
@@ -1111,24 +1111,15 @@ impl Variable {
                     make_native_method(
                         "enumerate",
                         move |_args| {
-                            let vec = match &val_clone {
-                                Value::Generator(g) => {
-                                    if !g.is_infinite() {
-                                        g.to_vec()
-                                    } else {
-                                        return Value::Error("TypeError", "Cannot enumerate infinite generator", None);
-                                    }
-                                }
+                            let generator = match &val_clone {
+                                Value::Generator(generator) => generator,
                                 _ => return Value::Error("TypeError", "Expected a generator", None),
                             };
-                            let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
-                                Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
-                            }).collect::<Vec<Value>>();
-                            let vec_iter = VecIter::new(&vec_enumerated);
+                            let enumerate_iter = EnumerateIter::new(generator);
 
                             let generator = Generator::new_anonymous(
                                 GeneratorType::Native(NativeGenerator {
-                                    iter: Box::new(vec_iter),
+                                    iter: Box::new(enumerate_iter),
                                     iteration: 0,
                                 }),
                                 false,

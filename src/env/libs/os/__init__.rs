@@ -71,10 +71,7 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     unsafe {
         let arc = Arc::from_raw(ptr as *const Value);
 
-        let cloned = arc.clone();
-        std::mem::forget(arc);
-
-        Value::Pointer(Arc::into_raw(cloned) as usize)
+        Value::Pointer(arc)
     }
 }
 

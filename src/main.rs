@@ -72,6 +72,10 @@ mod env {
         pub mod nest {
             pub mod __init__;
         }
+        pub mod libload {
+            pub mod __init__;
+            pub mod ffi;
+        }
     }
     pub mod transpiler {
         pub mod transpiler;

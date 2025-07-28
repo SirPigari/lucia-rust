@@ -621,6 +621,23 @@ impl VecIter {
     }
 }
 
+#[derive(Clone)]
+pub struct EnumerateIter {
+    pub generator: Box<Generator>,
+    pub index: usize,
+    pub done: bool,
+}
+
+impl EnumerateIter {
+    pub fn new(generator: &Generator) -> Self {
+        Self {
+            generator: Box::new(generator.clone()),
+            index: 0,
+            done: false,
+        }
+    }
+}
+
 impl Iterator for RangeValueIter {
     type Item = Value;
 
@@ -704,6 +721,28 @@ impl Iterator for InfRangeIter {
     }
 }
 
+impl Iterator for EnumerateIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let val = self.generator.next()?;
+
+        let result = Value::Tuple(vec![Value::Int(Int::from(self.index)), val]);
+
+        self.index += 1;
+
+        if self.generator.is_done() {
+            self.done = true;
+        }
+
+        Some(result)
+    }
+}
+
 impl Iterator for VecIter {
     type Item = Value;
 
@@ -752,6 +791,16 @@ impl GeneratorIterator for InfRangeIter {
 
     fn is_infinite(&self) -> bool {
         true
+    }
+}
+
+impl GeneratorIterator for EnumerateIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
     }
 }
 

@@ -359,8 +359,11 @@ impl Interpreter {
                 return false;
             }
     
-            if !valid_types.contains(&normalized_expected) || !valid_types.contains(&normalized_actual) {
+            if !valid_types.contains(&normalized_expected) {
                 return self._handle_invalid_type(normalized_expected, valid_types.to_vec());
+            }
+            if !valid_types.contains(&normalized_actual) {
+                return self._handle_invalid_type(normalized_actual, valid_types.to_vec());
             }
     
             if normalized_actual == "int" && normalized_expected == "float" && !is_ref_expected {
@@ -1816,70 +1819,73 @@ impl Interpreter {
     fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
         let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&NULL);
         let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&NULL);
-    
+
         if *pointer_type == Value::String("POINTER_ASSIGN".to_string()) {
             if self.err.is_some() {
                 self.err = None;
             }
-        }        
-    
+        }
+
         let value = self.evaluate(value_opt.convert_to_statement());
-    
+
         if !self.config.allow_unsafe {
             return self.raise_with_help(
                 "PermissionError",
                 "Pointer operations are not allowed in this context",
-                "Enable 'allow_unsafe' in the configuration to use pointers."
+                "Enable 'allow_unsafe' in the configuration to use pointers.",
             );
         }
-    
+
         if self.err.is_some() {
             return NULL;
         }
-    
+
         match pointer_type {
             Value::String(t) if t == "POINTER_REF" => {
-                let rc = std::rc::Rc::new(value);
-                let ptr = std::rc::Rc::into_raw(rc) as usize;
-    
-                if ptr == 0 {
-                    self.raise("MemoryError", "Failed to create pointer reference");
-                    return NULL;
-                }
-    
-                Value::Pointer(ptr)
-            }            
-    
+                Value::Pointer(Arc::new(value))
+            }
+
             Value::String(t) if t == "POINTER_DEREF" => {
-                if let Value::Pointer(ptr_val) = value {
-                    let raw = ptr_val as *const Value;
-                    unsafe {
-                        (*raw).clone()
-                    }
+                if let Value::Pointer(ptr_arc) = value {
+                    (*ptr_arc).clone()
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
                     NULL
                 }
             }
-            
+
             Value::String(t) if t == "POINTER_ASSIGN" => {
-                let left = self.evaluate(statement.get(&Value::String("left".to_string())).unwrap_or(&NULL).convert_to_statement());
-                let right = self.evaluate(statement.get(&Value::String("right".to_string())).unwrap_or(&NULL).convert_to_statement());
+                let left = self.evaluate(
+                    statement
+                        .get(&Value::String("left".to_string()))
+                        .unwrap_or(&NULL)
+                        .convert_to_statement(),
+                );
+                let right = self.evaluate(
+                    statement
+                        .get(&Value::String("right".to_string()))
+                        .unwrap_or(&NULL)
+                        .convert_to_statement(),
+                );
+
                 if self.err.is_some() {
                     return NULL;
                 }
-                if let Value::Pointer(ptr_val) = left {
-                    let raw = ptr_val as *mut Value;
+
+                if let Value::Pointer(ref ptr_arc) = left {
+                    let raw_ptr = Arc::as_ptr(&ptr_arc) as *mut Value;
+
                     unsafe {
-                        *raw = right.clone();
+                        raw_ptr.write(right.clone());
                     }
-                    Value::Pointer(ptr_val)
+
+                    left
                 } else {
-                    self.raise("TypeError", "Expected a pointer reference for assignment");
+                    self.raise("TypeError", "Expected pointer reference for assignment");
                     NULL
                 }
             }
-    
+
             _ => {
                 self.raise("SyntaxError", "Invalid pointer type");
                 NULL
@@ -2465,8 +2471,7 @@ impl Interpreter {
             if self.err.is_some() {
                 return NULL;
             }
-            let ptr: usize = std::rc::Rc::into_raw(std::rc::Rc::new(new_value)) as usize;
-            return Value::Pointer(ptr);
+            return Value::Pointer(Arc::new(new_value));
         }
         if target_type.starts_with("?") {
             let new_type = target_type.trim_start_matches('?').to_string();
@@ -2674,6 +2679,24 @@ impl Interpreter {
                     let interpreter_arc = Arc::new(Mutex::new(&mut *self));
                     let nest_module_props = nest::register(interpreter_arc);
                     for (name, var) in nest_module_props {
+                        properties.insert(name, var);
+                    }
+                }
+                "libload" => {
+                    use crate::env::libs::libload::__init__ as libload;
+                    let arc_config = Arc::new(self.config.clone());
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("libload").join("__init__.rs").display().to_string();
+                    let result = libload::init_libload(arc_config, module_path);
+                    if let Err(e) = result {
+                        self.stack.pop();
+                        return self.raise_with_ref(
+                            "ImportError",
+                            "Failed to initialize libload module",
+                            e,
+                        );
+                    }
+                    let libload_module_props = libload::register();
+                    for (name, var) in libload_module_props {
                         properties.insert(name, var);
                     }
                 }
@@ -6689,37 +6712,37 @@ impl Interpreter {
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
                 let l_val = unsafe {
-                    let raw = *lp as *const Value;
-                    let rc = std::rc::Rc::from_raw(raw);
-                    let val = (*rc).clone();
-                    std::mem::forget(rc);
+                    let raw = Arc::as_ptr(lp);
+                    let arc = Arc::from_raw(raw);
+                    let val = (*arc).clone();
+                    std::mem::forget(arc);
                     val
                 };
                 let r_val = unsafe {
-                    let raw = *rp as *const Value;
-                    let rc = std::rc::Rc::from_raw(raw);
-                    let val = (*rc).clone();
-                    std::mem::forget(rc);
+                    let raw = Arc::as_ptr(rp);
+                    let arc = Arc::from_raw(raw);
+                    let val = (*arc).clone();
+                    std::mem::forget(arc);
                     val
                 };
                 (l_val, r_val)
             }
             (Value::Pointer(lp), r) => {
                 let l_val = unsafe {
-                    let raw = *lp as *const Value;
-                    let rc = std::rc::Rc::from_raw(raw);
-                    let val = (*rc).clone();
-                    std::mem::forget(rc);
+                    let raw = Arc::as_ptr(lp);
+                    let arc = Arc::from_raw(raw);
+                    let val = (*arc).clone();
+                    std::mem::forget(arc);
                     val
                 };
                 (l_val, r.clone())
             }
             (l, Value::Pointer(rp)) => {
                 let r_val = unsafe {
-                    let raw = *rp as *const Value;
-                    let rc = std::rc::Rc::from_raw(raw);
-                    let val = (*rc).clone();
-                    std::mem::forget(rc);
+                    let raw = Arc::as_ptr(rp);
+                    let arc = Arc::from_raw(raw);
+                    let val = (*arc).clone();
+                    std::mem::forget(arc);
                     val
                 };
                 (l.clone(), r_val)
@@ -6739,32 +6762,14 @@ impl Interpreter {
             .collect::<Vec<_>>()
             .join("::");
 
-        // if let Some(cached) = deep_get(
-        //     self.cache
-        //         .get("operations")
-        //         .unwrap_or(&Value::Null),
-        //     path,
-        // ) {
-        //     debug_log(
-        //         &format!(
-        //             "<CachedOperation: {} {} {}>",
-        //             format_value(&left),
-        //             operator,
-        //             format_value(&right)
-        //         ),
-        //         &self.config,
-        //         Some(self.use_colors.clone()),
-        //     );
-        //     return cached.clone();
-        // }
-
         if let Some(cached) = self.cache.operations.get(&cache_key) {
             debug_log(
                 &format!(
-                    "<CachedOperation: {} {} {}>",
+                    "<CachedOperation: {} {} {} -> {}>",
                     format_value(&left),
                     operator,
-                    format_value(&right)
+                    format_value(&right),
+                    format_value(cached)
                 ),
                 &self.config,
                 Some(self.use_colors.clone()),
@@ -6777,12 +6782,6 @@ impl Interpreter {
         if self.err.is_some() {
             return NULL;
         }
-
-        // let cache_root = self.cache
-        //     .entry("operations".into())
-        //     .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-
-        // deep_insert(cache_root, path, result.clone());
 
         self.cache.operations.insert(cache_key, result.clone());
 
@@ -6882,22 +6881,14 @@ impl Interpreter {
         if left.is_infinity() || right.is_infinity() {
             return self.raise("MathError", "Operation with Infinity is not allowed");
         }
-    
-        if operator == "abs" {
-            debug_log(
-                &format!("<Operation: |{}|>", format_value(&right)),
-                &self.config,
-                Some(self.use_colors.clone()),
-            );
+        
+        let log_str = if operator == "abs" {
+            format!("<Operation: |{}| -> {{}}>", format_value(&right))
         } else {
-            debug_log(
-                &format!("<Operation: {} {} {}>", format_value(&left), operator, format_value(&right)),
-                &self.config,
-                Some(self.use_colors.clone()),
-            );
-        }
-    
-        match operator {
+            format!("<Operation: {} {} {} -> {{}}>", format_value(&left), operator, format_value(&right))
+        };
+
+        let result = match operator {
             "+" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => match a + b {
                     Ok(res) => Value::Int(res),
@@ -7296,7 +7287,14 @@ impl Interpreter {
                 }
             },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
-        }
+        };
+
+        debug_log(
+            &log_str.replace("{}", &format_value(&result)),
+            &self.config,
+            Some(self.use_colors.clone()),
+        );
+        return result;
     }
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {

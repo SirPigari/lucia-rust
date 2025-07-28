@@ -90,6 +90,12 @@ pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         expected_lucia_version: "^2.0.0",
     });
 
+    m.insert("libload", LibInfo {
+        description: "Dynamic library loading and function invocation.",
+        version: "1.0.0",
+        expected_lucia_version: "^2.0.0",
+    });
+
     m
 });
 

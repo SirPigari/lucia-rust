@@ -177,8 +177,8 @@ pub fn format_value(value: &Value) -> String {
             format!("<module '{}' at 0x{:X}>", obj.name(), addr)
         }
 
-        Value::Pointer(ptr) => {
-            let raw_ptr = *ptr as *const ();
+        Value::Pointer(arc) => {
+            let raw_ptr = Arc::as_ptr(arc);
             let addr = raw_ptr as usize;
             format!("<pointer to 0x{:X}>", addr)
         }
@@ -313,7 +313,7 @@ pub fn get_type_default(type_: &str) -> Value {
         let inner_type = &type_[1..];
         let boxed = Box::new(get_type_default(inner_type));
         let ptr = Box::into_raw(boxed) as usize;
-        return Value::Pointer(ptr);
+        return Value::Pointer( unsafe { Arc::from_raw(ptr as *const Value) });
     }
     if type_.starts_with("?") {
         let inner_type = &type_[1..];

@@ -17,6 +17,7 @@ use bincode::{
     de::{BorrowDecode, Decode, Decoder},
     error::{EncodeError, DecodeError},
 };
+use std::sync::Arc;
 
 #[derive(Clone, PartialEq, PartialOrd)]
 pub enum Value {
@@ -35,7 +36,7 @@ pub enum Value {
     Function(Function),
     Generator(Generator),
     Module(Object, PathBuf),
-    Pointer(usize),
+    Pointer(Arc<Value>),
     Error(&'static str, &'static str, Option<Error>),
 }
 
@@ -45,8 +46,9 @@ impl fmt::Debug for Value {
             Value::Generator(_) => write!(f, "Generator(...)"),
             Value::Function(func) => write!(f, "Function('{}')", func.get_name()),
             Value::Module(obj, _) => write!(f, "Module('{}')", obj.name()),
-            Value::Pointer(ptr) => {
-                let addr = *ptr as *const () as usize;
+            Value::Pointer(arc) => {
+                let raw_ptr = Arc::as_ptr(arc);
+                let addr = raw_ptr as usize;
                 write!(f, "Pointer(0x{:X})", addr)
             },
             Value::Error(kind, msg, _) => write!(f, "Error({}, {})", kind, msg),
@@ -98,9 +100,9 @@ impl Serialize for Value {
                 s.serialize_field("message", msg)?;
                 s.end()
             }
-            Value::Pointer(ptr) => {
+            Value::Pointer(arc) => {
                 let mut s = serializer.serialize_struct("Pointer", 1)?;
-                let raw_ptr = *ptr as *const ();
+                let raw_ptr = Arc::as_ptr(arc);
                 let addr = raw_ptr as usize;
                 s.serialize_field("address", &format!("0x{:X}", addr))?;
                 s.end()
@@ -268,7 +270,7 @@ impl<C> Decode<C> for Value {
             7 => Ok(Value::List(Vec::<Value>::decode(decoder)?)),
             8 => Ok(Value::Bytes(Vec::<u8>::decode(decoder)?)),
             9 | 10 | 12 => Ok(Value::Null),
-            11 => Ok(Value::Pointer(usize::decode(decoder)?)),
+            11 => Ok(Value::Pointer(unsafe { Arc::from_raw(usize::decode(decoder)? as *const Value) })),
             _ => Err(DecodeError::Other("invalid tag".into())),
         }
     }
@@ -514,13 +516,9 @@ impl Value {
             Value::Function(_) => "function".to_string(),
             Value::Generator(_) => "generator".to_string(),
             Value::Module(obj, _) => obj.name().to_string(),
-            Value::Pointer(ptr) => {
-                let raw = *ptr as *const Value;
-                let recovered = unsafe { std::rc::Rc::from_raw(raw) };
-                let name = recovered.type_name();
-                std::mem::forget(recovered);
-                format!("&{}", name)
-            }            
+            Value::Pointer(arc) => {
+                format!("&{}", arc.type_name())
+            }
             Value::Error(..) => "error".to_string(),
         }
     }
@@ -579,7 +577,7 @@ impl Value {
                 }
             }
             Value::Pointer(ptr) => {
-                let raw_ptr = *ptr as *const ();
+                let raw_ptr = Arc::as_ptr(ptr);
                 let addr = raw_ptr as usize;
                 format!("<pointer to 0x{:X}>", addr)
             }
@@ -643,7 +641,7 @@ impl Value {
             }
 
             Value::Pointer(ptr) => {
-                let raw_ptr = *ptr as *const ();
+                let raw_ptr = Arc::as_ptr(ptr);
                 let addr = raw_ptr as usize;
                 let description = format!("<pointer to 0x{:X}>", addr);
                 Some(description.into_bytes())
