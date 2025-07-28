@@ -1475,18 +1475,7 @@ fn execute_file(
     }
 }
 
-fn repl(
-    config: Config,
-    use_colors: bool,
-    disable_preprocessor: bool,
-    home_dir_path: PathBuf,
-    config_path: PathBuf,
-    debug_mode: Option<String>,
-    cwd: PathBuf,
-    argv: &Vec<String>,
-    dump_pp_flag: &bool,
-    dump_ast_flag: &bool,
-) {
+fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
         hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
@@ -1514,7 +1503,10 @@ fn repl(
         }
     }
 
-    let mut preprocessor = Preprocessor::new(home_dir_path.join("libs"), "<stdin>");
+    let mut preprocessor = Preprocessor::new(
+        home_dir_path.join("libs"),
+        "<stdin>",
+    );
 
     let print_start_debug = matches!(debug_mode.as_deref(), Some("full" | "minimal"));
     let print_intime_debug = matches!(debug_mode.as_deref(), Some("full" | "normal"));
@@ -1618,11 +1610,6 @@ fn repl(
         }
 
         if input == "\x03" {
-            println!("Use 'exit()' to exit.");
-            continue;
-        }
-
-        if input == "\x04" {
             exit(0);
         }
 
@@ -1665,19 +1652,25 @@ fn repl(
                 })
                 .map(|token| (&token.0, &token.1))
                 .collect::<Vec<_>>();
-
+        
             debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
-        }
+        }        
 
         let tokens = processed_tokens;
 
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new(
+            tokens,
+        );
 
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
                 if print_intime_debug {
-                    debug_log("Error while parsing", &config, Some(use_colors));
+                    debug_log(
+                        "Error while parsing",
+                        &config,
+                        Some(use_colors),
+                    );
                 }
                 handle_error(&error.clone(), &input, &config, use_colors);
                 continue;
@@ -1720,11 +1713,35 @@ fn repl(
 
         let mut interpreter_clone = interpreter.clone();
         let statements_clone = statements.clone();
+        let loc = statements.iter().rev().find_map(|stmt| {
+            if let Statement::Statement { keys, values, loc } = stmt {
+                let found = keys.iter().zip(values.iter()).any(|(k, v)| {
+                    *k == Value::String("type".into())
+                        && (*v == Value::String("FOR".into())
+                            || *v == Value::String("WHILE".into())
+                            || *v == Value::String("CALL".into()))
+                });
+                if found {
+                    loc.clone()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }).or_else(|| {
+            statements.iter().rev().find_map(|stmt| {
+                if let Statement::Statement { loc, .. } = stmt {
+                    loc.clone()
+                } else {
+                    None
+                }
+            })
+        });
 
         let handle = thread::spawn(move || {
             let result = interpreter_clone.interpret(statements_clone, true);
-            let state = interpreter_clone.state.clone();
-            (result, state)
+            (result, interpreter_clone)
         });
 
         loop {
@@ -1733,12 +1750,13 @@ fn repl(
             }
             if ctrl_t_pressed() {
                 stop_flag.store(true, Ordering::Relaxed);
-                handle_error(
-                    &Error::new("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", "<stdin>"),
-                    &input,
-                    &config,
-                    use_colors,
-                );
+                
+                let err = match loc {
+                    Some(loc) => Error::with_location("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", loc),
+                    None => Error::new("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", "<stdin>"),
+                };
+
+                handle_error(&err, &input, &config, use_colors);
                 break;
             }
             if handle.is_finished() {
@@ -1747,23 +1765,33 @@ fn repl(
             thread::sleep(Duration::from_millis(50));
         }
 
-        let (out_raw, state) = handle.join().unwrap();
-        interpreter.state = state;
+        let (out_raw, i) = handle.join().unwrap();
+        interpreter = i.clone();
 
-        let out = out_raw.unwrap_or(Value::Null);
+        let out = match out_raw {
+            Ok(out) => {
+                if interpreter.is_stopped() {
+                    if config.cache_format.is_enabled() {
+                        let cache_dir = home_dir_path.join(".cache");
+                        if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
+                            debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                        }
+                    }
+                    exit(0);
+                }
+                out
+            }
+            Err(error) => {
+                if print_intime_debug {
+                    debug_log("Error while interpreting:", &config, Some(use_colors));
+                }
+                handle_error(&error.clone(), &input, &config, use_colors);
+                continue;
+            }
+        };
 
         if !matches!(out, Value::Null) {
             println!("{}", format_value(&out));
-        }
-
-        if interpreter.is_stopped() {
-            if config.cache_format.is_enabled() {
-                let cache_dir = home_dir_path.join(".cache");
-                if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
-                    debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
-                }
-            }
-            exit(0);
         }
     }
 }
