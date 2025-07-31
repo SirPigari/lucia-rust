@@ -573,6 +573,10 @@ fn main() {
 
     scan_todos_and_generate_report(&src_path, &path);
 
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg=-mmacosx-version-min=14.0");
+    }
+
     if cfg!(target_os = "windows") {
         use winres::WindowsResource;
         let mut res = WindowsResource::new();
