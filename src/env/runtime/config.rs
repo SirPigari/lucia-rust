@@ -22,7 +22,7 @@ pub struct Config {
     pub allow_fetch: bool,
     pub allow_unsafe: bool,
     pub home_dir: String,
-    pub recursion_limit: usize,
+    pub stack_size: usize,
     pub version: String,
     pub color_scheme: ColorScheme,
 }
@@ -55,7 +55,7 @@ impl Default for Config {
             allow_fetch: true,
             allow_unsafe: false,
             home_dir: "lucia/src/env/".to_string(),
-            recursion_limit: 999,
+            stack_size: 16777216, // 16 MB
             color_scheme: ColorScheme {
                 exception: "#F44350".to_string(),
                 warning: "#F5F534".to_string(),
@@ -163,16 +163,16 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected a string value for 'home_dir'".to_string())
             }
         }
-        "recursion_limit" => {
+        "stack_size" => {
             if let Value::Int(val) = value {
                 if let Ok(i64_val) = val.to_i64() {
-                    config.recursion_limit = i64_val as usize;
+                    config.stack_size = i64_val as usize;
                     Ok(())
                 } else {
-                    Err("Expected an integer value for 'recursion_limit'".to_string())
+                    Err("Expected an integer value for 'stack_size'".to_string())
                 }
             } else {
-                Err("Expected an integer value for 'recursion_limit'".to_string())
+                Err("Expected an integer value for 'stack_size'".to_string())
             }
         }
         "version" => {
@@ -222,7 +222,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "allow_fetch" => Value::Boolean(config.allow_fetch),
         "allow_unsafe" => Value::Boolean(config.allow_unsafe),
         "home_dir" => Value::String(config.home_dir.clone()),
-        "recursion_limit" => Value::Int(Int::from_i64(config.recursion_limit as i64)),
+        "stack_size" => Value::Int(Int::from_i64(config.stack_size as i64)),
         "version" => Value::String(config.version.clone()),
         "color_scheme" => {
             let color_scheme = &config.color_scheme;

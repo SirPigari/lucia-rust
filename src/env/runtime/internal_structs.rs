@@ -3,6 +3,72 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use bincode::{Encode, Decode};
 use std::sync::RwLock;
+use crate::env::runtime::tokens::Location;
+use crate::env::runtime::statements::Statement;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stack {
+    pub frames: Vec<StackFrame>,
+}
+
+impl Stack {
+    pub fn new() -> Self {
+        Stack {
+            frames: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, frame: (String, Option<Location>, StackType)) {
+        self.frames.push(StackFrame::new(frame.0, frame.1, frame.2));
+    }
+
+    pub fn pop(&mut self) -> Option<(String, Option<Location>, StackType)> {
+        while self.frames.len() > 2 {
+            if let Some(frame) = self.frames.last() {
+                if frame.stack_type != StackType::File {
+                    self.frames.pop();
+                    continue;
+                }
+            }
+            break;
+        }
+        self.frames.pop().map(|frame| (frame.file_path, frame.location, frame.stack_type))
+    }
+
+    pub fn clear(&mut self) {
+        self.frames.clear();
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (String, Option<Location>, StackType)> {
+        self.frames.iter().map(|frame| (frame.file_path.clone(), frame.location.clone(), frame.stack_type.clone()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StackFrame {
+    pub file_path: String,
+    pub location: Option<Location>,
+    pub stack_type: StackType,
+}
+
+impl StackFrame {
+    pub fn new(file_path: String, location: Option<Location>, stack_type: StackType) -> Self {
+        StackFrame {
+            file_path,
+            location,
+            stack_type,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StackType {
+    FunctionCall,
+    MethodCall,
+    Import,
+    Scope,
+    File,
+}
 
 pub struct LibRegistry {
     inner: RwLock<HashMap<String, LibInfo>>,
@@ -130,13 +196,14 @@ impl PatternMethod {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum State {
     Normal,
     Exit,
     Defer,
     Break,
     Continue,
+    TCO(Statement),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -110,8 +110,8 @@ pub fn register(config: Arc<Config>) -> HashMap<String, Variable> {
     );
     insert_native_var!(
         map,
-        "recursion_limit",
-        Value::Int(Int::from_i64(config.recursion_limit as i64)),
+        "stack_size",
+        Value::Int(Int::from_i64(config.stack_size as i64)),
         "int"
     );
     insert_native_var!(

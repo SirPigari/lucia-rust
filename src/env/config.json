@@ -10,7 +10,7 @@
   "allow_fetch": true,
   "allow_unsafe": true,
   "home_dir": "C:\\Users\\Ja\\Desktop\\projects\\lucia-rust\\src\\env",
-  "recursion_limit": 999,
+  "stack_size": 16777216,
   "version": "2.0.0",
   "color_scheme": {
     "exception": "#F44350",

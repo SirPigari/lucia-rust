@@ -84,6 +84,88 @@ pub fn supports_color() -> bool {
     is_tty && not_dumb
 }
 
+#[cfg(not(any(unix, windows)))]
+pub fn supports_color() -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn get_remaining_stack_size() -> Option<usize> {
+    #[allow(non_camel_case_types)]
+    type ULONG_PTR = usize;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadStackLimits(
+            low_limit: *mut ULONG_PTR,
+            high_limit: *mut ULONG_PTR,
+        );
+    }
+
+    unsafe {
+        let mut low: ULONG_PTR = 0;
+        let mut high: ULONG_PTR = 0;
+
+        GetCurrentThreadStackLimits(&mut low, &mut high);
+
+        let sp = current_stack_pointer();
+
+        if sp >= low && sp <= high {
+            Some(sp - low)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(unix)]
+pub fn get_remaining_stack_size() -> Option<usize> {
+    use libc::{pthread_getattr_np, pthread_attr_getstack, pthread_attr_destroy};
+    use std::mem::MaybeUninit;
+    use std::ptr;
+
+    unsafe {
+        let mut attr = MaybeUninit::uninit();
+
+        if pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let attr = attr.assume_init();
+
+        let mut stackaddr: *mut libc::c_void = ptr::null_mut();
+        let mut stacksize: usize = 0;
+
+        if pthread_attr_getstack(&attr, &mut stackaddr as *mut _, &mut stacksize as *mut _) != 0 {
+            pthread_attr_destroy(&attr);
+            return None;
+        }
+
+        pthread_attr_destroy(&attr);
+
+        let sp = current_stack_pointer();
+
+        let stack_bottom = stackaddr as usize;
+        let stack_top = stack_bottom + stacksize;
+
+        if sp >= stack_bottom && sp <= stack_top {
+            Some(sp - stack_bottom)
+        } else {
+            None
+        }
+    }
+}
+
+#[inline(always)]
+fn current_stack_pointer() -> usize {
+    let x = 0u8;
+    &x as *const u8 as usize
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn get_remaining_stack_size() -> Option<usize> {
+    None
+}
+
 pub fn to_static(s: String) -> &'static str {
     let mut cache = ERROR_CACHE.lock().unwrap();
     if let Some(&static_ref) = cache.get(&s) {

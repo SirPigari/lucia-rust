@@ -9,6 +9,7 @@ match (a):
     "hello world":
         throw "This should not be reached"
     end
+    "hello world": end
     (a):
         print("Matched: ", a)
         break
@@ -18,14 +19,14 @@ match (a):
     end
 end
 
-// fallthrough is not allowed
-assert_err!(
-    match (a):
-        (a):
-            pass
-        end
-        _:
-            throw "This should not be reached"
-        end
+// no fallthrough
+match (a):
+    (a):
+        // will not fallthrough to the next case
+        print("Matched: ", a)
+        pass
     end
-)
+    _:
+        throw "This should not be reached"
+    end
+end

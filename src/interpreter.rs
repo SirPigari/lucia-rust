@@ -19,7 +19,8 @@ use crate::env::runtime::utils::{
     fix_path,
     fix_and_parse_json,
     json_to_value,
-    char_to_digit
+    char_to_digit,
+    get_remaining_stack_size
 };
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -32,7 +33,7 @@ use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
-use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod};
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
@@ -57,7 +58,7 @@ pub struct Interpreter {
     pub is_returning: bool,
     pub return_value: Value,
     pub state: State,
-    stack: Vec<(String, Option<Location>)>,
+    stack: Stack,
     use_colors: bool,
     pub current_statement: Option<Statement>,
     pub variables: HashMap<String, Variable>,
@@ -80,7 +81,7 @@ impl Interpreter {
             return_value: NULL,
             is_returning: false,
             state: State::Normal,
-            stack: vec![],
+            stack: Stack::new(),
             use_colors,
             current_statement: None,
             variables: HashMap::new(),
@@ -233,7 +234,7 @@ impl Interpreter {
 
     pub fn get_traceback(&self) -> BTreeMap<String, String> {
         let mut traceback = BTreeMap::new();
-        for (file, loc) in &self.stack {
+        for (file, loc, _) in self.stack.iter() {
             let location = loc.as_ref().map_or("unknown location".to_string(), |l| format!("{}:{}:{}", l.file, l.line_number, l.range.0));
             traceback.insert(file.clone(), location);
         }
@@ -803,7 +804,7 @@ impl Interpreter {
         }
     }
 
-    pub fn interpret(&mut self, statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
+    pub fn interpret(&mut self, mut statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
         self.is_returning = false;
         self.return_value = NULL;
         self.err = None;
@@ -813,64 +814,78 @@ impl Interpreter {
         self.stack.push((
             self.file_path.clone(),
             None,
+            StackType::File,
         ));
-    
-        for statement in statements {
-            if let Some(err) = &self.err {
-                return Err(err.clone());
-            }
-    
-            let stmt = match statement {
-                Statement::Statement { .. } => statement,
-                _ => {
-                    return Err(Error::new(
-                        "InvalidStatement",
-                        "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
-                        &self.file_path.to_string(),
-                    ));
+
+        loop {
+            for statement in &statements {
+                if let Some(err) = &self.err {
+                    return Err(err.clone());
                 }
-            };
-    
-            self.current_statement = Some(stmt.clone());
-    
-            let value = self.evaluate(stmt);
-    
-            if let Value::Error(err_type, err_msg, referr) = &value {
-                if let Some(referr) = referr {
-                    self.raise_with_ref(err_type, &err_msg, referr.clone());
-                } else {
-                    self.raise(err_type, &err_msg);
+
+                let stmt = match statement {
+                    Statement::Statement { .. } => statement.clone(),
+                    _ => {
+                        return Err(Error::new(
+                            "InvalidStatement",
+                            "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
+                            &self.file_path.to_string(),
+                        ));
+                    }
+                };
+
+                self.current_statement = Some(stmt.clone());
+
+                let value = self.evaluate(stmt);
+
+                if let Value::Error(err_type, err_msg, referr) = &value {
+                    if let Some(referr) = referr {
+                        self.raise_with_ref(err_type, &err_msg, referr.clone());
+                    } else {
+                        self.raise(err_type, &err_msg);
+                    }
                 }
-            }
-    
-            if self.is_returning {
+
+                if self.is_returning {
+                    self.return_value = value;
+                    return Ok(self.return_value.clone());
+                }
+
+                if let Some(err) = &self.err {
+                    return Err(err.clone());
+                }
+
                 self.return_value = value;
-                return Ok(self.return_value.clone());
+
+                if let State::TCO(_) = self.state {
+                    break;
+                }
             }
-    
-            if let Some(err) = &self.err {
-                return Err(err.clone());
+
+            if let State::TCO(stmt) = std::mem::replace(&mut self.state, State::Normal) {
+                statements = vec![stmt];
+                continue;
             }
-    
-            self.return_value = value;
+
+            break;
         }
-    
+
         if deferable {
             let old_state = std::mem::replace(&mut self.state, State::Defer);
 
             if !self.defer_stack.is_empty() {
                 let defer_statements = self.defer_stack.concat();
                 for stmt in defer_statements {
-                    self.current_statement = Some(stmt);
-                    self.evaluate(self.current_statement.clone().unwrap());
+                    self.current_statement = Some(stmt.clone());
+                    self.evaluate(stmt);
                 }
             }
-    
+
             self.state = old_state;
         }
 
         self.stack.pop();
-    
+
         Ok(self.return_value.clone())
     }
 
@@ -954,9 +969,9 @@ impl Interpreter {
         if self.check_stop_flag() {
             return NULL;
         }
-    
-        if self.stack.len() + self.defer_stack.len() > self.config.recursion_limit {
-            return self.raise("RecursionError", "Maximum recursion depth exceeded");
+
+        if get_remaining_stack_size().unwrap_or(self.config.stack_size) < 60_000 {
+            return self.raise("StackOverflowError", &format!("Maximum stack size exceeded ({} Bytes)", self.config.stack_size));
         }
     
         self.variables.entry("_".to_string()).or_insert_with(|| {
@@ -1410,19 +1425,18 @@ impl Interpreter {
         let condition = match statement.get(&Value::String("condition".to_string())) {
             Some(v) => v,
             _ => {
-                self.raise("SyntaxError", "Missing 'condition' in match statement");
+                self.raise("RuntimeError", "Missing 'condition' in match statement");
                 return NULL;
             }
         };
         if self.err.is_some() {
             return NULL;
         }
-        let mut matched_once = false;
 
         let cases = match statement.get(&Value::String("cases".to_string())) {
             Some(Value::List(c)) => c,
             _ => {
-                self.raise("SyntaxError", "Expected a list for 'cases' in match statement");
+                self.raise("RuntimeError", "Expected a list for 'cases' in match statement");
                 return NULL;
             }
         };
@@ -1432,11 +1446,11 @@ impl Interpreter {
                 let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
                     Some(pos) => values.get(pos).unwrap_or(&Value::Null),
                     None => {
-                        self.raise("SyntaxError", "Expected 'pattern' in match case");
+                        self.raise("RuntimeError", "Expected 'pattern' in match case");
                         return NULL;
                     }
                 };
-        
+
                 let guard: Option<Statement> = match (
                     keys.iter().position(|k| k == &Value::String("guard".to_string())),
                     values.get(keys.iter().position(|k| k == &Value::String("guard".to_string())).unwrap_or(usize::MAX)),
@@ -1445,27 +1459,27 @@ impl Interpreter {
                         Value::Map { .. } => Some(val.convert_to_statement()),
                         Value::Null => None,
                         _ => {
-                            self.raise("SyntaxError", "Expected 'guard' to be a map or null in match case");
+                            self.raise("RuntimeError", "Expected 'guard' to be a map or null in match case");
                             return NULL;
                         }
                     },
                     _ => None,
                 };
-        
+
                 let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
                     Some(pos) => match values.get(pos) {
                         Some(Value::List(b)) => b,
                         _ => {
-                            self.raise("SyntaxError", "Expected 'body' to be a list in match case");
+                            self.raise("RuntimeError", "Expected 'body' to be a list in match case");
                             return NULL;
                         }
                     },
                     None => {
-                        self.raise("SyntaxError", "Missing 'body' in match case");
+                        self.raise("RuntimeError", "Missing 'body' in match case");
                         return NULL;
                     }
                 };
-        
+
                 let matched = match pattern {
                     Value::Null => true,
                     _ => {
@@ -1486,50 +1500,28 @@ impl Interpreter {
                         };
                         self.evaluate(check).is_truthy()
                     }
-                };                
-        
+                };
+
                 if matched {
-                    if matched_once {
-                        self.raise_with_help(
-                            "RuntimeError",
-                            "Multiple patterns matched in 'match' (fallthrough is not allowed)",
-                            "Did you forgot to use 'continue' or 'break'?",
-                        );
-                        return NULL;
-                    }
-                
                     if let Some(g) = guard {
                         if !self.evaluate(g.clone()).is_truthy() {
                             continue;
                         }
                     }
-                    
-                    matched_once = true;
-                
+
                     let _ = self.interpret(
                         body.iter()
                             .map(|item| item.clone().convert_to_statement())
                             .collect(),
                         true,
                     );
-                    match self.state {
-                        State::Break => {
-                            self.state = State::Normal;
-                            return NULL
-                        },
-                        State::Continue => {
-                            self.state = State::Normal;
-                            continue;
-                        },
-                        _ => {}
-                    }
+                    return NULL;
                 }
-                
             } else {
                 self.raise("RuntimeError", "Invalid case in 'match' statement - expected map");
             }
         }
-    
+
         NULL
     }
 
@@ -1580,7 +1572,8 @@ impl Interpreter {
 
         self.stack.push((
             new_file_path.clone(),
-            self.get_location_from_current_statement()
+            self.get_location_from_current_statement(),
+            StackType::Scope,
         ));
 
         debug_log(
@@ -1604,6 +1597,7 @@ impl Interpreter {
                 if let Some(val) = self.variables.get(var_name) {
                     scope_interpreter.variables.insert(var_name.clone(), val.clone());
                 } else {
+                    self.stack.pop();
                     self.raise(
                         "NameError",
                         &format!("Variable '{}' is not defined in the outer scope", var_name),
@@ -2534,8 +2528,8 @@ impl Interpreter {
                 &format!("Use 'import ... as <valid_alias>'. Suggested alias: '{}'", sanitize_alias(alias)),
             );            
         }
-    
-        if self.stack.iter().any(|(name, _)| name == &module_name) {
+
+        if self.stack.iter().any(|(name, _, type_)| name == module_name && type_ == StackType::Import) {
             return self.raise(
                 "RecursionError",
                 &format!("Recursive import detected for module '{}'", module_name),
@@ -2544,7 +2538,8 @@ impl Interpreter {
     
         self.stack.push((
             module_name.clone(),
-            self.get_location_from_current_statement()
+            self.get_location_from_current_statement(),
+            StackType::Import
         ));
     
         if self.variables.contains_key(alias) {
@@ -3114,7 +3109,22 @@ impl Interpreter {
         }
         self.state = State::Normal;
 
-        let evaluated_value = self.evaluate(value.convert_to_statement());
+        let stmt = value.convert_to_statement();
+
+        // Tailcall optimization (TCO)
+        if stmt.get_type() == "CALL" {
+            let func_name = stmt.get_value("name").unwrap_or(Value::Null).to_string();
+            let len = self.stack.frames.len();
+            for i in (0..len).rev() {
+                let frame = &self.stack.frames[i];
+                if frame.stack_type == StackType::FunctionCall && frame.file_path == func_name {
+                    self.state = State::TCO(stmt);
+                    return NULL;
+                }
+            }
+        }
+
+        let evaluated_value = self.evaluate(stmt);
         if self.err.is_some() {
             return NULL;
         }
@@ -3955,7 +3965,7 @@ impl Interpreter {
                     "No exception variables provided",
                     &format!(
                         "Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'",
-                        hex_to_ansi("#1CC58B", self.use_colors),
+                        hex_to_ansi(&self.config.color_scheme.note, self.use_colors),
                         hex_to_ansi(&self.config.color_scheme.help, self.use_colors),
                     ),
                 );
@@ -3973,12 +3983,13 @@ impl Interpreter {
             }
         }
     
+        let mut result = NULL;
         for stmt in body {
             if !stmt.is_statement() {
                 continue;
             }
     
-            let _ = self.evaluate(stmt.convert_to_statement());
+            result = self.evaluate(stmt.convert_to_statement());
             if self.err.is_some() {
                 if stmt_type != "TRY_CATCH" {
                     return self.err.take().map_or(NULL, |_| NULL);
@@ -4072,18 +4083,22 @@ impl Interpreter {
                     _ => {}
                 }
     
+                let mut err_result = NULL;
                 for catch_stmt in catch_body {
                     if !catch_stmt.is_statement() {
                         continue;
                     }
-                    let _ = self.evaluate(catch_stmt.convert_to_statement());
+                    err_result = self.evaluate(catch_stmt.convert_to_statement());
                 }
-    
-                return NULL;
+
+                return err_result;
             }
         }
     
-        NULL
+        if self.err.is_some() {
+            return NULL;
+        }
+        result
     }
 
     // TODO: Fix nested index assignment and map index assign
@@ -5830,7 +5845,7 @@ impl Interpreter {
                     .collect::<HashMap<String, Variable<>>>();
             
                 if !is_module {
-                    self.stack.push((method_name.to_string(), self.get_location_from_current_statement()));
+                    self.stack.push((method_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
                     if !metadata.is_native {
                         let argv_vec = self.variables.get("argv").map(|var| {
                             match var.get_value() {
@@ -5860,6 +5875,7 @@ impl Interpreter {
                         let body = func.get_body();
                         let _ = new_interpreter.interpret(body, true);
                         if new_interpreter.err.is_some() {
+                            self.stack.pop();
                             self.raise_with_ref(
                                 "RuntimeError",
                                 "Error in method call",
@@ -5877,6 +5893,7 @@ impl Interpreter {
                         let module = match object_value {
                             Value::Module(obj, _) => obj,
                             _ => {
+                                self.stack.pop();
                                 return self.raise(
                                     "TypeError",
                                     &format!("Expected a module, but got '{}'", object_value.type_name())
@@ -5886,6 +5903,7 @@ impl Interpreter {
                         let module_file_path = match &object_value {
                             Value::Module(_, path) => path.clone(),
                             _ => { 
+                                self.stack.pop();
                                 return self.raise(
                                     "TypeError",
                                     &format!("Expected a module, but got '{}'", object_variable.type_name())
@@ -5905,14 +5923,17 @@ impl Interpreter {
                         if let Some(props) = module.get_properties() {
                             new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
                         } else {
+                            self.stack.pop();
                             self.raise(
                                 "RuntimeError",
                                 &format!("Module '{}' has no properties", module.name())
                             );
-                        }                    
+                            return NULL;
+                        }
                         let body = func.get_body();
                         let _ = new_interpreter.interpret(body, true);
                         if new_interpreter.err.is_some() {
+                            self.stack.pop();
                             self.raise_with_ref(
                                 "RuntimeError",
                                 "Error in module method call",
@@ -5945,6 +5966,7 @@ impl Interpreter {
                                 "Error in method call",
                                 err,
                             );
+                            self.stack.pop();
                             return NULL;
                         };
                         self.stack = new_interpreter.stack;
@@ -6421,7 +6443,7 @@ impl Interpreter {
                     Some(self.use_colors.clone()),
                 );
     
-                self.stack.push((function_name.to_string(), self.get_location_from_current_statement()));
+                self.stack.push((function_name.to_string(), self.get_location_from_current_statement(), StackType::FunctionCall));
 
                 let result;
 
@@ -6450,6 +6472,7 @@ impl Interpreter {
                 .collect::<HashMap<String, Variable>>();            
                 
                 if self.err.is_some() {
+                    self.stack.pop();
                     return NULL;
                 }    
                 
@@ -6623,6 +6646,7 @@ impl Interpreter {
                     let body = func.get_body();
                     let _ = new_interpreter.interpret(body, true);
                     if new_interpreter.err.is_some() {
+                        self.stack.pop();
                         self.err = new_interpreter.err.clone();
                         return NULL;
                     }
@@ -6864,7 +6888,6 @@ impl Interpreter {
             "isnt" | "isn't" | "nein" => "!=",
             "or" => "||",
             "and" => "&&",
-            "is" => "==",
             "not" => "!",
             other => other,
         };
@@ -7286,6 +7309,13 @@ impl Interpreter {
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xnor' to {} and {}", a.type_name(), b.type_name())),
                 }
             },
+            "is" => {
+                let res = self.check_type(&left, &right, false);
+                if self.err.is_some() {
+                    self.err = None;
+                }
+                Value::Boolean(res)
+            },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
         };
 
@@ -7374,12 +7404,12 @@ impl Interpreter {
                     .unwrap_or_else(|_| self.raise("RuntimeError", "Failed to convert float to int"));
             }            
     
-            match f.to_f64() {
-                Ok(val) if val == 0.0 => Value::Float(0.0.into()),
-                Ok(_) => Value::Float(f),
-                Err(_) => Value::Float(f),
-            }
+            Value::Float(f)
         } else {
+            let mut s = s.trim().trim_start_matches('0').trim_start_matches('+');
+            if s.is_empty() {
+                s = "0";
+            }
             Int::from_str(s)
                 .map_err(|_| ())
                 .map(Value::Int)

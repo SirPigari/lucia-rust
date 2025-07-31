@@ -1,6 +1,6 @@
 #include <std/macros>
 
-a: list = [0..5].collect()
+a: list[int] = [0..5].collect()
 assert_eq!(a, ([0, 1, 2, 3, 4, 5]))
 
 
@@ -32,3 +32,24 @@ try:
 end catch (err_type, err_msg, err_help):
     assert_eq!(err_type, "NameError")
 end
+
+// ? operator
+// name()? means the function may fail (doesnt do anything its just a syntax hint)
+fun may_fail()? -> int:
+    throw "lol failed"
+end
+
+// ? suppresses the error and returns null
+assert!(may_fail()? is void)
+assert_eq!(may_fail()?, null)
+
+// ? with a default value
+assert_eq!(may_fail()? or 42, 42)
+// OR you can use ??
+// but it looks like the code is confused
+assert_eq!(may_fail()?? 137, 137)
+
+// (you can chain them)
+assert_eq!(69??????????????????????????????????????????????????, 69)
+// maybe dont do that
+// kristof will probably like this

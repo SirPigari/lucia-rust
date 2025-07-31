@@ -657,7 +657,7 @@ fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
         allow_fetch: true,
         allow_unsafe: false,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
-        recursion_limit: 999,
+        stack_size: 16777216,
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),
             warning: "#F5F534".to_string(),
@@ -1873,10 +1873,14 @@ fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, conf
             })
         });
 
-        let handle = thread::spawn(move || {
+        let builder = thread::Builder::new()
+            .name(format!("Lucia-{} REPL", VERSION))
+            .stack_size(config.stack_size);
+
+        let handle = builder.spawn(move || {
             let result = interpreter_clone.interpret(statements_clone, true);
             (result, interpreter_clone)
-        });
+        }).expect("Failed to spawn thread");
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -2150,15 +2154,15 @@ fn main() {
                     let total_ram_bytes = mem.total * 1024;
 
                     if total_ram_bytes > 16 * 1024 * 1024 * 1024 {
-                        64 * 1024 * 1024
+                        128 * 1024 * 1024
                     } else if total_ram_bytes > 8 * 1024 * 1024 * 1024 {
-                        32 * 1024 * 1024
+                        64 * 1024 * 1024
                     } else {
-                        16 * 1024 * 1024
+                        32 * 1024 * 1024
                     }
                 }
                 Err(_) => {
-                    16 * 1024 * 1024
+                    32 * 1024 * 1024
                 }
             }
         });

@@ -320,6 +320,78 @@ impl Parser {
                     }
                 }
 
+                ("OPERATOR", "?") => {
+                    let loc = self.get_loc();
+                    self.next();
+                    while self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
+                        self.next();
+                    }
+                    if self.token_is("OPERATOR", "or") {
+                        self.next();
+                        let otherwise = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("body".to_string()),
+                                Value::String("exception_vars".to_string()),
+                                Value::String("catch_body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("TRY_CATCH".to_string()),
+                                Value::List(vec![expr.convert_to_map()]),
+                                Value::List(vec![Value::String("_".to_string())]),
+                                Value::List(vec![otherwise.convert_to_map()]),
+                            ],
+                            loc
+                        };
+                    }
+                    return Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("body".to_string()),
+                            Value::String("exception_vars".to_string()),
+                            Value::String("catch_body".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TRY".to_string()),
+                            Value::List(vec![expr.convert_to_map()]),
+                            Value::List(vec![]),
+                            Value::List(vec![]),
+                        ],
+                        loc
+                    };
+                }
+
+                ("OPERATOR", "??") => {
+                    let loc = self.get_loc();
+                    self.next();
+                    while self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
+                        self.next();
+                    }
+                    let otherwise = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    return Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("body".to_string()),
+                            Value::String("exception_vars".to_string()),
+                            Value::String("catch_body".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("TRY_CATCH".to_string()),
+                            Value::List(vec![expr.convert_to_map()]),
+                            Value::List(vec![Value::String("_".to_string())]),
+                            Value::List(vec![otherwise.convert_to_map()]),
+                        ],
+                        loc
+                    };
+                }
+
                 _ => break,
             }
         }
@@ -1605,6 +1677,10 @@ impl Parser {
 
                         self.check_for("SEPARATOR", ")");
                         self.next();
+
+                        if is_function && self.token_is("OPERATOR", "?") {
+                            self.next();
+                        }
 
                         if self.err.is_some() {
                             return Statement::Null;
