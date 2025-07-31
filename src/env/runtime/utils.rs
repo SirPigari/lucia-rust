@@ -119,6 +119,11 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 }
 
 #[cfg(unix)]
+// stupid macos
+// and stupid aarch64
+// and stupid chatgpt for NOT KNOWING THAT THE FUCKING EXTERN IS UNSAFE
+// and the fucking compiler not checking that on windows, you literally dont need it just CHECK IT
+// milochov
 pub fn get_remaining_stack_size() -> Option<usize> {
     use libc::{pthread_self, pthread_attr_destroy};
     use std::mem::MaybeUninit;
