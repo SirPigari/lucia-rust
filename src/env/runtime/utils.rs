@@ -138,7 +138,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     }
 
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             fn pthread_attr_getstack(
                 attr: *const libc::pthread_attr_t,
                 stackaddr: *mut *mut libc::c_void,
