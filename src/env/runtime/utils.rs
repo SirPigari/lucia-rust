@@ -33,6 +33,56 @@ use imagnum::math::{
 
 static ERROR_CACHE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+#[cfg(windows)]
+pub fn supports_color() -> bool {
+    use std::ptr::null_mut;
+    use std::ffi::c_void;
+
+    type HANDLE = *mut c_void;
+    type DWORD = u32;
+    type BOOL = i32;
+
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: DWORD = 0x0004;
+    const STD_OUTPUT_HANDLE: DWORD = -11i32 as u32;
+    const INVALID_HANDLE_VALUE: HANDLE = !0 as HANDLE;
+
+    const FILE_TYPE_CHAR: DWORD = 0x0002;
+
+    unsafe extern "system" {
+        fn GetStdHandle(nStdHandle: DWORD) -> HANDLE;
+        fn GetConsoleMode(hConsoleHandle: HANDLE, lpMode: *mut DWORD) -> BOOL;
+        fn GetFileType(hFile: HANDLE) -> DWORD;
+    }
+
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if handle == null_mut() || handle == INVALID_HANDLE_VALUE {
+            return false;
+        }
+
+        let file_type = GetFileType(handle);
+        if file_type != FILE_TYPE_CHAR {
+            return false;
+        }
+
+        let mut mode: DWORD = 0;
+        if GetConsoleMode(handle, &mut mode as *mut DWORD) == 0 {
+            return false;
+        }
+
+        (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+    }
+}
+
+#[cfg(unix)]
+pub fn supports_color() -> bool {
+    let is_tty = std::io::stdout().is_terminal();
+    let term = std::env::var("TERM").unwrap_or_default();
+    let not_dumb = term != "dumb";
+
+    is_tty && not_dumb
+}
+
 pub fn to_static(s: String) -> &'static str {
     let mut cache = ERROR_CACHE.lock().unwrap();
     if let Some(&static_ref) = cache.get(&s) {
@@ -86,9 +136,7 @@ pub fn clear_terminal() -> Result<(), io::Error> {
     Ok(())
 }
 
-pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
-    let use_colors = use_colors.unwrap_or(true);
-
+pub fn hex_to_ansi(hex_color: &str, use_colors: bool) -> String {
     if !use_colors {
         return "".to_string();
     }
@@ -111,7 +159,7 @@ pub fn hex_to_ansi(hex_color: &str, use_colors: Option<bool>) -> String {
 
 pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
-    let colored_message = format!("{}{}{}", hex_to_ansi(color, Some(use_colors)), message, hex_to_ansi("reset", Some(use_colors)));
+    let colored_message = format!("{}{}{}", hex_to_ansi(color, use_colors), message, hex_to_ansi("reset", use_colors));
     println!("{}", colored_message);
 }
 
@@ -522,11 +570,11 @@ pub fn create_note(text: &str, use_colors: Option<bool>, note_color: &str) -> St
     let use_colors = use_colors.unwrap_or(false);
     format!(
         "{}{}Note:{} {}{}",
-        hex_to_ansi(note_color, Some(use_colors)),
+        hex_to_ansi(note_color, use_colors),
         check_ansi("\x1b[1m", &use_colors),
         check_ansi("\x1b[22m", &use_colors),
         text,
-        hex_to_ansi("reset", Some(use_colors))
+        hex_to_ansi("reset", use_colors)
     )
 }
 

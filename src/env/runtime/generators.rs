@@ -5,10 +5,12 @@ use crate::env::runtime::internal_structs::State;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::types::Int;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::functions::Function;
 
 use std::cmp::Ordering;
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 fn add(a: &Value, b: &Value) -> Option<Value> {
     match (a, b) {
@@ -638,6 +640,45 @@ impl EnumerateIter {
     }
 }
 
+#[derive(Clone)]
+pub struct FilterIter {
+    pub generator: Box<Generator>,
+    pub filter_func: Function,
+    pub interpreter: Arc<Mutex<Interpreter>>,
+    pub done: bool,
+}
+
+impl FilterIter {
+    pub fn new(generator: &Generator, filter_func: Function, interpreter: &Interpreter) -> Self {
+        Self {
+            generator: Box::new(generator.clone()),
+            filter_func,
+            interpreter: Arc::new(Mutex::new(interpreter.clone())),
+            done: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MapIter {
+    pub generator: Box<Generator>,
+    pub map_func: Function,
+    pub interpreter: Arc<Mutex<Interpreter>>,
+    pub done: bool,
+}
+
+impl MapIter {
+    pub fn new(generator: &Generator, map_func: Function, interpreter: &Interpreter) -> Self {
+        Self {
+            generator: Box::new(generator.clone()),
+            map_func,
+            interpreter: Arc::new(Mutex::new(interpreter.clone())),
+            done: false,
+        }
+    }
+}
+
+
 impl Iterator for RangeValueIter {
     type Item = Value;
 
@@ -762,6 +803,76 @@ impl Iterator for VecIter {
     }
 }
 
+impl Iterator for FilterIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let mut interpreter = self.interpreter.lock().unwrap();
+
+        while let Some(val) = self.generator.next() {
+            let result = interpreter.call_function(
+                &self.filter_func.get_name(),
+                vec![val.clone()],
+                HashMap::new(),
+            );
+
+            if interpreter.err.is_some() {
+                self.done = true;
+                return Some(Value::Error(
+                    "FilterError",
+                    "Error during filter function evaluation",
+                    None,
+                ));
+            }
+
+            if result.is_truthy() {
+                return Some(val);
+            }
+        }
+
+        self.done = true;
+        None
+    }
+}
+
+impl Iterator for MapIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let mut interpreter = self.interpreter.lock().unwrap();
+
+        if let Some(val) = self.generator.next() {
+            let result = interpreter.call_function(
+                &self.map_func.get_name(),
+                vec![val.clone()],
+                HashMap::new(),
+            );
+
+            if interpreter.err.is_some() {
+                self.done = true;
+                return Some(Value::Error(
+                    "MapError",
+                    "Error during map function evaluation",
+                    None,
+                ));
+            }
+
+            return Some(result);
+        }
+
+        self.done = true;
+        None
+    }
+}
+
 impl GeneratorIterator for RangeValueIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
@@ -805,6 +916,26 @@ impl GeneratorIterator for EnumerateIter {
 }
 
 impl GeneratorIterator for VecIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
+    }
+}
+
+impl GeneratorIterator for FilterIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
+    }
+}
+
+impl GeneratorIterator for MapIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
     }

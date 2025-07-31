@@ -2,6 +2,46 @@ use crate::env::runtime::value::Value;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use bincode::{Encode, Decode};
+use std::sync::RwLock;
+
+pub struct LibRegistry {
+    inner: RwLock<HashMap<String, LibInfo>>,
+}
+
+impl LibRegistry {
+    pub fn new() -> Self {
+        LibRegistry {
+            inner: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<LibInfo> {
+        self.inner.read().ok()?.get(name).cloned()
+    }
+
+    pub fn set_all(&self, new_libs: HashMap<String, LibInfo>) {
+        if let Ok(mut inner) = self.inner.write() {
+            *inner = new_libs;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LibInfo {
+    pub description: String,
+    pub version: String,
+    pub expected_lucia_version: String,
+}
+
+impl LibInfo {
+    pub fn new(description: &str, version: &str, expected_lucia_version: &str) -> Self {
+        LibInfo {
+            description: description.to_string(),
+            version: version.to_string(),
+            expected_lucia_version: expected_lucia_version.to_string(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatternMethod {

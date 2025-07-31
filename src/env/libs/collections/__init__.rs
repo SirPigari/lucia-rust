@@ -48,7 +48,7 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
 
 fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
-        Value::String(hex_to_ansi(hex, Some(true)))
+        Value::String(hex_to_ansi(hex, true))
     } else {
         Value::Error("TypeError", "expected a string", None)
     }

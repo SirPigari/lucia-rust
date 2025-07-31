@@ -1,10 +1,11 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, convert_value_to_type};
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float};
 use imagnum::{create_int, create_float};
+use crate::interpreter::Interpreter;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
@@ -31,7 +32,7 @@ impl Variable {
         }
     }
 
-    pub fn init_properties(&mut self) {
+    pub fn init_properties(&mut self, interpreter: &mut Interpreter) {
         let to_string = {
             let val_clone = self.value.clone();
             make_native_method(
@@ -48,12 +49,37 @@ impl Variable {
                 None,
             )
         };
+
+        let clone = {
+            let val_clone = self.value.clone();
+            make_native_method(
+                "clone",
+                move |_args| {
+                    val_clone.clone()
+                },
+                vec![],
+                &self.value.type_name(),
+                true, true, true,
+                None,
+            )
+        };
     
         self.properties.insert(
             "to_string".to_string(),
             Variable::new(
                 "to_string".to_string(),
                 to_string,
+                "function".to_string(),
+                false,
+                true,
+                true,
+            ),
+        );
+        self.properties.insert(
+            "clone".to_string(),
+            Variable::new(
+                "clone".to_string(),
+                clone,
                 "function".to_string(),
                 false,
                 true,
@@ -1133,6 +1159,66 @@ impl Variable {
                         None,
                     )
                 };
+
+                let filter = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "filter",
+                        move |args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if let Some(Value::Function(func)) = args.get("f") {
+                                    let filter_iter = FilterIter::new(generator, func.clone(), &interpreter_clone);
+                                    let generator = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(filter_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    return Value::Generator(generator);
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let map = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "map",
+                        move |args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if let Some(Value::Function(func)) = args.get("f") {
+                                    let map_iter = MapIter::new(generator, func.clone(), &interpreter_clone);
+                                    let generator = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(map_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    return Value::Generator(generator);
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
                 
                 self.properties.insert(
                     "collect".to_string(),
@@ -1194,6 +1280,163 @@ impl Variable {
                     Variable::new(
                         "enumerate".to_string(),
                         enumerate,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "filter".to_string(),
+                    Variable::new(
+                        "filter".to_string(),
+                        filter,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "map".to_string(),
+                    Variable::new(
+                        "map".to_string(),
+                        map,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
+            Value::Map { .. } => {
+                let get = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "get",
+                        move |args| {
+                            if let Some(key) = args.get("key") {
+                                if let Value::Map { keys: map_keys, values: map_values } = &val_clone {
+                                    if let Some(index) = map_keys.iter().position(|k| k == key) {
+                                        return map_values.get(index).cloned().unwrap_or(Value::Null);
+                                    }
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("key", "any")],
+                        "any",
+                        true, true, true,
+                        None,
+                    )
+                };
+                let filter = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "filter",
+                        move |args| {
+                            if let Some(Value::Function(func)) = args.get("f") {
+                                let (keys, values) = if let Value::Map { keys, values } = &val_clone {
+                                    (keys.clone(), values.clone())
+                                } else {
+                                    return Value::Error("TypeError", "Expected a map", None);
+                                };
+
+                                let mut interpreter = interpreter_clone.clone();
+
+                                let (new_keys, new_values): (Vec<Value>, Vec<Value>) = keys.iter().zip(values.iter()).filter_map(|(key, val)| {
+                                    let result = interpreter.call_function(
+                                        func.get_name(),
+                                        vec![key.clone(), val.clone()],
+                                        HashMap::new(),
+                                    );
+                                    if result.is_truthy() {
+                                        Some((key.clone(), val.clone()))
+                                    } else {
+                                        None
+                                    }
+                                }).unzip();
+
+                                return Value::Map {
+                                    keys: new_keys,
+                                    values: new_values,
+                                };
+                            } else {
+                                return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                            }
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "map",
+                        true, true, true,
+                        None,
+                    )
+                };
+                let map = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "map",
+                        move |args| {
+                            if let Some(Value::Function(func)) = args.get("f") {
+                                let (keys, values) = if let Value::Map { keys, values } = &val_clone {
+                                    (keys.clone(), values.clone())
+                                } else {
+                                    return Value::Error("TypeError", "Expected a map", None);
+                                };
+
+                                let mut interpreter = interpreter_clone.clone();
+
+                                let new_values: Vec<Value> = keys.iter().zip(values.iter()).map(|(key, val)| {
+                                    interpreter.call_function(
+                                        func.get_name(),
+                                        vec![key.clone(), val.clone()],
+                                        HashMap::new(),
+                                    )
+                                }).collect();
+
+                                return Value::Map {
+                                    keys: keys.clone(),
+                                    values: new_values,
+                                };
+                            } else {
+                                return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                            }
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "map",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                self.properties.insert(
+                    "get".to_string(),
+                    Variable::new(
+                        "get".to_string(),
+                        get,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "filter".to_string(),
+                    Variable::new(
+                        "filter".to_string(),
+                        filter,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "map".to_string(),
+                    Variable::new(
+                        "map".to_string(),
+                        map,
                         "function".to_string(),
                         false,
                         true,

@@ -64,7 +64,7 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
     let mut style = String::new();
 
     if let Some(Value::String(fg)) = args.get("fg_color") {
-        style += &utils::hex_to_ansi(fg, Some(true));
+        style += &utils::hex_to_ansi(fg, true);
     }
 
     if let Some(Value::String(bg)) = args.get("bg_color") {
@@ -313,7 +313,7 @@ fn styledstr(args: &HashMap<String, Value>) -> Value {
     let mut style = String::new();
 
     if let Some(Value::String(fg)) = args.get("fg_color") {
-        style += &utils::hex_to_ansi(fg, Some(true));
+        style += &utils::hex_to_ansi(fg, true);
     }
 
     if let Some(Value::String(bg)) = args.get("bg_color") {

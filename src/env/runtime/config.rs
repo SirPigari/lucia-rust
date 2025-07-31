@@ -6,7 +6,8 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::Int;
 use crate::env::runtime::utils::to_static;
 use std::default::Default;
-use crate::env::runtime::internal_structs::CacheFormat;
+use std::collections::HashMap;
+use crate::env::runtime::internal_structs::{LibInfo, CacheFormat};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -298,5 +299,36 @@ pub fn get_version() -> String {
             eprintln!("Error loading config: {}", e);
             "Unknown version".to_string()
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Libs {
+    use_libs: bool,
+    std_libs: HashMap<String, LibInfo>,
+    global: HashMap<String, LibInfo>,
+    redirect: HashMap<String, String>,
+    block: Vec<String>,
+    domains: HashMap<String, Vec<String>>,
+}
+
+impl Libs {
+    pub fn new() -> Self {
+        Self {
+            use_libs: true,
+            std_libs: HashMap::new(),
+            global: HashMap::new(),
+            redirect: HashMap::new(),
+            block: Vec::new(),
+            domains: HashMap::new(),
+        }
+    }
+
+    pub fn set_all(&mut self, new_libs: Libs) {
+        self.std_libs = new_libs.std_libs;
+        self.global = new_libs.global;
+        self.redirect = new_libs.redirect;
+        self.block = new_libs.block;
+        self.domains = new_libs.domains;
     }
 }

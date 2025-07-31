@@ -86,8 +86,8 @@ mod lexer;
 mod parser;
 mod interpreter;
 
-use crate::env::runtime::config::{Config, ColorScheme};
-use crate::env::runtime::utils::{ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::config::{Config, ColorScheme, Libs};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -95,6 +95,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::libs::load_std_libs;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
@@ -126,8 +127,8 @@ pub fn handle_error(
     error: &Error,
     source: &str,
     config: &Config,
-    use_colors: bool,
 ) {
+    let use_colors = config.supports_color;
     let use_lucia_traceback = config.use_lucia_traceback;
 
     let format_location = |loc: &Location| -> String {
@@ -160,7 +161,7 @@ pub fn handle_error(
         let line_number = loc.line_number;
         let range = loc.range;
         let col = range.0;
-        let reset = hex_to_ansi("reset", Some(use_colors));
+        let reset = hex_to_ansi("reset", use_colors);
 
         let current_line = if line_number > 0 {
             get_line_info(source, line_number).unwrap_or_default()
@@ -199,7 +200,7 @@ pub fn handle_error(
 
         trace.push_str(&format!(
             "{}-> File '{}:{}:{}' got error:\n",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            hex_to_ansi(&config.color_scheme.exception, use_colors),
             file_name,
             line_number,
             col
@@ -229,11 +230,11 @@ pub fn handle_error(
                     "\n\t{} ...\n\t{}{} | {}Help:{} {}{}",
                     indent,
                     indent,
-                    hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                    hex_to_ansi(&config.color_scheme.help, use_colors),
                     check_ansi("\x1b[1m", &use_colors),
                     check_ansi("\x1b[22m", &use_colors),
                     help,
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+                    hex_to_ansi(&config.color_scheme.exception, use_colors)
                 ));
             }
         }
@@ -264,22 +265,22 @@ pub fn handle_error(
         let help_msg = match &current.help {
             Some(help) if !help.is_empty() => format!(
                 "   {}({}){}",
-                hex_to_ansi(&config.color_scheme.help, Some(use_colors)),
+                hex_to_ansi(&config.color_scheme.help, use_colors),
                 help,
-                hex_to_ansi("reset", Some(use_colors))
+                hex_to_ansi("reset", use_colors)
             ),
             _ => String::new(),
         };
 
         eprintln!(
             "{}[err] {} -> {}: {}{}{}{}",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+            hex_to_ansi(&config.color_scheme.exception, use_colors),
             location_str,
             current.error_type,
             current.msg,
             depth_note,
             help_msg,
-            hex_to_ansi("reset", Some(use_colors))
+            hex_to_ansi("reset", use_colors)
         );
         return;
     }
@@ -292,9 +293,9 @@ pub fn handle_error(
         if let Some(ref inner) = err.ref_err {
             trace.push_str(&format!(
                 "\n\t{}^-- caused by:\n",
-                hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+                hex_to_ansi(&config.color_scheme.exception, use_colors)
             ));
-            trace.push_str(&hex_to_ansi("reset", Some(use_colors)));
+            trace.push_str(&hex_to_ansi("reset", use_colors));
             current_error = Some(inner);
         } else {
             current_error = None;
@@ -310,15 +311,16 @@ pub fn handle_error(
     eprintln!("{}", trace);
 }
 
-fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
-    let use_colors = use_colors.unwrap_or(true);
+fn debug_log(message: &str, config: &Config) {
+    let use_colors = config.supports_color;
     if config.debug {
         print_colored(message, &config.color_scheme.debug, Some(use_colors));
     }
 }
 
 // TODO: Fix indentation and formatting for pp dump
-fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bool) {
+fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
+    let use_colors = config.supports_color;
     let new_line_keywords = [
         "match", "import", "throw", "try", "catch", "for", "while"
     ];
@@ -469,7 +471,7 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     {
         eprintln!(
             "{} Failed to write to {base_path}.i: {err}",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+            hex_to_ansi(&config.color_scheme.exception, use_colors)
         );
     }
 
@@ -478,14 +480,14 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     {
         eprintln!(
             "{} Failed to write to {base_path}.pp: {err}",
-            hex_to_ansi(&config.color_scheme.exception, Some(use_colors))
+            hex_to_ansi(&config.color_scheme.exception, use_colors)
         );
     }
 
     print_colored(
         &format!(
             "{}Preprocessed source code dumped to {}.i and {}.pp",
-            hex_to_ansi(&config.color_scheme.debug, Some(use_colors)),
+            hex_to_ansi(&config.color_scheme.debug, use_colors),
             base_path,
             base_path
         ),
@@ -494,7 +496,8 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config, use_colors: bo
     );
 }
 
-fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_colors: bool) {
+fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config) {
+    let use_colors = config.supports_color;
     let base_path = Path::new(file_path)
         .with_extension("")
         .to_string_lossy()
@@ -570,7 +573,7 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
             print_colored(
                 &format!(
                     "{}Failed to serialize full AST: {}",
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    hex_to_ansi(&config.color_scheme.exception, use_colors),
                     e
                 ),
                 &config.color_scheme.exception,
@@ -586,7 +589,7 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
             print_colored(
                 &format!(
                     "{}Failed to serialize cleaned AST: {}",
-                    hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                    hex_to_ansi(&config.color_scheme.exception, use_colors),
                     e
                 ),
                 &config.color_scheme.exception,
@@ -602,7 +605,7 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
                 print_colored(
                     &format!(
                         "{}Dumped AST to {}",
-                        hex_to_ansi(&config.color_scheme.debug, Some(use_colors)),
+                        hex_to_ansi(&config.color_scheme.debug, use_colors),
                         path
                     ),
                     &config.color_scheme.debug,
@@ -613,7 +616,7 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
                 print_colored(
                     &format!(
                         "{}Failed to write {}: {}",
-                        hex_to_ansi(&config.color_scheme.exception, Some(use_colors)),
+                        hex_to_ansi(&config.color_scheme.exception, use_colors),
                         path,
                         e
                     ),
@@ -628,15 +631,63 @@ fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config, use_color
     write_file(&ast_path, &json_ast);
 }
 
-fn load_config(path: &Path) -> Result<Config, String> {
-    let mut file = File::open(path).map_err(|_| "Config file not found")?;
-    let mut contents = String::new();
-    let _bytes_read = file.read_to_string(&mut contents).map_err(|_| "Failed to read config file")?;
+fn load_config(config_path: &Path) -> Result<Config, String> {
+    let mut cfg_file = File::open(config_path).map_err(|_| "Config file not found")?;
+    let mut cfg_contents = String::new();
+    let _bytes_read = cfg_file.read_to_string(&mut cfg_contents).map_err(|_| "Failed to read config file")?;
 
-    match serde_json::from_str::<Config>(&contents) {
-        Ok(config) => Ok(config),
-        Err(e) => Err(format!("Failed to deserialize JSON: {}", e)),
-    }
+    let config: Config = match serde_json::from_str::<Config>(&cfg_contents) {
+        Ok(config) => config,
+        Err(e) => return Err(format!("Failed to deserialize JSON: {}", e)),
+    };
+    Ok(config)
+}
+
+fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
+    let default_config = Config {
+        version: VERSION.to_string(),
+        moded: false,
+        debug: false,
+        debug_mode: "normal".to_string(),
+        supports_color: true,
+        use_lucia_traceback: true,
+        warnings: true,
+        use_preprocessor: true,
+        cache_format: CacheFormat::NoCache,
+        allow_fetch: true,
+        allow_unsafe: false,
+        home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
+        recursion_limit: 999,
+        color_scheme: ColorScheme {
+            exception: "#F44350".to_string(),
+            warning: "#F5F534".to_string(),
+            help: "#21B8DB".to_string(),
+            debug: "#434343".to_string(),
+            comment: "#757575".to_string(),
+            input_arrows: "#136163".to_string(),
+            note: "#1CC58B".to_string(),
+            output_text: "#BCBEC4".to_string(),
+            info: "#9209B3".to_string(),
+        },
+    };
+
+    let config_str = serde_json::to_string_pretty(&default_config)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
+
+    fs::write(&path, config_str)
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write config file"))?;
+    Ok(())
+}
+
+fn create_libs_file(path: &Path) -> io::Result<()> {
+    let default_libs = Libs::new();
+
+    let libs_str = serde_json::to_string_pretty(&default_libs)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize libs"))?;
+
+    fs::write(&path, libs_str)
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write libs file"))?;
+    Ok(())
 }
 
 fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Result<()> {
@@ -675,38 +726,11 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
         }
     }
 
-    let default_config = Config {
-        version: VERSION.to_string(),
-        moded: false,
-        debug: false,
-        debug_mode: "normal".to_string(),
-        supports_color: true,
-        use_lucia_traceback: true,
-        warnings: true,
-        use_preprocessor: true,
-        cache_format: CacheFormat::NoCache,
-        allow_fetch: true,
-        allow_unsafe: false,
-        home_dir: env_path_str,
-        recursion_limit: 999,
-        color_scheme: ColorScheme {
-            exception: "#F44350".to_string(),
-            warning: "#F5F534".to_string(),
-            help: "#21B8DB".to_string(),
-            debug: "#434343".to_string(),
-            comment: "#757575".to_string(),
-            input_arrows: "#136163".to_string(),
-            note: "#1CC58B".to_string(),
-            output_text: "#BCBEC4".to_string(),
-            info: "#9209B3".to_string(),
-        },
-    };
-
-    let config_str = serde_json::to_string_pretty(&default_config)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
-
-    fs::write(&config_path, config_str)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write config file"))?;
+    create_config_file(&config_path, env_path)?;
+    let libs_path = env_path.join("libs.json");
+    if !libs_path.exists() {
+        create_libs_file(&libs_path)?;
+    }
 
     Ok(())
 }
@@ -726,7 +750,7 @@ fn lucia(args: Vec<String>) {
             exit(1);
         });
 
-        let mut config_path = exe_path
+    let mut config_path = exe_path
         .parent()
         .map(|p| p.join("..").join("config.json"))
         .ok_or_else(|| {
@@ -734,6 +758,16 @@ fn lucia(args: Vec<String>) {
             exit(1);
         })
         .unwrap();
+    
+    let libs_path = exe_path
+        .parent()
+        .map(|p| p.join("..").join("libs.json"))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .unwrap();
+
     
     if !config_path.exists() {
         eprintln!("Config file not found at {}, creating empty config.", config_path.display());
@@ -744,7 +778,10 @@ fn lucia(args: Vec<String>) {
     }    
 
     let activate_flag = args.contains(&"--activate".to_string());
-    let no_color_flag = args.contains(&"--no-color".to_string());
+    let mut no_color_flag = args.contains(&"--no-color".to_string());
+    if args.contains(&"--color".to_string()) {
+        no_color_flag = false;
+    }
     let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
     let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
     let exit_flag = args.contains(&"--exit".to_string()) || args.contains(&"-e".to_string());
@@ -798,6 +835,68 @@ fn lucia(args: Vec<String>) {
         exit(0);
     }
 
+    let commands: Vec<String> = [
+        "--activate",
+        "-a",
+        "--no-color",
+        "--color",
+        "--quiet",
+        "-q",
+        "--debug",
+        "-d",
+        "--debug-mode=",
+        "--exit",
+        "-e",
+        "--info",
+        "-i",
+        "--help",
+        "-h",
+        "--version",
+        "-v",
+        "--build-info",
+        "--disable-preprocessor",
+        "-dp",
+        "--config=",
+        "--dump-pp",
+        "--dump-ast",
+        "--dump",
+        "--allow-unsafe",
+        "--stack-size=",
+        "--compile",
+        "-c",
+        "--run",
+        "-r",
+        "--cache=",
+        "--clean-cache",
+        "-cc",
+        "--clear-cache",
+        "--cls-cache",
+        "--c-compiler=",
+        "--argv=",
+        "--",
+    ].iter().map(|s| s.to_string()).collect();
+
+    for arg in &args {
+        if arg.starts_with("--") {
+            let is_valid = if commands.contains(arg) {
+                true
+            } else if let Some(eq_pos) = arg.find('=') {
+                let prefix = &arg[..=eq_pos];
+                commands.iter().any(|cmd| cmd == prefix)
+            } else {
+                false
+            };
+
+            if !is_valid {
+                eprintln!("Unknown argument: {}", arg);
+                if let Some(suggestion) = find_closest_match(arg, &commands) {
+                    eprintln!("Did you mean: {}", suggestion);
+                }
+                exit(1);
+            }
+        }
+    }
+
     if help_flag {
         println!("{}", "Usage:".bold());
         println!("  lucia [options] [files...]\n");
@@ -806,6 +905,7 @@ fn lucia(args: Vec<String>) {
         let options = [
             ("--activate, -a", "Activate the environment"),
             ("--no-color", "Disable colored output"),
+            ("--color", "Enable colored output (default)"),
             ("--quiet, -q", "Suppress debug and warning messages"),
             ("--debug, -d", "Enable debug mode"),
             ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal)"),
@@ -916,9 +1016,6 @@ fn lucia(args: Vec<String>) {
         }))
         .unwrap();
 
-
-    let use_colors = !no_color_flag;
-
     let mut config = if config_path.exists() {
         match load_config(&config_path) {
             Ok(config) => config,
@@ -933,7 +1030,7 @@ fn lucia(args: Vec<String>) {
                     Err(e) => {
                         eprintln!("Failed to load config file again after activation: {}", e);
                         eprintln!("Creating new empty config file at {}", config_path.display());
-                        if let Err(err) = fs::write(&config_path, b"{}") {
+                        if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
                             eprintln!("Failed to create new config file: {}", err);
                             exit(1);
                         }
@@ -956,7 +1053,7 @@ fn lucia(args: Vec<String>) {
             Err(e) => {
                 eprintln!("Failed to load config file after activation: {}", e);
                 eprintln!("Creating new empty config file at {}", config_path.display());
-                if let Err(err) = fs::write(&config_path, b"{}") {
+                if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
                     eprintln!("Failed to create new config file: {}", err);
                     exit(1);
                 }
@@ -1167,6 +1264,49 @@ fn lucia(args: Vec<String>) {
     if allow_unsafe {
         config.allow_unsafe = true;
     }
+    if !supports_color() {
+        config.supports_color = false;
+    }
+    if no_color_flag {
+        config.supports_color = false;
+    }
+
+    match load_std_libs(&libs_path.display().to_string(), moded) {
+        Ok((_, (f, n))) => {
+            if f {
+                print_colored(
+                    &format!("Warning: Standard libraries mismatch for {}. Running in moded mode.", n),
+                    &config.color_scheme.warning,
+                    Some(config.supports_color),
+                );
+            }
+        }
+        Err((e, m)) => {
+            if m {
+                handle_error(
+                    &Error::with_help(
+                        "ModedSTDLibError",
+                        &e,
+                        "Set 'moded' to true in your config file to ignore this error.",
+                        to_static(exe_path.display().to_string()),
+                    ),
+                    "",
+                    &config,
+                );
+            } else {
+                handle_error(
+                    &Error::new(
+                        "STDLibError",
+                        &e,
+                        to_static(exe_path.display().to_string()),
+                    ),
+                    "",
+                    &config,
+                );
+            }
+            exit(1);
+        }
+    }
 
     if config.version != VERSION {
         if !moded {
@@ -1182,7 +1322,6 @@ fn lucia(args: Vec<String>) {
                 ),
                 "",
                 &config,
-                use_colors,
             );
             exit(1);
         } else if config.warnings {
@@ -1192,7 +1331,7 @@ fn lucia(args: Vec<String>) {
                     VERSION, config.version
                 ),
                 &config.color_scheme.warning,
-                Some(use_colors),
+                Some(config.supports_color),
             );
         }
     }
@@ -1212,7 +1351,7 @@ fn lucia(args: Vec<String>) {
             }
             Err((code, errors)) => {
                 for error in errors {
-                    handle_error(&error, "", &config, use_colors);
+                    handle_error(&error, "", &config);
                 }
                 exit(code);
             }
@@ -1230,7 +1369,7 @@ fn lucia(args: Vec<String>) {
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, use_colors, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag, &dump_ast_flag);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag, &dump_ast_flag);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -1240,7 +1379,7 @@ fn lucia(args: Vec<String>) {
         };
 
         std_env::set_current_dir(&cwd).ok();
-        repl(config, use_colors, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag, &dump_ast_flag);
+        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag, &dump_ast_flag);
     }
 }
 
@@ -1248,7 +1387,6 @@ fn execute_file(
     path: &Path,
     file_path: String,
     config: &Config,
-    use_colors: bool,
     disable_preprocessor: bool,
     home_dir_path: PathBuf,
     config_path: PathBuf,
@@ -1258,22 +1396,22 @@ fn execute_file(
     dump_ast_flag: &bool,
 ) {
     if path.exists() && path.is_file() {
-        debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config, Some(use_colors));
+        debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
 
         let cache_dir = home_dir_path.join(".cache");
         if !cache_dir.exists() {
             if let Err(e) = std::fs::create_dir_all(&cache_dir) {
-                debug_log(&format!("Failed to create cache directory: {}", e), &config, Some(use_colors));
+                debug_log(&format!("Failed to create cache directory: {}", e), &config);
             } else if cfg!(windows) {
                 let status = Command::new("attrib")
                     .args(&["+h", cache_dir.to_str().unwrap()])
                     .status();
                 if let Ok(status) = status {
                     if !status.success() {
-                        debug_log("Failed to set hidden attribute on cache directory", &config, Some(use_colors));
+                        debug_log("Failed to set hidden attribute on cache directory", &config);
                     }
                 } else {
-                    debug_log("Failed to run attrib command to hide cache directory", &config, Some(use_colors));
+                    debug_log("Failed to run attrib command to hide cache directory", &config);
                 }
             }
         }
@@ -1286,7 +1424,7 @@ fn execute_file(
                     to_static(format!("Failed to read file '{}': {}", path.display(), e)),
                     "Check if the file exists and is readable.",
                     to_static(file_path.clone()),
-                ), "", config, use_colors);
+                ), "", config);
                 exit(1);
             }
         };
@@ -1296,7 +1434,7 @@ fn execute_file(
         let processed_tokens = if !disable_preprocessor {
             if !config.cache_format.is_enabled() {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
-                    debug_log("Cache disabled, reprocessing tokens", &config, Some(use_colors));
+                    debug_log("Cache disabled, reprocessing tokens", &config);
                 }
                 let mut preprocessor = Preprocessor::new(
                     home_dir_path.join("libs"),
@@ -1305,7 +1443,7 @@ fn execute_file(
                 match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
                     Ok(tokens) => tokens,
                     Err(e) => {
-                        handle_error(&e, &file_content, &config, use_colors);
+                        handle_error(&e, &file_content, &config);
                         exit(1);
                     }
                 }
@@ -1313,14 +1451,14 @@ fn execute_file(
                 let cached_processed = match load_tokens_from_cache(&cache_dir, &file_path, "processed", config.cache_format) {
                     Ok(opt) => opt,
                     Err(e) => {
-                        debug_log(&format!("Failed to load processed tokens cache: {}", e), &config, Some(use_colors));
+                        debug_log(&format!("Failed to load processed tokens cache: {}", e), &config);
                         None
                     }
                 };
                 let cached_raw = match load_tokens_from_cache(&cache_dir, &file_path, "raw", config.cache_format) {
                     Ok(opt) => opt,
                     Err(e) => {
-                        debug_log(&format!("Failed to load raw tokens cache: {}", e), &config, Some(use_colors));
+                        debug_log(&format!("Failed to load raw tokens cache: {}", e), &config);
                         None
                     }
                 };
@@ -1328,7 +1466,7 @@ fn execute_file(
                 let use_cache = match (cached_processed.as_ref(), cached_raw.as_ref()) {
                     (Some(processed), Some(raw)) if *raw == raw_tokens => {
                         if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
-                            debug_log("Loaded processed tokens from cache (raw tokens matched)", &config, Some(use_colors));
+                            debug_log("Loaded processed tokens from cache (raw tokens matched)", &config);
                         }
                         Some(processed.clone())
                     },
@@ -1339,7 +1477,7 @@ fn execute_file(
                     tokens
                 } else {
                     if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
-                        debug_log("Raw tokens changed or cache missing, reprocessing and updating cache", &config, Some(use_colors));
+                        debug_log("Raw tokens changed or cache missing, reprocessing and updating cache", &config);
                     }
                     let mut preprocessor = Preprocessor::new(
                         home_dir_path.join("libs"),
@@ -1348,15 +1486,15 @@ fn execute_file(
                     let tokens = match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
                         Ok(tokens) => tokens,
                         Err(e) => {
-                            handle_error(&e, &file_content, &config, use_colors);
+                            handle_error(&e, &file_content, &config);
                             exit(1);
                         }
                     };
                     if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens, config.cache_format) {
-                        debug_log(&format!("Failed to save processed tokens cache: {}", e), &config, Some(use_colors));
+                        debug_log(&format!("Failed to save processed tokens cache: {}", e), &config);
                     }
                     if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "raw", &raw_tokens, config.cache_format) {
-                        debug_log(&format!("Failed to save raw tokens cache: {}", e), &config, Some(use_colors));
+                        debug_log(&format!("Failed to save raw tokens cache: {}", e), &config);
                     }
                     tokens
                 }
@@ -1370,7 +1508,6 @@ fn execute_file(
                 processed_tokens.iter().collect(),
                 path.to_str().unwrap_or(""),
                 &config,
-                use_colors,
             );
         }
 
@@ -1388,7 +1525,7 @@ fn execute_file(
                 .map(|token| (&token.0, &token.1))
                 .collect::<Vec<_>>();
 
-            debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
+            debug_log(&format!("Tokens: {:?}", filtered), &config);
         }
 
         let tokens: Vec<Token> = processed_tokens;
@@ -1397,8 +1534,8 @@ fn execute_file(
         let statements = match parser.parse_safe() {
             Ok(stmts) => stmts,
             Err(error) => {
-                debug_log("Error while parsing:", &config, Some(use_colors));
-                handle_error(&error, &file_content, &config, use_colors);
+                debug_log("Error while parsing:", &config);
+                handle_error(&error, &file_content, &config);
                 exit(1);
             }
         };
@@ -1409,7 +1546,6 @@ fn execute_file(
                 statements.iter().collect(),
                 ast_file_path.to_str().unwrap_or(""),
                 &config,
-                use_colors,
             );
         }
 
@@ -1427,7 +1563,6 @@ fn execute_file(
                         .join(", ")
                 ),
                 &config,
-                Some(use_colors),
             );
         }
 
@@ -1446,7 +1581,7 @@ fn execute_file(
 
         let mut interpreter = Interpreter::new(
             config.clone(),
-            use_colors,
+            config.supports_color,
             file_path.as_str(),
             &parent_dir,
             (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
@@ -1463,14 +1598,14 @@ fn execute_file(
             Ok(out) => {
                 if config.cache_format.is_enabled() {
                     if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
-                        debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                        debug_log(&format!("Failed to save interpreter cache: {}", e), &config);
                     }
                 }
                 out
             }
             Err(error) => {
-                debug_log("Error while interpreting:", &config, Some(use_colors));
-                handle_error(&error, &file_content, &config, use_colors);
+                debug_log("Error while interpreting:", &config);
+                handle_error(&error, &file_content, &config);
                 exit(1);
             }
         };
@@ -1479,17 +1614,17 @@ fn execute_file(
     }
 }
 
-fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
+fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
-        hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
+        hex_to_ansi(&config.color_scheme.info, config.supports_color),
         config.version,
-        hex_to_ansi("reset", Some(use_colors))
+        hex_to_ansi("reset", config.supports_color)
     );
 
     let mut interpreter = Interpreter::new(
         config.clone(),
-        use_colors,
+        config.supports_color,
         "<stdin>",
         &cwd,
         (
@@ -1524,9 +1659,9 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
         line_number += 1;
         print!(
             "{}{}{} ",
-            hex_to_ansi(&config.color_scheme.input_arrows, Some(use_colors)),
+            hex_to_ansi(&config.color_scheme.input_arrows, config.supports_color),
             ">>>",
-            hex_to_ansi("reset", Some(use_colors))
+            hex_to_ansi("reset", config.supports_color)
         );
 
         let mut input = read_input("");
@@ -1543,14 +1678,13 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                             &Error::new("IOError", "Failed to clear screen", "<stdin>"),
                             &input,
                             &config,
-                            use_colors,
                         );
                     }
                     println!(
                         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
-                        hex_to_ansi(&config.color_scheme.info, Some(use_colors)),
+                        hex_to_ansi(&config.color_scheme.info, config.supports_color),
                         config.version,
-                        hex_to_ansi("reset", Some(use_colors))
+                        hex_to_ansi("reset", config.supports_color)
                     );
                     None
                 }
@@ -1629,7 +1763,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             match preprocessor.process(raw_tokens.clone(), &current_dir) {
                 Ok(toks) => toks,
                 Err(e) => {
-                    handle_error(&e.clone(), &input, &config, use_colors);
+                    handle_error(&e.clone(), &input, &config);
                     continue;
                 }
             }
@@ -1643,7 +1777,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 processed_tokens.iter().collect(),
                 file_path.to_str().unwrap_or("stdin"),
                 &config,
-                use_colors,
             );
         }
 
@@ -1657,7 +1790,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 .map(|token| (&token.0, &token.1))
                 .collect::<Vec<_>>();
         
-            debug_log(&format!("Tokens: {:?}", filtered), &config, Some(use_colors));
+            debug_log(&format!("Tokens: {:?}", filtered), &config);
         }        
 
         let tokens = processed_tokens;
@@ -1673,10 +1806,9 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     debug_log(
                         "Error while parsing",
                         &config,
-                        Some(use_colors),
                     );
                 }
-                handle_error(&error.clone(), &input, &config, use_colors);
+                handle_error(&error.clone(), &input, &config);
                 continue;
             }
         };
@@ -1687,7 +1819,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                 statements.iter().collect(),
                 file_path.to_str().unwrap_or("stdin"),
                 &config,
-                use_colors,
             );
         }
 
@@ -1705,7 +1836,6 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                         .join(", ")
                 ),
                 &config,
-                Some(use_colors),
             );
         }
 
@@ -1760,7 +1890,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     None => Error::new("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", "<stdin>"),
                 };
 
-                handle_error(&err, &input, &config, use_colors);
+                handle_error(&err, &input, &config);
                 break;
             }
             if handle.is_finished() {
@@ -1778,7 +1908,7 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
                     if config.cache_format.is_enabled() {
                         let cache_dir = home_dir_path.join(".cache");
                         if let Err(e) = save_interpreter_cache(&cache_dir, interpreter.get_cache(), config.cache_format) {
-                            debug_log(&format!("Failed to save interpreter cache: {}", e), &config, Some(use_colors));
+                            debug_log(&format!("Failed to save interpreter cache: {}", e), &config);
                         }
                     }
                     exit(0);
@@ -1787,9 +1917,9 @@ fn repl(config: Config, use_colors: bool, disable_preprocessor: bool, home_dir_p
             }
             Err(error) => {
                 if print_intime_debug {
-                    debug_log("Error while interpreting:", &config, Some(use_colors));
+                    debug_log("Error while interpreting:", &config);
                 }
-                handle_error(&error.clone(), &input, &config, use_colors);
+                handle_error(&error.clone(), &input, &config);
                 continue;
             }
         };
@@ -1829,7 +1959,6 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
                 processed_tokens.iter().collect(),
                 path.to_str().unwrap_or(""),
                 config,
-                config.supports_color,
             );
         }
         let mut parser = Parser::new(processed_tokens);
@@ -1846,7 +1975,6 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
                 ast.iter().collect(),
                 file_path.to_str().unwrap_or(""),
                 config,
-                config.supports_color,
             );
         }
         let mut transpiler = Transpiler::new(

@@ -2905,7 +2905,7 @@ impl Interpreter {
                                 };
                         
                                 if let Some(std_lib) = STD_LIBS.get(dep_name.as_str()) {
-                                    if !check_version(VERSION, std_lib.expected_lucia_version) {
+                                    if !check_version(VERSION, &std_lib.expected_lucia_version) {
                                         self.stack.pop();
                                         return self.raise("ImportError", &format!(
                                             "Standard library '{}' requires Lucia version '{}', but incompatible.",
@@ -2913,8 +2913,8 @@ impl Interpreter {
                                             std_lib.expected_lucia_version
                                         ));
                                     }
-                                    
-                                    if !check_version(std_lib.version, required_version) {
+
+                                    if !check_version(&std_lib.version, required_version) {
                                         self.stack.pop();
                                         return self.raise("ImportError", &format!(
                                             "Standard library '{}' version '{}' does not satisfy required '{}'",
@@ -3955,8 +3955,8 @@ impl Interpreter {
                     "No exception variables provided",
                     &format!(
                         "Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'",
-                        hex_to_ansi("#1CC58B", Some(self.use_colors)),
-                        hex_to_ansi(&self.config.color_scheme.help, Some(self.use_colors)),
+                        hex_to_ansi("#1CC58B", self.use_colors),
+                        hex_to_ansi(&self.config.color_scheme.help, self.use_colors),
                     ),
                 );
             }
@@ -5507,7 +5507,7 @@ impl Interpreter {
                 object_variable.properties = props.clone();
             }
         } else if !object_variable.is_init() {
-            object_variable.init_properties();
+            object_variable.init_properties(self);
         }
 
         if self.err.is_some() {
@@ -6013,7 +6013,7 @@ impl Interpreter {
                 object_variable.properties = props.clone();
             }
         } else if !object_variable.is_init() {
-            object_variable.init_properties();
+            object_variable.init_properties(self);
         }
 
         if self.err.is_some() {

@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use crate::env::runtime::internal_structs::{LibInfo, LibRegistry};
+use crate::env::runtime::config::Libs;
+use std::path::Path;
+use std::fs;
+use std::sync::RwLock;
 
 // This module defines the standard libraries available in the runtime environment.
 // Each library is represented by a name and a description, along with its version.
@@ -8,96 +13,136 @@ use once_cell::sync::Lazy;
 // Lucia Version 2.0.0
 // This file is part of the Lucia programming language runtime.
 
-#[derive(Debug, Clone)]
-pub struct LibInfo {
-    pub description: &'static str,
-    pub version: &'static str,
-    pub expected_lucia_version: &'static str,
-}
-
-pub static STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
+pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     let mut m = HashMap::new();
 
-    m.insert("math", LibInfo {
-        description: "Provides mathematical functions and constants.",
-        version: "1.0.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("math", LibInfo::new(
+        "Provides mathematical functions and constants.",
+        "1.0.0",
+        "^2.0.0",
+    ));
 
-    m.insert("os", LibInfo {
-        description: "Interfaces with the operating system.",
-        version: "1.0.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("os", LibInfo::new(
+        "Interfaces with the operating system.",
+        "1.0.0",
+        "^2.0.0",
+    ));
 
-    m.insert("time", LibInfo {
-        description: "Handles time and date functionality.",
-        version: "0.3.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("time", LibInfo::new(
+        "Handles time and date functionality.",
+        "0.3.0",
+        "^2.0.0",
+    ));
 
-    m.insert("json", LibInfo {
-        description: "JSON parsing and serialization.",
-        version: "1.0.82",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("json", LibInfo::new(
+        "JSON parsing and serialization.",
+        "1.0.82",
+        "^2.0.0",
+    ));
 
-    m.insert("config", LibInfo {
-        description: "Lucia configuration management.",
-        version: "0.2.6",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("config", LibInfo::new(
+        "Lucia configuration management.",
+        "0.2.6",
+        "^2.0.0",
+    ));
 
-    m.insert("regex", LibInfo {
-        description: "Regular expressions for pattern matching.",
-        version: "0.9.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("regex", LibInfo::new(
+        "Regular expressions for pattern matching.",
+        "0.9.0",
+        "^2.0.0",
+    ));
 
-    m.insert("collections", LibInfo {
-        description: "Collection of utilities.",
-        version: "1.0.0",
-        expected_lucia_version: "^2.0.0",
-    });
-    
-    m.insert("random", LibInfo {
-        description: "Random number generation utilities.",
-        version: "0.7.42",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("collections", LibInfo::new(
+        "Collection of utilities.",
+        "1.0.0",
+        "^2.0.0",
+    ));
 
-    m.insert("fs", LibInfo {
-        description: "File system operations and utilities.",
-        version: "0.4.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("random", LibInfo::new(
+        "Random number generation utilities.",
+        "0.7.42",
+        "^2.0.0",
+    ));
 
-    m.insert("clib", LibInfo {
-        description: "C standard library bindings for Lucia.",
-        version: "0.1.69",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("fs", LibInfo::new(
+        "File system operations and utilities.",
+        "0.4.0",
+        "^2.0.0",
+    ));
 
-    m.insert("lasm", LibInfo {
-        description: "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
-        version: "1.0.3",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("clib", LibInfo::new(
+        "C standard library bindings for Lucia.",
+        "0.1.69",
+        "^2.0.0",
+    ));
 
-    m.insert("nest", LibInfo {
-        description: "HTTP client and server utilities.",
-        version: "1.1.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("lasm", LibInfo::new(
+        "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
+        "1.0.3",
+        "^2.0.0",
+    ));
 
-    m.insert("libload", LibInfo {
-        description: "Dynamic library loading and function invocation.",
-        version: "1.0.0",
-        expected_lucia_version: "^2.0.0",
-    });
+    m.insert("nest", LibInfo::new(
+        "HTTP client and server utilities.",
+        "1.1.0",
+        "^2.0.0",
+    ));
+
+    m.insert("libload", LibInfo::new(
+        "Dynamic library loading and function invocation.",
+        "1.0.0",
+        "^2.0.0",
+    ));
 
     m
 });
+
+pub static STD_LIBS: Lazy<LibRegistry> = Lazy::new(|| {
+    LibRegistry::new()
+});
+
+pub static LIBS_JSON: Lazy<RwLock<Libs>> = Lazy::new(|| {
+    RwLock::new(Libs::new())
+});
+
+pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo>, (bool, String)), (String, bool)> {
+    let content = fs::read_to_string(Path::new(file))
+        .map_err(|e| (format!("Failed to read libs file: {}", e), false))?;
+
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| (format!("Failed to parse JSON: {}", e), false))?;
+
+    let std_libs = json.get("std_libs")
+        .ok_or(("Missing 'std_libs' field in JSON".to_string(), false))?;
+
+    let parsed: HashMap<String, LibInfo> = serde_json::from_value(std_libs.clone())
+        .map_err(|e| (format!("Failed to parse 'std_libs': {}", e), false))?;
+
+    let mut dirty_libs = (false, String::new());
+
+    for (name, lib) in &parsed {
+        match _STD_LIBS.get(name.as_str()) {
+            Some(orig) => {
+                if lib != orig {
+                    if !moded {
+                        return Err((format!("Library '{}' does not match standard definition", name), true));
+                    } else {
+                        dirty_libs = (true, name.to_string());
+                    }
+                }
+            }
+            None => return Err((format!("Unknown standard library '{}'", name), true)),
+        }
+    }
+
+    let libs = serde_json::from_str::<Libs>(&content)
+        .map_err(|e| (format!("Failed to parse libs JSON: {}", e), false))?;
+
+    STD_LIBS.set_all(parsed.clone());
+    LIBS_JSON.write().unwrap().set_all(libs);
+
+    Ok((parsed, dirty_libs))
+}
 
 
 // ------- Macros -------
