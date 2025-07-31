@@ -76,6 +76,7 @@ pub fn supports_color() -> bool {
 
 #[cfg(unix)]
 pub fn supports_color() -> bool {
+    use std::io::IsTerminal;
     let is_tty = std::io::stdout().is_terminal();
     let term = std::env::var("TERM").unwrap_or_default();
     let not_dumb = term != "dumb";

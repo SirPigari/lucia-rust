@@ -137,7 +137,7 @@ pub fn predict_sequence(
     
             if (diff > 0.0 && next > end_f64) || (diff < 0.0 && next < end_f64) {
                 let closest = *seed_f64.iter()
-                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .min_by(|a, b| (*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap())
                     .unwrap();
                 return Err((
                     "PatternError",
@@ -162,7 +162,7 @@ pub fn predict_sequence(
         if let Some(&last) = seed_f64.last() {
             if last != end_f64 {
                 let closest = seed_f64.iter()
-                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .min_by(|a, b| (*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap())
                     .unwrap();
                 let help_msg = to_static(format!("Did you mean to end at this closest factorial value {} instead?", closest));
                 return Err(("PatternError", "Factorial sequence does not reach the exact end value", help_msg));
@@ -187,7 +187,7 @@ pub fn predict_sequence(
         if let Some(&last) = seed_f64.last() {
             if last != end_f64 {
                 let closest = seed_f64.iter()
-                    .min_by(|a, b| ((*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap()))
+                    .min_by(|a, b| (*a - end_f64).abs().partial_cmp(&(*b - end_f64).abs()).unwrap())
                     .unwrap();
                 return Err((
                     "PatternError",
