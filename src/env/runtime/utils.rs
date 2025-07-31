@@ -120,14 +120,23 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 
 #[cfg(unix)]
 pub fn get_remaining_stack_size() -> Option<usize> {
-    use libc::{pthread_getattr_np, pthread_attr_getstack, pthread_attr_destroy};
+    use libc::{pthread_self, pthread_attr_destroy};
     use std::mem::MaybeUninit;
     use std::ptr;
 
     unsafe {
+        extern "C" {
+            fn pthread_getattr_np(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int;
+            fn pthread_attr_getstack(
+                attr: *const libc::pthread_attr_t,
+                stackaddr: *mut *mut libc::c_void,
+                stacksize: *mut usize,
+            ) -> libc::c_int;
+        }
+
         let mut attr = MaybeUninit::<libc::pthread_attr_t>::uninit();
 
-        if pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
+        if pthread_getattr_np(pthread_self(), attr.as_mut_ptr()) != 0 {
             return None;
         }
 
