@@ -125,22 +125,23 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     use std::ptr;
 
     unsafe {
-        let mut attr = MaybeUninit::uninit();
+        let mut attr = MaybeUninit::<libc::pthread_attr_t>::uninit();
 
         if pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
             return None;
         }
-        let attr = attr.assume_init();
+
+        let mut attr = attr.assume_init();
 
         let mut stackaddr: *mut libc::c_void = ptr::null_mut();
         let mut stacksize: usize = 0;
 
         if pthread_attr_getstack(&attr, &mut stackaddr as *mut _, &mut stacksize as *mut _) != 0 {
-            pthread_attr_destroy(&attr);
+            pthread_attr_destroy(&mut attr);
             return None;
         }
 
-        pthread_attr_destroy(&attr);
+        pthread_attr_destroy(&mut attr);
 
         let sp = current_stack_pointer();
 
