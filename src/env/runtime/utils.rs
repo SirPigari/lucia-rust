@@ -124,9 +124,21 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     use std::mem::MaybeUninit;
     use std::ptr;
 
-    unsafe {
-        unsafe extern "C" {
+    #[cfg(any(not(target_os = "macos"), target_arch = "x86_64"))]
+    unsafe fn pthread_getattr_np_wrapper(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int {
+        extern "C" {
             fn pthread_getattr_np(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int;
+        }
+        pthread_getattr_np(thread, attr)
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    unsafe fn pthread_getattr_np_wrapper(_thread: libc::pthread_t, _attr: *mut libc::pthread_attr_t) -> libc::c_int {
+        0
+    }
+
+    unsafe {
+        extern "C" {
             fn pthread_attr_getstack(
                 attr: *const libc::pthread_attr_t,
                 stackaddr: *mut *mut libc::c_void,
@@ -136,7 +148,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 
         let mut attr = MaybeUninit::<libc::pthread_attr_t>::uninit();
 
-        if pthread_getattr_np(pthread_self(), attr.as_mut_ptr()) != 0 {
+        if pthread_getattr_np_wrapper(pthread_self(), attr.as_mut_ptr()) != 0 {
             return None;
         }
 
