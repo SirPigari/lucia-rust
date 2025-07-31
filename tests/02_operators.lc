@@ -41,9 +41,11 @@ assert!((1 in [1, 2, 3]))
 assert_eq!(true xor false, true)
 assert_eq!(false xnor false, true)
 
+// type checking
+assert!(1 is int)
+assert!(2 isnt str)
+
 // aliases
-assert!(1 is 1)
-assert!(2 isnt 3)
 assert_eq!(true and false, false)
 assert_eq!(false or true, true)
 

@@ -6885,7 +6885,7 @@ impl Interpreter {
 
     fn make_operation(&mut self, left: Value, right: Value, mut operator: &str) -> Value {
         operator = match operator {
-            "isnt" | "isn't" | "nein" => "!=",
+            "nein" => "!=",
             "or" => "||",
             "and" => "&&",
             "not" => "!",
@@ -7311,6 +7311,13 @@ impl Interpreter {
             },
             "is" => {
                 let res = self.check_type(&left, &right, false);
+                if self.err.is_some() {
+                    self.err = None;
+                }
+                Value::Boolean(res)
+            },
+            "isnt" | "isn't" => {
+                let res = !self.check_type(&left, &right, false);
                 if self.err.is_some() {
                     self.err = None;
                 }

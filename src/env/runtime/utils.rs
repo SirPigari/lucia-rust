@@ -125,7 +125,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     use std::ptr;
 
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             fn pthread_getattr_np(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int;
             fn pthread_attr_getstack(
                 attr: *const libc::pthread_attr_t,
