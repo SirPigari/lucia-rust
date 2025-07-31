@@ -131,10 +131,10 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 
     #[cfg(any(not(target_os = "macos"), target_arch = "x86_64"))]
     unsafe fn pthread_getattr_np_wrapper(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int {
-        extern "C" {
+        unsafe extern "C" {
             fn pthread_getattr_np(thread: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> libc::c_int;
         }
-        pthread_getattr_np(thread, attr)
+        unsafe { pthread_getattr_np(thread, attr) }
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
