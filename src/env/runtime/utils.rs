@@ -118,12 +118,12 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     }
 }
 
-#[cfg(unix)]
 // stupid macos
 // and stupid aarch64
 // and stupid chatgpt for NOT KNOWING THAT THE FUCKING EXTERN IS UNSAFE
 // and the fucking compiler not checking that on windows, you literally dont need it just CHECK IT
 // milochov
+#[cfg(unix)]
 pub fn get_remaining_stack_size() -> Option<usize> {
     use libc::{pthread_self, pthread_attr_destroy};
     use std::mem::MaybeUninit;
@@ -139,7 +139,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     unsafe fn pthread_getattr_np_wrapper(_thread: libc::pthread_t, _attr: *mut libc::pthread_attr_t) -> libc::c_int {
-        0
+        100_000
     }
 
     unsafe {
@@ -407,6 +407,18 @@ pub fn unescape_string_full(s: &str) -> Result<String, String> {
     let wrapped = format!("\"{}\"", s);
     serde_json::from_str::<String>(&wrapped)
         .map_err(|e| format!("Failed to fully unescape: {}", e))
+}
+
+pub fn escape_string(s: &str) -> Result<String, String> {
+    serde_json::to_string(s)
+        .map_err(|e| format!("Failed to escape string: {}", e))
+        .and_then(|quoted| {
+            if quoted.len() >= 2 && quoted.starts_with('"') && quoted.ends_with('"') {
+                Ok(quoted[1..quoted.len() - 1].to_string())
+            } else {
+                Err("Invalid JSON string output".to_string())
+            }
+        })
 }
 
 

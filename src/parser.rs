@@ -35,6 +35,10 @@ impl Parser {
         None
     }
 
+    fn token_is(&mut self, kind: &str, value: &str) -> bool {
+        self.token().map_or(false, |t| t.0 == kind && t.1 == value)
+    }
+
     #[cold]
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Statement {
         self.err = Some(Error {
@@ -47,10 +51,6 @@ impl Parser {
         Statement::Null
     }
 
-    fn token_is(&mut self, kind: &str, value: &str) -> bool {
-        self.token().map_or(false, |t| t.0 == kind && t.1 == value)
-    }    
-
     #[cold]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Statement {
         self.err = Some(Error {
@@ -58,6 +58,18 @@ impl Parser {
             msg: msg.to_string(),
             help: Some(help.to_string()),
             loc: self.get_loc(),
+            ref_err: None,
+        });
+        Statement::Null
+    }
+
+    #[cold]
+    pub fn raise_with_loc(&mut self, error_type: &str, msg: &str, loc: Location) -> Statement {
+        self.err = Some(Error {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: None,
+            loc: Some(loc),
             ref_err: None,
         });
         Statement::Null
@@ -323,9 +335,11 @@ impl Parser {
                 ("OPERATOR", "?") => {
                     let loc = self.get_loc();
                     self.next();
-                    while self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
+
+                    while self.token_is("OPERATOR", "?") {
                         self.next();
                     }
+
                     if self.token_is("OPERATOR", "or") {
                         self.next();
                         let otherwise = self.parse_expression();
@@ -345,9 +359,10 @@ impl Parser {
                                 Value::List(vec![Value::String("_".to_string())]),
                                 Value::List(vec![otherwise.convert_to_map()]),
                             ],
-                            loc
+                            loc,
                         };
                     }
+
                     return Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -361,39 +376,30 @@ impl Parser {
                             Value::List(vec![]),
                             Value::List(vec![]),
                         ],
-                        loc
+                        loc,
                     };
                 }
 
                 ("OPERATOR", "??") => {
                     let loc = self.get_loc();
                     self.next();
-                    if self.token_is("OPERATOR", "??") || self.token_is("OPERATOR", "?") {
-                        while self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
-                            self.next();
-                        }
+
+                    let mut multi = false;
+                    while self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
+                        multi = true;
+                        self.next();
+                    }
+
+                    if self.token_is("OPERATOR", "or") || !multi {
                         if self.token_is("OPERATOR", "or") {
                             self.next();
-                            let otherwise = self.parse_expression();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("body".to_string()),
-                                    Value::String("exception_vars".to_string()),
-                                    Value::String("catch_body".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("TRY_CATCH".to_string()),
-                                    Value::List(vec![expr.convert_to_map()]),
-                                    Value::List(vec![Value::String("_".to_string())]),
-                                    Value::List(vec![otherwise.convert_to_map()]),
-                                ],
-                                loc
-                            };
                         }
+
+                        let otherwise = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+
                         return Statement::Statement {
                             keys: vec![
                                 Value::String("type".to_string()),
@@ -402,18 +408,15 @@ impl Parser {
                                 Value::String("catch_body".to_string()),
                             ],
                             values: vec![
-                                Value::String("TRY".to_string()),
+                                Value::String("TRY_CATCH".to_string()),
                                 Value::List(vec![expr.convert_to_map()]),
-                                Value::List(vec![]),
-                                Value::List(vec![]),
+                                Value::List(vec![Value::String("_".to_string())]),
+                                Value::List(vec![otherwise.convert_to_map()]),
                             ],
-                            loc
+                            loc,
                         };
                     }
-                    let otherwise = self.parse_expression();
-                    if self.err.is_some() {
-                        return Statement::Null;
-                    }
+
                     return Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -422,12 +425,12 @@ impl Parser {
                             Value::String("catch_body".to_string()),
                         ],
                         values: vec![
-                            Value::String("TRY_CATCH".to_string()),
+                            Value::String("TRY".to_string()),
                             Value::List(vec![expr.convert_to_map()]),
-                            Value::List(vec![Value::String("_".to_string())]),
-                            Value::List(vec![otherwise.convert_to_map()]),
+                            Value::List(vec![]),
+                            Value::List(vec![]),
                         ],
-                        loc
+                        loc,
                     };
                 }
 
@@ -1574,9 +1577,8 @@ impl Parser {
                     }
                 }
 
-                "IDENTIFIER" if ["fun", "gen", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
-                    let mut modifiers = vec![];
-                    let (name, is_function, is_generator);
+                "IDENTIFIER" if ["fun", "gen", "type", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
+                    let mut modifiers: Vec<String> = vec![];
 
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
                         while let Some(tok) = self.token() {
@@ -1589,263 +1591,441 @@ impl Parser {
                         }
                     }
 
-                    if self.token_is("IDENTIFIER", "fun") {
-                        is_function = true;
-                        is_generator = false;
-                        self.next();
-                    } else if self.token_is("IDENTIFIER", "gen") {
-                        is_function = false;
-                        is_generator = true;
-                        self.next();
-                    } else {
-                        is_function = false;
-                        is_generator = false;
-                    }
+                    match self.token().cloned().unwrap_or_default().1.as_str() {
+                        x if ["fun", "gen"].contains(&x) => {
+                            self.next();
+                            let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1 } else { "".to_string() }).unwrap_or_default();
+                            self.next();
+                            if name.is_empty() {
+                                self.raise("SyntaxError", "Function or generator declaration cannot have a name when using modifiers");
+                                return Statement::Null;
+                            }
+                            let is_function = x == "fun";
+                            self.check_for("SEPARATOR", "(");
+                            self.next();
+                            let mut pos_args = vec![];
+                            let mut named_args = vec![];
 
-                    name = self.token().cloned().unwrap().1.clone();
-                    self.next();
+                            while let Some(mut current_tok) = self.token().cloned() {
+                                let mut param_modifiers = vec![];
 
-                    if (is_function || is_generator) && name.is_empty() {
-                        self.raise("SyntaxError", if is_function { "Function declaration must have a name" } else { "Generator declaration must have a name" });
-                        return Statement::Null;
-                    }
+                                while current_tok.0 == "IDENTIFIER" &&
+                                    (current_tok.1 == "mutable" || current_tok.1 == "final" || current_tok.1 == "static" || current_tok.1 == "non-static")
+                                {
+                                    param_modifiers.push(current_tok.1.clone());
+                                    self.next();
 
-                    if is_function || is_generator {
-                        self.check_for("SEPARATOR", "(");
-                        self.next();
-                        let mut pos_args = vec![];
-                        let mut named_args = vec![];
+                                    if let Some(next_tok) = self.token() {
+                                        current_tok = next_tok.clone();
+                                    } else {
+                                        break;
+                                    }
+                                }
 
-                        while let Some(mut current_tok) = self.token().cloned() {
-                            let mut param_modifiers = vec![];
+                                if current_tok.0 == "SEPARATOR" && current_tok.1 == ")" {
+                                    break;
+                                }
 
-                            while current_tok.0 == "IDENTIFIER" &&
-                                (current_tok.1 == "mutable" || current_tok.1 == "final" || current_tok.1 == "static" || current_tok.1 == "non-static")
-                            {
-                                param_modifiers.push(current_tok.1.clone());
+                                if current_tok.0 == "IDENTIFIER" {
+                                    let arg_name = current_tok.1.clone();
+                                    self.next();
+
+                                    let mut arg_type = Value::Map {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string()),
+                                            Value::String("type_kind".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("TYPE".to_string()),
+                                            Value::String("any".to_string()),
+                                            Value::String("simple".to_string()),
+                                        ],
+                                    };
+
+                                    if self.token_is("SEPARATOR", ":") {
+                                        self.next();
+                                        let type_expr = self.parse_type();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                        arg_type = type_expr.convert_to_map();
+                                    }
+
+                                    let modifiers_value = Value::List(param_modifiers.into_iter().map(Value::String).collect());
+
+                                    if self.token_is("OPERATOR", "=") {
+                                        self.next();
+                                        let def_val = self.parse_expression();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+
+                                        let wrapped_named_arg = Value::Map {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("value".to_string()),
+                                                Value::String("modifiers".to_string()),
+                                            ],
+                                            values: vec![
+                                                arg_type.clone(),
+                                                def_val.convert_to_map(),
+                                                modifiers_value.clone(),
+                                            ],
+                                        };
+                                        named_args.push((arg_name, wrapped_named_arg));
+                                    } else {
+                                        let mut keys = vec![
+                                            Value::String("name".to_string()),
+                                            Value::String("type".to_string()),
+                                        ];
+                                        let mut values = vec![
+                                            Value::String(arg_name.clone()),
+                                            arg_type,
+                                        ];
+
+                                        if let Value::List(_) = modifiers_value {
+                                            keys.push(Value::String("modifiers".to_string()));
+                                            values.push(modifiers_value);
+                                        }
+
+                                        let arg_stmt = Statement::Statement {
+                                            keys,
+                                            values,
+                                            loc: self.get_loc(),
+                                        };
+                                        pos_args.push(arg_stmt);
+                                    }
+                                } else if current_tok.0 == "SEPARATOR" && current_tok.1 == "," {
+                                    self.next();
+                                } else {
+                                    self.raise("SyntaxError", &format!("Unexpected token '{}'", current_tok.1));
+                                    return Statement::Null;
+                                }
+                            }
+
+                            self.check_for("SEPARATOR", ")");
+                            self.next();
+
+                            if is_function && self.token_is("OPERATOR", "?") {
+                                self.next();
+                            }
+
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            let mut return_type = Value::Map {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("value".to_string()),
+                                    Value::String("type_kind".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("TYPE".to_string()),
+                                    Value::String("any".to_string()),
+                                    Value::String("simple".to_string()),
+                                ],
+                            }.convert_to_statement();
+
+                            if self.token_is("OPERATOR", "->") {
+                                self.next();
+                                return_type = self.parse_type();
+                            }
+
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            if return_type.get_type() != "TYPE" {
+                                self.raise("SyntaxError", if is_function { "Expected a type after '->'" } else { "Expected a type after '->' in generator" });
+                                return Statement::Null;
+                            }
+
+                            if self.token_is("SEPARATOR", ":") {
+                                self.next();
+                            } else if !self.token_is("IDENTIFIER", "end") {
+                                self.raise("SyntaxError", if is_function { "Expected ':' or 'end' after function parameters" } else { "Expected ':' or 'end' after generator parameters" });
+                                return Statement::Null;
+                            }
+
+                            let mut body = vec![];
+                            while let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                    break;
+                                }
+                                let stmt = self.parse_expression();
+                                if self.err.is_some() {
+                                    return Statement::Null;
+                                }
+                                body.push(stmt);
+                            }
+
+                            self.check_for("IDENTIFIER", "end");
+                            self.next();
+
+                            return Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("name".to_string()),
+                                    Value::String("modifiers".to_string()),
+                                    Value::String("pos_args".to_string()),
+                                    Value::String("named_args".to_string()),
+                                    Value::String("body".to_string()),
+                                    Value::String("return_type".to_string()),
+                                ],
+                                values: vec![
+                                    if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
+                                    Value::String(name),
+                                    Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                    Value::List(pos_args.into_iter().map(|s| s.convert_to_map()).collect()),
+                                    Value::Map {
+                                        keys: named_args.iter().map(|(k, _)| Value::String(k.clone())).collect(),
+                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
+                                    },
+                                    Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                    return_type.convert_to_map(),
+                                ],
+                                loc: self.get_loc(),
+                            };
+                        }
+                        "type" => {
+                            self.next();
+                            let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                            if type_token.0 != "IDENTIFIER" {
+                                self.raise("SyntaxError", "Expected type name after 'type'");
+                                return Statement::Null;
+                            }
+                            let name = type_token.1.clone();
+                            let name_loc = type_token.2.clone();
+                            self.next();
+
+                            let mut generics = vec![];
+                            if self.token_is("OPERATOR", "<") {
+                                self.next();
+                                while !self.token_is("OPERATOR", ">") {
+                                    let gen_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                                    if gen_token.0 != "IDENTIFIER" {
+                                        self.raise("SyntaxError", "Expected generic parameter");
+                                        return Statement::Null;
+                                    }
+                                    generics.push(gen_token.1);
+                                    self.next();
+                                    if self.token_is("SEPARATOR", ",") {
+                                        self.next();
+                                    } else if !self.token_is("OPERATOR", ">") {
+                                        self.raise("SyntaxError", "Expected ',' or '>' in generics");
+                                        return Statement::Null;
+                                    }
+                                }
+                                self.next();
+                            }
+
+                            let mut vars = vec![];
+                            if self.token_is("SEPARATOR", "[") {
+                                self.next();
+                                while !self.token_is("SEPARATOR", "]") {
+                                    let var_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                                    if var_token.0 != "IDENTIFIER" {
+                                        self.raise("SyntaxError", "Expected variable name in type declaration");
+                                        return Statement::Null;
+                                    }
+                                    vars.push(var_token.1);
+                                    self.next();
+                                    if self.token_is("SEPARATOR", ",") {
+                                        self.next();
+                                    } else if !self.token_is("SEPARATOR", "]") {
+                                        self.raise("SyntaxError", "Expected ',' or ']' in type variables");
+                                        return Statement::Null;
+                                    }
+                                }
+                                self.next();
+                            }
+
+                            if !self.token_is("OPERATOR", "=") {
+                                self.raise("SyntaxError", "Expected '=' after type name");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            let mut variants = vec![];
+                            let mut paren_locs = vec![];
+
+                            loop {
+                                let variant_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                                if variant_token.0 != "IDENTIFIER" {
+                                    break;
+                                }
+                                let ident_pos = self.pos;
+                                let variant_name = variant_token.1.clone();
                                 self.next();
 
-                                if let Some(next_tok) = self.token() {
-                                    current_tok = next_tok.clone();
+                                let paren_loc = if self.token_is("SEPARATOR", "(") {
+                                    let loc = self.get_loc();
+                                    self.next();
+
+                                    let mut variant_args = vec![];
+                                    while !self.token_is("SEPARATOR", ")") {
+                                        let arg_type = self.parse_type();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                        variant_args.push(arg_type.convert_to_map());
+                                        if self.token_is("SEPARATOR", ",") {
+                                            self.next();
+                                        } else if !self.token_is("SEPARATOR", ")") {
+                                            self.raise("SyntaxError", "Expected ',' or ')' in variant arguments");
+                                            return Statement::Null;
+                                        }
+                                    }
+                                    self.next();
+
+                                    variants.push(Value::Map {
+                                        keys: vec![Value::String("name".to_string()), Value::String("args".to_string())],
+                                        values: vec![
+                                            Value::String(variant_name),
+                                            Value::List(variant_args),
+                                        ],
+                                    });
+
+                                    Some(loc)
+                                } else {
+                                    self.pos = ident_pos;
+                                    let type_ = self.parse_type();
+                                    if self.err.is_some() {
+                                        return Statement::Null;
+                                    }
+                                    variants.push(type_.convert_to_map());
+                                    None
+                                };
+
+                                paren_locs.push(paren_loc);
+
+                                if self.token_is("OPERATOR", "|") {
+                                    self.next();
                                 } else {
                                     break;
                                 }
                             }
 
-                            if current_tok.0 == "SEPARATOR" && current_tok.1 == ")" {
-                                break;
-                            }
+                            let (all_have_parens, none_have_parens) = paren_locs.iter().fold((true, true), |(all, none), loc| {
+                                (all && loc.is_some(), none && loc.is_none())
+                            });
 
-                            if current_tok.0 == "IDENTIFIER" {
-                                let arg_name = current_tok.1.clone();
-                                self.next();
-
-                                let mut arg_type = Value::Map {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("value".to_string()),
-                                        Value::String("type_kind".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("TYPE".to_string()),
-                                        Value::String("any".to_string()),
-                                        Value::String("simple".to_string()),
-                                    ],
+                            if !all_have_parens && !none_have_parens {
+                                let err_loc = paren_locs.iter().filter_map(|loc| loc.clone()).next().unwrap_or(self.get_loc());
+                                match err_loc {
+                                    Some(loc) => self.raise_with_loc("SyntaxError", "Mixed variant parens usage is not allowed", loc),
+                                    None => self.raise("SyntaxError", "Mixed variant parens usage is not allowed"),
                                 };
+                                return Statement::Null;
+                            }
 
-                                if self.token_is("SEPARATOR", ":") {
-                                    self.next();
-                                    let type_expr = self.parse_type();
-                                    if self.err.is_some() {
-                                        return Statement::Null;
-                                    }
-                                    arg_type = type_expr.convert_to_map();
-                                }
-
-                                let modifiers_value = Value::List(param_modifiers.into_iter().map(Value::String).collect());
-
-                                if self.token_is("OPERATOR", "=") {
-                                    self.next();
-                                    let def_val = self.parse_expression();
-                                    if self.err.is_some() {
-                                        return Statement::Null;
-                                    }
-
-                                    let wrapped_named_arg = Value::Map {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                            Value::String("modifiers".to_string()),
-                                        ],
-                                        values: vec![
-                                            arg_type.clone(),
-                                            def_val.convert_to_map(),
-                                            modifiers_value.clone(),
-                                        ],
-                                    };
-                                    named_args.push((arg_name, wrapped_named_arg));
-                                } else {
-                                    let mut keys = vec![
-                                        Value::String("name".to_string()),
-                                        Value::String("type".to_string()),
-                                    ];
-                                    let mut values = vec![
-                                        Value::String(arg_name.clone()),
-                                        arg_type,
-                                    ];
-
-                                    if let Value::List(_) = modifiers_value {
-                                        keys.push(Value::String("modifiers".to_string()));
-                                        values.push(modifiers_value);
-                                    }
-
-                                    let arg_stmt = Statement::Statement {
-                                        keys,
-                                        values,
-                                        loc: self.get_loc(),
-                                    };
-                                    pos_args.push(arg_stmt);
-                                }
-                            } else if current_tok.0 == "SEPARATOR" && current_tok.1 == "," {
+                            let mut conditions = vec![];
+                            if self.token_is("IDENTIFIER", "where") {
                                 self.next();
+                                if !self.token_is("SEPARATOR", "(") {
+                                    self.raise("SyntaxError", "Expected '(' after 'where'");
+                                    return Statement::Null;
+                                }
+                                self.next();
+                                while !self.token_is("SEPARATOR", ")") {
+                                    let condition = self.parse_expression();
+                                    if self.err.is_some() {
+                                        return Statement::Null;
+                                    }
+                                    conditions.push(condition);
+                                    if self.token_is("SEPARATOR", ",") {
+                                        self.next();
+                                    } else if !self.token_is("SEPARATOR", ")") {
+                                        self.raise("SyntaxError", "Expected ',' or ')' in type conditions");
+                                        return Statement::Null;
+                                    }
+                                }
+                                self.next();
+                            }
+
+                            let kind = if none_have_parens {
+                                "alias"
                             } else {
-                                self.raise("SyntaxError", &format!("Unexpected token '{}'", current_tok.1));
-                                return Statement::Null;
+                                "enum"
+                            };
+
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("name".to_string()),
+                                    Value::String("generics".to_string()),
+                                    Value::String("variables".to_string()),
+                                    Value::String("variants".to_string()),
+                                    Value::String("conditions".to_string()),
+                                    Value::String("modifiers".to_string()),
+                                    Value::String("kind".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("TYPE_DECLARATION".to_string()),
+                                    Value::String(name),
+                                    Value::List(generics.into_iter().map(Value::String).collect()),
+                                    Value::List(vars.into_iter().map(Value::String).collect()),
+                                    Value::List(variants),
+                                    Value::List(conditions.into_iter().map(|c| c.convert_to_map()).collect()),
+                                    Value::List(modifiers.iter().cloned().map(Value::String).collect()),
+                                    Value::String(kind.to_string()),
+                                ],
+                                loc: name_loc,
                             }
                         }
-
-                        self.check_for("SEPARATOR", ")");
-                        self.next();
-
-                        if is_function && self.token_is("OPERATOR", "?") {
+                        _ => {
+                            let name = self.token().cloned().map(|tok| tok.1).unwrap_or_default();
                             self.next();
-                        }
-
-                        if self.err.is_some() {
-                            return Statement::Null;
-                        }
-
-                        let mut return_type = Value::Map {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                                Value::String("type_kind".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("TYPE".to_string()),
-                                Value::String("any".to_string()),
-                                Value::String("simple".to_string()),
-                            ],
-                        }.convert_to_statement();
-
-                        if self.token_is("OPERATOR", "->") {
-                            self.next();
-                            return_type = self.parse_type();
-                        }
-
-                        if self.err.is_some() {
-                            return Statement::Null;
-                        }
-                        if return_type.get_type() != "TYPE" {
-                            self.raise("SyntaxError", if is_function { "Expected a type after '->'" } else { "Expected a type after '->' in generator" });
-                            return Statement::Null;
-                        }
-
-                        if self.token_is("SEPARATOR", ":") {
-                            self.next();
-                        } else if !self.token_is("IDENTIFIER", "end") {
-                            self.raise("SyntaxError", if is_function { "Expected ':' or 'end' after function parameters" } else { "Expected ':' or 'end' after generator parameters" });
-                            return Statement::Null;
-                        }
-
-                        let mut body = vec![];
-                        while let Some(tok) = self.token() {
-                            if tok.0 == "IDENTIFIER" && tok.1 == "end" {
-                                break;
-                            }
-                            let stmt = self.parse_expression();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            body.push(stmt);
-                        }
-
-                        self.check_for("IDENTIFIER", "end");
-                        self.next();
-
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("name".to_string()),
-                                Value::String("modifiers".to_string()),
-                                Value::String("pos_args".to_string()),
-                                Value::String("named_args".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("return_type".to_string()),
-                            ],
-                            values: vec![
-                                if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
-                                Value::String(name),
-                                Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                Value::List(pos_args.into_iter().map(|s| s.convert_to_map()).collect()),
-                                Value::Map {
-                                    keys: named_args.iter().map(|(k, _)| Value::String(k.clone())).collect(),
-                                    values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                                },
-                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                return_type.convert_to_map(),
-                            ],
-                            loc: self.get_loc(),
-                        };
-                    } else {
-                        if self.token_is("SEPARATOR", ":") {
-                            self.next();
-                            let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                            if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR") {
-                                self.raise("SyntaxError", "Expected type after ':'");
-                                return Statement::Null;
-                            }
-                            let type_ = self.parse_type();
-                            let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            if self.token_is("OPERATOR", "=") {
+                            if self.token_is("SEPARATOR", ":") {
                                 self.next();
-                                value = self.parse_expression().convert_to_map();
+                                let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                                if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR") {
+                                    self.raise("SyntaxError", "Expected type after ':'");
+                                    return Statement::Null;
+                                }
+                                let type_ = self.parse_type();
+                                let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
                                 if self.err.is_some() {
                                     return Statement::Null;
                                 }
+                                if self.token_is("OPERATOR", "=") {
+                                    self.next();
+                                    value = self.parse_expression().convert_to_map();
+                                    if self.err.is_some() {
+                                        return Statement::Null;
+                                    }
+                                }
+                                return Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("name".to_string()),
+                                        Value::String("var_type".to_string()),
+                                        Value::String("value".to_string()),
+                                        Value::String("modifiers".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("VARIABLE_DECLARATION".to_string()),
+                                        Value::String(name),
+                                        type_.clone().convert_to_map(),
+                                        value,
+                                        Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                    ],
+                                    loc: self.get_loc(),
+                                };
+                            } else {
+                                return Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("name".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("VARIABLE".to_string()),
+                                        Value::String(name),
+                                    ],
+                                    loc: self.get_loc(),
+                                };
                             }
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("name".to_string()),
-                                    Value::String("var_type".to_string()),
-                                    Value::String("value".to_string()),
-                                    Value::String("modifiers".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("VARIABLE_DECLARATION".to_string()),
-                                    Value::String(name),
-                                    type_.clone().convert_to_map(),
-                                    value,
-                                    Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                ],
-                                loc: self.get_loc(),
-                            };
-                        } else {
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("name".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("VARIABLE".to_string()),
-                                    Value::String(name),
-                                ],
-                                loc: self.get_loc(),
-                            };
                         }
                     }
                 }
@@ -2241,89 +2421,6 @@ impl Parser {
                                     values: vec![pattern_value, guard_value, Value::List(b.into_iter().map(|s| s.convert_to_map()).collect())],
                                 }
                             }).collect()),
-                        ],
-                        loc: self.get_loc(),
-                    }
-                }
-
-                "IDENTIFIER" if token.1 == "type" => {
-                    self.next();
-                    let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                    if type_token.0 != "IDENTIFIER" {
-                        self.raise("SyntaxError", "Expected type name after 'type'");
-                        return Statement::Null;
-                    }
-                    self.next();
-                    let mut vars = vec![];
-                    let mut conditions = vec![];
-                    if self.token_is("SEPARATOR", "[") {
-                        self.next();
-                        while !self.token_is("SEPARATOR", "]") {
-                            let var_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                            if var_token.0 != "IDENTIFIER" {
-                                self.raise("SyntaxError", "Expected variable name in type declaration");
-                                return Statement::Null;
-                            }
-                            vars.push(var_token.1);
-                            self.next();
-                            if self.token_is("SEPARATOR", ",") {
-                                self.next();
-                            } else if !self.token_is("SEPARATOR", "]") {
-                                self.raise("SyntaxError", "Expected ',' or ']' in type variables");
-                                return Statement::Null;
-                            }
-                        }
-                        self.next();
-                    }
-                    if !self.token_is("OPERATOR", "=") {
-                        self.raise("SyntaxError", "Expected '=' after type name");
-                        return Statement::Null;
-                    }
-                    self.next();
-                    let new_type = self.parse_type();
-                    if self.err.is_some() {
-                        return Statement::Null;
-                    }
-                    if new_type.get_type() != "TYPE" {
-                        self.raise("SyntaxError", "Expected a type after '='");
-                        return Statement::Null;
-                    }
-                    if self.token_is("IDENTIFIER", "where") {
-                        self.next();
-                        if !self.token_is("SEPARATOR", "(") {
-                            self.raise("SyntaxError", "Expected '(' after 'where'");
-                            return Statement::Null;
-                        }
-                        self.next();
-                        while !self.token_is("SEPARATOR", ")") {
-                            let condition = self.parse_expression();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            conditions.push(condition);
-                            if self.token_is("SEPARATOR", ",") {
-                                self.next();
-                            } else if !self.token_is("SEPARATOR", ")") {
-                                self.raise("SyntaxError", "Expected ',' or ')' in type conditions");
-                                return Statement::Null;
-                            }
-                        }
-                        self.next();
-                    }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("name".to_string()),
-                            Value::String("base_type".to_string()),
-                            Value::String("variables".to_string()),
-                            Value::String("conditions".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TYPE_DECLARATION".to_string()),
-                            Value::String(type_token.1),
-                            new_type.convert_to_map(),
-                            Value::List(vars.into_iter().map(Value::String).collect()),
-                            Value::List(conditions.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
                         loc: self.get_loc(),
                     }

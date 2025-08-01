@@ -87,7 +87,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme, Libs};
-use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, unescape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -319,7 +319,7 @@ fn debug_log(message: &str, config: &Config) {
 }
 
 // TODO: Fix indentation and formatting for pp dump
-fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
+fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config) {
     let use_colors = config.supports_color;
     let new_line_keywords = [
         "match", "import", "throw", "try", "catch", "for", "while"
@@ -347,7 +347,7 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
         }
 
         let escaped_val = if kind == "STRING" {
-            unescape_string(val).unwrap_or_else(|_| val.clone()).replace("%", "%%")
+            escape_string(val).unwrap_or_else(|_| val.clone()).replace("%", "%%")
         } else {
             val.clone()
         };
@@ -442,11 +442,6 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
         }
 
         match kind.as_str() {
-            "STRING" => {
-                pp_buffer.push('"');
-                pp_buffer.push_str(&escaped_val);
-                pp_buffer.push('"');
-            }
             "SEPARATOR" if val == "," => {
                 pp_buffer.push_str(", ");
             }
@@ -461,7 +456,8 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
 
     i_buffer.push(']');
 
-    let base_path = Path::new(file_path)
+    let base_path = Path::new(dump_dir)
+        .join(filename)
         .with_extension("")
         .to_string_lossy()
         .to_string();
@@ -496,9 +492,10 @@ fn dump_pp(tokens: Vec<&Token>, file_path: &str, config: &Config) {
     );
 }
 
-fn dump_ast(tokens: Vec<&Statement>, file_path: &str, config: &Config) {
+fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Config) {
     let use_colors = config.supports_color;
-    let base_path = Path::new(file_path)
+    let base_path = Path::new(dump_dir)
+        .join(filename)
         .with_extension("")
         .to_string_lossy()
         .to_string();
@@ -680,7 +677,13 @@ fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
 }
 
 fn create_libs_file(path: &Path) -> io::Result<()> {
-    let default_libs = Libs::new();
+    let mut default_libs = Libs::new();
+    default_libs.set_std_libs(
+        crate::env::runtime::libs::_STD_LIBS
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    );
 
     let libs_str = serde_json::to_string_pretty(&default_libs)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize libs"))?;
@@ -794,6 +797,10 @@ fn lucia(args: Vec<String>) {
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
     let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
+    let dump_dir = args.iter()
+        .find(|arg| arg.starts_with("--dump-dir="))
+        .map(|arg| (arg.trim_start_matches("--dump-dir="), true))
+        .unwrap_or((".", false));
     let cache: (CacheFormat, bool) = match args.iter().find(|arg| arg.starts_with("--cache=")) {
         Some(arg) => {
             let val_str = arg.trim_start_matches("--cache=");
@@ -874,6 +881,7 @@ fn lucia(args: Vec<String>) {
         "--c-compiler=",
         "--argv=",
         "--",
+        "--dump-dir=",
     ].iter().map(|s| s.to_string()).collect();
 
     for arg in &args {
@@ -927,6 +935,7 @@ fn lucia(args: Vec<String>) {
             ("--clean-cache, -cc", "Clear the cache directory"),
             ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
             ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
+            ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
         ];
     
         for (flag, desc) in options {
@@ -1341,7 +1350,7 @@ fn lucia(args: Vec<String>) {
             eprintln!("No files provided to compile. Exiting.");
             exit(1);
         }
-        let result = compile(&config, non_flag_args.clone(), cwd, home_dir_path, config_path, dump_pp_flag, dump_ast_flag, run_flag, c_compiler);
+        let result = compile(&config, non_flag_args.clone(), cwd, home_dir_path, config_path, dump_dir, dump_pp_flag, dump_ast_flag, run_flag, c_compiler);
         match result {
             Ok(message) => {
                 if !quiet_flag {
@@ -1369,7 +1378,7 @@ fn lucia(args: Vec<String>) {
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, &dump_pp_flag, &dump_ast_flag);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -1379,7 +1388,7 @@ fn lucia(args: Vec<String>) {
         };
 
         std_env::set_current_dir(&cwd).ok();
-        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, &dump_pp_flag, &dump_ast_flag);
+        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag);
     }
 }
 
@@ -1392,8 +1401,9 @@ fn execute_file(
     config_path: PathBuf,
     debug_mode: Option<String>,
     argv: &Vec<String>,
+    dump_dir: (&str, bool),
     dump_pp_flag: &bool,
-    dump_ast_flag: &bool,
+    dump_ast_flag: &bool
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
@@ -1504,9 +1514,15 @@ fn execute_file(
         };
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
+            let p = if dump_dir.1 {
+                dump_dir.0.to_string()
+            } else {
+                Path::new(&file_path).parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("").to_string()
+            };
             dump_pp(
                 processed_tokens.iter().collect(),
-                path.to_str().unwrap_or(""),
+                &p,
+                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
             );
         }
@@ -1541,10 +1557,18 @@ fn execute_file(
         };
 
         if *dump_ast_flag && !statements.is_empty() {
-            let ast_file_path = path.with_extension("ast");
+            let p = if dump_dir.1 {
+                dump_dir.0.to_string()
+            } else {
+                path.parent()
+                    .map(|p| p.to_str().unwrap_or(""))
+                    .unwrap_or("")
+                    .to_string()
+            };
             dump_ast(
                 statements.iter().collect(),
-                ast_file_path.to_str().unwrap_or(""),
+                &p,
+                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
             );
         }
@@ -1614,7 +1638,18 @@ fn execute_file(
     }
 }
 
-fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, config_path: PathBuf, debug_mode: Option<String>, cwd: PathBuf, argv: &Vec<String>, dump_pp_flag: &bool, dump_ast_flag: &bool) {
+fn repl(
+    config: Config,
+    disable_preprocessor: bool,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    debug_mode: Option<String>,
+    cwd: PathBuf,
+    argv: &Vec<String>,
+    dump_dir: (&str, bool),
+    dump_pp_flag: &bool,
+    dump_ast_flag: &bool,
+) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
         hex_to_ansi(&config.color_scheme.info, config.supports_color),
@@ -1773,9 +1808,15 @@ fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, conf
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
             let file_path = cwd.join(format!("stdin-{}", line_number));
+            let path = if dump_dir.1 {
+                dump_dir.0
+            } else {
+                file_path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
+            };
             dump_pp(
                 processed_tokens.iter().collect(),
-                file_path.to_str().unwrap_or("stdin"),
+                &path,
+                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
             );
         }
@@ -1815,9 +1856,15 @@ fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, conf
 
         if *dump_ast_flag && !statements.is_empty() {
             let file_path = cwd.join(format!("stdin-{}", line_number));
+            let path = if dump_dir.1 {
+                dump_dir.0
+            } else {
+                file_path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
+            };
             dump_ast(
                 statements.iter().collect(),
-                file_path.to_str().unwrap_or("stdin"),
+                &path,
+                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
             );
         }
@@ -1934,7 +1981,18 @@ fn repl(config: Config, disable_preprocessor: bool, home_dir_path: PathBuf, conf
     }
 }
 
-fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: PathBuf, config_path: PathBuf, dump_pp_flag: bool, dump_ast_flag: bool, run_flag: bool, c_compiler: &str) -> Result<String, (i32, Vec<Error>)> {
+fn compile(
+    config: &Config,
+    files: Vec<String>,
+    cwd: PathBuf,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    dump_dir: (&str, bool),
+    dump_pp_flag: bool,
+    dump_ast_flag: bool,
+    run_flag: bool,
+    c_compiler: &str,
+) -> Result<String, (i32, Vec<Error>)> {
     std_env::set_current_dir(&cwd).ok();
     for file in &files {
         let mut errors: Vec<Error> = vec![];
@@ -1959,9 +2017,15 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
             }
         };
         if dump_pp_flag && !processed_tokens.is_empty() {
+            let path = if dump_dir.1 {
+                dump_dir.0
+            } else {
+                path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
+            };
             dump_pp(
                 processed_tokens.iter().collect(),
-                path.to_str().unwrap_or(""),
+                &path,
+                &Path::new(&file).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 config,
             );
         }
@@ -1975,10 +2039,16 @@ fn compile(config: &Config, files: Vec<String>, cwd: PathBuf, home_dir_path: Pat
         };
         if dump_ast_flag && !ast.is_empty() {
             let file_path = path.with_extension("ast");
+            let path = if dump_dir.1 {
+                dump_dir.0
+            } else {
+                &file_path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
+            };
             dump_ast(
                 ast.iter().collect(),
-                file_path.to_str().unwrap_or(""),
-                config,
+                path,
+                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
+                &config,
             );
         }
         let mut transpiler = Transpiler::new(

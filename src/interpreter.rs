@@ -1349,74 +1349,109 @@ impl Interpreter {
         let name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(n)) => n.clone(),
             _ => {
-                self.raise("SyntaxError", "Expected a string for 'name' in type declaration");
+                self.raise("RuntimeError", "Expected a string for 'name' in type declaration");
                 return NULL;
             }
         };
-        let base_type = match statement.get(&Value::String("base_type".to_string())) {
-            Some(Value::Map { keys, values }) => Value::Map {
-                keys: keys.to_vec(),
-                values: values.to_vec(),
-            },
+
+        let type_kind = match statement.get(&Value::String("kind".to_string())) {
+            Some(Value::String(k)) => k.clone(),
             _ => {
-                self.raise("SyntaxError", "Expected a string for 'base_type' in type declaration");
+                self.raise("RuntimeError", "Expected a string for 'kind' in type declaration");
                 return NULL;
             }
         };
+
+        let generics = match statement.get(&Value::String("generics".to_string())) {
+            Some(Value::List(g)) => g.clone(),
+            _ => vec![],
+        };
+
         let variables = match statement.get(&Value::String("variables".to_string())) {
             Some(Value::List(v)) => v.clone(),
-            _ => {
-                self.raise("SyntaxError", "Expected a list for 'variables' in type declaration");
-                return NULL;
-            }
+            _ => vec![],
         };
+
         let conditions = match statement.get(&Value::String("conditions".to_string())) {
             Some(Value::List(c)) => c.clone(),
-            _ => {
-                self.raise("SyntaxError", "Expected a list for 'conditions' in type declaration");
-                return NULL;
-            }
+            _ => vec![],
         };
 
-        let base_map = base_type.convert_to_hashmap().unwrap_or_else(|| {
-            self.raise("SyntaxError", "Expected a map for 'base_type' in type declaration");
-            return HashMap::new();
-        });
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(m)) => m.clone(),
+            _ => vec![],
+        };
 
-        if self.err.is_some() {
+        let variants = match statement.get(&Value::String("variants".to_string())) {
+            Some(Value::List(v)) => v.clone(),
+            _ => vec![],
+        };
+
+        if type_kind == "alias" {
+            if variants.len() != 1 {
+                self.raise("RuntimeError", "Alias type must have exactly one variant");
+                return NULL;
+            }
+            let base_variant = &variants[0];
+            let base_type = match base_variant {
+                Value::Map { .. } => base_variant.clone(),
+                _ => {
+                    self.raise("RuntimeError", "Expected variant to be a map for alias base type");
+                    return NULL;
+                }
+            };
+
+            self.internal_storage.types.insert(
+                name.clone(),
+                Value::Map {
+                    keys: vec![
+                        Value::String("type_kind".to_string()),
+                        Value::String("name".to_string()),
+                        Value::String("base".to_string()),
+                        Value::String("generics".to_string()),
+                        Value::String("variables".to_string()),
+                        Value::String("conditions".to_string()),
+                        Value::String("modifiers".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("alias".to_string()),
+                        Value::String(name),
+                        base_type,
+                        Value::List(generics),
+                        Value::List(variables),
+                        Value::List(conditions),
+                        Value::List(modifiers),
+                    ],
+                },
+            );
+        } else if type_kind == "enum" {
+            self.internal_storage.types.insert(
+                name.clone(),
+                Value::Map {
+                    keys: vec![
+                        Value::String("type_kind".to_string()),
+                        Value::String("name".to_string()),
+                        Value::String("variants".to_string()),
+                        Value::String("generics".to_string()),
+                        Value::String("variables".to_string()),
+                        Value::String("conditions".to_string()),
+                        Value::String("modifiers".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("enum".to_string()),
+                        Value::String(name),
+                        Value::List(variants),
+                        Value::List(generics),
+                        Value::List(variables),
+                        Value::List(conditions),
+                        Value::List(modifiers),
+                    ],
+                },
+            );
+        } else {
+            self.raise("RuntimeError", "Unknown type kind in type declaration");
             return NULL;
         }
-        
-        let converted_map: HashMap<Value, Value> = base_map
-            .into_iter()
-            .map(|(k, v)| (k.into(), v))
-            .collect();
-        
-        let _ = self.handle_type(converted_map);
-        
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        self.internal_storage.types.insert(
-            name.clone(),
-            Value::Map {
-                keys: vec![
-                    Value::String("type_kind".to_string()),
-                    Value::String("name".to_string()),
-                    Value::String("base".to_string()),
-                    Value::String("variables".to_string()),
-                    Value::String("conditions".to_string()),
-                ],
-                values: vec![
-                    Value::String("new".to_string()),
-                    Value::String(name),
-                    base_type,
-                    Value::List(variables),
-                    Value::List(conditions),
-                ],
-            },
-        );
 
         NULL
     }
@@ -3555,7 +3590,7 @@ impl Interpreter {
                 return NULL;
             }
         };
-        
+
         let check_type_validity = |type_str: &str| -> bool {
             let trimmed = type_str.trim_start_matches('&').trim_start_matches('?');
             valid_types.iter().any(|val| {

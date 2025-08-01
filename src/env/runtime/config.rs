@@ -331,4 +331,8 @@ impl Libs {
         self.block = new_libs.block;
         self.domains = new_libs.domains;
     }
+
+    pub fn set_std_libs(&mut self, std_libs: HashMap<String, LibInfo>) {
+        self.std_libs = std_libs;
+    }
 }
