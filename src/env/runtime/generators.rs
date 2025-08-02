@@ -185,6 +185,26 @@ impl Generator {
         }
     }
 
+    pub fn take(&self, count: usize) -> Vec<Value> {
+        let mut inner = self.inner.lock().unwrap();
+
+        if inner.is_static {
+            if inner.has_iterated {
+                return vec![Value::Error(
+                    "StaticGeneratorError",
+                    "Cannot iterate a static generator more than once",
+                    None,
+                )];
+            }
+            inner.has_iterated = true;
+        }
+
+        match &mut inner.kind {
+            GeneratorType::Native(native) => native.iter.by_ref().take(count).collect(),
+            GeneratorType::Custom(custom) => custom.by_ref().take(count).collect(),
+        }
+    }
+
     pub fn is_done(&self) -> bool {
         match &self.inner.lock().unwrap().kind {
             GeneratorType::Native(native) => native.iter.is_done(),

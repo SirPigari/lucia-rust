@@ -1369,6 +1369,37 @@ impl Variable {
                     )
                 };
                 
+                let take = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "take",
+                        move |args| {
+                            if let Value::Generator(generator) = &val_clone {
+                                if let Some(Value::Int(n)) = args.get("n") {
+                                    let n = n.to_usize().unwrap_or(0);
+                                    let taken_values: Vec<Value> = generator.take(n as usize);
+                                    let vec_iter = VecIter::new(&taken_values);
+                                    let generator = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(vec_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    return Value::Generator(generator);
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'n' to be an integer", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("n", "int")],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
+
                 self.properties.insert(
                     "collect".to_string(),
                     Variable::new(
@@ -1451,6 +1482,17 @@ impl Variable {
                     Variable::new(
                         "map".to_string(),
                         map,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "take".to_string(),
+                    Variable::new(
+                        "take".to_string(),
+                        take,
                         "function".to_string(),
                         false,
                         true,
