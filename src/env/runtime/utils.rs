@@ -1467,6 +1467,15 @@ pub fn ctrl_t_pressed() -> bool {
     false
 }
 
+pub fn wrap_in_help(text: &str, use_colors: bool, config: &Config) -> String {
+    format!(
+        "{}{}{}",
+        hex_to_ansi(&config.color_scheme.note, use_colors),
+        text,
+        hex_to_ansi(&config.color_scheme.help, use_colors)
+    )
+}
+
 pub const KEYWORDS: &[&str] = &[
     "fun", "gen", "return", "throw", "end", "catch", "try", "static", "non-static",
     "public", "private", "final", "mutable", "if", "else", "then", "for",

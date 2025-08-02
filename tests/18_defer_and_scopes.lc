@@ -25,3 +25,31 @@ assert_eq!(*a, 20)
 assert_eq!(output, (["first", "second", "third", "fourth"]))
 
 exit(0)
+
+// groups
+// note: groups were mainly added for macros under the hood
+assert_eq!(\ 1 + 1 \, 2) // groups are like () but for multiple expressions
+assert_eq!(
+    \ 1 + 1 m := (x) => (x + 1) m(10) \, 10,
+)
+
+#macro group_test($a):
+    b := $a
+    b
+#endmacro
+
+assert_eq!(group_test!(5 + 5), 10)
+
+// Without groups, expanding 'group_test!(5 + 5)' becomes:
+b := 5 + 5
+b (5 + 5)
+// The parser thinks 'b (5 + 5)' is a function call, which is wrong!
+// (If you use vscode with the extension, the second 'b' should be highlighted as a call)
+
+// With groups, the macro expands like this instead:
+\ 
+    b := 5 + 5
+    b
+\
+// Now the parser treats the whole block as one group,
+// so it doesn't get confused by 'b (5 + 5)' being a call.

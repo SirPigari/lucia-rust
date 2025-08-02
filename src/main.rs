@@ -348,6 +348,8 @@ fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config)
 
         let escaped_val = if kind == "STRING" {
             escape_string(val).unwrap_or_else(|_| val.clone()).replace("%", "%%")
+        } else if kind == "SEPARATOR" && val == "\\" {
+            "\\\\".to_string()
         } else {
             val.clone()
         };

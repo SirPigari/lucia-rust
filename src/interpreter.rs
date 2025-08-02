@@ -20,7 +20,8 @@ use crate::env::runtime::utils::{
     fix_and_parse_json,
     json_to_value,
     char_to_digit,
-    get_remaining_stack_size
+    get_remaining_stack_size,
+    wrap_in_help
 };
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -1025,6 +1026,7 @@ impl Interpreter {
                 "DEFER" => self.handle_defer(statement_map),
                 "SCOPE" => self.handle_scope(statement_map),
                 "MATCH" => self.handle_match(statement_map),
+                "GROUP" => self.handle_group(statement_map),
     
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
                 "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
@@ -1097,6 +1099,19 @@ impl Interpreter {
             }
         }
     
+        result
+    }
+
+    fn handle_group(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let expressions = match statement.get(&Value::String("expressions".to_string())) {
+            Some(Value::List(exprs)) => exprs,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'expressions' in group"),
+        };
+
+        let mut result = Value::Null;
+        for expr in expressions {
+            result = self.evaluate(expr.convert_to_statement());
+        }
         result
     }
 
@@ -3433,7 +3448,10 @@ impl Interpreter {
                 };
 
                 match self.variables.remove(name) {
-                    Some(value) => value.get_value().clone(),
+                    Some(value) => {
+                        debug_log(&format!("<Variable '{}' forgotten>", name), &self.config, Some(self.use_colors.clone()));
+                        value.get_value().clone()
+                    },
                     None => self.raise("NameError", &format!("Variable '{}' not found for forget", name)),
                 }
             }
@@ -3565,13 +3583,54 @@ impl Interpreter {
                 };
 
                 let mut results = Vec::new();
+                let mut names = Vec::new();
+                
+                fn extract_names(item: &Value, names: &mut Vec<String>) -> Result<(), String> {
+                    let item_map = match item {
+                        Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+                        _ => return Err("Expected a map for tuple forget item".to_string()),
+                    };
+
+                    match item_map.get(&Value::String("type".to_string())) {
+                        Some(Value::String(n)) => match n.as_str() {
+                            "VARIABLE" => {
+                                if let Some(Value::String(name)) = item_map.get(&Value::String("name".to_string())) {
+                                    names.push(name.clone());
+                                    Ok(())
+                                } else {
+                                    Err("Missing or invalid 'name' in tuple forget item".to_string())
+                                }
+                            }
+                            "TUPLE" => {
+                                if let Some(Value::List(items)) = item_map.get(&Value::String("items".to_string())) {
+                                    for sub_item in items {
+                                        extract_names(sub_item, names)?;
+                                    }
+                                    Ok(())
+                                } else {
+                                    Err("Missing or invalid 'items' in tuple forget item".to_string())
+                                }
+                            }
+                            _ => Ok(()),
+                        },
+                        _ => Err("Missing or invalid 'type' in tuple forget item".to_string()),
+                    }
+                }
 
                 for item in items {
                     let mut stmt = HashMap::new();
+                    stmt.insert(Value::String("type".to_string()), Value::String("FORGET".to_string()));
                     stmt.insert(Value::String("value".to_string()), item.clone());
+                    let name = match extract_names(&item, &mut names) {
+                        Ok(_) => item,
+                        Err(e) => return self.raise("RuntimeError", &e),
+                    };
+                    names.push(name.to_string());
                     let forgotten_value = self.handle_forget(stmt);
                     results.push(forgotten_value);
                 }
+
+                debug_log(&format!("<Variables '{}' forgotten>", names.join(", ")), &self.config, Some(self.use_colors.clone()));
 
                 Value::Tuple(results)
             }
@@ -4188,18 +4247,29 @@ impl Interpreter {
                 let expected_type = {
                     let var = match self.variables.get(name) {
                         Some(v) => v,
-                        None => return self.raise_with_help(
-                            "NameError",
-                            &format!("Variable '{}' is not defined", name),
-                            &format!(
-                                "Use this instead: '{}{}: {} = {}{}'",
-                                check_ansi("\x1b[4m", &self.use_colors),
-                                name,
-                                right_value.type_name(),
-                                format_value(&right_value),
-                                check_ansi("\x1b[24m", &self.use_colors),
-                            ),
-                        ),
+                        None => {
+                            let suggestion = if let Value::Null = right_value {
+                                format!(
+                                    "Did you mean to use '{}' instead of '='?",
+                                    wrap_in_help(":=", self.use_colors.clone(), &self.config)
+                                )
+                            } else {
+                                format!(
+                                    "Use this instead: '{}{}: {} = {}{}'",
+                                    check_ansi("\x1b[4m", &self.use_colors),
+                                    name,
+                                    right_value.type_name(),
+                                    format_value(&right_value),
+                                    check_ansi("\x1b[24m", &self.use_colors),
+                                )
+                            };
+
+                            return self.raise_with_help(
+                                "NameError",
+                                &format!("Variable '{}' is not defined", name),
+                                &suggestion,
+                            );
+                        }
                     };
                     var.type_name().to_owned()
                 };

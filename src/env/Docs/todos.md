@@ -8,7 +8,7 @@ Be free to fix them or add new ones.
 _Total TODOs found: 7_
 ---
 
-### [`src/env/libs/std/macros.lc:93:36`](../../../src/env/libs/std/macros.lc#L93) _(added by **SirPigari** on **2025-07-22**)_
+### [`src/env/libs/std/macros.lc:83:36`](../../../src/env/libs/std/macros.lc#L83) _(added by **SirPigari** on **2025-07-22**)_
 - Fix apollo time in time module (src/env/libs/time/__init__.rs)
 
 ### [`src/env/transpiler/transpiler.rs:78:1`](../../../src/env/transpiler/transpiler.rs#L78) _(added by **SirPigari** on **2025-07-21**)_
@@ -18,7 +18,7 @@ _Total TODOs found: 7_
 - stick to C for now
 - fuck it compile to Rust its better anyway
 
-### [`src/interpreter.rs:5575:1`](../../../src/interpreter.rs#L5575) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5645:1`](../../../src/interpreter.rs#L5645) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
@@ -27,10 +27,10 @@ _Total TODOs found: 7_
 ### [`src/main.rs:321:1`](../../../src/main.rs#L321) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:4139:1`](../../../src/interpreter.rs#L4139) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:4198:1`](../../../src/interpreter.rs#L4198) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
-### [`src/interpreter.rs:392:1`](../../../src/interpreter.rs#L392) _(added by **SirPigari** on **2025-07-09**)_
+### [`src/interpreter.rs:393:1`](../../../src/interpreter.rs#L393) _(added by **SirPigari** on **2025-07-09**)_
 - Check function signature
 
 ---

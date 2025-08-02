@@ -37,30 +37,19 @@
 
 #macro assert_err($expr, $msg=("Expected an error but got success")):
     // i couldnt find cleaner way sorry
-    mutable _error_occurred: bool = false
+    mutable _error_occurred: ?tuple = null
     try:
         $expr
-    catch (_err):
-        _error_occurred = true
-    end
-    if (!_error_occurred):
+    catch (_error_occurred): end
+    if (_error_occurred.is_null()):
         throw $msg from "AssertionError"
     end
+    // forget and return the error tuple
+    forget _error_occurred
 #endmacro
 
-// this is shorter but the above is more readable
-// #macro assert_err($expr, $msg=("Expected an error but got success")):
-//     mutable _error_occurred: ?tuple = null
-//     try:
-//         $expr
-//     catch (_error_occurred): end
-//     if (!_error_occurred):
-//         throw $msg from "AssertionError"
-//     end
-// #endmacro
-
 #macro assert_type($value, $type_, $msg=(f"Type mismatch")):
-    if (type_of($value) != $type_):
+    if ($value isn't $type_):
         throw $msg from "TypeError"
     end
 #endmacro
@@ -80,7 +69,8 @@
     values: list = [$value]
     for ((i, n) in values.enumerate()):
         // $!value means the stringified version of the value tokens
-        print($!value.split(",")[i].trim(), "=", _collections.format_value(n).trim())
+        // split by backticks to get the identifiers (backticks aren't used in lucia)
+        print($!`value.split("`")[i].trim(), "=", _collections.format_value(n).trim())
     end
     forget values
     null  // otherwise it will return the last value (values)

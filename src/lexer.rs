@@ -165,7 +165,7 @@ impl Lexer {
                 ("NUMBER", &number_pattern),
                 ("OPERATOR", &operator_pattern),
                 ("IDENTIFIER", r"\bnon-static\b|[a-zA-Z_]\w*"),
-                ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?]"),
+                ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?\\]"),
                 ("WHITESPACE", r"\s+"),
                 ("INVALID", r"."),
             ];

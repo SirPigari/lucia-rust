@@ -451,7 +451,7 @@ impl Parser {
             return expr;
         }
 
-        expr = self.parse_binops(expr, 0);
+        (expr, _) = self.parse_binops(expr, 0);
 
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
@@ -693,7 +693,7 @@ impl Parser {
         expr
     }
 
-    fn parse_binops(&mut self, mut lhs: Statement, min_prec: u8) -> Statement {
+    fn parse_binops(&mut self, mut lhs: Statement, min_prec: u8) -> (Statement, bool) {
         loop {
             let tok_opt = self.token().cloned();
 
@@ -712,7 +712,7 @@ impl Parser {
                     &format!("Unexpected operator: '{}'", op_str),
                     &format!("Did you mean to use '{}'?", op_str.chars().rev().collect::<String>()),
                 );
-                return Statement::Null;
+                return (Statement::Null, false);
             }
 
             if tok_type != "OPERATOR" {
@@ -725,11 +725,18 @@ impl Parser {
                 break;
             }
 
+            let backup_pos = self.pos;
+
             self.next();
 
             let mut rhs = self.parse_primary();
             if self.err.is_some() {
-                return Statement::Null;
+                return (Statement::Null, false);
+            }
+
+            if matches!(rhs, Statement::Null) {
+                self.pos = backup_pos;
+                return (lhs, false);
             }
 
             loop {
@@ -747,9 +754,14 @@ impl Parser {
                 let next_prec = get_precedence(next_op_str);
 
                 if next_prec > prec {
-                    rhs = self.parse_binops(rhs, next_prec);
+                    let success;
+                    (rhs, success) = self.parse_binops(rhs, next_prec);
                     if self.err.is_some() {
-                        return Statement::Null;
+                        return (Statement::Null, false);
+                    }
+                    if matches!(rhs, Statement::Null) || !success {
+                        self.pos = backup_pos;
+                        return (lhs, false);
                     }
                 } else {
                     break;
@@ -773,7 +785,7 @@ impl Parser {
             };
         }
 
-        lhs
+        (lhs, true)
     }
 
     fn parse_primary(&mut self) -> Statement {
@@ -781,6 +793,40 @@ impl Parser {
             Some(token) => match token.0.as_str() {
                 "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_str()) => {
                     self.parse_type()
+                }
+
+                "SEPARATOR" if token.1 == "\\" => {
+                    self.next();
+                    let mut exprs = vec![];
+                    while let Some(_) = self.token().cloned() {
+                        if self.token_is("SEPARATOR", "\\") {
+                            break;
+                        }
+                        let expr = self.parse_expression();
+                        if matches!(expr, Statement::Null) {
+                            break;
+                        }
+                        exprs.push(expr);
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                    }
+                    self.check_for("SEPARATOR", "\\");
+                    self.next();
+                    if exprs.is_empty() {
+                        return Statement::Null;
+                    }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("expressions".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("GROUP".to_string()),
+                            Value::List(exprs.into_iter().map(|e| e.convert_to_map()).collect()),
+                        ],
+                        loc: self.get_loc(),
+                    }
                 }
 
                 "OPERATOR" if token.1 == "|" => {

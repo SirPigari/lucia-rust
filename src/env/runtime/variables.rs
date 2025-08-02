@@ -63,7 +63,21 @@ impl Variable {
                 None,
             )
         };
-    
+        
+        let is_null = {
+            let val_clone = self.value.clone();
+            make_native_method(
+                "is_null",
+                move |_args| {
+                    Value::Boolean(val_clone.is_null())
+                },
+                vec![],
+                "bool",
+                true, true, true,
+                None,
+            )
+        };
+
         self.properties.insert(
             "to_string".to_string(),
             Variable::new(
@@ -80,6 +94,17 @@ impl Variable {
             Variable::new(
                 "clone".to_string(),
                 clone,
+                "function".to_string(),
+                false,
+                true,
+                true,
+            ),
+        );
+        self.properties.insert(
+            "is_null".to_string(),
+            Variable::new(
+                "is_null".to_string(),
+                is_null,
                 "function".to_string(),
                 false,
                 true,
@@ -104,8 +129,7 @@ impl Variable {
                         true, true, true,
                         None,
                     )
-                };
-                
+                };  
                 let endswith = {
                     let val_clone = self.value.clone();
                     make_native_method(
@@ -126,8 +150,7 @@ impl Variable {
                         true, true, true,
                         None,
                     )
-                };
-                
+                };        
                 let startswith = {
                     let val_clone = self.value.clone();
                     make_native_method(
@@ -243,6 +266,23 @@ impl Variable {
                         None,
                     )
                 };
+                let chars = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "chars",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                let char_list: Vec<Value> = s.chars().map(|c| Value::String(c.to_string())).collect();
+                                return Value::List(char_list);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        true, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "to_bytes".to_string(),
@@ -326,6 +366,17 @@ impl Variable {
                     Variable::new(
                         "trim".to_string(),
                         trim,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "chars".to_string(),
+                    Variable::new(
+                        "chars".to_string(),
+                        chars,
                         "function".to_string(),
                         false,
                         true,
@@ -849,6 +900,82 @@ impl Variable {
                         None,
                     )
                 };
+
+                let map = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "map",
+                        move |args| {
+                            if let Value::List(list) = &val_clone {
+                                if let Some(Value::Function(func)) = args.get("f") {
+                                    let vec_iter = VecIter::new(list);
+                                    let vec_gen = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(vec_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    let map_iter = MapIter::new(&vec_gen, func.clone(), &interpreter_clone);
+                                    let generator = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(map_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    return Value::Generator(generator);
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                let filter = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method(
+                        "filter",
+                        move |args| {
+                            if let Value::List(list) = &val_clone {
+                                if let Some(Value::Function(func)) = args.get("f") {
+                                    let vec_iter = VecIter::new(list);
+                                    let vec_gen = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(vec_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    let filter_iter = FilterIter::new(&vec_gen, func.clone(), &interpreter_clone);
+                                    let generator = Generator::new_anonymous(
+                                        GeneratorType::Native(NativeGenerator {
+                                            iter: Box::new(filter_iter),
+                                            iteration: 0,
+                                        }),
+                                        false,
+                                    );
+                                    return Value::Generator(generator);
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("f", "function")],
+                        "generator",
+                        true, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -899,6 +1026,28 @@ impl Variable {
                     Variable::new(
                         "enumerate".to_string(),
                         enumerate,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "map".to_string(),
+                    Variable::new(
+                        "map".to_string(),
+                        map,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "filter".to_string(),
+                    Variable::new(
+                        "filter".to_string(),
+                        filter,
                         "function".to_string(),
                         false,
                         true,

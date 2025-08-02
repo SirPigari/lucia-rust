@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
@@ -41,7 +41,12 @@ impl MangleContext {
         mangle.to_string()
     }
     fn get_mangled(&self, original: &str) -> Option<&String> {
-        self.mangled_names[self.current_mangle_index].get(original)
+        for scope in self.mangled_names.iter().rev() {
+            if let Some(mangled) = scope.get(original) {
+                return Some(mangled);
+            }
+        }
+        None
     }
 }
 
@@ -901,39 +906,41 @@ impl Preprocessor {
                                     if body_i >= body.len() {
                                         return Err(Error::new(
                                             "PreprocessorError",
-                                            "Expected identifier after $!",
+                                            "Expected identifier or separator after $!",
                                             &self.file_path,
                                         ));
                                     }
 
-                                    let next_token = &body[body_i];
-                                    if next_token.0 != "IDENTIFIER" {
+                                    let mut sep = ",";
+
+                                    if body[body_i].0 != "IDENTIFIER" {
+                                        sep = &body[body_i].1;
+                                        body_i += 1;
+                                        if body_i >= body.len() {
+                                            return Err(Error::new(
+                                                "PreprocessorError",
+                                                "Expected identifier after separator in $!",
+                                                &self.file_path,
+                                            ));
+                                        }
+                                    }
+
+                                    if body[body_i].0 != "IDENTIFIER" {
                                         return Err(Error::new(
                                             "PreprocessorError",
-                                            &format!("Expected IDENTIFIER after $!, got {}", next_token.0),
+                                            &format!("Expected IDENTIFIER after $!, got {}", body[body_i].0),
                                             &self.file_path,
                                         ));
                                     }
 
-                                    let arg_name = if next_token.1.ends_with("...") {
-                                        &next_token.1[..next_token.1.len() - 3]
+                                    let arg_name = if body[body_i].1.ends_with("...") {
+                                        &body[body_i].1[..body[body_i].1.len() - 3]
                                     } else {
-                                        next_token.1.as_str()
+                                        body[body_i].1.as_str()
                                     };
 
                                     if let Some(replacement) = replacement_map.get(arg_name) {
-                                        let joined = replacement
-                                            .iter()
-                                            .map(|t| {
-                                                if t.0 == "STRING" {
-                                                    format!("{}", t.1).replace("\"", "\\\"").replace("'", "\\'")
-                                                } else {
-                                                    t.1.clone()
-                                                }
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join(" ");
-
+                                        let joined = join_tokens_sep(replacement, sep);
                                         let loc = token.2.clone().or(None);
                                         expanded_tokens.push(Token(
                                             "STRING".to_string(),
@@ -943,11 +950,10 @@ impl Preprocessor {
                                     } else {
                                         return Err(Error::new(
                                             "PreprocessorError",
-                                            &format!("Unknown macro argument $!{}", next_token.1),
+                                            &format!("Unknown macro argument $!{}", body[body_i].1),
                                             &self.file_path,
                                         ));
                                     }
-
                                 } else {
                                     let next_token = &body[body_i];
                                     if next_token.0 != "IDENTIFIER" {
@@ -980,7 +986,9 @@ impl Preprocessor {
                         self.mangle_context.enter_scope();
 
                         let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), 0, &current_dir)?;
+                        result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
                         result.extend(self.mangle_tokens(&recursively_expanded));
+                        result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
 
                         self.mangle_context.exit_scope();
                         continue;
@@ -1173,39 +1181,42 @@ impl Preprocessor {
                                 if body_i >= body.len() {
                                     return Err(Error::new(
                                         "PreprocessorError",
-                                        "Expected identifier after $!",
+                                        "Expected identifier or separator after $!",
                                         &self.file_path,
                                     ));
                                 }
 
-                                let next_token = &body[body_i];
-                                if next_token.0 != "IDENTIFIER" {
+                                let mut sep = ",";
+
+                                if body[body_i].0 != "IDENTIFIER" {
+                                    sep = &body[body_i].1;
+                                    body_i += 1;
+                                    if body_i >= body.len() {
+                                        return Err(Error::new(
+                                            "PreprocessorError",
+                                            "Expected IDENTIFIER after separator",
+                                            &self.file_path,
+                                        ));
+                                    }
+                                }
+
+                                let ident = &body[body_i];
+                                if ident.0 != "IDENTIFIER" {
                                     return Err(Error::new(
                                         "PreprocessorError",
-                                        &format!("Expected IDENTIFIER after $!, got {}", next_token.0),
+                                        &format!("Expected IDENTIFIER after $!, got {}", ident.0),
                                         &self.file_path,
                                     ));
                                 }
 
-                                let arg_name = if next_token.1.ends_with("...") {
-                                    &next_token.1[..next_token.1.len() - 3]
+                                let arg_name = if ident.1.ends_with("...") {
+                                    &ident.1[..ident.1.len() - 3]
                                 } else {
-                                    next_token.1.as_str()
+                                    ident.1.as_str()
                                 };
 
                                 if let Some(replacement) = replacement_map.get(arg_name) {
-                                    let joined = replacement
-                                        .iter()
-                                        .map(|t| {
-                                            if t.0 == "STRING" {
-                                                format!("\"{}\"", t.1)
-                                            } else {
-                                                t.1.clone()
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(" ");
-
+                                    let joined = join_tokens_sep(replacement, sep);
                                     let loc = token.2.clone().or(call_loc.clone());
                                     expanded_tokens.push(Token(
                                         "STRING".to_string(),
@@ -1215,7 +1226,7 @@ impl Preprocessor {
                                 } else {
                                     return Err(Error::new(
                                         "PreprocessorError",
-                                        &format!("Unknown macro argument $!{}", next_token.1),
+                                        &format!("Unknown macro argument $!{}", ident.1),
                                         &self.file_path,
                                     ));
                                 }
@@ -1262,7 +1273,9 @@ impl Preprocessor {
                         );
                         let recursively_expanded_preprocessor = new_preprocessor.process(recursively_expanded, &current_dir)?;
                         let mangled = self.mangle_tokens(&recursively_expanded_preprocessor);
+                        result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
                         result.extend(mangled);
+                        result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
                         self.mangle_context.exit_scope();
                     }
 
@@ -1300,110 +1313,109 @@ impl Preprocessor {
     }
 
     fn mangle_tokens(&mut self, tokens: &[Token]) -> Vec<Token> {
+        let declared_names = {
+            let mut declared = HashSet::new();
+            let mut i = 0;
+
+            while i < tokens.len() {
+                let t = &tokens[i];
+
+                if t.0 == "IDENTIFIER" && !KEYWORDS.contains(&t.1.as_str()) {
+                    if let Some(next) = tokens.get(i + 1) {
+                        match next.1.as_str() {
+                            ":=" => {
+                                declared.insert(t.1.clone());
+                                i += 2;
+                                continue;
+                            }
+                            ":" => {
+                                if let Some(eq) = tokens.get(i + 3) {
+                                    if eq.1 == "=" {
+                                        declared.insert(t.1.clone());
+                                        i += 4;
+                                        continue;
+                                    }
+                                }
+                            }
+                            "in" => {
+                                declared.insert(t.1.clone());
+                                i += 2;
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if t.0 == "SEPARATOR" && t.1 == "(" {
+                    let mut j = i + 1;
+                    let mut level = 1;
+                    while j < tokens.len() {
+                        let tok = &tokens[j];
+                        if tok.0 == "SEPARATOR" {
+                            if tok.1 == "(" {
+                                level += 1;
+                            } else if tok.1 == ")" {
+                                level -= 1;
+                                if level == 0 {
+                                    break;
+                                }
+                            }
+                        }
+                        j += 1;
+                    }
+
+                    let after = tokens.get(j + 1);
+                    if let Some(a) = after {
+                        if a.1 == ":=" || a.1 == "=" {
+                            for k in i + 1..j {
+                                let tok = &tokens[k];
+                                if tok.0 == "IDENTIFIER" && !KEYWORDS.contains(&tok.1.as_str()) {
+                                    declared.insert(tok.1.clone());
+                                }
+                            }
+                            i = j + 2;
+                            continue;
+                        }
+                    }
+                }
+
+                i += 1;
+            }
+
+            declared
+        };
+
         let mut result = Vec::new();
         let mut i = 0;
 
         while i < tokens.len() {
             let token = &tokens[i];
 
-            if token.0 == "KEYWORD" && token.1 == "for" {
-                let next = tokens.get(i + 1);
-                if let Some(next_tok) = next {
-                    if next_tok.0 == "IDENTIFIER" {
-                        let og_token = &next_tok.1;
-                        if og_token == "_" || KEYWORDS.contains(&og_token.as_str()) {
-                            result.push(token.clone());
-                            result.push(next_tok.clone());
-                        } else {
-                            let uid = if let Some(loc) = &next_tok.2 {
-                                format!("{}{}", loc.line_number, loc.range.0)
-                            } else {
-                                let id = self.mangle_context.counter;
-                                format!("gen{}", id)
-                            };
-                            let mangled = format!("__mangle_{}_{}", uid, og_token);
-                            self.mangle_context.mangle(og_token, &mangled);
-                            result.push(token.clone());
-                            result.push(Token("IDENTIFIER".to_string(), mangled, next_tok.2.clone()));
-                        }
-                        i += 2;
-                        continue;
-                    } else if next_tok.0 == "SYMBOL" && next_tok.1 == "(" {
-                        let mut j = i + 2;
-                        let mut paren_level = 1;
-                        while j < tokens.len() {
-                            let t = &tokens[j];
-                            if t.0 == "SYMBOL" && t.1 == "(" {
-                                paren_level += 1;
-                            } else if t.0 == "SYMBOL" && t.1 == ")" {
-                                paren_level -= 1;
-                            } else if t.0 == "KEYWORD" && t.1 == "in" && paren_level == 1 {
-                                break;
-                            }
-                            j += 1;
-                        }
-                        result.push(token.clone());
-                        result.push(next_tok.clone());
-                        let vars_tokens = &tokens[i + 2..j];
-                        for vt in vars_tokens.iter() {
-                            if vt.0 == "IDENTIFIER" && vt.1 != "_" && !KEYWORDS.contains(&vt.1.as_str()) {
-                                let og_token = &vt.1;
-                                let uid = if let Some(loc) = &vt.2 {
-                                    format!("{}{}", loc.line_number, loc.range.0)
-                                } else {
-                                    let id = self.mangle_context.counter;
-                                    format!("gen{}", id)
-                                };
-                                let mangled = format!("__mangle_{}_{}", uid, og_token);
-                                self.mangle_context.mangle(og_token, &mangled);
-                                result.push(Token("IDENTIFIER".to_string(), mangled, vt.2.clone()));
-                            } else {
-                                result.push(vt.clone());
-                            }
-                        }
-                        if let Some(in_token) = tokens.get(j) {
-                            result.push(in_token.clone());
-                        }
-                        i = j + 1;
-                        continue;
-                    }
-                }
-            }
-
             if token.0 == "IDENTIFIER" {
                 let og_token = &token.1;
 
-                if og_token == "_" {
+                if og_token == "_" || !declared_names.contains(og_token) {
                     result.push(token.clone());
                     i += 1;
                     continue;
                 }
 
-                let next_token = tokens.get(i + 1);
-
-                let defines_identifier = next_token.map_or(false, |t| t.1 == ":" || t.1 == ":=" || t.1 == "in");
-                let not_keyword = !KEYWORDS.contains(&og_token.as_str());
-
-                if defines_identifier && not_keyword {
+                let mangled = if let Some(existing) = self.mangle_context.get_mangled(og_token) {
+                    existing.clone()
+                } else {
                     let uid = if let Some(loc) = &token.2 {
                         format!("{}{}", loc.line_number, loc.range.0)
                     } else {
-                        let id = self.mangle_context.counter;
-                        format!("gen{}", id)
+                        format!("gen{}", self.mangle_context.counter) // safe: counter is incremented inside `.mangle`
                     };
+                    let name = format!("__mangle_{}_{}", uid, og_token);
+                    self.mangle_context.mangle(og_token, &name)
+                };
 
-                    let mangled = format!("__mangle_{}_{}", uid, og_token);
-                    self.mangle_context.mangle(og_token, &mangled);
-                    result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
-                    i += 1;
-                    continue;
-                }
-
-                if let Some(mangled) = self.mangle_context.get_mangled(og_token) {
-                    result.push(Token("IDENTIFIER".to_string(), mangled.clone(), token.2.clone()));
-                    i += 1;
-                    continue;
-                }
+                result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
+                i += 1;
+                continue;
             }
 
             result.push(token.clone());
@@ -1469,4 +1481,45 @@ fn expand_macros_in_default_string(
         format!("f{}{}{}", quote_char, replaced, quote_char),
         token.2.clone(),
     )
+}
+
+fn join_tokens_sep(tokens: &[Token], sep: &str) -> String {
+    let mut result = String::new();
+    let mut depth = 0;
+
+    for (i, token) in tokens.iter().enumerate() {
+        if token.0 == "STRING" {
+            let escaped = token.1.replace("\"", "\\\"");
+            result.push_str(&escaped);
+        } else {
+            let is_comma = token.0 == "SEPARATOR" && token.1 == ",";
+            if is_comma && depth == 0 {
+                result.push_str(sep);
+            } else {
+                result.push_str(&token.1);
+            }
+        }
+
+        if token.0 == "SEPARATOR" {
+            match token.1.as_str() {
+                "(" => depth += 1,
+                ")" => if depth > 0 { depth -= 1; },
+                _ => {}
+            }
+        }
+
+        if i + 1 < tokens.len() {
+            let next = &tokens[i + 1];
+            let skip_space = match (token.1.as_str(), next.1.as_str()) {
+                (_, ")") | (_, ",") | ("(", _) => true,
+                _ => false,
+            };
+
+            if !skip_space {
+                result.push(' ');
+            }
+        }
+    }
+
+    result
 }
