@@ -829,6 +829,15 @@ impl Parser {
                     }
                 }
 
+                "OPERATOR" if token.1 == "/" => {
+                    self.raise_with_help(
+                        "SyntaxError",
+                        "Unexpected operator '/'",
+                        "Did you mean to use '//' for comments or '\\' for groups?",
+                    );
+                    return Statement::Null;
+                }
+
                 "OPERATOR" if token.1 == "|" => {
                     self.next();
                     let expr = self.parse_expression();
