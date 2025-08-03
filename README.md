@@ -40,7 +40,7 @@ It's designed for speed and safety, without sacrificing elegance.
 - [ ] [Syntax](src/env/Docs/language-syntax.md)
 - [x] [Examples](src/env/Docs/examples/)
 - [ ] [Standard libraries API](src/env/Docs/standart-libs.md)
-- [ ] [REPL Guide](src/env/Docs/repl-guide.md)
+- [x] [REPL Guide](src/env/Docs/repl-guide.md)
 - [x] [Versioning](src/env/Docs/versioning.md)
 - [x] [Contributing guide](src/env/Docs/contributing.md)
 - [ ] [Changelog](src/env/Docs/changelog.md)

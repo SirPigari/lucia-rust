@@ -114,7 +114,7 @@ prints basic help info.
 
 The displayed tokens (`Tokens:`), statements (`Statements:`), and messages inside `<>` (like `<Declared variable ...>`) are **debug features**.  
 They are only printed if the `debug` option is set to `true` in your `config.json`.  
-See [config-guide.md](src/env/Docs/config-guide.md) for details on configuring this.
+See [config-guide.md](config-guide.md) for details on configuring this.
 
 These debug outputs are printed in a **separate color**, which is defined in the config and used only if your terminal supports color output.
 
