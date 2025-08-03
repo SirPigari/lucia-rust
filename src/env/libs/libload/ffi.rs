@@ -5,6 +5,22 @@ use std::ffi::c_void;
 
 use crate::env::runtime::value::Value;
 
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+static STORED_ARGS: Lazy<Mutex<Vec<StoredValue>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+enum StoredValue {
+    Int(i64),
+    Float(f64),
+    Boolean(u8),
+    Ptr(*const std::ffi::c_void),
+}
+
+unsafe impl Send for StoredValue {}
+unsafe impl Sync for StoredValue {}
+
+
 #[derive(Clone, Debug)]
 pub enum ValueType {
     Int,
@@ -72,16 +88,45 @@ impl LuciaFfiFn {
 
         let cif = Cif::new(ffi_arg_types.clone(), ffi_ret_type);
 
-        let mut ptrs: Vec<*const c_void> = vec![];
+        let mut stored_args = STORED_ARGS.lock().unwrap();
+        stored_args.clear();
 
         let ffi_args: Result<Vec<Arg>, String> = args.iter().zip(self.arg_types.iter()).map(|(v, t)| {
             match (v, t) {
-                (Value::Int(i), ValueType::Int) => Ok(Arg::new(&i.to_i64().unwrap_or(0))),
-                (Value::Float(f), ValueType::Float) => Ok(Arg::new(&f.to_f64().unwrap_or(0.0))),
-                (Value::Boolean(b), ValueType::Boolean) => Ok(Arg::new(b)),
+                (Value::Int(i), ValueType::Int) => {
+                    let val = i.to_i64().unwrap_or(0);
+                    stored_args.push(StoredValue::Int(val));
+                    if let StoredValue::Int(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
+                }
+                (Value::Float(f), ValueType::Float) => {
+                    let val = f.to_f64().unwrap_or(0.0);
+                    stored_args.push(StoredValue::Float(val));
+                    if let StoredValue::Float(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
+                }
+                (Value::Boolean(b), ValueType::Boolean) => {
+                    stored_args.push(StoredValue::Boolean(*b as u8));
+                    if let StoredValue::Boolean(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
+                }
                 (Value::Int(i), ValueType::Ptr) => {
-                    let raw_ptr = i.to_i64().unwrap_or(0) as *const c_void;
-                    Ok(Arg::new(&raw_ptr))
+                    let raw_ptr = i.to_i64().unwrap_or(0) as *const std::ffi::c_void;
+                    stored_args.push(StoredValue::Ptr(raw_ptr));
+                    if let StoredValue::Ptr(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
                 }
                 (Value::Pointer(ptr_arc), ValueType::Ptr) => {
                     let val_ref = ptr_arc.as_ref();
@@ -92,11 +137,13 @@ impl LuciaFfiFn {
                             return Err("Pointer is null".into());
                         }
 
-                        let raw_ptr = raw_usize as *const c_void;
-
-                        ptrs.push(raw_ptr);
-
-                        Ok(Arg::new(ptrs.last().unwrap()))
+                        let raw_ptr = raw_usize as *const std::ffi::c_void;
+                        stored_args.push(StoredValue::Ptr(raw_ptr));
+                        if let StoredValue::Ptr(stored_val) = stored_args.last().unwrap() {
+                            Ok(Arg::new(stored_val))
+                        } else {
+                            unreachable!()
+                        }
                     } else {
                         Err("Expected Value::Int inside pointer Arc".into())
                     }
@@ -104,6 +151,7 @@ impl LuciaFfiFn {
                 _ => Err("Unsupported Value/ValueType combination for ffi call".to_string()),
             }
         }).collect();
+
 
         let ffi_args = ffi_args?;
 

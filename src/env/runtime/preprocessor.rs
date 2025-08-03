@@ -502,6 +502,18 @@ impl Preprocessor {
                             ));
                         }
 
+                        let included_in = self._process(vec![
+                            Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
+                            Token("IDENTIFIER".to_string(), "define".to_string(), last_normal_token_location.clone()),
+                            Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
+                            Token("STRING".to_string(), included_path.display().to_string(), last_normal_token_location.clone()),
+                        ], included_path.parent().unwrap_or(current_dir))?;
+                        let included_out = vec![
+                            Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
+                            Token("IDENTIFIER".to_string(), "undef".to_string(), last_normal_token_location.clone()),
+                            Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
+                        ];
+
                         if included_path.is_dir() {
                             let mut entries: Vec<_> = fs::read_dir(&included_path)
                                 .map_err(|e| Error::new(
@@ -547,8 +559,10 @@ impl Preprocessor {
                                     }
                                 }
 
-                                let included = self._process(toks, file_path.parent().unwrap_or(current_dir))?;
+                                result.extend(included_in.clone());
+                                let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
                                 result.extend(included);
+                                result.extend(self._process(included_out.clone(), included_path.parent().unwrap_or(current_dir))?);
                             }
                         } else {
                             let content = fs::read_to_string(&included_path).map_err(|e| Error::new(
@@ -567,8 +581,10 @@ impl Preprocessor {
                                 toks.pop();
                             }
 
+                            result.extend(included_in);
                             let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
                             result.extend(included);
+                            result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
                         }
                         continue;
                     }

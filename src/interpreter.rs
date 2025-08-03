@@ -103,6 +103,7 @@ impl Interpreter {
             stop_flag: None,
         };
 
+
         for type_ in VALID_TYPES {
             this.internal_storage.types.insert(
                 type_.to_string(),
@@ -116,6 +117,32 @@ impl Interpreter {
                 "argv".to_owned(),
                 Value::List(argv.iter().cloned().map(Value::String).collect()),
                 "list".to_owned(),
+                false,
+                true,
+                true,
+            ),
+        );
+
+        let dir = Path::new(file_path).parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or(".").to_owned();
+        std::env::set_current_dir(&dir).ok();
+
+        this.variables.insert(
+            "__dir__".to_owned(),
+            Variable::new(
+                "__dir__".to_owned(),
+                Value::String(dir),
+                "str".to_owned(),
+                false,
+                true,
+                true,
+            ),
+        );
+        this.variables.insert(
+            "__file__".to_owned(),
+            Variable::new(
+                "__file__".to_owned(),
+                Value::String(file_path.to_owned()),
+                "str".to_owned(),
                 false,
                 true,
                 true,
@@ -2569,7 +2596,16 @@ impl Interpreter {
                 return NULL;
             },
         };
-    
+
+        let named_imports = match statement.get(&Value::String("named".to_string())) {
+            Some(Value::List(l)) => l.clone(),
+            Some(Value::Null) => Vec::new(),
+            _ => {
+                self.raise("RuntimeError", "Missing or invalid 'named' in import statement");
+                return NULL;
+            },
+        };
+
         let valid_alias_re = Regex::new(r"^[a-zA-Z_]\w*$").unwrap();
         if !valid_alias_re.is_match(alias) {
             return self.raise_with_help(
@@ -2592,7 +2628,7 @@ impl Interpreter {
             StackType::Import
         ));
     
-        if self.variables.contains_key(alias) {
+        if self.variables.contains_key(alias) && named_imports.is_empty() {
             self.stack.pop();
             if let Some(var) = self.variables.get(alias) {
                 return var.value.clone();
@@ -3104,43 +3140,93 @@ impl Interpreter {
         }
     
         let order = ["object", "function", "constant", "variable"];
-    
-        for &category in &order {
-            if let Some(names) = categorized.get(category) {
-                for name in names {
-                    debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+
+        if !named_imports.is_empty() {
+            let mut names: HashMap<String, String> = HashMap::new();
+            for named_import in named_imports {
+                let named_import_hashmap = named_import.convert_to_hashmap().unwrap_or_else(|| {
+                    self.stack.pop();
+                    self.raise("TypeError", "Expected a map for named import");
+                    return HashMap::new();
+                });
+                let name = named_import_hashmap
+                    .get("name")
+                    .unwrap_or(&Value::Null)
+                    .to_string();
+
+                let alias = named_import_hashmap
+                    .get("alias")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| name.clone());
+
+                if let Some(var) = properties.get(&name) {
+                    self.variables.insert(
+                        alias.to_string(),
+                        Variable::new(alias.to_string(), var.value.clone(), var.type_name().to_string(), var.is_final(), var.is_public(), var.is_static()),
+                    );
+                    names.insert(name.clone(), alias.clone());
+                } else {
+                    self.stack.pop();
+                    return self.raise("ImportError", &format!("Variable '{}' not found in module '{}'", name, module_name));
                 }
             }
-        }
-        if self.err.is_some() {
+            for &category in &order {
+                if let Some(n) = categorized.get(category) {
+                    for name in n {
+                        if !names.contains_key(name.as_str()) {
+                            continue;
+                        }
+                        if let Some(alias) = names.get(name.as_str()) {
+                            debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config, Some(self.use_colors.clone()));
+                        } else {
+                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                        }
+                    }
+                }
+            }
+            if self.err.is_some() {
+                self.stack.pop();
+                return NULL;
+            }
+            Value::Null
+        } else {
+            for &category in &order {
+                if let Some(names) = categorized.get(category) {
+                    for name in names {
+                        debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                    }
+                }
+            }
+            if self.err.is_some() {
+                self.stack.pop();
+                return NULL;
+            }
+        
+            debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config, Some(self.use_colors.clone()));
+
+            let module_meta = ObjectMetadata {
+                name: module_name.clone(),
+                properties,
+                parameters: Vec::new(),
+                is_public: true,
+                is_static: true,
+                is_final: true,
+                state: None,
+            };
+        
+            let class = Class::new(module_name.clone(), module_meta.clone());
+            let object = Object::Class(class);
+        
+            let module = Value::Module(object, PathBuf::from(module_path.clone()));
+            self.variables.insert(
+                alias.to_string(),
+                Variable::new(alias.to_string(), module.clone(), "module".to_string(), false, true, true),
+            );
+        
             self.stack.pop();
-            return NULL;
+        
+            module
         }
-    
-        debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config, Some(self.use_colors.clone()));
-    
-        let module_meta = ObjectMetadata {
-            name: module_name.clone(),
-            properties,
-            parameters: Vec::new(),
-            is_public: true,
-            is_static: true,
-            is_final: true,
-            state: None,
-        };
-    
-        let class = Class::new(module_name.clone(), module_meta.clone());
-        let object = Object::Class(class);
-    
-        let module = Value::Module(object, PathBuf::from(module_path.clone()));
-        self.variables.insert(
-            alias.to_string(),
-            Variable::new(alias.to_string(), module.clone(), "module".to_string(), false, true, true),
-        );
-    
-        self.stack.pop();
-    
-        module
     }
 
     fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {

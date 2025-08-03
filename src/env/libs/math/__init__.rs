@@ -48,7 +48,7 @@ where
 {
     match args.get("x") {
         Some(Value::Float(v)) => match v.to_f64() {
-            Ok(n) => {dbg!(f(n)); return Value::Float(Float::from_f64(f(n)))},
+            Ok(n) => Value::Float(Float::from_f64(f(n))),
             Err(e) => math_error(e),
         },
         Some(Value::Int(i)) => match i.to_i64() {

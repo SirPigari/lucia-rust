@@ -1,1 +1,3 @@
+#ifndef INCLUDE
 throw "Use '#include <std/..>' instead of importing std directly" from "ImportError"
+#endif

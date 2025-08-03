@@ -95,7 +95,7 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
                 "int" => Some(ValueType::Int),
                 "float" => Some(ValueType::Float),
                 "bool" => Some(ValueType::Boolean),
-                "any" | "ptr" => Some(ValueType::Ptr),
+                "any" | "str" => Some(ValueType::Ptr),
                 _ => None,
             };
 
