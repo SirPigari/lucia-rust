@@ -1477,7 +1477,7 @@ pub fn wrap_in_help(text: &str, use_colors: bool, config: &Config) -> String {
 }
 
 pub const KEYWORDS: &[&str] = &[
-    "fun", "gen", "return", "throw", "end", "catch", "try", "static", "non-static",
+    "fun", "gen", "return", "export", "throw", "end", "catch", "try", "static", "non-static",
     "public", "private", "final", "mutable", "if", "else", "then", "for",
     "while", "as", "from", "import", "in", "forget", "and", "or", "not",
     "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",

@@ -1150,17 +1150,22 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "while" => {
                     self.next();
-                    if !self.token_is("SEPARATOR", "(") {
-                        self.raise_with_help("SyntaxError", "Expected '(' after 'while'", "Did you forget to add '('?");
-                        return Statement::Null;
+                    let mut parentheses = false;
+                    if self.token_is("SEPARATOR", "(") {
+                        parentheses = true;
+                        self.next();
                     }
-                    self.next();
                     let condition = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    self.check_for("SEPARATOR", ")");
-                    self.next();
+                    if parentheses {
+                        if !self.token_is("SEPARATOR", ")") {
+                            self.raise_with_help("SyntaxError", "Expected ')' after 'while' condition", "Did you forget to add ')'?");
+                            return Statement::Null;
+                        }
+                        self.next();
+                    }
                     if self.token_is("IDENTIFIER", "end") {
                         return Statement::Statement {
                             keys: vec![
@@ -1304,17 +1309,22 @@ impl Parser {
                         self.raise("SyntaxError", "Unexpected 'else' after 'if'");
                         return Statement::Null;
                     }
-                    if !self.token_is("SEPARATOR", "(") {
-                        self.raise_with_help("SyntaxError", "Expected '(' after 'if'", "Did you forget to add '('?");
-                        return Statement::Null;
+                    let mut parentheses = false;
+                    if self.token_is("SEPARATOR", "(") {
+                        parentheses = true;
+                        self.next();
                     }
-                    self.next();
                     let condition = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    self.check_for("SEPARATOR", ")");
-                    self.next();
+                    if parentheses {
+                        if !self.token_is("SEPARATOR", ")") {
+                            self.raise_with_help("SyntaxError", "Expected ')' after 'if' condition", "Did you forget to add ')'?");
+                            return Statement::Null;
+                        }
+                        self.next();
+                    }
 
                     if self.token_is("IDENTIFIER", "then") {
                         self.next();
@@ -2202,6 +2212,69 @@ impl Parser {
                                 };
                             }
                         }
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "export" => {
+                    self.next();
+
+                    let mut modifiers: Vec<String> = vec![];
+                    if ["public", "private", "static", "non-static", "final", "mutable"].contains(&self.token().as_ref().map(|t| t.1.as_str()).unwrap_or("")) {
+                        while let Some(tok) = self.token() {
+                            if tok.0 == "IDENTIFIER" && ["public", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str()) {
+                                modifiers.push(tok.1.clone());
+                                self.next();
+                            } else if tok.0 == "IDENTIFIER" && tok.1 == "private" {
+                                self.raise("SyntaxError", "'private' cannot be used in export statements");
+                                return Statement::Null;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+
+                    let name_token = self.token().cloned().unwrap_or_else(|| {
+                        self.raise("SyntaxError", "Expected identifier after 'export'");
+                        DEFAULT_TOKEN.clone()
+                    });
+                    if name_token.0 != "IDENTIFIER" {
+                        self.raise("SyntaxError", "Expected identifier after 'export'");
+                        return Statement::Null;
+                    }
+                    let name = name_token.1.clone();
+                    self.next();
+                    let mut alias = name.clone();
+                    
+                    if self.token_is("IDENTIFIER", "as") {
+                        self.next();
+                        let alias_token = self.token().cloned().unwrap_or_else(|| {
+                            self.raise("SyntaxError", "Expected alias after 'as'");
+                            DEFAULT_TOKEN.clone()
+                        });
+                        if alias_token.0 != "IDENTIFIER" {
+                            self.raise("SyntaxError", "Expected identifier after 'as'");
+                            return Statement::Null;
+                        }
+                        alias = alias_token.1;
+                        self.next();
+                    }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("name".to_string()),
+                            Value::String("alias".to_string()),
+                            Value::String("modifiers".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("EXPORT".to_string()),
+                            Value::String(name),
+                            Value::String(alias),
+                            Value::List(modifiers.into_iter().map(Value::String).collect()),
+                        ],
+                        loc: self.get_loc(),
                     }
                 }
 

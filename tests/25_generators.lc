@@ -1,7 +1,7 @@
 #include <std/macros>
 
 // TODO:
-// Add 'gen' keyword to vsix extension
+// Add 'gen' keyword to vsix extension (also 'export' keyword)
 // and add 'generator' type to vsix extension
 
 // since fibonacci is already as a pattern reg

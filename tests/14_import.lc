@@ -14,6 +14,12 @@ import "04_variables.lc" from "." as vars
 assert_eq!(vars.i, 100)
 print(vars.i)
 
+// export test
+assert_eq!(vars.public_j, 200)
+print(vars.public_j)
+
+assert_err!(vars.j)  // j is private, should not be accessible
+
 import math as m
 assert_eq!(m.sqrt(16), 4.0)
 assert_approx_eq!(m.PI, 3.141592653589793)

@@ -1090,7 +1090,8 @@ impl Interpreter {
                 "RETURN" => self.handle_return(statement_map),
     
                 "IMPORT" => self.handle_import(statement_map),
-    
+                "EXPORT" => self.handle_export(statement_map),
+
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement_map),
                 "VARIABLE" => self.handle_variable(statement_map),
                 "ASSIGNMENT" => self.handle_assignment(statement_map),
@@ -1157,6 +1158,62 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in export"),
+        };
+
+        let alias = match statement.get(&Value::String("alias".to_string())) {
+            Some(Value::String(a)) => a.clone(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'alias' in export"),
+        };
+
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(m)) => m,
+            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in export"),
+        };
+
+        let mut is_public = false;
+        let mut is_static = None;
+        let mut is_final = None;
+
+        for modifier in modifiers {
+            if let Value::String(modifier_str) = modifier {
+                match modifier_str.as_str() {
+                    "public" => is_public = true,
+                    "static" => is_static = Some(true),
+                    "final" => is_final = Some(true),
+                    "non-static" => is_static = Some(false),
+                    "mutable" => is_final = Some(false),
+                    _ => return self.raise("RuntimeError", &format!("Unknown modifier: {}", modifier_str)),
+                }
+            }
+        }
+
+        if self.variables.contains_key(name) {
+            let mut var = self.variables.get(name).unwrap().clone();
+            if !var.is_public() && !is_public {
+                return self.raise_with_help("RuntimeError", &format!("Variable '{}' is not public and cannot be exported", name), "Add 'public' modifier to the export statement to make it public");
+            }
+            var.set_public(true);
+            if let Some(is_static) = is_static {
+                var.set_static(is_static);
+            }
+            if let Some(is_final) = is_final {
+                var.set_final(is_final);
+            }
+            let val = var.value.clone();
+            self.variables.insert(
+                alias,
+                var
+            );
+            return val;
+        } else {
+            return self.raise("RuntimeError", &format!("Variable '{}' is not defined therefore cannot be exported", name));
+        }
     }
 
     fn handle_group(&mut self, statement: HashMap<Value, Value>) -> Value {

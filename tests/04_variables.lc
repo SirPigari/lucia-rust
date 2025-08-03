@@ -34,7 +34,7 @@ assert_eq!(y, 7)
 assert_eq!(z, 0)
 
 // boolean negation and logic
-c: bool = false
+c := false
 d: bool = true
 
 assert_eq!(!c, true)
@@ -44,10 +44,15 @@ assert_eq!(c || d, true)
 // string concatenation
 s1: str = "foo"
 s2: str = "bar"
-s3: str = s1 + s2
+s3 := s1 + s2
 
 assert_eq!(s3, "foobar")
 
 // redeclare public variable with new value
 public i: int = 100
 assert_eq!(i, 100)
+
+private mutable j: int = 200
+assert_eq!(j, 200)
+export public final j as public_j
+assert_eq!(public_j, 200)
