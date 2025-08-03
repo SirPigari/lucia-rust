@@ -5,10 +5,8 @@ use std::hash::{Hash, Hasher};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use std::collections::HashMap;
-
-// -------------------------------
-// Parameter and Metadata
-// -------------------------------
+use crate::interpreter::Interpreter;
+use std::sync::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ParameterKind {
@@ -39,10 +37,6 @@ pub struct FunctionMetadata {
     pub state: Option<String>,
 }
 
-// -------------------------------
-// Callable Trait
-// -------------------------------
-
 pub trait Callable: Send + Sync {
     fn call(&self, args: &HashMap<String, Value>) -> Value;
     fn metadata(&self) -> &FunctionMetadata;
@@ -60,10 +54,6 @@ where
         (self)(_args)
     }
 }
-
-// -------------------------------
-// Native Function
-// -------------------------------
 
 #[derive(Clone)]
 pub struct NativeFunction {
@@ -112,11 +102,6 @@ impl Callable for NativeFunction {
     }
 }
 
-
-// -------------------------------
-// User-defined Function
-// -------------------------------
-
 #[derive(Clone, PartialEq, Hash, PartialOrd)]
 pub struct UserFunction {
     pub meta: FunctionMetadata,
@@ -132,10 +117,6 @@ impl Callable for UserFunction {
         &self.meta
     }
 }
-
-// -------------------------------
-// Native Method
-// -------------------------------
 
 #[derive(Clone)]
 pub struct NativeMethod {
@@ -153,16 +134,49 @@ impl Callable for NativeMethod {
     }
 }
 
-
-// -------------------------------
-// User-defined Method
-// -------------------------------
-
-#[derive(Clone, PartialEq, Hash, PartialOrd)]
-#[allow(dead_code)]
+// interpreter shared state to support private calls in methods
+#[derive(Clone)]
 pub struct UserFunctionMethod {
     pub meta: FunctionMetadata,
     pub body: Vec<Statement>,
+    pub interpreter: Arc<Mutex<Interpreter>>,
+}
+
+impl Hash for UserFunctionMethod {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.meta.hash(state);
+    }
+}
+
+impl PartialEq for UserFunctionMethod {
+    fn eq(&self, other: &Self) -> bool {
+        self.meta == other.meta
+    }
+}
+
+impl PartialOrd for UserFunctionMethod {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.meta.partial_cmp(&other.meta)
+    }
+}
+
+
+impl UserFunctionMethod {
+    pub fn new_from_func_with_interpreter(func: Arc<UserFunction>, interpreter: Arc<Mutex<Interpreter>>) -> Self {
+        Self {
+            meta: func.metadata().clone(),
+            body: func.body.clone(),
+            interpreter,
+        }
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.meta.name
+    }
+
+    pub fn get_interpreter(&self) -> Arc<Mutex<Interpreter>> {
+        Arc::clone(&self.interpreter)
+    }
 }
 
 impl Callable for UserFunctionMethod {
@@ -175,18 +189,13 @@ impl Callable for UserFunctionMethod {
     }
 }
 
-
-// -------------------------------
-// Function Enum
-// -------------------------------
-
 #[allow(dead_code)]
 #[derive(Clone)]
 pub enum Function {
     Native(Arc<NativeFunction>),
     Custom(Arc<UserFunction>),
     NativeMethod(Arc<NativeMethod>),
-    CustomMethod(Arc<UserFunction>),
+    CustomMethod(Arc<UserFunctionMethod>),
 }
 
 impl Function {

@@ -31,7 +31,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
 use crate::env::runtime::native;
-use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction};
+use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
@@ -741,7 +741,7 @@ impl Interpreter {
     
         false
     }
-    
+
     fn get_properties_from_file(&mut self, path: &PathBuf) -> HashMap<String, Variable> {
         if !path.exists() || !path.is_file() {
             self.raise("ImportError", to_static(format!("File '{}' does not exist or is not a file", path.display())));
@@ -815,7 +815,22 @@ impl Interpreter {
         let mut final_properties = HashMap::new();
         for (var_name, var) in properties {
             if var.is_public() && !var.is_native() {
-                final_properties.insert(var_name, var);
+                if let Value::Function(ref f) = var.value {
+                    if let Function::Custom(func) = f {
+                        final_properties.insert(var_name.clone(), Variable::new(
+                            var_name,
+                            Value::Function(Function::CustomMethod(
+                                Arc::new(UserFunctionMethod::new_from_func_with_interpreter(func.clone(), Arc::new(Mutex::new(interpreter.clone())))),
+                            )),
+                            "function".to_string(),
+                            var.is_static(),
+                            var.is_public(),
+                            var.is_final(),
+                        ));
+                    }
+                } else {
+                    final_properties.insert(var_name, var);
+                }
             }
         }
     
@@ -1378,8 +1393,8 @@ impl Interpreter {
                     None,
                 )))),
                 "generator".to_string(),
-                is_public,
                 is_static,
+                is_public,
                 is_final,
             ),
         );
@@ -2639,7 +2654,7 @@ impl Interpreter {
     
         let mut properties = HashMap::new();
         let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
-    
+
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
             debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
 
@@ -3132,7 +3147,7 @@ impl Interpreter {
         for (name, var) in properties.iter() {
             let category = match &var.value {
                 Value::Module(..) => "object",
-                Value::Function(_) => "function",
+                Value::Function(_) if var.is_public() => "function",
                 _ if var.is_final() => "constant",
                 _ => "variable",
             };
@@ -3474,6 +3489,10 @@ impl Interpreter {
                 }
             }
         }
+
+        if name == "msgbox_ask" {
+            dbg!(is_public);
+        }
         
         self.variables.insert(
             name.to_string(),
@@ -3484,8 +3503,8 @@ impl Interpreter {
                     body_formatted,
                 ),
                 "function".to_string(),
-                is_public,
                 is_static,
+                is_public,
                 is_final,
             ),
         );
@@ -6035,7 +6054,65 @@ impl Interpreter {
                     })
                     .collect::<HashMap<String, Variable<>>>();
             
-                if !is_module {
+                if let Function::CustomMethod(func) = func {
+                    let module_file_path = match &object_value {
+                        Value::Module(_, path) => path.clone(),
+                        _ => { 
+                            self.stack.pop();
+                            return self.raise(
+                                "TypeError",
+                                &format!("Expected a module, but got '{}'", object_variable.type_name())
+                            );
+                        }
+                    };
+
+                    let interpreter_arc = func.get_interpreter();
+                    let mut interpreter = interpreter_arc.lock().unwrap();
+
+                    result = interpreter.call_function(
+                        func.get_name(),
+                        positional,
+                        named_map,
+                    );
+
+                    if interpreter.err.is_some() {
+                        self.stack.pop();
+                        self.raise_with_ref(
+                            "RuntimeError",
+                            "Error in module method call",
+                            interpreter.err.clone().unwrap(),
+                        );
+                        return NULL;
+                    }
+
+                    if let Value::Error(err_type, err_msg, referr) = &result {
+                        if let Some(rerr) = referr {
+                            let err = Error::with_ref(
+                                err_type,
+                                err_msg,
+                                rerr.clone(),
+                                &module_file_path.display().to_string(),
+                            );
+                            self.raise_with_ref(
+                                "RuntimeError",
+                                "Error in method call",
+                                err,
+                            );
+                        }
+                        let err = Error::new(
+                            err_type,
+                            err_msg,
+                            &module_file_path.display().to_string(),
+                        );
+                        self.raise_with_ref(
+                            "RuntimeError",
+                            "Error in method call",
+                            err,
+                        );
+                        self.stack.pop();
+                        return NULL;
+                    };
+                } else if !is_module {
                     self.stack.push((method_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
                     if !metadata.is_native {
                         let argv_vec = self.variables.get("argv").map(|var| {
