@@ -796,18 +796,27 @@ impl Interpreter {
             .unwrap_or(Path::new("."))
             .canonicalize()
             .unwrap_or_else(|_| PathBuf::from("."));
-        let mut interpreter = Interpreter::new(self.config.clone(), self.use_colors, path.display().to_string().as_str(), &parent_dir, self.preprocessor_info.clone(), &vec![]);
-        interpreter.stack = self.stack.clone();
-        let result = interpreter.interpret(statements, true);
-        self.stack = interpreter.stack.clone();
-    
-        let properties = interpreter.variables.clone();
 
-        if let Some(err) = interpreter.err {
+        let shared_interpreter = Arc::new(Mutex::new(Interpreter::new(
+            self.config.clone(),
+            self.use_colors,
+            path.display().to_string().as_str(),
+            &parent_dir,
+            self.preprocessor_info.clone(),
+            &vec![],
+        )));
+
+        shared_interpreter.lock().unwrap().stack = self.stack.clone();
+        let result = shared_interpreter.lock().unwrap().interpret(statements, true);
+        self.stack = shared_interpreter.lock().unwrap().stack.clone();
+
+        let properties = shared_interpreter.lock().unwrap().variables.clone();
+
+        if let Some(err) = shared_interpreter.lock().unwrap().err.clone() {
             self.raise_with_ref(
                 "ImportError",
                 &format!("Error while importing '{}'", path.display()),
-                err.clone(),
+                err,
             );
             return HashMap::new();
         }
@@ -817,16 +826,22 @@ impl Interpreter {
             if var.is_public() && !var.is_native() {
                 if let Value::Function(ref f) = var.value {
                     if let Function::Custom(func) = f {
-                        final_properties.insert(var_name.clone(), Variable::new(
-                            var_name,
-                            Value::Function(Function::CustomMethod(
-                                Arc::new(UserFunctionMethod::new_from_func_with_interpreter(func.clone(), Arc::new(Mutex::new(interpreter.clone())))),
-                            )),
-                            "function".to_string(),
-                            var.is_static(),
-                            var.is_public(),
-                            var.is_final(),
-                        ));
+                        final_properties.insert(
+                            var_name.clone(),
+                            Variable::new(
+                                var_name,
+                                Value::Function(Function::CustomMethod(
+                                    Arc::new(UserFunctionMethod::new_from_func_with_interpreter(
+                                        func.clone(),
+                                        shared_interpreter.clone(),
+                                    )),
+                                )),
+                                "function".to_string(),
+                                var.is_static(),
+                                var.is_public(),
+                                var.is_final(),
+                            ),
+                        );
                     }
                 } else {
                     final_properties.insert(var_name, var);
