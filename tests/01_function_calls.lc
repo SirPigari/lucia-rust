@@ -14,7 +14,7 @@ styledprint("hello", strikethrough=true)
 styledprint("hello", link="https://example.com")
 styledprint("hello", fg_color="red")
 styledprint("hello", bg_color="blue")
-// ik end is highlighted here but it is allowed
+// ik end may be highlighted here but it is allowed
 styledprint("hello", end="✨")
 
 

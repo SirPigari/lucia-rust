@@ -273,6 +273,27 @@ pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {
     println!("{}", colored_message);
 }
 
+pub fn print_colored_no_newline(message: &str, color: &str, use_colors: Option<bool>) {
+    let use_colors = use_colors.unwrap_or(true);
+    let colored_message = format!("{}{}{}", hex_to_ansi(color, use_colors), message, hex_to_ansi("reset", use_colors));
+    print!("{}", colored_message);
+    std::io::stdout().flush().unwrap();
+}
+
+pub fn debug_log_no_newline(message: &str, config: &Config, use_colors: Option<bool>) {
+    let use_colors = use_colors.unwrap_or(true);
+    if config.debug && (config.debug_mode == "full" || config.debug_mode == "normal") {
+        let single_line_message = message
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+            .replace('\0', "\\0")
+            .replace('\x1b', "\\e")
+            .replace(r"\A", "\n");
+        print_colored_no_newline(&single_line_message, &config.color_scheme.debug, Some(use_colors));
+    }
+}
+
 pub fn read_input(prompt: &str) -> String {
     print!("{}", prompt);
     io::stdout().flush().unwrap();
@@ -1315,6 +1336,8 @@ pub fn char_to_digit(c: char) -> Option<u32> {
 
 pub fn get_precedence(op: &str) -> u8 {
     match op {
+        "^^^" => 10,
+        "^^" => 9,
         "++" | "--" | "!" | "~" | "bnot" | "not" => 9,
         "^" => 8,
         "*" | "/" | "%" | "*=" | "/=" | "%=" => 7,

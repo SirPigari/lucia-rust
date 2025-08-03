@@ -6,6 +6,7 @@ use crate::env::runtime::utils::{
     find_closest_match,
     TRUE, FALSE, NULL,
     debug_log,
+    debug_log_no_newline,
     check_ansi,
     unescape_string,
     to_static,
@@ -22,6 +23,11 @@ use crate::env::runtime::utils::{
     char_to_digit,
     get_remaining_stack_size,
     wrap_in_help
+};
+use crossterm::{
+    cursor::{MoveUp, MoveToColumn},
+    terminal::{Clear, ClearType},
+    ExecutableCommand,
 };
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, VALID_TYPES};
@@ -42,6 +48,7 @@ use regex::Regex;
 use tokio::runtime::Runtime;
 use reqwest;
 use serde_urlencoded;
+use std::io::{stdout, Write};
 use std::sync::Mutex;
 
 use crate::lexer::Lexer;
@@ -1012,6 +1019,10 @@ impl Interpreter {
     }
 
     fn check_stop_flag(&mut self) -> bool {
+        if get_remaining_stack_size().unwrap_or(self.config.stack_size) < 60_000 {
+            self.raise("StackOverflowError", &format!("Maximum stack size exceeded ({} Bytes)", self.config.stack_size));
+            return true;
+        }
         if let Some(stop_flag) = &self.stop_flag {
             if stop_flag.load(Ordering::Relaxed) {
                 self.is_returning = true;
@@ -1026,10 +1037,6 @@ impl Interpreter {
 
         if self.check_stop_flag() {
             return NULL;
-        }
-
-        if get_remaining_stack_size().unwrap_or(self.config.stack_size) < 60_000 {
-            return self.raise("StackOverflowError", &format!("Maximum stack size exceeded ({} Bytes)", self.config.stack_size));
         }
     
         self.variables.entry("_".to_string()).or_insert_with(|| {
@@ -1188,7 +1195,7 @@ impl Interpreter {
                     "final" => is_final = Some(true),
                     "non-static" => is_static = Some(false),
                     "mutable" => is_final = Some(false),
-                    _ => return self.raise("RuntimeError", &format!("Unknown modifier: {}", modifier_str)),
+                    _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
                 }
             }
         }
@@ -1196,7 +1203,7 @@ impl Interpreter {
         if self.variables.contains_key(name) {
             let mut var = self.variables.get(name).unwrap().clone();
             if !var.is_public() && !is_public {
-                return self.raise_with_help("RuntimeError", &format!("Variable '{}' is not public and cannot be exported", name), "Add 'public' modifier to the export statement to make it public");
+                return self.raise_with_help("ModifierError", &format!("Variable '{}' is not public and cannot be exported", name), "Add 'public' modifier to the export statement to make it public");
             }
             var.set_public(true);
             if let Some(is_static) = is_static {
@@ -1212,7 +1219,7 @@ impl Interpreter {
             );
             return val;
         } else {
-            return self.raise("RuntimeError", &format!("Variable '{}' is not defined therefore cannot be exported", name));
+            return self.raise("NameError", &format!("Variable '{}' is not defined therefore cannot be exported", name));
         }
     }
 
@@ -2674,6 +2681,15 @@ impl Interpreter {
             }
             _ => return self.raise("RuntimeError", "Missing or invalid 'module_name' in import statement"),
         };
+
+        if module_name == "42" {
+            self.raise_with_help(
+                "ImportError",
+                "What do you get if you multiply six by nine?",
+                "Six by nine. Forty two."
+            );
+            return NULL;
+        }
 
         let alias = match statement.get(&Value::String("alias".to_string())) {
             Some(Value::String(a)) => a,
@@ -7066,11 +7082,11 @@ impl Interpreter {
                 return NULL;
             }
         };
-    
+
         if self.err.is_some() {
             return NULL;
         }
-    
+
         let right = match statement.get(&Value::String("right".to_string())) {
             Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
@@ -7078,7 +7094,7 @@ impl Interpreter {
                 return NULL;
             }
         };
-    
+
         let operator = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s.clone(),
             _ => {
@@ -7086,7 +7102,7 @@ impl Interpreter {
                 return NULL;
             }
         };
-    
+
         let left = if let Value::Boolean(b) = left {
             Value::Int(if b { 1.into() } else { 0.into() })
         } else {
@@ -7097,11 +7113,11 @@ impl Interpreter {
         } else {
             right
         };
-    
+
         if self.err.is_some() {
             return NULL;
         }
-    
+
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
                 let l_val = unsafe {
@@ -7142,15 +7158,15 @@ impl Interpreter {
             }
             _ => (left.clone(), right.clone()),
         };
-    
+
         let path = &[
             left.clone(),
             right.clone(),
             Value::String(operator.clone()),
-            right.clone(),
         ];
-        
-        let cache_key = path.iter()
+
+        let cache_key = path
+            .iter()
             .map(|v| format_value(v))
             .collect::<Vec<_>>()
             .join("::");
@@ -7170,11 +7186,42 @@ impl Interpreter {
             return cached.clone();
         }
 
+        let mut stdout = stdout();
+        debug_log_no_newline(
+            &format!(
+                "<Operation: {} {} {} -> ...>",
+                format_value(&left),
+                operator,
+                format_value(&right),
+            ),
+            &self.config,
+            Some(self.use_colors.clone()),
+        );
+        stdout.flush().unwrap();
+
         let result = self.make_operation(left.clone(), right.clone(), &operator);
 
         if self.err.is_some() {
+            println!();
             return NULL;
         }
+
+        stdout.execute(MoveUp(1)).unwrap();
+        stdout.execute(MoveToColumn(0)).unwrap();
+        stdout.execute(Clear(ClearType::CurrentLine)).unwrap();
+        stdout.flush().unwrap();
+
+        debug_log(
+            &format!(
+                "<Operation: {} {} {} -> {}>",
+                format_value(&left),
+                operator,
+                format_value(&right),
+                format_value(&result)
+            ),
+            &self.config,
+            Some(self.use_colors.clone()),
+        );
 
         self.cache.operations.insert(cache_key, result.clone());
 
@@ -7450,7 +7497,7 @@ impl Interpreter {
                 }
             },
             "^" => match (&left, &right) {
-                (_, Value::Int(b)) if b.is_zero() => Value::Float(1.0.into()),
+                (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
                 (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
 
                 (Value::Int(a), Value::Int(b)) if a.negative || b.negative => {
@@ -7504,6 +7551,218 @@ impl Interpreter {
 
                 (a, b) => self.raise("TypeError", &format!(
                     "Operator '^' requires numeric operands, got '{}' and '{}'",
+                    a.type_name(),
+                    b.type_name()
+                )),
+            },
+            "^^" => match (&left, &right) {
+                (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
+
+                (Value::Int(base), Value::Int(height)) if !height.negative => {
+                    fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
+                        let key = format!("{}::{}::^", base, exp);
+                        if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
+                            return Some(cached.clone());
+                        }
+                        let res = base.pow(exp).ok()?;
+                        this.cache.operations.insert(key, Value::Int(res.clone()));
+                        Some(res)
+                    }
+
+                    if height.is_zero() {
+                        Value::Int(1.into())
+                    } else if *height == Int::from(1) {
+                        Value::Int(base.clone())
+                    } else {
+                        let one = Int::from(1);
+                        let mut result = base.clone();
+                        let mut count = Int::from(1);
+
+                        while &count < height {
+                            if self.check_stop_flag() {
+                                return self.raise("ValueError", "Tetration interrupted by stop flag");
+                            }
+                            result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
+                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                        }
+
+                        Value::Int(result)
+                    }
+                }
+
+                (Value::Float(base), Value::Int(height)) if !height.negative => {
+                    let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
+                        let key = format!("{}::{}::^", base, exp);
+                        if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
+                            return Some(cached.clone());
+                        }
+                        let res = base.pow(exp).ok()?;
+                        this.cache.operations.insert(key, Value::Float(res.clone()));
+                        Some(res)
+                    };
+
+                    let float_height = match Float::from_int(&height) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+
+                    if float_height.is_zero() {
+                        Value::Float(Float::from(1.0))
+                    } else if float_height == Float::from(1.0) {
+                        Value::Float(base.clone())
+                    } else {
+                        let one = Float::from(1.0);
+                        let mut result = base.clone();
+                        let mut count = Float::from(1.0);
+
+                        while &count < &float_height {
+                            if self.check_stop_flag() {
+                                return self.raise("ValueError", "Tetration interrupted by stop flag");
+                            }
+                            result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
+                            count = (count + one.clone()).unwrap_or_else(|_| float_height.clone());
+                        }
+
+                        Value::Float(result)
+                    }
+                }
+
+                (Value::Int(_), Value::Float(_)) | (Value::Float(_), Value::Float(_)) => {
+                    self.raise("TypeError", "Tetration height must be an integer")
+                }
+
+                (a, b) => self.raise("TypeError", &format!(
+                    "Operator '^^' requires numeric base and integer non-negative height, got '{}' and '{}'",
+                    a.type_name(),
+                    b.type_name()
+                )),
+            },
+            "^^^" => match (&left, &right) {
+                (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
+
+                (Value::Int(base), Value::Int(height)) if !height.negative => {
+                    fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
+                        let key = format!("{}::{}::^", base, exp);
+                        if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
+                            return Some(cached.clone());
+                        }
+                        let res = base.pow(exp).ok()?;
+                        this.cache.operations.insert(key, Value::Int(res.clone()));
+                        Some(res)
+                    }
+
+                    fn tetration(this: &mut Interpreter, base: &Int, height: &Int, pow_cached: &dyn Fn(&mut Interpreter, &Int, &Int) -> Option<Int>) -> Option<Int> {
+                        if this.check_stop_flag() {
+                            return None;
+                        }
+                        if height.is_zero() {
+                            return Some(Int::from(1));
+                        }
+                        if *height == Int::from(1) {
+                            return Some(base.clone());
+                        }
+
+                        let one = Int::from(1);
+                        let mut result = base.clone();
+                        let mut count = Int::from(1);
+
+                        while &count < height {
+                            if this.check_stop_flag() {
+                                return None;
+                            }
+                            result = pow_cached(this, base, &result)?;
+                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                        }
+
+                        Some(result)
+                    }
+
+                    if height.is_zero() {
+                        Value::Int(1.into())
+                    } else {
+                        let one = Int::from(1);
+                        let mut result = base.clone();
+                        let mut count = Int::from(1);
+
+                        while &count < height {
+                            if self.check_stop_flag() {
+                                return self.raise("ValueError", "Pentation interrupted by stop flag");
+                            }
+                            result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap();
+                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                        }
+
+                        Value::Int(result)
+                    }
+                }
+
+                (Value::Float(base), Value::Int(height)) if !height.negative => {
+                    let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
+                        let key = format!("{}::{}::^", base, exp);
+                        if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
+                            return Some(cached.clone());
+                        }
+                        let res = base.pow(exp).ok()?;
+                        this.cache.operations.insert(key, Value::Float(res.clone()));
+                        Some(res)
+                    };
+
+                    fn tetration(this: &mut Interpreter, base: &Float, height: &Float, pow_cached: &dyn Fn(&mut Interpreter, &Float, &Float) -> Option<Float>) -> Option<Float> {
+                        if this.check_stop_flag() {
+                            return None;
+                        }
+                        if height.is_zero() {
+                            return Some(Float::from(1.0));
+                        }
+                        if *height == Float::from(1.0) {
+                            return Some(base.clone());
+                        }
+
+                        let one = Float::from(1.0);
+                        let mut result = base.clone();
+                        let mut count = Float::from(1.0);
+
+                        while &count < height {
+                            if this.check_stop_flag() {
+                                return None;
+                            }
+                            result = pow_cached(this, base, &result)?;
+                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                        }
+
+                        Some(result)
+                    }
+
+                    let float_height = match Float::from_int(&height) {
+                        Ok(f) => f,
+                        Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
+                    };
+
+                    if float_height.is_zero() {
+                        Value::Float(Float::from(1.0))
+                    } else {
+                        let one = Float::from(1.0);
+                        let mut result = base.clone();
+                        let mut count = Float::from(1.0);
+
+                        while &count < &float_height {
+                            if self.check_stop_flag() {
+                                return self.raise("ValueError", "Pentation interrupted by stop flag");
+                            }
+                            result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap();
+                            count = (count + one.clone()).unwrap_or_else(|_| float_height.clone());
+                        }
+
+                        Value::Float(result)
+                    }
+                }
+
+                (Value::Int(_), Value::Float(_)) | (Value::Float(_), Value::Float(_)) => {
+                    self.raise("TypeError", "Pentation height must be an integer")
+                }
+
+                (a, b) => self.raise("TypeError", &format!(
+                    "Operator '^^^' requires numeric base and integer non-negative height, got '{}' and '{}'",
                     a.type_name(),
                     b.type_name()
                 )),

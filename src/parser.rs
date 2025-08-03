@@ -720,7 +720,6 @@ impl Parser {
             }
 
             let prec = get_precedence(op_str);
-
             if prec < min_prec {
                 break;
             }
@@ -753,7 +752,11 @@ impl Parser {
 
                 let next_prec = get_precedence(next_op_str);
 
-                if next_prec > prec {
+                let right_assoc_ops = ["^", "^^", "^^^"];
+
+                if (right_assoc_ops.contains(&op_str) && next_prec >= prec)
+                    || (!right_assoc_ops.contains(&op_str) && next_prec > prec)
+                {
                     let success;
                     (rhs, success) = self.parse_binops(rhs, next_prec);
                     if self.err.is_some() {
@@ -1956,6 +1959,28 @@ impl Parser {
                         }  
                         "import" => {
                             self.next();
+
+                            if self.token_is("NUMBER", "42") {
+                                return Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("module_name".to_string()),
+                                        Value::String("path".to_string()),
+                                        Value::String("alias".to_string()),
+                                        Value::String("named".to_string()),
+                                        Value::String("modifiers".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("IMPORT".to_string()),
+                                        Value::String("42".to_string()),
+                                        Value::String("".to_string()),
+                                        Value::String("".to_string()),
+                                        Value::Null,
+                                        Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                    ],
+                                    loc: self.get_loc(),
+                                }
+                            }
 
                             let mut named_imports = vec![];
                             let mut is_named_import = false;

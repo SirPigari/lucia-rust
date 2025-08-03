@@ -18,7 +18,7 @@ _Total TODOs found: 7_
 - stick to C for now
 - fuck it compile to Rust its better anyway
 
-### [`src/interpreter.rs:5851:1`](../../../src/interpreter.rs#L5851) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5867:1`](../../../src/interpreter.rs#L5867) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
@@ -27,10 +27,10 @@ _Total TODOs found: 7_
 ### [`src/main.rs:321:1`](../../../src/main.rs#L321) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:4404:1`](../../../src/interpreter.rs#L4404) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:4420:1`](../../../src/interpreter.rs#L4420) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
-### [`src/interpreter.rs:420:1`](../../../src/interpreter.rs#L420) _(added by **SirPigari** on **2025-07-09**)_
+### [`src/interpreter.rs:427:1`](../../../src/interpreter.rs#L427) _(added by **SirPigari** on **2025-07-09**)_
 - Check function signature
 
 ---

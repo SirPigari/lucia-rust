@@ -1,9 +1,5 @@
 #include <std/macros>
 
-// TODO:
-// Add 'gen' keyword to vsix extension (also 'export' keyword)
-// and add 'generator' type to vsix extension
-
 // since fibonacci is already as a pattern reg
 gen tribonacci(n: int) -> int:
     (a, b, c) := (0, 1, 1)
@@ -62,7 +58,7 @@ assert_err!(i.next())  // StaticGeneratorError: Cannot iterate a static generato
 p := static_gen()
 assert_eq!(p.peek(), 0)  // peek() returns the next item without consuming it
 assert_eq!(p.next(), 0)  // allowing you to check the next item without wasting the static generator
-assert_err!(p.peek())   // StaticGeneratorError: Cannot iterate a static generator more than once 
+assert_err!(p.peek())    // StaticGeneratorError: Cannot iterate a static generator more than once 
 
 o := [1..5]
 assert_eq!(o.next(), 1)
