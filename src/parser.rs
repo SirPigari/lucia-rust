@@ -1035,228 +1035,6 @@ impl Parser {
                     Statement::Null
                 }
 
-                "IDENTIFIER" if token.1 == "import" => {
-                    self.next();
-
-                    let mut named_imports = vec![];
-                    let mut is_named_import = false;
-
-                    // Check if next token is '(' to parse named imports
-                    if self.token_is("SEPARATOR", "(") {
-                        is_named_import = true;
-                        self.next();
-
-                        loop {
-                            let ident = self.token().cloned().unwrap_or_else(|| {
-                                self.raise("SyntaxError", "Expected identifier in named import");
-                                DEFAULT_TOKEN.clone()
-                            });
-                            if ident.0 != "IDENTIFIER" {
-                                self.raise("SyntaxError", "Expected identifier in named import");
-                                return Statement::Null;
-                            }
-                            self.next();
-
-                            let mut alias = None;
-                            if self.token_is("IDENTIFIER", "as") {
-                                self.next();
-                                let alias_token = self.token().cloned().unwrap_or_else(|| {
-                                    self.raise("SyntaxError", "Expected alias after 'as'");
-                                    DEFAULT_TOKEN.clone()
-                                });
-                                if alias_token.0 != "IDENTIFIER" {
-                                    self.raise("SyntaxError", "Expected identifier after 'as'");
-                                    return Statement::Null;
-                                }
-                                alias = Some(alias_token.1);
-                                self.next();
-                            }
-
-                            named_imports.push((ident.1, alias));
-
-                            if self.token_is("SEPARATOR", ",") {
-                                self.next();
-                            } else {
-                                break;
-                            }
-                        }
-
-                        if !self.token_is("SEPARATOR", ")") {
-                            self.raise("SyntaxError", "Expected ')' after named import list");
-                            return Statement::Null;
-                        }
-                        self.next();
-                    }
-
-                    // Parse module name (identifier or string literal)
-                    let first = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected module name after 'import'");
-                        DEFAULT_TOKEN.clone()
-                    });
-
-                    let module_name = if is_named_import {
-                        // if named import, module name must come after 'from'
-                        // so module_name will be parsed after 'from' keyword below
-                        String::new()
-                    } else if first.0 == "IDENTIFIER" || first.0 == "STRING" {
-                        let mut module_parts = vec![];
-
-                        if first.0 == "IDENTIFIER" {
-                            module_parts.push(first.1);
-                            self.next();
-
-                            while self.token_is("SEPARATOR", ".") {
-                                self.next();
-                                let next_ident = self.token().cloned().unwrap_or_else(|| {
-                                    self.raise("SyntaxError", "Expected identifier after '.' in module name");
-                                    DEFAULT_TOKEN.clone()
-                                });
-                                if next_ident.0 != "IDENTIFIER" {
-                                    self.raise("SyntaxError", "Expected identifier after '.' in module name");
-                                    return Statement::Null;
-                                }
-                                module_parts.push(next_ident.1);
-                                self.next();
-                            }
-                            module_parts.join(".")
-                        } else {
-                            // STRING
-                            let raw = &first.1;
-                            let unescaped = unescape_string_literal(raw);
-                            match unescaped {
-                                Ok(inner) => {
-                                    self.next();
-                                    inner
-                                }
-                                Err(_) => {
-                                    self.raise("SyntaxError", "Malformed string literal for module name");
-                                    return Statement::Null;
-                                }
-                            }
-                        }
-                    } else {
-                        if !is_named_import {
-                            self.raise("SyntaxError", "Expected identifier or string after 'import'");
-                            return Statement::Null;
-                        }
-                        String::new()
-                    };
-
-                    // Now parse optional 'from' keyword
-                    let mut from_path: Option<Statement> = None;
-                    let mut module_name_final = module_name;
-
-                    if self.token_is("IDENTIFIER", "from") {
-                        self.next();
-
-                        // If named imports, module_name is parsed here after 'from'
-                        if is_named_import {
-                            let first_mod = self.token().cloned().unwrap_or_else(|| {
-                                self.raise("SyntaxError", "Expected module name after 'from'");
-                                DEFAULT_TOKEN.clone()
-                            });
-
-                            module_name_final = if first_mod.0 == "IDENTIFIER" {
-                                let mut parts = vec![first_mod.1];
-                                self.next();
-
-                                while self.token_is("SEPARATOR", ".") {
-                                    self.next();
-                                    let next_ident = self.token().cloned().unwrap_or_else(|| {
-                                        self.raise("SyntaxError", "Expected identifier after '.' in module name");
-                                        DEFAULT_TOKEN.clone()
-                                    });
-                                    if next_ident.0 != "IDENTIFIER" {
-                                        self.raise("SyntaxError", "Expected identifier after '.' in module name");
-                                        return Statement::Null;
-                                    }
-                                    parts.push(next_ident.1);
-                                    self.next();
-                                }
-                                parts.join(".")
-                            } else if first_mod.0 == "STRING" {
-                                let raw = &first_mod.1;
-                                let unescaped = unescape_string_literal(raw);
-                                match unescaped {
-                                    Ok(inner) => {
-                                        self.next();
-                                        inner
-                                    }
-                                    Err(_) => {
-                                        self.raise("SyntaxError", "Malformed string literal for module name");
-                                        return Statement::Null;
-                                    }
-                                }
-                            } else {
-                                self.raise("SyntaxError", "Expected identifier or string after 'from'");
-                                return Statement::Null;
-                            };
-                        }
-
-                        // Try to parse from_path as statement (optional)
-                        if !self.token_is("IDENTIFIER", "as") && !self.token_is("EOF", "") {
-                            from_path = Some(self.parse_primary());
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                        }
-                    } else if is_named_import {
-                        self.raise("SyntaxError", "Expected 'from' after named import");
-                        return Statement::Null;
-                    }
-
-                    // Optional alias
-                    let mut alias: Option<Token> = None;
-                    if self.token_is("IDENTIFIER", "as") {
-                        self.next();
-                        let next_token = self.token().cloned().unwrap_or_else(|| {
-                            self.raise("SyntaxError", "Expected alias after 'as'");
-                            DEFAULT_TOKEN.clone()
-                        });
-                        if next_token.0 != "IDENTIFIER" {
-                            self.raise("SyntaxError", "Expected identifier after 'as'");
-                            return Statement::Null;
-                        }
-                        alias = Some(next_token);
-                        self.next();
-                    }
-
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("module_name".to_string()),
-                            Value::String("path".to_string()),
-                            Value::String("alias".to_string()),
-                            Value::String("named".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("IMPORT".to_string()),
-                            Value::String(module_name_final),
-                            from_path.map_or(Value::Null, |p| p.convert_to_map()),
-                            alias.map_or(Value::Null, |a| Value::String(a.1)),
-                            if is_named_import {
-                                let converted = named_imports
-                                    .into_iter()
-                                    .map(|(name, alias)| {
-                                        let mut keys = vec![Value::String("name".to_string())];
-                                        let mut values = vec![Value::String(name)];
-
-                                        if let Some(alias) = alias {
-                                            keys.push(Value::String("alias".to_string()));
-                                            values.push(Value::String(alias));
-                                        }
-                                        Value::Map { keys, values }
-                                    })
-                                    .collect();
-                                Value::List(converted)
-                            } else {
-                                Value::Null
-                            }
-                        ],
-                        loc: self.get_loc(),
-                    }
-                }
-
                 "IDENTIFIER" if token.1 == "for" => {
                     self.next();
 
@@ -1760,7 +1538,7 @@ impl Parser {
                     }
                 }
 
-                "IDENTIFIER" if ["fun", "gen", "type", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
+                "IDENTIFIER" if ["fun", "gen", "type", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
                     let mut modifiers: Vec<String> = vec![];
 
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
@@ -2155,6 +1933,220 @@ impl Parser {
                                     Value::String(kind.to_string()),
                                 ],
                                 loc: name_loc,
+                            }
+                        }  
+                        "import" => {
+                            self.next();
+
+                            let mut named_imports = vec![];
+                            let mut is_named_import = false;
+
+                            if self.token_is("SEPARATOR", "(") {
+                                is_named_import = true;
+                                self.next();
+
+                                loop {
+                                    let ident = self.token().cloned().unwrap_or_else(|| {
+                                        self.raise("SyntaxError", "Expected identifier in named import");
+                                        DEFAULT_TOKEN.clone()
+                                    });
+                                    if ident.0 != "IDENTIFIER" {
+                                        self.raise("SyntaxError", "Expected identifier in named import");
+                                        return Statement::Null;
+                                    }
+                                    self.next();
+
+                                    let mut alias = None;
+                                    if self.token_is("IDENTIFIER", "as") {
+                                        self.next();
+                                        let alias_token = self.token().cloned().unwrap_or_else(|| {
+                                            self.raise("SyntaxError", "Expected alias after 'as'");
+                                            DEFAULT_TOKEN.clone()
+                                        });
+                                        if alias_token.0 != "IDENTIFIER" {
+                                            self.raise("SyntaxError", "Expected identifier after 'as'");
+                                            return Statement::Null;
+                                        }
+                                        alias = Some(alias_token.1);
+                                        self.next();
+                                    }
+
+                                    named_imports.push((ident.1, alias));
+
+                                    if self.token_is("SEPARATOR", ",") {
+                                        self.next();
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                if !self.token_is("SEPARATOR", ")") {
+                                    self.raise("SyntaxError", "Expected ')' after named import list");
+                                    return Statement::Null;
+                                }
+                                self.next();
+                            }
+
+                            let first = self.token().cloned().unwrap_or_else(|| {
+                                self.raise("SyntaxError", "Expected module name after 'import'");
+                                DEFAULT_TOKEN.clone()
+                            });
+
+                            let module_name = if is_named_import {
+                                String::new()
+                            } else if first.0 == "IDENTIFIER" || first.0 == "STRING" {
+                                let mut module_parts = vec![];
+
+                                if first.0 == "IDENTIFIER" {
+                                    module_parts.push(first.1);
+                                    self.next();
+
+                                    while self.token_is("SEPARATOR", ".") {
+                                        self.next();
+                                        let next_ident = self.token().cloned().unwrap_or_else(|| {
+                                            self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                            DEFAULT_TOKEN.clone()
+                                        });
+                                        if next_ident.0 != "IDENTIFIER" {
+                                            self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                            return Statement::Null;
+                                        }
+                                        module_parts.push(next_ident.1);
+                                        self.next();
+                                    }
+                                    module_parts.join(".")
+                                } else {
+                                    let raw = &first.1;
+                                    let unescaped = unescape_string_literal(raw);
+                                    match unescaped {
+                                        Ok(inner) => {
+                                            self.next();
+                                            inner
+                                        }
+                                        Err(_) => {
+                                            self.raise("SyntaxError", "Malformed string literal for module name");
+                                            return Statement::Null;
+                                        }
+                                    }
+                                }
+                            } else {
+                                if !is_named_import {
+                                    self.raise("SyntaxError", "Expected identifier or string after 'import'");
+                                    return Statement::Null;
+                                }
+                                String::new()
+                            };
+
+                            let mut from_path: Option<Statement> = None;
+                            let mut module_name_final = module_name;
+
+                            if self.token_is("IDENTIFIER", "from") {
+                                self.next();
+
+                                if is_named_import {
+                                    let first_mod = self.token().cloned().unwrap_or_else(|| {
+                                        self.raise("SyntaxError", "Expected module name after 'from'");
+                                        DEFAULT_TOKEN.clone()
+                                    });
+
+                                    module_name_final = if first_mod.0 == "IDENTIFIER" {
+                                        let mut parts = vec![first_mod.1];
+                                        self.next();
+
+                                        while self.token_is("SEPARATOR", ".") {
+                                            self.next();
+                                            let next_ident = self.token().cloned().unwrap_or_else(|| {
+                                                self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                                DEFAULT_TOKEN.clone()
+                                            });
+                                            if next_ident.0 != "IDENTIFIER" {
+                                                self.raise("SyntaxError", "Expected identifier after '.' in module name");
+                                                return Statement::Null;
+                                            }
+                                            parts.push(next_ident.1);
+                                            self.next();
+                                        }
+                                        parts.join(".")
+                                    } else if first_mod.0 == "STRING" {
+                                        let raw = &first_mod.1;
+                                        let unescaped = unescape_string_literal(raw);
+                                        match unescaped {
+                                            Ok(inner) => {
+                                                self.next();
+                                                inner
+                                            }
+                                            Err(_) => {
+                                                self.raise("SyntaxError", "Malformed string literal for module name");
+                                                return Statement::Null;
+                                            }
+                                        }
+                                    } else {
+                                        self.raise("SyntaxError", "Expected identifier or string after 'from'");
+                                        return Statement::Null;
+                                    };
+                                }
+
+                                if !self.token_is("IDENTIFIER", "as") && !self.token_is("EOF", "") {
+                                    from_path = Some(self.parse_primary());
+                                    if self.err.is_some() {
+                                        return Statement::Null;
+                                    }
+                                }
+                            } else if is_named_import {
+                                self.raise("SyntaxError", "Expected 'from' after named import");
+                                return Statement::Null;
+                            }
+
+                            let mut alias: Option<Token> = None;
+                            if self.token_is("IDENTIFIER", "as") {
+                                self.next();
+                                let next_token = self.token().cloned().unwrap_or_else(|| {
+                                    self.raise("SyntaxError", "Expected alias after 'as'");
+                                    DEFAULT_TOKEN.clone()
+                                });
+                                if next_token.0 != "IDENTIFIER" {
+                                    self.raise("SyntaxError", "Expected identifier after 'as'");
+                                    return Statement::Null;
+                                }
+                                alias = Some(next_token);
+                                self.next();
+                            }
+
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("module_name".to_string()),
+                                    Value::String("path".to_string()),
+                                    Value::String("alias".to_string()),
+                                    Value::String("named".to_string()),
+                                    Value::String("modifiers".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("IMPORT".to_string()),
+                                    Value::String(module_name_final),
+                                    from_path.map_or(Value::Null, |p| p.convert_to_map()),
+                                    alias.map_or(Value::Null, |a| Value::String(a.1)),
+                                    if is_named_import {
+                                        let converted = named_imports
+                                            .into_iter()
+                                            .map(|(name, alias)| {
+                                                let mut keys = vec![Value::String("name".to_string())];
+                                                let mut values = vec![Value::String(name)];
+
+                                                if let Some(alias) = alias {
+                                                    keys.push(Value::String("alias".to_string()));
+                                                    values.push(Value::String(alias));
+                                                }
+                                                Value::Map { keys, values }
+                                            })
+                                            .collect();
+                                        Value::List(converted)
+                                    } else {
+                                        Value::Null
+                                    },
+                                    Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                ],
+                                loc: self.get_loc(),
                             }
                         }
                         _ => {

@@ -2651,6 +2651,39 @@ impl Interpreter {
                 &format!("Recursive import detected for module '{}'", module_name),
             );
         }
+
+        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(l)) => l.clone(),
+            Some(Value::Null) => Vec::new(),
+            _ => {
+                self.raise("RuntimeError", "Missing or invalid 'modifiers' in import statement");
+                return NULL;
+            },
+        };
+
+        let mut is_public = false;
+        let mut is_final = true;
+        let mut is_static = true;
+
+        for modifier in &modifiers {
+            if let Value::String(modifier_str) = modifier {
+                match modifier_str.as_str() {
+                    "public" => is_public = true,
+                    "final" => is_final = true,
+                    "static" => is_static = true,
+                    "private" => is_public = false,
+                    "mutable" => is_final = false,
+                    "non-static" => is_static = false,
+                    _ => {
+                        self.raise("SyntaxError", &format!("Unknown import modifier '{}'", modifier_str));
+                        return NULL;
+                    }
+                }
+            } else {
+                self.raise("TypeError", "Import modifiers must be strings");
+                return NULL;
+            }
+        }
     
         self.stack.push((
             module_name.clone(),
@@ -3238,9 +3271,9 @@ impl Interpreter {
                 name: module_name.clone(),
                 properties,
                 parameters: Vec::new(),
-                is_public: true,
-                is_static: true,
-                is_final: true,
+                is_public,
+                is_static,
+                is_final,
                 state: None,
             };
         
@@ -3250,7 +3283,7 @@ impl Interpreter {
             let module = Value::Module(object, PathBuf::from(module_path.clone()));
             self.variables.insert(
                 alias.to_string(),
-                Variable::new(alias.to_string(), module.clone(), "module".to_string(), false, true, true),
+                Variable::new(alias.to_string(), module.clone(), "module".to_string(), is_static, is_public, is_final),
             );
         
             self.stack.pop();
@@ -3503,10 +3536,6 @@ impl Interpreter {
                     return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
                 }
             }
-        }
-
-        if name == "msgbox_ask" {
-            dbg!(is_public);
         }
         
         self.variables.insert(
