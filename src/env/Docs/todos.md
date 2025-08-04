@@ -30,7 +30,7 @@ _Total TODOs found: 7_
 ### [`src/interpreter.rs:4420:1`](../../../src/interpreter.rs#L4420) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
-### [`src/interpreter.rs:427:1`](../../../src/interpreter.rs#L427) _(added by **SirPigari** on **2025-07-09**)_
+### [`src/interpreter.rs:424:1`](../../../src/interpreter.rs#L424) _(added by **SirPigari** on **2025-07-09**)_
 - Check function signature
 
 ---

@@ -72,13 +72,31 @@ fn main() {
         }
     };
 
+    let mut test_entries: Vec<_> = entries
+    .filter_map(Result::ok)
+    .filter(|entry| {
+        entry.path().extension().map_or(false, |ext| ext == "lc")
+    })
+    .collect();
+
+    test_entries.sort_by_key(|entry| {
+        let binding = entry.file_name();
+        let file_name = binding.to_string_lossy();
+        file_name
+            .split('_')
+            .next()
+            .and_then(|num_str| num_str.parse::<usize>().ok())
+            .unwrap_or(0)
+    });
+
+
     let mut passed = vec![];
     let mut failed = vec![];
     let mut found_prefixes = HashSet::new();
 
     println!("{}", "Lucia Test Runner".bold().underline().cyan());
 
-    for entry in entries.filter_map(Result::ok) {
+    for entry in test_entries {
         let path = entry.path();
         if path.extension().map_or(false, |ext| ext == "lc") {
             let file_name = path.file_name().unwrap().to_string_lossy();

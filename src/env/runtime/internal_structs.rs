@@ -295,6 +295,7 @@ pub struct Cache {
 pub struct InternalStorage {
     pub types: HashMap<String, Value>,
     pub lambda_counter: usize,
+    pub use_42: (bool, bool),
 }
 
 #[derive(Serialize)]

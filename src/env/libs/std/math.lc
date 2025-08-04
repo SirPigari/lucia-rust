@@ -1,0 +1,106 @@
+#ifndef LUCIA_STD_MATH
+#define LUCIA_STD_MATH true
+
+// approximate limit of f as x -> a
+final fun lim(f: function[float | int] -> float, a: float, delta: float = 1e-7, tolerance: float = 1e-5) -> float:
+    left_x := a - delta
+    right_x := a + delta
+
+    left_val := f(left_x)
+    right_val := f(right_x)
+
+    if (|left_val - right_val| < tolerance):
+        return (left_val + right_val) / 2
+    else:
+        throw "Limit does not exist or is not defined at this precision" from "MathError"
+    end
+end
+
+// numerical derivative of f at x using small h
+final fun derivative(f: function[float] -> float, x: float, h: float = 1e-7) -> float:
+    return (f(x + h) - f(x - h)) / (2 * h)
+end
+
+// numerical second derivative of f at x using small h
+final fun second_derivative(f: function[float] -> float, x: float, h: float = 1e-5) -> float:
+    return (f(x + h) - 2 * f(x) + f(x - h)) / (h * h)
+end
+
+// numerical integration of f from a to b using n trapezoids
+final fun integrate(f: function[float] -> float, a: float, b: float, n: int = 1000) -> float:
+    delta_x := (b - a) / n
+    total := 0.0
+
+    for i in [0..n - 1]:
+        x0 := a + i * delta_x
+        x1 := a + (i + 1) * delta_x
+        area := (f(x0) + f(x1)) / 2 * delta_x
+        total := total + area
+    end
+
+    return total
+end
+
+// adaptive trapezoidal integration (recursive refinement)
+final fun adaptive_integrate(f: function[float] -> float, a: float, b: float, tol: float = 1e-6, max_depth: int = 20, depth: int = 0) -> float:
+    mid := (a + b) / 2
+    left := integrate(f, a, mid, 1)
+    right := integrate(f, mid, b, 1)
+    whole := integrate(f, a, b, 1)
+
+    if (depth >= max_depth || |(left + right) - whole| < tol):
+        return left + right
+    else:
+        left_refined := adaptive_integrate(f, a, mid, tol / 2, max_depth, depth + 1)
+        right_refined := adaptive_integrate(f, mid, b, tol / 2, max_depth, depth + 1)
+        return left_refined + right_refined
+    end
+end
+
+// Taylor polynomial of f at point a up to order n
+final fun taylor_polynomial(f: function[float] -> float, a: float, n: int, x: float, h: float = 1e-5) -> float:
+    sum := 0.0
+    for k in [0..n]:
+        // approximate k-th derivative numerically
+        deriv := nth_derivative(f, a, k, h)
+        term := deriv * ((x - a) ^ k) / factorial(k)
+        sum := sum + term
+    end
+    return sum
+end
+
+// helper: factorial (recursive)
+final fun factorial(n: int) -> int:
+    if (n <= 1):
+        return 1
+    else:
+        return n * factorial(n - 1)
+    end
+end
+
+// helper: nth numerical derivative of f at x, order k
+final fun nth_derivative(f: function[float] -> float, x: float, k: int, h: float = 1e-5) -> float:
+    if (k == 0):
+        return f(x)
+    else if (k == 1):
+        return derivative(f, x, h)
+    else if (k == 2):
+        return second_derivative(f, x, h)
+    else:
+        // finite difference approximation of higher derivatives
+        return (nth_derivative(f, x + h, k - 1, h) - nth_derivative(f, x - h, k - 1, h)) / (2 * h)
+    end
+end
+
+// approximate sum of series: sum_{i=0}^{n-1} term(i)
+final fun partial_sum_series(term: function[int] -> float, n: int) -> float:
+    sum := 0.0
+    for i in [0..n - 1]:
+        sum := sum + term(i)
+    end
+    return sum
+end
+
+null
+
+#endif

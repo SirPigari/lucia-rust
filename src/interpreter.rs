@@ -104,6 +104,7 @@ impl Interpreter {
             internal_storage: InternalStorage {
                 types: HashMap::new(),
                 lambda_counter: 0,
+                use_42: (false, false),
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
@@ -400,10 +401,6 @@ impl Interpreter {
             }
             if !valid_types.contains(&normalized_actual) {
                 return self._handle_invalid_type(normalized_actual, valid_types.to_vec());
-            }
-    
-            if normalized_actual == "int" && normalized_expected == "float" && !is_ref_expected {
-                return true;
             }
     
             if normalized_actual != normalized_expected {
@@ -2683,6 +2680,9 @@ impl Interpreter {
         };
 
         if module_name == "42" {
+            if !self.internal_storage.use_42.0 {
+                self.internal_storage.use_42 = (true, false);
+            }
             self.raise_with_help(
                 "ImportError",
                 "What do you get if you multiply six by nine?",
@@ -7159,6 +7159,24 @@ impl Interpreter {
             _ => (left.clone(), right.clone()),
         };
 
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        if self.internal_storage.use_42.0 && !self.internal_storage.use_42.1 {
+            if let (Value::Int(left_val), op, Value::Int(right_val)) = (&left, &operator, &right) {
+                if *left_val == Int::from(6) && *op == "*" && *right_val == Int::from(9) {
+                    self.internal_storage.use_42.1 = true;
+                    debug_log(
+                        "<Operation: 6 * 9 -> 42>",
+                        &self.config,
+                        Some(self.use_colors.clone()),
+                    );
+                    return Value::Int(Int::from(42));
+                }
+            }
+        }
+
         let path = &[
             left.clone(),
             right.clone(),
@@ -7442,28 +7460,45 @@ impl Interpreter {
                 Value::Int(ref val) if val.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
                 Value::Float(ref f) if f.is_zero() => self.raise("ZeroDivisionError", "Division by zero."),
                 _ => {
-                    let base = match left {
-                        Value::Int(ref i) => match Float::from_int(i) {
-                            Ok(f) => f,
-                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
-                        },
-                        Value::Float(ref f) => f.clone(),
-                        _ => return self.raise("TypeError", &format!("Cannot divide {} by {}", left.type_name(), right.type_name())),
-                    };
-                    let divisor = match right {
-                        Value::Int(ref i) => match Float::from_int(i) {
-                            Ok(f) => f,
-                            Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
-                        },
-                        Value::Float(ref f) => f.clone(),
-                        _ => return self.raise("TypeError", &format!("Cannot divide {} by {}", left.type_name(), right.type_name())),
-                    };
-                    match base / divisor {
-                        Ok(result) => Value::Float(result),
-                        Err(_) => self.raise("TypeError", "Failed to perform division"),
+                    match (&left, &right) {
+                        (Value::Int(l), Value::Int(r)) => {
+                            if (l.clone() % r.clone()).unwrap_or(Int::from(0)) == Int::from(0) {
+                                Value::Int((l.clone() / r.clone()).unwrap_or_else(|_| {
+                                    self.raise("TypeError", "Integer division failed");
+                                    Int::from(0)
+                                }))
+                            } else {
+                                match (Float::from_int(l), Float::from_int(r)) {
+                                    (Ok(f1), Ok(f2)) => match f1 / f2 {
+                                        Ok(result) => Value::Float(result),
+                                        Err(_) => self.raise("TypeError", "Failed to perform division"),
+                                    },
+                                    _ => self.raise("TypeError", "Failed to convert Int to Float"),
+                                }
+                            }
+                        }
+                        (Value::Int(i), Value::Float(f)) => match Float::from_int(i) {
+                            Ok(left_f) => match left_f / f.clone() {
+                                Ok(result) => Value::Float(result),
+                                Err(_) => self.raise("TypeError", "Failed to perform division"),
+                            },
+                            Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                        }
+                        (Value::Float(f), Value::Int(i)) => match Float::from_int(i) {
+                            Ok(right_f) => match f.clone() / right_f {
+                                Ok(result) => Value::Float(result),
+                                Err(_) => self.raise("TypeError", "Failed to perform division"),
+                            },
+                            Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
+                        }
+                        (Value::Float(f1), Value::Float(f2)) => match f1.clone() / f2.clone() {
+                            Ok(result) => Value::Float(result),
+                            Err(_) => self.raise("TypeError", "Failed to perform division"),
+                        }
+                        _ => self.raise("TypeError", &format!("Cannot divide {} by {}", left.type_name(), right.type_name())),
                     }
                 }
-            },
+            }
             "%" => match (left, right) {
                 (_, Value::Int(ref val)) if val.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),
                 (_, Value::Float(ref f)) if f.is_zero() => self.raise("ZeroDivisionError", "Modulo by zero."),

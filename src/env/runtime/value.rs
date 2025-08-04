@@ -543,15 +543,10 @@ impl Value {
     pub fn to_string(&self) -> String {
         match self {
             Value::Float(f) => {
-                let s = format!("{:.15}", f);
-                if s.contains('.') {
-                    s.trim_end_matches('0').trim_end_matches('.').to_string()
-                } else {
-                    s
-                }
+                format_float(f)
             }
             Value::Int(i) => {
-                i.to_string()
+                format_int(i)
             }
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),

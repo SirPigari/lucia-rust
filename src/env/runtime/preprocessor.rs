@@ -541,7 +541,7 @@ impl Preprocessor {
                                     &self.file_path,
                                 ))?;
 
-                                let mut lexer = Lexer::new(&content, to_static(self.file_path.clone()), None);
+                                let mut lexer = Lexer::new(&content, to_static(included_path.display().to_string()), None);
                                 let mut toks = lexer.tokenize()
                                     .into_iter()
                                     .filter(|tok| tok.0 != "WHITESPACE")

@@ -434,6 +434,51 @@ impl Parser {
                     };
                 }
 
+                ("OPERATOR", op) if ["++", "--"].contains(&op) => {
+                    let operator = match op {
+                        "++" => "+",
+                        "--" => "-",
+                        _ => unreachable!(),
+                    }.to_string();
+                    self.next();
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("left".to_string()),
+                            Value::String("right".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("ASSIGNMENT".to_string()),
+                            expr.convert_to_map(),
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("left".to_string()),
+                                    Value::String("right".to_string()),
+                                    Value::String("operator".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("OPERATION".to_string()),
+                                    expr.convert_to_map(),
+                                    Value::Map {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("NUMBER".to_string()),
+                                            Value::String("1".to_string()),
+                                        ],
+                                    },
+                                    Value::String(operator),
+                                ],
+                                loc: self.get_loc(),
+                            }.convert_to_map(),
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+
                 _ => break,
             }
         }
@@ -636,51 +681,6 @@ impl Parser {
                             Value::String("ASSIGNMENT".to_string()),
                             expr.convert_to_map(),
                             value.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
-                    };
-                }
-
-                ("OPERATOR", op) if ["++", "--"].contains(&op) => {
-                    let operator = match op {
-                        "++" => "+",
-                        "--" => "-",
-                        _ => unreachable!(),
-                    }.to_string();
-                    self.next();
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("ASSIGNMENT".to_string()),
-                            expr.convert_to_map(),
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("left".to_string()),
-                                    Value::String("right".to_string()),
-                                    Value::String("operator".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("OPERATION".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::Map {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("NUMBER".to_string()),
-                                            Value::String("1".to_string()),
-                                        ],
-                                    },
-                                    Value::String(operator),
-                                ],
-                                loc: self.get_loc(),
-                            }.convert_to_map(),
                         ],
                         loc: self.get_loc(),
                     };
@@ -1377,7 +1377,7 @@ impl Parser {
                         self.next();
                         let mut body = vec![];
                         while let Some(tok) = self.token() {
-                            if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "else") {
+                            if tok.0 == "IDENTIFIER" && (tok.1 == "end" || tok.1 == "else" || tok.1 == "elif") {
                                 break;
                             }
                             let stmt = self.parse_expression();
@@ -1422,6 +1422,9 @@ impl Parser {
                                     self.raise("SyntaxError", "Unexpected end after 'else'");
                                     return Statement::Null;
                                 }
+                            } else if tok.0 == "IDENTIFIER" && tok.1 == "elif" {
+                                self.raise_with_help("SyntaxError", "Unexpected 'elif'.", "Did you mean to use 'else if'?");
+                                return Statement::Null;
                             } else {
                                 self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
                                 return Statement::Null;
