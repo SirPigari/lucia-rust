@@ -3,6 +3,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
+use crate::lexer::Lexer;
 use crate::env::runtime::config::Config;
 
 use std::path::PathBuf;
@@ -10,6 +11,26 @@ use once_cell::sync::OnceCell;
 use std::sync::Mutex;
 
 static INTERPRETER: OnceCell<Mutex<Interpreter>> = OnceCell::new();
+
+pub fn interpret(input: &str) -> Result<Value, Error> {
+    let mut lexer = Lexer::new(input, "<internal>", None);
+    let tokens = lexer.tokenize();
+    
+    let mut parser = Parser::new(tokens);
+    let ast = parser.parse_safe()?;
+    
+    let interpreter_mutex = INTERPRETER.get_or_init(|| Mutex::new(Interpreter::new(
+        Config::default(),
+        true,
+        "<internal>",
+        &PathBuf::from("<internal>"),
+        (PathBuf::from("<internal>"), PathBuf::from("<internal>"), true),
+        &[],
+    )));
+    
+    let mut interpreter = interpreter_mutex.lock().unwrap();
+    interpreter.interpret(ast, false)
+}
 
 pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
     if tokens.is_empty() {

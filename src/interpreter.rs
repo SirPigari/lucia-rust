@@ -1134,11 +1134,16 @@ impl Interpreter {
         }
     
         if let Some(err) = self.err.clone() {
-            let tuple = Value::Tuple(vec![
+            let mut tuple_vec = vec![
                 Value::String(err.error_type),
                 Value::String(err.msg),
-                Value::String(err.help.unwrap_or_default()),
-            ]);
+            ];
+
+            if err.help.is_some() {
+                tuple_vec.push(Value::String(err.help.unwrap()));
+            }
+
+            let tuple = Value::Tuple(tuple_vec);
     
             if let Some(var) = self.variables.get_mut("_") {
                 var.set_value(tuple.clone());
@@ -1229,6 +1234,10 @@ impl Interpreter {
         let mut result = Value::Null;
         for expr in expressions {
             result = self.evaluate(expr.convert_to_statement());
+        }
+        if self.is_returning {
+            result = self.return_value.clone();
+            self.is_returning = false;
         }
         result
     }

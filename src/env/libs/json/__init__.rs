@@ -25,10 +25,11 @@ fn from_json_value(jv: &JsonValue) -> Value {
         JsonValue::Null => Value::Null,
         JsonValue::Bool(b) => Value::Boolean(b.clone()),
         JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::Int(Int::from_i64(i))
-            } else if let Some(f) = n.as_f64() {
-                Value::Float(Float::from_f64(f))
+            let s = n.to_string();
+            if let Ok(i) = Int::from_str(&s) {
+                Value::Int(i)
+            } else if let Ok(f) = Float::from_str(&s) {
+                Value::Float(f)
             } else {
                 Value::Error("JSONError", to_static("invalid number".to_string()), None)
             }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::types::{Float};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{get_imagnum_error_message, to_static};
+use crate::env::runtime::utils::{get_imagnum_error_message, to_static, parse_type};
 use crate::env::runtime::variables::Variable;
 
 use crate::{insert_native_fn, insert_native_var};
@@ -144,12 +144,14 @@ pub fn register() -> HashMap<String, Variable> {
         ("round", round),
     ];
 
+    let int_float_type = parse_type("int | float");
+
     for (name, func) in funcs {
         insert_native_fn!(
             map,
             name,
             func,
-            vec![Parameter::positional("x", "float")],
+            vec![Parameter::positional_pt("x", &int_float_type)],
             "float"
         );
     }

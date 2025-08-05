@@ -36,19 +36,19 @@
 #endmacro
 
 #macro assert_err($expr, $msg=("Expected an error but got success")):
-    // i couldnt find cleaner way sorry
-    mutable _error_occurred: ?tuple = null
-    try:
-        $expr
-    catch (_error_occurred): end
-    if (_error_occurred.is_null()):
-        throw $msg from "AssertionError"
-    end
+    // smallest assert err macro i could come up with
+    // you could argue that the before ones were more readable, but this is the smallest
+    //               | --------------------- wrapping into a group
+    //               V                      V -- using '? or' to check if error, on error return the error tuple
+    result: ?tuple = \ ($expr) return null \? or _err
+    // if result is null (which can be only if it doesnt fail) then throw the error
+    if (result.is_null()) then throw $msg from "AssertionError"
     // forget and return the error tuple
-    forget _error_occurred
+    forget result
 #endmacro
 
 #macro assert_type($value, $type_, $msg=(f"Type mismatch")):
+    // innit?
     if ($value isn't $type_):
         throw $msg from "TypeError"
     end
@@ -82,13 +82,25 @@
 
 // TODO: Fix apollo time in time module (src/env/libs/time/__init__.rs)
 #macro time_it($expr):
-    scope time_it_scope (_time, _collections, _config): 
+    scope time_it_scope (_time): 
         start_time: int = _time.current_apollo_time()
         result: any = ($expr)
         end_time: int = _time.current_apollo_time()
         elapsed: int = end_time - start_time
         return ((result, elapsed))
     end
+#endmacro
+
+#macro stringify($value):
+    if ($value is str):
+        return $value
+    else:
+        return _collections.format_value($value)
+    end
+#endmacro
+
+#macro stringify_tokens($tokens):
+    return $!tokens
 #endmacro
 
 // return null

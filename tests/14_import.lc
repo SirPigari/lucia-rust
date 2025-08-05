@@ -21,16 +21,16 @@ print(vars.public_j)
 assert_err!(vars.j)  // j is private, should not be accessible
 
 import math as m
-assert_eq!(m.sqrt(16.0), 4.0)
+assert_eq!(m.sqrt(16), 4.0)
 assert_approx_eq!(m.PI, 3.141592653589793)
-print(m.sqrt(16.0))
+print(m.sqrt(16))
 print(m.PI)
 
 forget m
 
 import (sin, cos as c) from math
 
-assert_approx_eq!(sin(42.0), -0.9165215479156338)
-assert_approx_eq!(c(42.0), -0.39998531498835127)
+assert_approx_eq!(sin(42), -0.9165215479156338)
+assert_approx_eq!(c(42), -0.39998531498835127)
 
 forget (sin, c)

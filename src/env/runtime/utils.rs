@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
+use crate::env::runtime::types::VALID_TYPES;
+use crate::env::runtime::precompile::interpret;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
@@ -31,7 +33,7 @@ use imagnum::math::{
 };
 
 
-static ERROR_CACHE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static STATIC_STORAGE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(windows)]
 pub fn supports_color() -> bool {
@@ -194,7 +196,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 }
 
 pub fn to_static(s: String) -> &'static str {
-    let mut cache = ERROR_CACHE.lock().unwrap();
+    let mut cache = STATIC_STORAGE.lock().unwrap();
     if let Some(&static_ref) = cache.get(&s) {
         return static_ref;
     }
@@ -1497,6 +1499,20 @@ pub fn wrap_in_help(text: &str, use_colors: bool, config: &Config) -> String {
         text,
         hex_to_ansi(&config.color_scheme.help, use_colors)
     )
+}
+
+pub fn parse_type(type_str: &str) -> Value {
+    if type_str.is_empty() {
+        return Value::String("any".to_string());
+    }
+    if VALID_TYPES.contains(&type_str) {
+        return Value::String(type_str.to_string());
+    }
+    let result = interpret(type_str);
+    if result.is_err() {
+        return Value::String("any".to_string());
+    }
+    result.unwrap()
 }
 
 pub const KEYWORDS: &[&str] = &[
