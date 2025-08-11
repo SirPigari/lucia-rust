@@ -332,6 +332,63 @@ impl Parser {
                     }
                 }
 
+                ("OPERATOR", "-li") => {
+                    self.next();
+                    let loc = self.get_loc();
+                    if self.token_is("SEPARATOR", ":") {
+                        self.next();
+                        let mut body = vec![];
+                        while let Some(tok) = self.token() {
+                            if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                break;
+                            }
+                            let stmt = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            body.push(stmt);
+                        }
+
+                        if !self.token_is("IDENTIFIER", "end") {
+                            self.raise_with_help("SyntaxError", "Expected 'end' after 'while' body", "Did you forget to add 'end'?");
+                            return Statement::Null;
+                        }
+                        self.next();
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("body".to_string()),
+                                Value::String("else_body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("IF".to_string()),
+                                expr.convert_to_map(),
+                                Value::List(body.into_iter().map(|e| e.convert_to_map()).collect()),
+                                Value::List(vec![]),
+                            ],
+                            loc,
+                        };
+                    } else {
+                        let then_body = self.parse_expression();
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("body".to_string()),
+                                Value::String("else_body".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("IF".to_string()),
+                                expr.convert_to_map(),
+                                Value::List(vec![then_body.convert_to_map()]),
+                                Value::List(vec![]),
+                            ],
+                            loc,
+                        };
+                    }
+                }
+
                 ("OPERATOR", "?") => {
                     let loc = self.get_loc();
                     self.next();
@@ -539,106 +596,180 @@ impl Parser {
                     };
 
                     let mut pos_args = vec![];
+                    let mut named_args = vec![];
+
                     if let Value::List(items) = params {
-                        for param_val in items {
-                            match param_val {
-                                Value::Map { keys: k, values: v } => {
+                        for param in items {
+                            match param {
+                                Value::Map { keys, values } => {
                                     let mut name_opt = None;
-                                    for (key, val) in k.iter().zip(v.iter()) {
-                                        if let Value::String(s) = key {
-                                            if s == "name" {
-                                                if let Value::String(nm) = val {
-                                                    name_opt = Some(nm.clone());
-                                                }
+                                    let mut type_val = Value::Map {
+                                        keys: vec![
+                                            Value::String("type".into()),
+                                            Value::String("value".into()),
+                                            Value::String("type_kind".into()),
+                                        ],
+                                        values: vec![
+                                            Value::String("TYPE".into()),
+                                            Value::String("any".into()),
+                                            Value::String("simple".into()),
+                                        ],
+                                    };
+                                    let mut value_opt = None;
+                                    let mut is_decl = false;
+                                    let mut is_default = false;
+
+                                    for (k, v) in keys.iter().zip(values.iter()) {
+                                        match (k, v) {
+                                            (Value::String(k), Value::String(v))
+                                                if k == "type" && v == "VARIABLE_DECLARATION" =>
+                                            {
+                                                is_decl = true;
                                             }
+                                            (Value::String(k), Value::Boolean(b)) if k == "is_default" => {
+                                                is_default = *b;
+                                            }
+                                            (Value::String(k), Value::String(n)) if k == "name" => {
+                                                name_opt = Some(n.clone());
+                                            }
+                                            (Value::String(k), val) if k == "var_type" => {
+                                                type_val = val.clone();
+                                            }
+                                            (Value::String(k), val) if k == "value" => {
+                                                value_opt = Some(val.clone());
+                                            }
+                                            _ => {}
                                         }
                                     }
+
                                     if let Some(name) = name_opt {
-                                        pos_args.push(Value::Map {
-                                            keys: vec![
-                                                Value::String("name".to_string()),
-                                                Value::String("type".to_string()),
-                                                Value::String("modifiers".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String(name),
-                                                Value::Map {
+                                        if is_decl {
+                                            if is_default {
+                                                pos_args.push(Value::Map {
                                                     keys: vec![
-                                                        Value::String("type".to_string()),
-                                                        Value::String("value".to_string()),
-                                                        Value::String("type_kind".to_string()),
+                                                        Value::String("name".into()),
+                                                        Value::String("type".into()),
+                                                        Value::String("modifiers".into()),
                                                     ],
                                                     values: vec![
-                                                        Value::String("TYPE".to_string()),
-                                                        Value::String("any".to_string()),
-                                                        Value::String("simple".to_string()),
+                                                        Value::String(name),
+                                                        type_val,
+                                                        Value::List(vec![]),
                                                     ],
-                                                },
-                                                Value::List(vec![]),
-                                            ],
-                                        });
+                                                });
+                                            } else {
+                                                if let Some(val) = value_opt {
+                                                    named_args.push((
+                                                        name,
+                                                        Value::Map {
+                                                            keys: vec![
+                                                                Value::String("type".into()),
+                                                                Value::String("value".into()),
+                                                                Value::String("modifiers".into()),
+                                                            ],
+                                                            values: vec![
+                                                                type_val,
+                                                                val,
+                                                                Value::List(vec![]),
+                                                            ],
+                                                        },
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            pos_args.push(Value::Map {
+                                                keys: vec![
+                                                    Value::String("name".into()),
+                                                    Value::String("type".into()),
+                                                    Value::String("modifiers".into()),
+                                                ],
+                                                values: vec![
+                                                    Value::String(name),
+                                                    Value::Map {
+                                                        keys: vec![
+                                                            Value::String("type".into()),
+                                                            Value::String("value".into()),
+                                                            Value::String("type_kind".into()),
+                                                        ],
+                                                        values: vec![
+                                                            Value::String("TYPE".into()),
+                                                            Value::String("any".into()),
+                                                            Value::String("simple".into()),
+                                                        ],
+                                                    },
+                                                    Value::List(vec![]),
+                                                ],
+                                            });
+                                        }
                                     }
                                 }
+
                                 Value::String(name) => {
                                     pos_args.push(Value::Map {
                                         keys: vec![
-                                            Value::String("name".to_string()),
-                                            Value::String("type".to_string()),
-                                            Value::String("modifiers".to_string()),
+                                            Value::String("name".into()),
+                                            Value::String("type".into()),
+                                            Value::String("modifiers".into()),
                                         ],
                                         values: vec![
                                             Value::String(name),
                                             Value::Map {
                                                 keys: vec![
-                                                    Value::String("type".to_string()),
-                                                    Value::String("value".to_string()),
-                                                    Value::String("type_kind".to_string()),
+                                                    Value::String("type".into()),
+                                                    Value::String("value".into()),
+                                                    Value::String("type_kind".into()),
                                                 ],
                                                 values: vec![
-                                                    Value::String("TYPE".to_string()),
-                                                    Value::String("any".to_string()),
-                                                    Value::String("simple".to_string()),
+                                                    Value::String("TYPE".into()),
+                                                    Value::String("any".into()),
+                                                    Value::String("simple".into()),
                                                 ],
                                             },
                                             Value::List(vec![]),
                                         ],
                                     });
                                 }
+
                                 _ => {}
                             }
                         }
                     }
+
+                    let named_args_map = Value::Map {
+                        keys: named_args.iter().map(|(k, _)| Value::String(k.clone())).collect(),
+                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
+                    };
 
                     let body = vec![body_expr];
                     let body_values: Vec<Value> = body.into_iter().map(|stmt| stmt.convert_to_map()).collect();
 
                     expr = Statement::Statement {
                         keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("name".to_string()),
-                            Value::String("modifiers".to_string()),
-                            Value::String("pos_args".to_string()),
-                            Value::String("named_args".to_string()),
-                            Value::String("body".to_string()),
-                            Value::String("return_type".to_string()),
+                            Value::String("type".into()),
+                            Value::String("name".into()),
+                            Value::String("modifiers".into()),
+                            Value::String("pos_args".into()),
+                            Value::String("named_args".into()),
+                            Value::String("body".into()),
+                            Value::String("return_type".into()),
                         ],
                         values: vec![
-                            Value::String("FUNCTION_DECLARATION".to_string()),
-                            Value::String("<lambda#{}>".to_string()),
-                            Value::List(vec!["mutable".to_string().into()]),
+                            Value::String("FUNCTION_DECLARATION".into()),
+                            Value::String("<lambda#{}>".into()),
+                            Value::List(vec![Value::String("mutable".into())]),
                             Value::List(pos_args),
-                            Value::Map { keys: vec![], values: vec![] },
+                            named_args_map,
                             Value::List(body_values),
                             Value::Map {
                                 keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("value".to_string()),
-                                    Value::String("type_kind".to_string()),
+                                    Value::String("type".into()),
+                                    Value::String("value".into()),
+                                    Value::String("type_kind".into()),
                                 ],
                                 values: vec![
-                                    Value::String("TYPE".to_string()),
-                                    Value::String("any".to_string()),
-                                    Value::String("simple".to_string()),
+                                    Value::String("TYPE".into()),
+                                    Value::String("any".into()),
+                                    Value::String("simple".into()),
                                 ],
                             },
                         ],
@@ -702,7 +833,7 @@ impl Parser {
                 None => break,
             };
 
-            if ["=", "=>", "as", "++", "--", "|"].contains(&op_str) {
+            if ["=", "=>", "as", "++", "--", "|", "-li"].contains(&op_str) {
                 break;
             }
 
@@ -1563,7 +1694,7 @@ impl Parser {
                     }
                 }
 
-                "IDENTIFIER" if ["fun", "gen", "type", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
+                "IDENTIFIER" if ["fun", "gen", "typedef", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
                     let mut modifiers: Vec<String> = vec![];
 
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
@@ -1774,7 +1905,7 @@ impl Parser {
                                 loc: self.get_loc(),
                             };
                         }
-                        "type" => {
+                        "typedef" => {
                             self.next();
                             let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
                             if type_token.0 != "IDENTIFIER" {
@@ -1959,7 +2090,7 @@ impl Parser {
                                 ],
                                 loc: name_loc,
                             }
-                        }  
+                        }
                         "import" => {
                             self.next();
 
@@ -2207,13 +2338,14 @@ impl Parser {
                                     return Statement::Null;
                                 }
                                 let type_ = self.parse_type();
-                                let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
+                                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_).convert_to_map(), true);
                                 if self.err.is_some() {
                                     return Statement::Null;
                                 }
                                 if self.token_is("OPERATOR", "=") {
                                     self.next();
                                     value = self.parse_expression().convert_to_map();
+                                    is_default = false;
                                     if self.err.is_some() {
                                         return Statement::Null;
                                     }
@@ -2225,6 +2357,7 @@ impl Parser {
                                         Value::String("var_type".to_string()),
                                         Value::String("value".to_string()),
                                         Value::String("modifiers".to_string()),
+                                        Value::String("is_default".to_string()),
                                     ],
                                     values: vec![
                                         Value::String("VARIABLE_DECLARATION".to_string()),
@@ -2232,6 +2365,7 @@ impl Parser {
                                         type_.clone().convert_to_map(),
                                         value,
                                         Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                        Value::Boolean(is_default),
                                     ],
                                     loc: self.get_loc(),
                                 };
@@ -2819,6 +2953,7 @@ impl Parser {
                                                 Value::String("var_type".to_string()),
                                                 Value::String("value".to_string()),
                                                 Value::String("modifiers".to_string()),
+                                                Value::String("is_default".to_string()),
                                             ],
                                             values: vec![
                                                 Value::String("VARIABLE_DECLARATION".to_string()),
@@ -2846,6 +2981,7 @@ impl Parser {
                                                     ],
                                                 },
                                                 Value::List(vec![]),
+                                                Value::Boolean(true),
                                             ],
                                         }
                                     }
@@ -3059,7 +3195,7 @@ impl Parser {
         ))
     }    
 
-    fn parse_type(&mut self) -> Statement {
+    fn parse_type(& mut self) -> Statement {
         let (base_str, base_stmt) = match self.parse_single_type() {
             Some(v) => v,
             None => return Statement::Null,
@@ -3176,7 +3312,7 @@ impl Parser {
                 return Statement::Null;
             }
     
-            if base_str == "function" {
+            if base_str == "function" || base_str == "generator" {
                 let mut return_type = Value::Map {
                     keys: vec![
                         Value::String("type".to_string()),
@@ -3211,7 +3347,7 @@ impl Parser {
                     ],
                     values: vec![
                         Value::String("TYPE".to_string()),
-                        Value::String("function".to_string()),
+                        Value::String(base_str.clone()),
                         Value::List(elements),
                         return_type.convert_to_map(),
                         Value::Boolean(has_variadic_any),
@@ -3316,13 +3452,14 @@ impl Parser {
                     return Statement::Null;
                 }
                 let type_ = self.parse_type();
-                let mut value = get_type_default_as_statement_from_statement(&type_).convert_to_map();
+                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_).convert_to_map(), true);
                 if self.err.is_some() {
                     return Statement::Null;
                 }
                 if self.token_is("OPERATOR", "=") {
                     self.next();
                     value = self.parse_expression().convert_to_map();
+                    is_default = false;
                     if self.err.is_some() {
                         return Statement::Null;
                     }
@@ -3334,6 +3471,7 @@ impl Parser {
                         Value::String("var_type".to_string()),
                         Value::String("value".to_string()),
                         Value::String("modifiers".to_string()),
+                        Value::String("is_default".to_string()),
                     ],
                     values: vec![
                         Value::String("VARIABLE_DECLARATION".to_string()),
@@ -3341,6 +3479,7 @@ impl Parser {
                         type_.clone().convert_to_map(),
                         value,
                         Value::List(vec![]),
+                        Value::Boolean(is_default),
                     ],
                     loc
                 };
@@ -3371,6 +3510,7 @@ impl Parser {
                         Value::String("var_type".to_string()),
                         Value::String("value".to_string()),
                         Value::String("modifiers".to_string()),
+                        Value::String("is_default".to_string()),
                     ],
                     values: vec![
                         Value::String("VARIABLE_DECLARATION".to_string()),
@@ -3378,6 +3518,7 @@ impl Parser {
                         type_.clone().convert_to_map(),
                         value,
                         Value::List(vec![]),
+                        Value::Boolean(false),
                     ],
                     loc
                 };

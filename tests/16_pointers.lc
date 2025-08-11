@@ -5,7 +5,7 @@
 
 p: &int = &10
 
-fun f(f: function[int] -> int, a: &int) -> int: f(a) end
+fun f(f: function[&int] -> int, a: &int) -> int: f(a) end
 
 fun g(a: &int) -> int:
     return *a

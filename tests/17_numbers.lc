@@ -44,3 +44,7 @@ assert_eq!(36#z, 35) // base 36
 assert_eq!(62#10, 62) // base 62
 assert_eq!(1#1, 1) // base 1
 assert_eq!(62#i_can_put_anything_here, 3334511810847886609099271355119208) // base 62 with alphanumeric characters
+
+// decimal notation without leading zero
+assert_eq!(.69, 0.69)
+assert_eq!(.123_456, 0.123456)

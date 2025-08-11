@@ -799,6 +799,7 @@ fn lucia(args: Vec<String>) {
     let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
     let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
     let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
+    let debug_mode_flag = args.contains(&"--debug-mode=".to_string());
     let dump_dir = args.iter()
         .find(|arg| arg.starts_with("--dump-dir="))
         .map(|arg| (arg.trim_start_matches("--dump-dir="), true))
@@ -918,7 +919,7 @@ fn lucia(args: Vec<String>) {
             ("--color", "Enable colored output (default)"),
             ("--quiet, -q", "Suppress debug and warning messages"),
             ("--debug, -d", "Enable debug mode"),
-            ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal)"),
+            ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal, none)"),
             ("--exit, -e", "Exit if no files are provided"),
             ("--info, -i", "Show build and environment information"),
             ("--help, -h", "Show this help message"),
@@ -1105,14 +1106,18 @@ fn lucia(args: Vec<String>) {
 
     let home_dir_path = PathBuf::from(home_dir.clone());
 
-    let debug_mode: String = if debug_flag {
+    let debug_mode: String = if debug_flag || debug_mode_flag {
         args.iter()
             .find(|arg| arg.starts_with("--debug-mode="))
             .and_then(|arg| arg.split('=').nth(1))
             .map(|mode| match mode {
                 "full" | "normal" | "minimal" => mode.into(),
+                "none" => {
+                    config.debug = false;
+                    "none".into()
+                }
                 _ => {
-                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', or 'minimal'.", mode);
+                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', 'minimal' or 'none'.", mode);
                     exit(1);
                 }
             })
@@ -1135,7 +1140,12 @@ fn lucia(args: Vec<String>) {
         config.debug = true;
         config.debug_mode = "full".to_string();
     }
-    config.debug_mode = debug_mode;
+    if debug_mode == "none" {
+        config.debug = false;
+        config.debug_mode = "normal".to_string();
+    } else {
+        config.debug_mode = debug_mode;
+    }
     if quiet_flag {
         config.debug = false;
         config.use_lucia_traceback = false;

@@ -3,7 +3,7 @@ use crate::env::runtime::statements::Statement;
 use crate::interpreter::Interpreter;
 use crate::env::runtime::internal_structs::State;
 use crate::env::runtime::utils::to_static;
-use crate::env::runtime::types::Int;
+use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::functions::Function;
 
@@ -238,6 +238,20 @@ impl Generator {
             GeneratorType::Custom(custom) => custom.clone().collect(),
         }
     }
+
+    pub fn get_yield_type(&self) -> Option<Type> {
+        match &self.inner.lock().unwrap().kind {
+            GeneratorType::Native(_) => None, // Native generators do not have a yield type
+            GeneratorType::Custom(custom) => Some(custom.ret_type.clone()),
+        }
+    }
+
+    pub fn get_parameter_types(&self) -> Option<Vec<Type>> {
+        match &self.inner.lock().unwrap().kind {
+            GeneratorType::Native(_) => None, // Native generators do not have parameter types
+            GeneratorType::Custom(_) => None, // TODO: Implement this
+        }
+    }
 }
 
 impl fmt::Debug for Generator {
@@ -304,7 +318,7 @@ impl PartialOrd for NativeGenerator {
 pub struct CustomGenerator {
     pub body: Vec<Statement>,
     pub interpreter: Box<Interpreter>,
-    pub ret_type: Box<Value>,
+    pub ret_type: Type,
     pub iteration: usize,
     pub index: usize,
     pub done: bool,

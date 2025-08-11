@@ -15,7 +15,6 @@ use crate::env::runtime::utils::{
     to_static,
     create_function,
     create_note,
-    format_type,
     get_type_from_token_name,
     sanitize_alias,
     special_function_meta,

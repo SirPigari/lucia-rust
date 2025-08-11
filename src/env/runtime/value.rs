@@ -1,4 +1,4 @@
-use crate::env::runtime::types::{Float, Int};
+use crate::env::runtime::types::{Float, Int, Type};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
@@ -33,6 +33,7 @@ pub enum Value {
     Tuple(Vec<Value>),
     List(Vec<Value>),
     Bytes(Vec<u8>),
+    Type(Type),
     Function(Function),
     Generator(Generator),
     Module(Object, PathBuf),
@@ -85,6 +86,7 @@ impl Serialize for Value {
                 serializer.collect_seq(vec)
             }
             Value::Bytes(b) => serializer.serialize_bytes(b),
+            Value::Type(t) => t.display().serialize(serializer),
             Value::Function(_) => {
                 serializer.serialize_str("Function(opaque)")
             }
@@ -232,6 +234,10 @@ impl Encode for Value {
                 8u8.encode(encoder)?;
                 b.encode(encoder)
             }
+            Type(t) => {
+                9u8.encode(encoder)?;
+                t.display().encode(encoder)
+            }
             Function(_) | Module(_, _) | Error(_, _, _) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
             }
@@ -316,6 +322,12 @@ impl Hash for Value {
                 2u8.hash(state);
                 bytes.hash(state);
             }
+
+            Value::Type(t) => {
+                3u8.hash(state);
+                t.display().hash(state);
+            }
+
             Value::Function(func) => {
                 func.get_name().hash(state);
                 func.get_parameters().hash(state);
@@ -503,23 +515,29 @@ impl Value {
         }
     }
     pub fn type_name(&self) -> String {
+        self.get_type().display()
+    }
+    pub fn get_type(&self) -> Type {
         match self {
-            Value::Float(_) => "float".to_string(),
-            Value::Int(_) => "int".to_string(),
-            Value::String(_) => "str".to_string(),
-            Value::Boolean(_) => "bool".to_string(),
-            Value::Null => "void".to_string(),
-            Value::Map { .. } => "map".to_string(),
-            Value::List(_) => "list".to_string(),
-            Value::Tuple(_) => "tuple".to_string(),
-            Value::Bytes(_) => "bytes".to_string(),
-            Value::Function(_) => "function".to_string(),
-            Value::Generator(_) => "generator".to_string(),
-            Value::Module(obj, _) => obj.name().to_string(),
+            Value::Float(_) => Type::new_simple("float"),
+            Value::Int(_) => Type::new_simple("int"),
+            Value::String(_) => Type::new_simple("str"),
+            Value::Boolean(_) => Type::new_simple("bool"),
+            Value::Null => Type::new_simple("void"),
+            Value::Map { .. } => Type::new_simple("map"),
+            Value::List(_) => Type::new_simple("list"),
+            Value::Tuple(_) => Type::new_simple("tuple"),
+            Value::Bytes(_) => Type::new_simple("bytes"),
+            Value::Type(_) => Type::new_simple("type"),
+            Value::Function(_) => Type::new_simple("function"),
+            Value::Generator(_) => Type::new_simple("generator"),
+            Value::Module(..) => Type::new_simple("object"),
             Value::Pointer(arc) => {
-                format!("&{}", arc.type_name())
+                let mut t = arc.get_type();
+                t.set_reference(true);
+                t
             }
-            Value::Error(..) => "error".to_string(),
+            Value::Error(..) => Type::new_simple("error"),
         }
     }
     pub fn is_truthy(&self) -> bool {
@@ -532,6 +550,7 @@ impl Value {
             Value::Map { keys, .. } => !keys.is_empty(),
             Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
+            Value::Type(_) => true,
             Value::Function(_) => true,
             Value::Generator(_) => true,
             Value::Module(..) => true,
@@ -576,6 +595,7 @@ impl Value {
                 let addr = raw_ptr as usize;
                 format!("<pointer to 0x{:X}>", addr)
             }
+            Value::Type(t) => (*t).display(),
             Value::Function(func) => {
                 let addr = func.ptr() as *const () as usize;
                 format!("<function '{}' at 0x{:X}>", func.get_name(), addr)
@@ -612,6 +632,10 @@ impl Value {
             Value::Map { keys: _, values: _ } | Value::List(_) | Value::Tuple(_) => {
                 let description = format!("<{}>", self.type_name());
                 Some(description.into_bytes())
+            }
+
+            Value::Type(_) => {
+                None
             }
     
             Value::Function(func) => {
@@ -692,6 +716,21 @@ impl Value {
                 Some(map)
             }
             _ => None,
+        }
+    }
+    pub fn convert_to_hashmap_value(&self) -> HashMap<Value, Value> {
+        match self {
+            Value::Map { keys, values } => {
+                if keys.len() != values.len() {
+                    return HashMap::new();
+                }
+                let mut map = HashMap::new();
+                for (key, value) in keys.iter().zip(values.iter()) {
+                    map.insert(key.clone(), value.clone());
+                }
+                map
+            }
+            _ => HashMap::new(),
         }
     }
     pub fn is_null(&self) -> bool {

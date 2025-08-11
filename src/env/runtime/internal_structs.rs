@@ -293,7 +293,6 @@ pub struct Cache {
 
 #[derive(Debug, Clone)]
 pub struct InternalStorage {
-    pub types: HashMap<String, Value>,
     pub lambda_counter: usize,
     pub use_42: (bool, bool),
 }

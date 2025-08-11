@@ -234,7 +234,7 @@ Happy coding!"#, version);
 
 fn type_name(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("obj") {
-        return Value::String(value.type_name().to_string());
+        return Value::Type(value.get_type());
     }
     Value::Error("TypeError", "No value provided for type_name()", None)
 }
@@ -433,7 +433,10 @@ fn format_value(value: &Value) -> String {
                 Ok(decoded) => decoded,
                 Err(_) => format!("<invalid utf-8: {:?}>", bytes),
             }
-        }        
+        }
+        Value::Type(ty) => {
+            ty.display()
+        }
         Value::Function(func) => {
             format!("<function '{}' at {:p}>", func.get_name(), func)
         }
@@ -534,7 +537,7 @@ pub fn type_fn() -> Function {
         vec![
             Parameter::positional("obj", "any"),
         ],
-        "str",
+        "type",
         true, true, true,
         None,
     )))

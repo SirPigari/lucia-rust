@@ -1,9 +1,9 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method, convert_value_to_type};
+use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
 use std::collections::HashMap;
-use crate::env::runtime::types::{Float};
+use crate::env::runtime::types::{Float, Type};
 use imagnum::{create_int, create_float};
 use crate::interpreter::Interpreter;
 
@@ -11,7 +11,7 @@ use crate::interpreter::Interpreter;
 pub struct Variable {
     name: String,
     pub value: Value,
-    type_: String,
+    pub type_: Type,
     is_static: bool,
     is_public: bool,
     is_final: bool,
@@ -21,6 +21,18 @@ pub struct Variable {
 #[allow(dead_code)]
 impl Variable {
     pub fn new(name: String, value: Value, type_: String, is_static: bool, is_public: bool, is_final: bool) -> Self {
+        Self {
+            name,
+            value,
+            type_: Type::new_simple(&type_),
+            is_static,
+            is_public,
+            is_final,
+            properties: HashMap::new(),
+        }
+    }
+
+    pub fn new_pt(name: String, value: Value, type_: Type, is_static: bool, is_public: bool, is_final: bool) -> Self {
         Self {
             name,
             value,
@@ -813,8 +825,8 @@ impl Variable {
                         "into",
                         move |args| {
                             let type_ = args
-                                .get("type")
-                                .and_then(|v| if let Value::String(t) = v { Some(t.clone()) } else { None })
+                                .get("ty")
+                                .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
                                 .unwrap_or_else(|| "any".to_string());
 
                             let item_vec = match &val_clone {
@@ -833,7 +845,7 @@ impl Variable {
                             Value::List(list)
                         },
                         vec![
-                            Parameter::positional("type", "str"),
+                            Parameter::positional("ty", "type"),
                         ],
                         "list",
                         true, true, true,
@@ -1189,8 +1201,8 @@ impl Variable {
                         "collect_into",
                         move |args| {
                             let type_ = args
-                                .get("type")
-                                .and_then(|v| if let Value::String(t) = v { Some(t.clone()) } else { None })
+                                .get("ty")
+                                .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
                                 .unwrap_or_else(|| "any".to_string());
 
                             let item_vec = match &val_clone {
@@ -1215,7 +1227,7 @@ impl Variable {
 
                             Value::List(list)
                         },
-                        vec![Parameter::positional("type", "str")],
+                        vec![Parameter::positional("ty", "type")],
                         "list",
                         true, true, true,
                         None,
@@ -1651,8 +1663,12 @@ impl Variable {
         self.value = value;
     }
 
+    pub fn get_type(&self) -> Type {
+        self.type_.clone()
+    }
+
     pub fn type_name(&self) -> &str {
-        &self.type_
+        to_static(self.type_.display())
     }
 
     pub fn get_name(&self) -> &str {
@@ -1683,7 +1699,7 @@ impl Variable {
         self.is_public = is_public;
     }
 
-    pub fn set_type(&mut self, type_: String) {
+    pub fn set_type(&mut self, type_: Type) {
         self.type_ = type_;
     }
 

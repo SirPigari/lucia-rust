@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::types::{Int, Float};
+use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::value::{Value};
 use serde_json::Value as JsonValue;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,6 +15,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
+use regex::Regex;
 use crate::env::runtime::precompile::interpret;
 use crossterm::{
     execute,
@@ -340,6 +341,8 @@ pub fn format_value(value: &Value) -> String {
             format!("b\"{}\"", formatted_bytes.join(" "))
         }
 
+        Value::Type(t) => t.display(),
+
         Value::Function(func) => {
             let addr = func.ptr() as *const () as usize;
             format!("<function '{}' at 0x{:X}>", func.get_name(), addr)
@@ -489,7 +492,7 @@ where
         meta: FunctionMetadata {
             name: name.to_string(),
             parameters,
-            return_type: Value::String(return_type.to_string()),
+            return_type: Type::new_simple(return_type),
             is_public,
             is_static,
             is_final,
@@ -723,158 +726,6 @@ pub fn create_note(text: &str, use_colors: Option<bool>, note_color: &str) -> St
     )
 }
 
-pub fn format_type(value: &Value) -> String {
-    fn as_str(v: &Value) -> Option<&str> {
-        if let Value::String(s) = v {
-            Some(s)
-        } else {
-            None
-        }
-    }
-    
-    if let Value::String(s) = value {
-        if s.trim_start().starts_with('{') {
-            let mut err = false;
-            let fixed = fix_and_parse_json(s).unwrap_or_else(|| {
-                err = true;
-                return serde_json::Value::String("unknown".to_string());
-            });
-            if err {
-                return "unknown".to_string();
-            }
-            if let Value::Map { keys, values } = json_to_value(&fixed) {
-                let new_value = Value::Map { keys, values };
-                return format_type(&new_value);
-            }
-        }
-    }
-
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Map { keys, values } => {
-            let mut map = HashMap::new();
-
-            for (k, v) in keys.iter().zip(values.iter()) {
-                if let Some(key_str) = as_str(k) {
-                    map.insert(key_str, v);
-                }
-            }
-
-            let type_kind = map.get("type_kind").and_then(|v| as_str(*v));
-
-            let elements = match map.get("elements") {
-                Some(Value::Map { .. }) => vec![],
-                Some(Value::String(_)) => vec![map.get("elements").and_then(|v| as_str(*v)).unwrap().to_string()],
-                Some(_) => vec![],
-                None => vec![],
-            };
-
-            let base = map.get("base").and_then(|v| as_str(*v));
-            let _variadic = map.get("variadic").and_then(|v| {
-                if let Value::String(s) = v {
-                    Some(s == "true")
-                } else {
-                    None
-                }
-            }).unwrap_or(false);
-
-            let return_type = map.get("return_type");
-
-            match type_kind {
-                Some("indexed") => {
-                    if let Some(base) = base {
-                        if !elements.is_empty() {
-                            format!("{}[{}]", base, elements.join(","))
-                        } else {
-                            base.to_string()
-                        }
-                    } else {
-                        "unknown".to_string()
-                    }
-                }
-
-                Some("function") => {
-                    let elems = if !elements.is_empty() {
-                        format!("[{}]", elements.join(","))
-                    } else {
-                        "".to_string()
-                    };
-
-                    let ret_str = if let Some(Value::Map { keys: rt_keys, values: rt_values }) = return_type {
-                        let mut rt_map = std::collections::HashMap::new();
-                        for (k, v) in rt_keys.iter().zip(rt_values.iter()) {
-                            if let Some(key_str) = as_str(k) {
-                                rt_map.insert(key_str, v);
-                            }
-                        }
-
-                        if rt_map.get("type_kind").and_then(|v| as_str(*v)) == Some("simple") {
-                            if let Some(Value::String(val)) = rt_map.get("value") {
-                                let mut o = "".to_string();
-                                if !(val == "any" || val == "void") {
-                                    o = format!(" -> {}", val);
-                                };
-                                o
-                            } else {
-                                "".to_string()
-                            }
-                        } else {
-                            "".to_string()
-                        }
-                    } else {
-                        "".to_string()
-                    };
-
-                    format!("function{}{}", elems, ret_str)
-                }
-
-                Some("simple") => {
-                    if let Some(Value::String(val)) = map.get("value") {
-                        val.to_string()
-                    } else {
-                        "unknown".to_string()
-                    }
-                }
-
-                Some("union") => {
-                    let types = map.get("types").and_then(|v| {
-                        if let Value::List(values) = v {
-                            Some(values.iter().filter_map(|v| as_str(v)).collect::<Vec<_>>())
-                        } else {
-                            None
-                        }
-                    }).unwrap_or(vec![]);
-                    if types.is_empty() {
-                        "unknown".to_string()
-                    } else {
-                        format!("union<{}>", types.join(", "))
-                    }
-                }
-
-                Some("new") => {
-                    if let Some(b) = map.get("base") {
-                        let val = format_type(b);
-                        if let Some(Value::String(name)) = map.get("name") {
-                            return format!("{}<{}>", name, val);
-                        }
-                        format!("new<{}>", val)
-                    } else {
-                        "unknown".to_string()
-                    }
-                }
-
-                _ => {
-                    map.get("type").and_then(|v| as_str(*v)).unwrap_or("unknown").to_string()
-                }
-            }
-        }
-        Value::Null => "void".to_string(),
-        _ => {
-            "unknown".to_string()
-        }
-    }
-}
-
 pub fn get_type_from_token_name(token_name: &str) -> String {
     match token_name {
         "NUMBER" => "int".to_string(),
@@ -970,7 +821,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         FunctionMetadata {
             name: "exit".to_string(),
             parameters: vec![Parameter::positional_optional("code", "int", Value::Int(Int::from_i64(0 as i64)))],
-            return_type: Value::String("void".to_string()),
+            return_type: Type::new_simple("void"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -990,7 +841,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
                 Parameter::positional_optional("data", "map", Value::Map { keys: vec![], values: vec![] }),
                 Parameter::positional_optional("json", "any", NULL),
             ],
-            return_type: Value::String("map".to_string()),
+            return_type: Type::new_simple("map"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -1003,7 +854,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         FunctionMetadata {
             name: "eval".to_string(),
             parameters: vec![Parameter::positional("code", "str")],
-            return_type: Value::String("any".to_string()),
+            return_type: Type::new_simple("any"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -1016,7 +867,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         FunctionMetadata {
             name: "exec".to_string(),
             parameters: vec![Parameter::positional("code", "str")],
-            return_type: Value::String("any".to_string()),
+            return_type: Type::new_simple("any"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -1032,7 +883,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
                 Parameter::positional("key", "str"),
                 Parameter::positional("value", "any"),
             ],
-            return_type: Value::String("void".to_string()),
+            return_type: Type::new_simple("void"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -1048,7 +899,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
                 Parameter::positional("d", "str"),
                 Parameter::positional("i", "bool"),
             ],
-            return_type: Value::String("void".to_string()),
+            return_type: Type::new_simple("void"),
             is_public: true,
             is_static: true,
             is_final: true,
@@ -1501,18 +1352,45 @@ pub fn wrap_in_help(text: &str, use_colors: bool, config: &Config) -> String {
     )
 }
 
-pub fn parse_type(type_str: &str) -> Value {
+pub fn parse_type(type_str: &str) -> Type {
     if type_str.is_empty() {
-        return Value::String("any".to_string());
+        return Type::new_simple("any");
     }
     if VALID_TYPES.contains(&type_str) {
-        return Value::String(type_str.to_string());
+        return Type::new_simple(type_str);
     }
     let result = interpret(type_str);
     if result.is_err() {
-        return Value::String("any".to_string());
+        return Type::new_simple("any");
     }
-    result.unwrap()
+    if let Value::Type(t) = result.unwrap() {
+        return t;
+    }
+    Type::new_simple("any")
+}
+
+static NUMBER_REGEX: Lazy<Regex> = Lazy::new(|| {
+    let number_pattern = r"(?x)
+        -?
+        (
+            \d+\#[0-9a-zA-Z_]+
+            | 0[bB][01]+(?:_[01]+)*
+            | 0[oO][0-7]+(?:_[0-7]+)*
+            | 0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*
+            | \.\d+(?:_\d+)*
+            |
+            (?:\d+(?:_\d)* 
+                (?:\.\d+(?:_\d+)*)?
+            )
+            (?:[eE][+-]?\d+)?
+        )
+    ";
+
+    Regex::new(number_pattern).unwrap()
+});
+
+pub fn is_number(n: &str) -> bool {
+    NUMBER_REGEX.is_match(n)
 }
 
 pub const KEYWORDS: &[&str] = &[

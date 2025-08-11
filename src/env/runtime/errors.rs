@@ -29,6 +29,16 @@ impl Error {
         }
     }
 
+    pub fn new_anonymous(error_type: &str, msg: &str) -> Self {
+        Self {
+            error_type: to_static(error_type.to_string()).to_string(),
+            msg: to_static(msg.to_string()).to_string(),
+            help: None,
+            loc: None,
+            ref_err: None,
+        }
+    }
+
     pub fn error_with_help(error_type: &'static str, msg: &'static str, help: String, loc: Location) -> Self {
         Self {
             error_type: to_static(error_type.to_string()).to_string(),

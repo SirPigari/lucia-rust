@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::types::Type;
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
 use std::sync::Mutex;
@@ -18,7 +19,7 @@ pub enum ParameterKind {
 #[derive(Clone, Debug, PartialEq, Hash, PartialOrd)]
 pub struct Parameter {
     pub name: String,
-    pub ty: Value,
+    pub ty: Type,
     pub default: Option<Value>,
     pub kind: ParameterKind,
     pub mods: Vec<String>,
@@ -29,7 +30,7 @@ pub struct Parameter {
 pub struct FunctionMetadata {
     pub name: String,
     pub parameters: Vec<Parameter>,
-    pub return_type: Value,
+    pub return_type: Type,
     pub is_public: bool,
     pub is_static: bool,
     pub is_final: bool,
@@ -80,7 +81,7 @@ impl NativeFunction {
             meta: FunctionMetadata {
                 name: name.to_string(),
                 parameters,
-                return_type: Value::String(return_type.to_string()),
+                return_type: Type::new_simple(return_type),
                 is_public,
                 is_static,
                 is_final,
@@ -239,9 +240,13 @@ impl Function {
         &self.metadata().name
     }
 
-    pub fn get_return_type(&self) -> Value {
+    pub fn get_return_type(&self) -> Type {
         self.metadata().return_type.clone()
-    }    
+    }
+
+    pub fn get_parameter_types(&self) -> Vec<Type> {
+        self.metadata().parameters.iter().map(|p| p.ty.clone()).collect()
+    }
 
     pub fn get_parameters(&self) -> &[Parameter] {
         &self.metadata().parameters
@@ -303,14 +308,14 @@ impl Parameter {
     pub fn positional(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: None,
             kind: ParameterKind::Positional,
             mods: vec![],
         }
     }
     
-    pub fn positional_pt(name: &str, ty: &Value) -> Self {
+    pub fn positional_pt(name: &str, ty: &Type) -> Self {
         Self {
             name: name.to_string(),
             ty: ty.clone(),
@@ -323,14 +328,14 @@ impl Parameter {
     pub fn positional_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: Some(default),
             kind: ParameterKind::Positional,
             mods: vec![],
         }
     }
     
-    pub fn positional_optional_pt(name: &str, ty: &Value, default: Value) -> Self {
+    pub fn positional_optional_pt(name: &str, ty: &Type, default: Value) -> Self {
         Self {
             name: name.to_string(),
             ty: ty.clone(),
@@ -343,7 +348,7 @@ impl Parameter {
     pub fn variadic(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: None,
             kind: ParameterKind::Variadic,
             mods: vec![],
@@ -353,7 +358,7 @@ impl Parameter {
     pub fn variadic_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: Some(default),
             kind: ParameterKind::Variadic,
             mods: vec![],
@@ -363,7 +368,7 @@ impl Parameter {
     pub fn keyword_variadic(name: &str, ty: &str) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: None,
             kind: ParameterKind::KeywordVariadic,
             mods: vec![],
@@ -373,7 +378,7 @@ impl Parameter {
     pub fn keyword_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
             mods: vec![],
@@ -383,7 +388,7 @@ impl Parameter {
     pub fn keyword_variadic_optional(name: &str, ty: &str, default: Value) -> Self {
         Self {
             name: name.to_string(),
-            ty: Value::String(ty.to_string()),
+            ty: Type::new_simple(ty),
             default: Some(default),
             kind: ParameterKind::KeywordVariadic,
             mods: vec![],
@@ -393,7 +398,7 @@ impl Parameter {
     pub fn instance() -> Self {
         Self {
             name: "self".to_string(),
-            ty: Value::String("any".to_string()),
+            ty: Type::new_simple("any"),
             default: None,
             kind: ParameterKind::Positional,
             mods: vec!["mutable".to_string()],

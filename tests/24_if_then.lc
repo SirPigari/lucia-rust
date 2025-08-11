@@ -40,3 +40,27 @@ assert_eq!(grade, "B")
 
 process: function = (x) => if (x > 0) then "positive" else "negative"
 assert_eq!(process(10), "positive")
+
+state: bool = true
+out: ?str = null
+
+fun print_state(state: bool) -> str:
+    if (state):
+        print("State is true")
+        return "State is true"
+    else:
+        print("State is false")
+        return "State is false"
+    end
+end
+
+// "-li" operator, acts like if
+state-li out = print_state(state)  // if state then print_state()
+assert_eq!(out, "State is true")
+
+state = false
+(!state)-li:
+    print_state(state)
+    out = "State is false"
+end
+assert_eq!(out, "State is false")

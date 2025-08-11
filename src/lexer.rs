@@ -125,21 +125,40 @@ impl Lexer {
     
         static REGEX: OnceLock<Regex> = OnceLock::new();
         let regex = REGEX.get_or_init(|| {
-            let operators = [
+            let symbol_operators = [
                 "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*", "=/", "=^", "=", "<<", ">>", ":=", "^^^", "^^",
                 "++", "--", "+", "-", "^", "*", "/", ">", "<", "!", "%", "||", "&&", "??",
                 "|", "#", "~", "$", "?", "&", "^=", "%="
             ];
 
-            let word_operators = [
-                "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift", "rshift", "band", "bor", "bnot"
+            let word_ops_no_boundaries = [
+                "-li"
             ];
 
-            let operator_pattern = format!(
-                "({})|\\b({})\\b",
-                operators.iter().map(|pattern| regex::escape(*pattern)).collect::<Vec<_>>().join("|"),
-                word_operators.iter().map(|pattern| regex::escape(*pattern)).collect::<Vec<_>>().join("|"),
-            );
+            let word_operators = [
+                "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift", "rshift", "band", "bor", "bnot",
+            ];
+
+            let mut word_with_bounds_sorted = word_operators.iter()
+                .map(|s| regex::escape(*s))
+                .collect::<Vec<_>>();
+            word_with_bounds_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+
+            let mut word_no_bounds_sorted = word_ops_no_boundaries.iter()
+                .map(|s| regex::escape(*s))
+                .collect::<Vec<_>>();
+            word_no_bounds_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+
+            let mut symbol_ops_sorted = symbol_operators.iter()
+                .map(|s| regex::escape(*s))
+                .collect::<Vec<_>>();
+            symbol_ops_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+
+            let word_with_bounds_pattern = format!(r"\b({})\b", word_with_bounds_sorted.join("|"));
+            let word_no_bounds_pattern = word_no_bounds_sorted.join("|");
+            let symbol_ops_pattern = symbol_ops_sorted.join("|");
+
+            let operator_pattern = format!("{}|{}|{}", word_with_bounds_pattern, word_no_bounds_pattern, symbol_ops_pattern);
 
             let number_pattern = r"(?x)
                 -?
@@ -148,9 +167,11 @@ impl Lexer {
                     | 0[bB][01]+(?:_[01]+)*
                     | 0[oO][0-7]+(?:_[0-7]+)*
                     | 0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*
-                    |
-                    \d+(?:_\d+)*
-                    (?:\.\d+(?:_\d+)*)?
+                    | \.\d+(?:_\d+)*
+                    |                                         
+                    (?:\d+(?:_\d)*
+                        (?:\.\d+(?:_\d+)*)?
+                    )
                     (?:[eE][+-]?\d+)?
                 )
             ";
