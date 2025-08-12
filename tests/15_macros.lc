@@ -51,3 +51,31 @@ assert_err!(assert_type!(i, str, "Expected i to be a string"))
 formatted_time: float = _time.format_apollo_time_ms(elapsed)
 
 print(formatted_time, elapsed)
+
+#macro #no-mangle m!():
+    i = 100
+#endmacro
+
+i := 6969
+m!()
+
+assert_eq!(i, 100)
+
+#macro #no-group g!():
+    f: function = () => (42)
+    f
+#endmacro
+
+assert_eq!(\
+g!()
+
+()  // this calls f
+\, 42)
+
+// deprecated macro example
+// for now doesnt do anything special, just a marker
+#macro #deprecated("This macro is deprecated") deprecated_macro():
+    print("This macro is deprecated")
+#endmacro
+
+deprecated_macro!()

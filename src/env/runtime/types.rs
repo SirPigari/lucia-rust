@@ -76,7 +76,7 @@ impl Type {
             Type::Union(types) => format!("<union type '{}'>", types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(" | ")),
             Type::Enum { name, .. } => format!("<enum '{}'>", name),
             Type::EnumInstance { name, variant, value } => format!("<type '{}::{}({})'>", name, variant, value.display_simple()),
-            Type::Alias { name, base_type, .. } => format!("<type '{} as {}'>", name, base_type.display_simple()),
+            Type::Alias { name, base_type, .. } => format!("<type '{}' as '{}'>", name, base_type.display_simple()),
         }
     }
 

@@ -20,6 +20,10 @@ final STDIN: int = 3
     _collections.format_string($format, [$args])
 #endmacro
 
+#macro read_line($input_stream=(STDIN)):
+    _collections.read_line($input_stream)
+#endmacro
+
 null
 
 #endif

@@ -289,6 +289,41 @@ pub fn handle_error(
     let mut current_error = Some(error);
 
     while let Some(err) = current_error {
+        if let Some(ref inner) = err.ref_err {
+            let same_loc = match (&err.loc, &inner.loc) {
+                (Some(a), Some(b)) => a.file == b.file
+                    && a.line_number == b.line_number
+                    && a.range == b.range,
+                _ => false,
+            };
+
+            if same_loc {
+                trace.push_str(&print_single_error(err));
+
+                let indent = " ".repeat(err.loc.as_ref().map_or(0, |l| l.line_number.to_string().len()));
+                trace.push_str(&format!(
+                    "\n\t{}^-- caused by:\n\t{} | {}: {}",
+                    hex_to_ansi(&config.color_scheme.exception, use_colors),
+                    indent,
+                    inner.error_type,
+                    inner.msg
+                ));
+
+                if let Some(help) = &inner.help {
+                    if !help.is_empty() {
+                        trace.push_str(&format!(
+                            "\n\t{}   (Help: {})",
+                            indent,
+                            help
+                        ));
+                    }
+                }
+
+                current_error = inner.ref_err.as_deref();
+                continue;
+            }
+        }
+
         trace.push_str(&print_single_error(err));
         if let Some(ref inner) = err.ref_err {
             trace.push_str(&format!(
@@ -1810,6 +1845,18 @@ fn repl(
             match preprocessor.process(raw_tokens.clone(), &current_dir) {
                 Ok(toks) => toks,
                 Err(e) => {
+                    if print_start_debug {
+                        let filtered = raw_tokens
+                            .iter()
+                            .filter(|token| {
+                                let t = &token.0;
+                                t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+                            })
+                            .map(|token| (&token.0, &token.1))
+                            .collect::<Vec<_>>();
+                    
+                        debug_log(&format!("Tokens: {:?}", filtered), &config);
+                    }
                     handle_error(&e.clone(), &input, &config);
                     continue;
                 }

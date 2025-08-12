@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Int};
+use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{
     to_static,
@@ -159,6 +159,24 @@ fn print_to_handler(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn read_line_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::Int(input_stream)) = args.get("input_stream") {
+        match input_stream.to_i64() {
+            Ok(3) => {
+                let mut input = String::new();
+                if io::stdin().read_line(&mut input).is_ok() {
+                    Value::String(input.trim_end().to_string())
+                } else {
+                    Value::Error("IOError", "failed to read from stdin", None)
+                }
+            }
+            _ => Value::Error("ValueError", "invalid input stream", None),
+        }
+    } else {
+        Value::Error("TypeError", "expected an integer input stream", None)
+    }
+}
+
 fn format_value_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("value") {
         Value::String(format_value(value))
@@ -203,6 +221,46 @@ fn replace_accented_handler(args: &HashMap<String, Value>) -> Value {
     } else {
         Value::Error("TypeError".into(), "expected a string".into(), None)
     }
+}
+
+fn range_handler(args: &HashMap<String, Value>) -> Value {
+    let (a, b) = if let Some(Value::Null) = args.get("b") {
+        // `a` is actually the end, default start to 0
+        let end = if let Some(Value::Int(i)) = args.get("a") {
+            i.to_i64().unwrap_or(0)
+        } else {
+            return Value::Error("TypeError", "expected an integer for 'a'", None);
+        };
+        (0, end)
+    } else {
+        let start = if let Some(Value::Int(i)) = args.get("a") {
+            i.to_i64().unwrap_or(0)
+        } else {
+            return Value::Error("TypeError", "expected an integer for 'a'", None);
+        };
+        let end = if let Some(Value::Int(i)) = args.get("b") {
+            i.to_i64().unwrap_or(0)
+        } else {
+            return Value::Error("TypeError", "expected an integer for 'b'", None);
+        };
+        (start, end)
+    };
+
+    let step = if let Some(Value::Int(i)) = args.get("step") {
+        i.to_i64().unwrap_or(1)
+    } else {
+        1
+    };
+
+    if step == 0 {
+        return Value::Error("ValueError", "step cannot be zero", None);
+    }
+
+    let range: Vec<Value> = (a..b)
+        .step_by(step as usize)
+        .map(|x| Value::Int(imagnum::Int::from(x)))
+        .collect();
+    Value::List(range)
 }
 
 fn sanitize_alias_handler(args: &HashMap<String, Value>) -> Value {
@@ -283,6 +341,13 @@ pub fn register() -> HashMap<String, Variable> {
     );
     insert_native_fn!(
         map,
+        "read_line",
+        read_line_handler,
+        vec![Parameter::positional("input_stream", "int")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
         "get_type_default",
         get_type_default_handler,
         vec![Parameter::positional("type", "str")],
@@ -314,6 +379,17 @@ pub fn register() -> HashMap<String, Variable> {
         },
         vec![Parameter::positional("input", "str")],
         "str"
+    );
+    insert_native_fn!(
+        map,
+        "range",
+        range_handler,
+        vec![
+            Parameter::positional("a", "int"),
+            Parameter::positional_optional_pt("b", Type::new_simple("int").set_maybe_type(true), Value::Null),
+            Parameter::positional_optional("step", "int", Value::Int(Int::from_i64(1)))
+        ],
+        "list"
     );
 
     insert_native_var!(

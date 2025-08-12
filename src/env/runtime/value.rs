@@ -595,7 +595,7 @@ impl Value {
                 let addr = raw_ptr as usize;
                 format!("<pointer to 0x{:X}>", addr)
             }
-            Value::Type(t) => (*t).display(),
+            Value::Type(t) => (*t).display_simple(),
             Value::Function(func) => {
                 let addr = func.ptr() as *const () as usize;
                 format!("<function '{}' at 0x{:X}>", func.get_name(), addr)

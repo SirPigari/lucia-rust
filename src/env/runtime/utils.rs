@@ -726,6 +726,21 @@ pub fn create_note(text: &str, use_colors: Option<bool>, note_color: &str) -> St
     )
 }
 
+pub fn parse_usize_radix(value: &str) -> Option<usize> {
+    if let Some(stripped) = value.strip_prefix("0b") {
+        usize::from_str_radix(stripped, 2).ok()
+    } else if let Some(stripped) = value.strip_prefix("0o") {
+        usize::from_str_radix(stripped, 8).ok()
+    } else if let Some(stripped) = value.strip_prefix("0x") {
+        usize::from_str_radix(stripped, 16).ok()
+    } else {
+        match value.parse::<f64>() {
+            Ok(f) if f.fract() == 0.0 && f >= 0.0 => Some(f as usize),
+            _ => None,
+        }
+    }
+}
+
 pub fn get_type_from_token_name(token_name: &str) -> String {
     match token_name {
         "NUMBER" => "int".to_string(),
@@ -735,6 +750,8 @@ pub fn get_type_from_token_name(token_name: &str) -> String {
         "MAP" => "map".to_string(),
         "LIST" => "list".to_string(),
         "TUPLE" => "tuple".to_string(),
+        "TYPE" => "type".to_string(),
+        "POINTER_REF" => "pointer".to_string(),
         _ => "unknown".to_string(),
     }
 }
@@ -1063,6 +1080,7 @@ pub fn fix_path(raw_path: String) -> String {
         return path[4..].to_string();
     }
     path.to_string().replace("\\", "/")
+        .replace("\\\\", "/")
         .replace("//", "/")
         .replace(":/", "://")
         .to_string()

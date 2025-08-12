@@ -283,7 +283,7 @@ impl Interpreter {
     }
 
     // this is a lot cleaner than last time, glad i refactored it
-    fn check_type(&mut self, value: &Value, expected: &Type, error: bool) -> bool {
+    fn check_type(&mut self, value: &Value, expected: &Type) -> (bool, Option<Error>) {
         let mut err: Option<Error> = None;
         let mut status: bool = true;
         fn make_err(err_type: &str, err_msg: &str, loc: Option<Location>) -> Error {
@@ -303,7 +303,7 @@ impl Interpreter {
                             }
                         }
                         _ => {
-                            err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), None));
+                            err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
                         }
                     }
                 } 
@@ -314,21 +314,22 @@ impl Interpreter {
                 }
                 match value {
                     Value::List(l) | Value::Tuple(l) => {
+                        let val_type: &str = if matches!(value, Value::Tuple(_)) { "tuple" } else { "list" };
                         if elements.len() == 1 {
                             for (i, elem) in l.iter().enumerate() {
-                                if !self.check_type(elem, &elements[0], false) {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for list element #{}, got '{}'", base.display(), i + 1, elem.get_type().display()), None));
+                                if !self.check_type(elem, &elements[0]).0 {
+                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for {} element #{}, got '{}' ({})", elements[0].display_simple(), val_type, i + 1, elem.get_type().display_simple(), format_value(elem)), self.get_location_from_current_statement()));
                                     status = false;
                                     break;
                                 }
                             }
                         } else if l.len() != elements.len() {
-                            err = Some(make_err("TypeError", &format!("Expected list of length {}, got {}", elements.len(), l.len()), None));
+                            err = Some(make_err("TypeError", &format!("Expected {} of length {}, got {}", val_type, elements.len(), l.len()), self.get_location_from_current_statement()));
                             status = false;
                         } else {
                             for (i, elem) in l.iter().enumerate() {
-                                if !self.check_type(elem, &elements[i], false) {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for list element #{}, got '{}'", elements[i].display(), i + 1, elem.get_type().display()), None));
+                                if !self.check_type(elem, &elements[i]).0 {
+                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for {} element #{}, got '{}' ({})", elements[i].display_simple(), val_type, i + 1, elem.get_type().display_simple(), format_value(elem)), self.get_location_from_current_statement()));
                                     status = false;
                                     break;
                                 }
@@ -338,37 +339,40 @@ impl Interpreter {
                     Value::Map { keys, values } => {
                         if elements.len() == 2 {
                             for (k, v) in keys.iter().zip(values.iter()) {
-                                if !self.check_type(k, &elements[0], false) {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map key, got '{}'", elements[0].display(), k.get_type().display()), None));
+                                if !self.check_type(k, &elements[0]).0 {
+                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map key, got '{}'", elements[0].display(), k.get_type().display()), self.get_location_from_current_statement()));
                                     status = false;
                                 }
-                                if !self.check_type(v, &elements[1], false) {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map value, got '{}'", elements[1].display(), v.get_type().display()), None));
+                                if !self.check_type(v, &elements[1]).0 {
+                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map value, got '{}'", elements[1].display(), v.get_type().display()), self.get_location_from_current_statement()));
                                     status = false;
                                 }
                             }
                         } else {
-                            err = Some(make_err("TypeError", &format!("Expected type with 2 elements, got {}", elements.len()), None));
+                            err = Some(make_err("TypeError", &format!("Expected type with 2 elements, got {}", elements.len()), self.get_location_from_current_statement()));
                             status = false;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        err = Some(make_err("TypeError", &format!("Expected type '{}' for indexed type, got '{}'", base.display(), value.get_type().display()), self.get_location_from_current_statement()));
+                        status = false;
+                    }
                 }
             }
             Type::Union(types) => {
                 if types.is_empty() {
-                    err = Some(make_err("TypeError", "Union type cannot be empty", None));
+                    err = Some(make_err("TypeError", "Union type cannot be empty", self.get_location_from_current_statement()));
                     status = false;
                 } else {
                     let mut matched = false;
                     for ty in types {
-                        if self.check_type(value, ty, false) {
+                        if self.check_type(value, ty).0 {
                             matched = true;
                             break;
                         }
                     }
                     if !matched {
-                        err = Some(make_err("TypeError", &format!("Expected one of the union types: {}, got '{}'", types.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "), value.get_type().display()), None));
+                        err = Some(make_err("TypeError", &format!("Expected one of the union types: {}, got '{}'", types.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "), value.get_type().display()), self.get_location_from_current_statement()));
                         status = false;
                     }
                 }
@@ -379,17 +383,17 @@ impl Interpreter {
                     let return_type = f.get_return_type();
                     let parameter_types = f.get_parameter_types();
                     if return_type != **expected_return_type {
-                        err = Some(make_err("TypeError", &format!("Expected return type '{}', got '{}'", expected_return_type.display(), return_type.display()), None));
+                        err = Some(make_err("TypeError", &format!("Expected return type '{}', got '{}'", expected_return_type.display(), return_type.display()), self.get_location_from_current_statement()));
                         status = false;
                     }
                     for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
                         if param_type != expected_param_type {
-                            err = Some(make_err("TypeError", &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()), None));
+                            err = Some(make_err("TypeError", &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()), self.get_location_from_current_statement()));
                             status = false;
                         }
                     }
                 } else {
-                    err = Some(make_err("TypeError", &format!("Expected type 'function', got '{}'", value.get_type().display()), None));
+                    err = Some(make_err("TypeError", &format!("Expected type 'function', got '{}'", value.get_type().display()), self.get_location_from_current_statement()));
                     status = false;
                 }
             }
@@ -402,7 +406,7 @@ impl Interpreter {
                             err = Some(make_err(
                                 "TypeError",
                                 &format!("Expected yield type '{}', got '{}'", expected_yield_type.display(), yield_type.display()),
-                                None,
+                                self.get_location_from_current_statement(),
                             ));
                             status = false;
                         }
@@ -414,7 +418,7 @@ impl Interpreter {
                                 err = Some(make_err(
                                     "TypeError",
                                     &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()),
-                                    None,
+                                    self.get_location_from_current_statement(),
                                 ));
                                 status = false;
                             }
@@ -424,7 +428,7 @@ impl Interpreter {
                     err = Some(make_err(
                         "TypeError",
                         &format!("Expected type 'generator', got '{}'", value.get_type().display()),
-                        None,
+                        self.get_location_from_current_statement(),
                     ));
                     status = false;
                 }
@@ -435,7 +439,7 @@ impl Interpreter {
                 }
                 if variables.len() > 1 {
                     status = false;
-                    err = Some(make_err("TypeError", &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), None));
+                    err = Some(make_err("TypeError", &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), self.get_location_from_current_statement()));
                 }
                 let mut vars: HashMap<String, Variable> = HashMap::new();
                 for var in variables.iter() {
@@ -443,7 +447,7 @@ impl Interpreter {
                         vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value.get_type().display().to_string(), false, true, true));
                     } else {
                         status = false;
-                        err = Some(make_err("TypeError", &format!("Expected variable name to be a string, got '{}'", var.get_type().display()), None));
+                        err = Some(make_err("TypeError", &format!("Expected variable name to be a string, got '{}'", var.get_type().display()), self.get_location_from_current_statement()));
                     }
                 }
                 let mut new_interpreter = Interpreter::new(
@@ -460,20 +464,18 @@ impl Interpreter {
                     new_interpreter.current_statement = Some(cond.convert_to_statement());
                     if !new_interpreter.evaluate(cond.convert_to_statement()).is_truthy() {
                         status = false;
-                        err = Some(make_err("TypeError", &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), None));
+                        err = Some(make_err("TypeError", &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), self.get_location_from_current_statement()));
                         break;
                     }
                 }
             }
             _ => {
-                err = Some(make_err("TypeError", &format!("Unsupported type check for '{}'", expected.display()), None));
+                status = false;
+                err = Some(make_err("TypeError", &format!("Unsupported type check for '{}'", expected.display()), self.get_location_from_current_statement()));
             }
         }
 
-        if error {
-            self.err = err.clone();
-        }
-        return status;
+        return (status, err);
     }
 
     pub async fn fetch(
@@ -2172,11 +2174,18 @@ impl Interpreter {
                                 }
                             };
 
-                            if type_ != Type::new_simple("auto") && !self.check_type(&val, &type_, false) {
-                                self.raise("TypeError", &format!(
-                                    "Value '{}' does not match the type '{}'",
-                                    val, type_.display_simple()
-                                ));
+                            if type_ != Type::new_simple("auto") && let (is_valid, err) = self.check_type(&val, &type_) && !is_valid {
+                                if let Some(err) = err {
+                                    self.raise_with_ref("TypeError", &format!(
+                                        "Value '{}' does not match the type '{}'",
+                                        val, type_.display_simple()
+                                    ), err);
+                                } else {
+                                    self.raise("TypeError", &format!(
+                                        "Value '{}' does not match the type '{}'",
+                                        val, type_.display_simple()
+                                    ));
+                                }
                                 return NULL;
                             }
                             
@@ -2564,8 +2573,13 @@ impl Interpreter {
             return NULL;
         }
 
-        if !self.check_type(&result, &target_type_type, false) {
-            self.raise("TypeError", &format!("Value '{}' does not match the type '{}'", result, target_type_type.display_simple()));
+        let (is_valid, err) = self.check_type(&result, &target_type_type);
+        if !is_valid {
+            if let Some(err) = err {
+                self.raise_with_ref("TypeError", &format!("Value '{}' does not match the type '{}'", result, target_type_type.display_simple()), err);
+            } else {
+                self.raise("TypeError", &format!("Value '{}' does not match the type '{}'", result, target_type_type.display_simple()));
+            }
             return NULL;
         }
         if self.err.is_some() {
@@ -3499,10 +3513,10 @@ impl Interpreter {
         let body_formatted: Vec<Statement> = body.iter().map(|v| v.convert_to_statement()).collect();
 
         let lambda_name;  // stupid lifetimes
-        if name == "<lambda#{}>" {
+        if name == "<lambda#{id}>" {
             let id: usize = self.internal_storage.lambda_counter;
             self.internal_storage.lambda_counter = id + 1;
-            lambda_name = name.replace("{}", &id.to_string());
+            lambda_name = name.replace("{id}", &id.to_string());
             name = &lambda_name;
         }
 
@@ -3874,56 +3888,6 @@ impl Interpreter {
                         return NULL;
                     }
                 }
-
-                // let mut handled_types = Vec::new();
-                // for t in types_list {
-                //     match t {
-                //         Value::Map { keys, values } => {
-                //             let map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                //             let ht = self.handle_type(map);
-                //             if ht == NULL {
-                //                 return NULL;
-                //             }
-                //             handled_types.push(ht);
-                //         }
-                //         Value::String(s) => {
-                //             if !self.check_type_validity(s) {
-                //                 self.raise("TypeError", &format!("Invalid union member type '{}'", s));
-                //                 return NULL;
-                //             }
-                //             handled_types.push(Value::String(s.clone()));
-                //         }
-                //         _ => {
-                //             self.raise("RuntimeError", "Each union member must be a type map or string");
-                //             return NULL;
-                //         }
-                //     }
-                // }
-
-                // let mut keys = vec![
-                //     Value::String("_note".to_string()),
-                //     Value::String("type_kind".to_string()),
-                //     Value::String("types".to_string())
-                // ];
-                // let mut values = vec![
-                //     Value::String(create_note(
-                //         "This map is for the interpreter's internal use to track union types. You don't need to worry about it.",
-                //         Some(self.use_colors),
-                //         &self.config.color_scheme.note,
-                //     )),
-                //     Value::String("union".to_string()),
-                //     Value::List(handled_types),
-                // ];
-
-                // for (k, v) in statement.iter() {
-                //     if k != &Value::String("types".to_string())
-                //         && k != &Value::String("type_kind".to_string())
-                //         && k != &Value::String("type".to_string())
-                //     {
-                //         keys.push(k.clone());
-                //         values.push(v.clone());
-                //     }
-                // }
 
                 Type::Union(types)
             }
@@ -4409,18 +4373,27 @@ impl Interpreter {
                 if self.err.is_some() {
                     return NULL;
                 }
-    
-                if !self.check_type(&right_value, &expected_type, false) {
-                    if self.err.is_some() {
-                        return NULL;
+
+                let (is_valid, err) = self.check_type(&right_value, &expected_type);
+                if !is_valid {
+                    if let Some(err) = err {
+                        self.raise_with_ref(
+                            "TypeError",
+                            &format!(
+                                "Invalid type for variable '{}': expected '{}', got '{}'",
+                                name, expected_type.display(), right_value.type_name()
+                            ),
+                            err,
+                        );
+                    } else {
+                        return self.raise(
+                            "TypeError",
+                            &format!(
+                                "Invalid type for variable '{}': expected '{}', got '{}'",
+                                name, expected_type.display(), right_value.type_name()
+                            ),
+                        );
                     }
-                    return self.raise(
-                        "TypeError",
-                        &format!(
-                            "Invalid type for variable '{}': expected '{}', got '{}'",
-                            name, expected_type.display(), right_value.type_name()
-                        ),
-                    );
                 }
     
                 let var = self.variables.get_mut(name).unwrap();
@@ -4984,11 +4957,12 @@ impl Interpreter {
             return NULL;
         }
     
-        if !self.check_type(&value.clone(), &declared_type, false) {
-            if self.err.is_some() {
-                return NULL;
+        let (is_valid, err) = self.check_type(&value, &declared_type);
+        if !is_valid {
+            if let Some(err) = err {
+                return self.raise_with_ref("TypeError", &format!("Variable '{}' declared with type '{}', but got {} with invalid element types", name, declared_type.display_simple(), value.get_type().display_simple()), err);
             }
-            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display(), value.type_name()));
+            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display_simple(), value.type_name()));
         }
     
         let variable = Variable::new_pt(name.to_string(), value.clone(), declared_type, is_static, is_public, is_final);
@@ -5939,7 +5913,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(&arg_value, param_type, false) {
+                                if self.check_type(&arg_value, param_type).0 {
                                     final_args.insert(param_name.clone(), arg_value);
                                 } else {
                                     if let Type::Simple { .. } = param_type {
@@ -5964,7 +5938,7 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(&named_value, param_type, false) {
+                                if self.check_type(&named_value, param_type).0 {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     if let Type::Simple { .. } = param_type {
@@ -5997,7 +5971,15 @@ impl Interpreter {
                             let variadic_args = positional[pos_index..].to_vec();
 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(&arg, param_type, false) {
+                                let (is_valid, err) = self.check_type(arg, param_type);
+                                if !is_valid {
+                                    if let Some(err) = err {
+                                        return self.raise_with_ref(
+                                            "TypeError",
+                                            &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                            err,
+                                        );
+                                    }
                                     return self.raise(
                                         "TypeError",
                                         &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
@@ -6012,7 +5994,7 @@ impl Interpreter {
                         }
                         ParameterKind::KeywordVariadic => {
                             if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(&named_value, &param_type, false) {
+                                if self.check_type(&named_value, &param_type).0 {
                                     final_args.insert(param_name.clone(), named_value);
                                 } else {
                                     return self.raise(
@@ -6299,7 +6281,15 @@ impl Interpreter {
                     }
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&result, &metadata.return_type, false) {
+                let (is_valid, err) = self.check_type(&result, &metadata.return_type);
+                if !is_valid {
+                    if let Some(err) = err {
+                        return self.raise_with_ref(
+                            "TypeError",
+                            &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type.display(), result.type_name()),
+                            err,
+                        );
+                    }
                     return self.raise(
                         "TypeError",
                         &format!("Return value does not match expected type '{}', got '{}'", metadata.return_type.display(), result.type_name())
@@ -6620,7 +6610,7 @@ impl Interpreter {
                         ParameterKind::Positional => {
                             if pos_index < positional.len() {
                                 let arg_value = positional[pos_index].clone();
-                                if self.check_type(&arg_value, param_type, false) {
+                                if self.check_type(&arg_value, param_type).0 {
                                     final_args.insert(param_name.clone(), (arg_value, param_mods.clone()));
                                 } else {
                                     if let Type::Simple { .. } = param_type {
@@ -6645,7 +6635,7 @@ impl Interpreter {
                                 }
                                 pos_index += 1;
                             } else if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(&named_value, param_type, false) {
+                                if self.check_type(&named_value, param_type).0 {
                                     final_args.insert(param_name.clone(), (named_value, param_mods.clone()));
                                 } else {
                                     if let Type::Simple { .. } = param_type {
@@ -6678,7 +6668,15 @@ impl Interpreter {
                             let variadic_args = positional[pos_index..].to_vec();
                 
                             for (i, arg) in variadic_args.iter().enumerate() {
-                                if !self.check_type(&arg, param_type, false) {
+                                let (is_valid, err) = self.check_type(arg, param_type);
+                                if !is_valid {
+                                    if let Some(err) = err {
+                                        return self.raise_with_ref(
+                                            "TypeError",
+                                            &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                            err,
+                                        );
+                                    }
                                     return self.raise(
                                         "TypeError",
                                         &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
@@ -6693,7 +6691,7 @@ impl Interpreter {
                         }
                         ParameterKind::KeywordVariadic => {
                             if let Some(named_value) = named_map.remove(param_name) {
-                                if self.check_type(&named_value, &param_type, false) {
+                                if self.check_type(&named_value, &param_type).0 {
                                     final_args.insert(param_name.clone(), (named_value, param_mods.clone()));
                                 } else {
                                     return self.raise(
@@ -6992,7 +6990,15 @@ impl Interpreter {
                     }
                     return self.raise(err_type, err_msg);
                 }
-                if !self.check_type(&result, &metadata.return_type, false) {
+                let (is_valid, err) = self.check_type(&result, &metadata.return_type);
+                if !is_valid {
+                    if let Some(err) = err {
+                        return self.raise_with_ref(
+                            "TypeError",
+                            &format!("Return value does not match expected type '{}', got '{}'", &metadata.return_type.display(), result.type_name()),
+                            err,
+                        );
+                    }
                     return self.raise(
                         "TypeError",
                         &format!("Return value does not match expected type '{}', got '{}'", &metadata.return_type.display(), result.type_name())
@@ -7914,10 +7920,7 @@ impl Interpreter {
                 } else {
                     return self.raise_with_help("TypeError", &format!("Cannot apply 'is' to {} and {}", left.type_name(), right.type_name()), &format!("Expected a type, got {}", right.type_name()));
                 };
-                let res = self.check_type(&left, &t, false);
-                if self.err.is_some() {
-                    self.err = None;
-                }
+                let res = self.check_type(&left, &t).0;
                 Value::Boolean(res)
             },
             "isnt" | "isn't" => {
@@ -7926,10 +7929,7 @@ impl Interpreter {
                 } else {
                     return self.raise_with_help("TypeError", &format!("Cannot apply 'isnt' to {} and {}", left.type_name(), right.type_name()), &format!("Expected a type, got {}", right.type_name()));
                 };
-                let res = !self.check_type(&left, &t, false);
-                if self.err.is_some() {
-                    self.err = None;
-                }
+                let res = !self.check_type(&left, &t).0;
                 Value::Boolean(res)
             },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),

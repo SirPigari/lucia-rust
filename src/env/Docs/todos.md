@@ -18,16 +18,16 @@ _Total TODOs found: 6_
 - stick to C for now
 - fuck it compile to Rust its better anyway
 
-### [`src/interpreter.rs:5777:1`](../../../src/interpreter.rs#L5777) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5751:1`](../../../src/interpreter.rs#L5751) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
 
-### [`src/main.rs:321:1`](../../../src/main.rs#L321) _(added by **SirPigari** on **2025-07-19**)_
+### [`src/main.rs:356:1`](../../../src/main.rs#L356) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:4330:1`](../../../src/interpreter.rs#L4330) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:4294:1`](../../../src/interpreter.rs#L4294) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
 ---

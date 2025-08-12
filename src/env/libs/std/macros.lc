@@ -103,6 +103,10 @@
     return $!tokens
 #endmacro
 
+#macro range($a, $b=(null), $step=(1)):
+    return _collections.range($a, $b, $step)
+#endmacro
+
 // return null
 null
 
