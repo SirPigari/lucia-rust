@@ -53,13 +53,13 @@ formatted_time: float = _time.format_apollo_time_ms(elapsed)
 print(formatted_time, elapsed)
 
 #macro #no-mangle m!():
-    i = 100
+    h = 100
 #endmacro
 
-i := 6969
+h := 6969
 m!()
 
-assert_eq!(i, 100)
+assert_eq!(h, 100)
 
 #macro #no-group g!():
     f: function = () => (42)

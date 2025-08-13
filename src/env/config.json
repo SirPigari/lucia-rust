@@ -5,7 +5,6 @@
   "supports_color": true,
   "use_lucia_traceback": true,
   "warnings": true,
-  "use_preprocessor": true,
   "cache_format": "no_cache",
   "allow_fetch": true,
   "allow_unsafe": true,

@@ -2392,61 +2392,161 @@ impl Parser {
                 "IDENTIFIER" if token.1 == "export" => {
                     self.next();
 
-                    let mut modifiers: Vec<String> = vec![];
-                    if ["public", "private", "static", "non-static", "final", "mutable"].contains(&self.token().as_ref().map(|t| t.1.as_str()).unwrap_or("")) {
-                        while let Some(tok) = self.token() {
-                            if tok.0 == "IDENTIFIER" && ["public", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str()) {
-                                modifiers.push(tok.1.clone());
-                                self.next();
-                            } else if tok.0 == "IDENTIFIER" && tok.1 == "private" {
-                                self.raise("SyntaxError", "'private' cannot be used in export statements");
+                    let mut global_modifiers: Vec<String> = vec![];
+                    while let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER"
+                            && ["public", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str())
+                        {
+                            global_modifiers.push(tok.1.clone());
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let mut names = vec![];
+                    let mut modifiers_list = vec![];
+
+                    if self.token_is("SEPARATOR", "(") {
+                        self.next();
+
+                        loop {
+                            let mut item_modifiers = global_modifiers.clone();
+
+                            while let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER"
+                                    && ["public", "static", "non-static", "final", "mutable"]
+                                        .contains(&tok.1.as_str())
+                                {
+                                    item_modifiers.push(tok.1.clone());
+                                    self.next();
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            let name_token = self.token().cloned().unwrap_or_else(|| {
+                                self.raise("SyntaxError", "Expected identifier in tuple export");
+                                DEFAULT_TOKEN.clone()
+                            });
+                            if name_token.0 != "IDENTIFIER" {
+                                self.raise("SyntaxError", "Expected identifier in tuple export");
                                 return Statement::Null;
+                            }
+
+                            names.push(name_token.1.clone());
+                            modifiers_list.push(item_modifiers);
+                            self.next();
+
+                            if self.token_is("SEPARATOR", ")") {
+                                break;
+                            }
+                            if !self.token_is("SEPARATOR", ",") {
+                                self.raise("SyntaxError", "Expected ',' between tuple items");
+                                return Statement::Null;
+                            }
+                            self.next();
+                        }
+
+                        self.next();
+                    } else {
+                        let mut item_modifiers = global_modifiers.clone();
+                        while let Some(tok) = self.token() {
+                            if tok.0 == "IDENTIFIER"
+                                && ["public", "static", "non-static", "final", "mutable"]
+                                    .contains(&tok.1.as_str())
+                            {
+                                item_modifiers.push(tok.1.clone());
+                                self.next();
                             } else {
                                 break;
                             }
                         }
+
+                        let name_token = self.token().cloned().unwrap_or_else(|| {
+                            self.raise("SyntaxError", "Expected identifier after 'export'");
+                            DEFAULT_TOKEN.clone()
+                        });
+                        if name_token.0 != "IDENTIFIER" {
+                            self.raise("SyntaxError", "Expected identifier after 'export'");
+                            return Statement::Null;
+                        }
+
+                        names.push(name_token.1.clone());
+                        modifiers_list.push(item_modifiers);
+                        self.next();
                     }
-                    if self.err.is_some() {
+
+                    let mut aliases = names.clone();
+                    if self.token_is("IDENTIFIER", "as") {
+                        self.next();
+                        if self.token_is("SEPARATOR", "(") {
+                            self.next();
+                            let mut alias_names = vec![];
+                            for i in 0..names.len() {
+                                let alias_token = self.token().cloned().unwrap_or_else(|| {
+                                    self.raise("SyntaxError", "Expected identifier in alias tuple");
+                                    DEFAULT_TOKEN.clone()
+                                });
+                                if alias_token.0 != "IDENTIFIER" {
+                                    self.raise("SyntaxError", "Expected identifier in alias tuple");
+                                    return Statement::Null;
+                                }
+                                alias_names.push(alias_token.1.clone());
+                                self.next();
+
+                                if i != names.len() - 1 {
+                                    if !self.token_is("SEPARATOR", ",") {
+                                        self.raise("SyntaxError", "Expected ',' between alias items");
+                                        return Statement::Null;
+                                    }
+                                    self.next();
+                                }
+                            }
+
+                            if !self.token_is("SEPARATOR", ")") {
+                                self.raise("SyntaxError", "Expected ')' at end of alias tuple");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            aliases = alias_names;
+                        } else {
+                            let alias_token = self.token().cloned().unwrap_or_else(|| {
+                                self.raise("SyntaxError", "Expected identifier after 'as'");
+                                DEFAULT_TOKEN.clone()
+                            });
+                            if alias_token.0 != "IDENTIFIER" {
+                                self.raise("SyntaxError", "Expected identifier after 'as'");
+                                return Statement::Null;
+                            }
+                            aliases = vec![alias_token.1.clone()];
+                            self.next();
+                        }
+                    }
+
+                    if aliases.len() != names.len() {
+                        self.raise("SyntaxError", "Number of aliases must match number of names in export");
                         return Statement::Null;
                     }
 
-                    let name_token = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected identifier after 'export'");
-                        DEFAULT_TOKEN.clone()
-                    });
-                    if name_token.0 != "IDENTIFIER" {
-                        self.raise("SyntaxError", "Expected identifier after 'export'");
-                        return Statement::Null;
-                    }
-                    let name = name_token.1.clone();
-                    self.next();
-                    let mut alias = name.clone();
-                    
-                    if self.token_is("IDENTIFIER", "as") {
-                        self.next();
-                        let alias_token = self.token().cloned().unwrap_or_else(|| {
-                            self.raise("SyntaxError", "Expected alias after 'as'");
-                            DEFAULT_TOKEN.clone()
-                        });
-                        if alias_token.0 != "IDENTIFIER" {
-                            self.raise("SyntaxError", "Expected identifier after 'as'");
-                            return Statement::Null;
-                        }
-                        alias = alias_token.1;
-                        self.next();
-                    }
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
-                            Value::String("name".to_string()),
-                            Value::String("alias".to_string()),
+                            Value::String("names".to_string()),
+                            Value::String("aliases".to_string()),
                             Value::String("modifiers".to_string()),
                         ],
                         values: vec![
                             Value::String("EXPORT".to_string()),
-                            Value::String(name),
-                            Value::String(alias),
-                            Value::List(modifiers.into_iter().map(Value::String).collect()),
+                            Value::List(names.into_iter().map(Value::String).collect()),
+                            Value::List(aliases.into_iter().map(Value::String).collect()),
+                            Value::List(
+                                modifiers_list
+                                    .into_iter()
+                                    .map(|mods| Value::List(mods.into_iter().map(Value::String).collect()))
+                                    .collect(),
+                            ),
                         ],
                         loc: self.get_loc(),
                     }

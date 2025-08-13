@@ -34,3 +34,8 @@ assert_approx_eq!(sin(42), -0.9165215479156338)
 assert_approx_eq!(c(42), -0.39998531498835127)
 
 forget (sin, c)
+
+import regex as re
+assert_eq!(re.is_match(r"^hello", "hello world"), true)
+
+forget re

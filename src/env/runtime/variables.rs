@@ -89,6 +89,33 @@ impl Variable {
                 None,
             )
         };
+        
+        let is_truthy = {
+            let val_clone = self.value.clone();
+            make_native_method(
+                "is_truthy",
+                move |_args| {
+                    Value::Boolean(val_clone.is_truthy())
+                },
+                vec![],
+                "bool",
+                true, true, true,
+                None,
+            )
+        };
+        let is_some = {
+            let val_clone = self.value.clone();
+            make_native_method(
+                "is_some",
+                move |_args| {
+                    Value::Boolean(val_clone.is_truthy())
+                },
+                vec![],
+                "bool",
+                true, true, true,
+                None,
+            )
+        };
 
         self.properties.insert(
             "to_string".to_string(),
@@ -117,6 +144,28 @@ impl Variable {
             Variable::new(
                 "is_null".to_string(),
                 is_null,
+                "function".to_string(),
+                false,
+                true,
+                true,
+            ),
+        );
+        self.properties.insert(
+            "is_truthy".to_string(),
+            Variable::new(
+                "is_truthy".to_string(),
+                is_truthy,
+                "function".to_string(),
+                false,
+                true,
+                true,
+            ),
+        );
+        self.properties.insert(
+            "is_some".to_string(),
+            Variable::new(
+                "is_some".to_string(),
+                is_some,
                 "function".to_string(),
                 false,
                 true,

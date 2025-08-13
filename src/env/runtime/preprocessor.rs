@@ -471,6 +471,42 @@ impl Preprocessor {
                         ));
                     }
 
+                    "precompile" => {
+                        if i >= tokens.len() {
+                            return Err(Error::new(
+                                "PreprocessorError",
+                                "#precompile missing expression",
+                                &self.file_path,
+                            ));
+                        }
+                        if tokens[i].1 == ":" {
+                            i += 1;
+                        }
+
+                        let mut precompile_tokens = Vec::new();
+
+                        while i < tokens.len() {
+                            if tokens[i].1 == "#" && i + 1 < tokens.len() && tokens[i + 1].1 == "endprecompile" {
+                                i += 2;
+                                break;
+                            }
+                            precompile_tokens.push(tokens[i].clone());
+                            i += 1;
+                        }
+
+                        let precompiled = precompile(precompile_tokens)?;
+                        result.extend(precompiled);
+                        continue;
+                    }
+
+                    "endprecompile" => {
+                        return Err(Error::new(
+                            "PreprocessorError",
+                            "#endprecompile without matching #precompile",
+                            &self.file_path,
+                        ));
+                    }
+
                     "define" => {
                         if i >= tokens.len() {
                             return Err(Error::new(
@@ -938,40 +974,6 @@ impl Preprocessor {
                         ));
                     }
                 }
-            } else if token.0 == "IDENTIFIER" && token.1 == "precompile" {
-                i += 1;
-                if i >= tokens.len() || tokens[i].0 != "SEPARATOR" || tokens[i].1 != "(" {
-                    return Err(Error::new(
-                        "PreprocessorError",
-                        "Expected '(' after 'precompile'",
-                        &self.file_path,
-                    ));
-                }
-                i += 1;
-
-                let mut precompile_tokens = Vec::new();
-                while i < tokens.len() && !(tokens[i].0 == "SEPARATOR" && tokens[i].1 == ")") {
-                    precompile_tokens.push(tokens[i].clone());
-                    i += 1;
-                }
-
-                if i >= tokens.len() || tokens[i].0 != "SEPARATOR" || tokens[i].1 != ")" {
-                    return Err(Error::new(
-                        "PreprocessorError",
-                        "Unclosed precompile directive",
-                        &self.file_path,
-                    ));
-                }
-                if precompile_tokens.is_empty() {
-                    return Err(Error::new(
-                        "PreprocessorError",
-                        "precompile directive requires at least one token",
-                        &self.file_path,
-                    ));
-                }
-
-                let precompiled_tokens = precompile(precompile_tokens)?;
-                result.extend(precompiled_tokens);
             } else {
                 if !skipping 
                     && i + 2 < tokens.len()
@@ -1296,7 +1298,9 @@ impl Preprocessor {
             i += 1;
         }
 
-        Ok(result)
+        
+        let processed_result = self._process(result, current_dir)?;
+        Ok(processed_result)
     }
 
     fn expand_macro(

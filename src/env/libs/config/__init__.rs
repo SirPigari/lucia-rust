@@ -86,12 +86,6 @@ pub fn register(config: Arc<Config>) -> HashMap<String, Variable> {
     );
     insert_native_var!(
         map,
-        "use_preprocessor",
-        Value::Boolean(config.use_preprocessor),
-        "bool"
-    );
-    insert_native_var!(
-        map,
         "allow_fetch",
         Value::Boolean(config.allow_fetch),
         "bool"

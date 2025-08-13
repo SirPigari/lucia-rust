@@ -686,7 +686,6 @@ fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
         supports_color: true,
         use_lucia_traceback: true,
         warnings: true,
-        use_preprocessor: true,
         cache_format: CacheFormat::NoCache,
         allow_fetch: true,
         allow_unsafe: false,
@@ -2061,9 +2060,7 @@ fn compile(
         }
         let mut lexer = Lexer::new(&fs::read_to_string(path).unwrap(), file, None);
         let raw_tokens = lexer.tokenize();
-        let processed_tokens = if !config.use_preprocessor {
-            raw_tokens.clone()
-        } else {
+        let processed_tokens = {
             let mut preprocessor = Preprocessor::new(
                 home_dir_path.join("libs"),
                 file,

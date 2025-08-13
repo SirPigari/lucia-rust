@@ -1105,58 +1105,87 @@ impl Interpreter {
     }
 
     fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in export"),
+        let names = match statement.get(&Value::String("names".to_string())) {
+            Some(Value::List(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'names' in export"),
         };
 
-        let alias = match statement.get(&Value::String("alias".to_string())) {
-            Some(Value::String(a)) => a.clone(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'alias' in export"),
+        let aliases = match statement.get(&Value::String("aliases".to_string())) {
+            Some(Value::List(a)) => a,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'aliases' in export"),
         };
 
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
+        let modifiers_list = match statement.get(&Value::String("modifiers".to_string())) {
             Some(Value::List(m)) => m,
             _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in export"),
         };
 
-        let mut is_public = false;
-        let mut is_static = None;
-        let mut is_final = None;
+        if names.len() != aliases.len() || names.len() != modifiers_list.len() {
+            return self.raise("RuntimeError", "Mismatched lengths of names, aliases, or modifiers");
+        }
 
-        for modifier in modifiers {
-            if let Value::String(modifier_str) = modifier {
-                match modifier_str.as_str() {
-                    "public" => is_public = true,
-                    "static" => is_static = Some(true),
-                    "final" => is_final = Some(true),
-                    "non-static" => is_static = Some(false),
-                    "mutable" => is_final = Some(false),
-                    _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
+        let mut exported_values = vec![];
+
+        for i in 0..names.len() {
+            let name = match &names[i] {
+                Value::String(s) => s,
+                _ => return self.raise("RuntimeError", "Invalid name in export list"),
+            };
+            let alias = match &aliases[i] {
+                Value::String(s) => s,
+                _ => return self.raise("RuntimeError", "Invalid alias in export list"),
+            };
+            let modifiers = match &modifiers_list[i] {
+                Value::List(l) => l,
+                _ => return self.raise("RuntimeError", "Invalid modifiers list for export item"),
+            };
+
+            let mut is_public = false;
+            let mut is_static = None;
+            let mut is_final = None;
+
+            for modifier in modifiers {
+                if let Value::String(modifier_str) = modifier {
+                    match modifier_str.as_str() {
+                        "public" => is_public = true,
+                        "static" => is_static = Some(true),
+                        "final" => is_final = Some(true),
+                        "non-static" => is_static = Some(false),
+                        "mutable" => is_final = Some(false),
+                        _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
+                    }
                 }
+            }
+
+            if let Some(var) = self.variables.get(name).cloned() {
+                if !var.is_public() && !is_public {
+                    return self.raise_with_help(
+                        "ModifierError",
+                        &format!("Variable '{}' is not public and cannot be exported", name),
+                        "Add 'public' modifier to the export statement to make it public"
+                    );
+                }
+
+                let mut var = var;
+                var.set_public(true);
+                if let Some(is_static) = is_static {
+                    var.set_static(is_static);
+                }
+                if let Some(is_final) = is_final {
+                    var.set_final(is_final);
+                }
+
+                self.variables.insert(alias.clone(), var.clone());
+                exported_values.push(var.value.clone());
+            } else {
+                return self.raise("NameError", &format!("Variable '{}' is not defined therefore cannot be exported", name));
             }
         }
 
-        if self.variables.contains_key(name) {
-            let mut var = self.variables.get(name).unwrap().clone();
-            if !var.is_public() && !is_public {
-                return self.raise_with_help("ModifierError", &format!("Variable '{}' is not public and cannot be exported", name), "Add 'public' modifier to the export statement to make it public");
-            }
-            var.set_public(true);
-            if let Some(is_static) = is_static {
-                var.set_static(is_static);
-            }
-            if let Some(is_final) = is_final {
-                var.set_final(is_final);
-            }
-            let val = var.value.clone();
-            self.variables.insert(
-                alias,
-                var
-            );
-            return val;
+        if exported_values.len() == 1 {
+            return exported_values.first().cloned().unwrap_or(Value::Null);
         } else {
-            return self.raise("NameError", &format!("Variable '{}' is not defined therefore cannot be exported", name));
+            return Value::Tuple(exported_values);
         }
     }
 
@@ -5731,9 +5760,11 @@ impl Interpreter {
         if let Value::Module(ref o, _) = object_value {
             if let Some(props) = o.get_properties() {
                 object_variable.properties = props.clone();
+                object_variable.set_name(o.name().to_string());
             }
         } else if !object_variable.is_init() {
             object_variable.init_properties(self);
+            object_variable.set_name(object_value.get_type().display_simple());
         }
 
         if self.err.is_some() {
@@ -5763,7 +5794,7 @@ impl Interpreter {
                 if let Some(closest) = find_closest_match(method_name, &available_names) {
                     return self.raise_with_help(
                         "NameError",
-                        &format!("No method '{}' in '{}'", method_name, object_variable.type_name()),
+                        &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
                         &format!("Did you mean '{}{}{}'?",
                             check_ansi("\x1b[4m", &self.use_colors),
                             closest,
@@ -5771,7 +5802,7 @@ impl Interpreter {
                         ),
                     );
                 } else {
-                    return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.type_name()));
+                    return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
                 }
             }
         };
@@ -6332,9 +6363,11 @@ impl Interpreter {
         if let Value::Module(ref o, _) = object_value {
             if let Some(props) = o.get_properties() {
                 object_variable.properties = props.clone();
+                object_variable.set_name(o.name().to_string());
             }
         } else if !object_variable.is_init() {
             object_variable.init_properties(self);
+            object_variable.set_name(object_value.get_type().display_simple());
         }
 
         if self.err.is_some() {
@@ -6348,7 +6381,7 @@ impl Interpreter {
                 if let Some(closest) = find_closest_match(property_name, &available_names) {
                     return self.raise_with_help(
                         "NameError",
-                        &format!("No property '{}' in '{}'", property_name, object_variable.type_name()),
+                        &format!("No property '{}' in '{}'", property_name, object_variable.get_name()),
                         &format!("Did you mean '{}{}{}'?",
                             check_ansi("\x1b[4m", &self.use_colors),
                             closest,
@@ -6356,7 +6389,7 @@ impl Interpreter {
                         ),
                     );
                 } else {
-                    return self.raise("NameError", &format!("No property '{}' in '{}'", property_name, object_variable.type_name()));
+                    return self.raise("NameError", &format!("No property '{}' in '{}'", property_name, object_variable.get_name()));
                 }
             }
         };

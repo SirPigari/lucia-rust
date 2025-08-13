@@ -1,16 +1,36 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::Mutex;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{to_static};
+use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;
+use std::sync::Arc;
 use regex::Regex;
 
-use crate::{insert_native_fn};
+use crate::insert_native_fn;
 
 // This module provides regular expression matching capabilities.
 // It includes functions for compiling, matching, and replacing patterns in strings.
 // Lucia version 2.0.0, module: regex@0.9.0
+
+static REGEX_CACHE: once_cell::sync::Lazy<Mutex<HashMap<String, Regex>>> = once_cell::sync::Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+fn get_cached_regex(pattern: &str) -> Result<Regex, String> {
+    let mut cache = REGEX_CACHE.lock().unwrap();
+    if let Some(re) = cache.get(pattern) {
+        return Ok(re.clone());
+    }
+
+    match Regex::new(pattern) {
+        Ok(re) => {
+            cache.insert(pattern.to_string(), re.clone());
+            Ok(re)
+        }
+        Err(e) => Err(format!("Invalid regex pattern: {}", e)),
+    }
+}
 
 fn regex_match(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
@@ -23,14 +43,12 @@ fn regex_match(args: &HashMap<String, Value>) -> Value {
         _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
     };
 
-    match Regex::new(pattern) {
-        Ok(re) => {
-            match re.find(value) {
-                Some(mat) => Value::String(mat.as_str().to_string()),
-                None => Value::Null,
-            }
-        }
-        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e)), None),
+    match get_cached_regex(pattern) {
+        Ok(re) => match re.find(value) {
+            Some(mat) => Value::String(mat.as_str().to_string()),
+            None => Value::Null,
+        },
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
     }
 }
 
@@ -50,13 +68,191 @@ fn regex_replace(args: &HashMap<String, Value>) -> Value {
         _ => return Value::Error("TypeError".into(), "expected a string for 'replacement'".into(), None),
     };
 
-    match Regex::new(pattern) {
+    match get_cached_regex(pattern) {
         Ok(re) => {
             let replaced = re.replace_all(value, replacement);
             Value::String(replaced.into_owned())
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(format!("invalid regex pattern: {}", e)), None),
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
     }
+}
+
+fn regex_is_match(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => Value::Boolean(re.is_match(value)),
+        Err(_) => Value::Boolean(false),
+    }
+}
+
+fn regex_find_all(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => {
+            let matches: Vec<Value> = re.find_iter(value)
+                .map(|m| Value::String(m.as_str().to_string()))
+                .collect();
+            Value::List(matches)
+        }
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+    }
+}
+
+fn regex_split(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => {
+            let parts: Vec<Value> = re.split(value)
+                .map(|s| Value::String(s.to_string()))
+                .collect();
+            Value::List(parts)
+        }
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+    }
+}
+
+fn regex_count(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => Value::Int((re.find_iter(value).count() as i64).into()),
+        Err(_) => Value::Int(0.into()),
+    }
+}
+
+fn regex_capture(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => {
+            let caps = re.captures(value);
+            match caps {
+                Some(c) => {
+                    let mut keys = Vec::new();
+                    let mut values = Vec::new();
+                    for (i, mat) in c.iter().enumerate() {
+                        keys.push(Value::String(i.to_string()));
+                        values.push(match mat {
+                            Some(m) => Value::String(m.as_str().to_string()),
+                            None => Value::Null,
+                        });
+                    }
+                    Value::Map { keys, values }
+                },
+                None => Value::Null,
+            }
+        }
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+    }
+}
+
+fn regex_match_all(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => {
+            let matches: Vec<Value> = re.find_iter(value)
+                .map(|m| {
+                    let keys = vec!["match".into(), "start".into(), "end".into()];
+                    let values = vec![
+                        Value::String(m.as_str().to_string()),
+                        Value::Int((m.start() as i64).into()),
+                        Value::Int((m.end() as i64).into()),
+                    ];
+                    Value::Map { keys, values }
+                })
+                .collect();
+            Value::List(matches)
+        }
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+    }
+}
+
+fn regex_named_groups(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    match get_cached_regex(pattern) {
+        Ok(re) => {
+            match re.captures(value) {
+                Some(caps) => {
+                    let mut keys = Vec::new();
+                    let mut values = Vec::new();
+                    for name in re.capture_names().flatten() {
+                        keys.push(Value::String(name.to_string()));
+                        values.push(match caps.name(name) {
+                            Some(m) => Value::String(m.as_str().to_string()),
+                            None => Value::Null,
+                        });
+                    }
+                    Value::Map { keys, values }
+                },
+                None => Value::Null,
+            }
+        }
+        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+    }
+}
+
+fn regex_escape(args: &HashMap<String, Value>) -> Value {
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+    };
+
+    Value::String(regex::escape(value))
 }
 
 
@@ -72,6 +268,13 @@ pub fn register() -> HashMap<String, Variable> {
     );
     insert_native_fn!(
         map,
+        "is_match",
+        regex_is_match,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "bool"
+    );
+    insert_native_fn!(
+        map,
         "replace",
         regex_replace,
         vec![
@@ -81,6 +284,56 @@ pub fn register() -> HashMap<String, Variable> {
         ],
         "str"
     );
+        insert_native_fn!(
+        map,
+        "find_all",
+        regex_find_all,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "list"
+    );
+    insert_native_fn!(
+        map,
+        "split",
+        regex_split,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "list"
+    );
+    insert_native_fn!(
+        map,
+        "count",
+        regex_count,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "int"
+    );
+    insert_native_fn!(
+        map,
+        "capture",
+        regex_capture,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "map"
+    );
+    insert_native_fn!(
+        map,
+        "match_all",
+        regex_match_all,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "list"
+    );
+    insert_native_fn!(
+        map,
+        "named_groups",
+        regex_named_groups,
+        vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
+        "map"
+    );
+    insert_native_fn!(
+        map,
+        "escape",
+        regex_escape,
+        vec![Parameter::positional("value", "str")],
+        "str"
+    );
+
 
     map
 }

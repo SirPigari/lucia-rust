@@ -44,6 +44,34 @@ fn from_json_value(jv: &JsonValue) -> Value {
     }
 }
 
+fn escape_handler(args: &HashMap<String, Value>) -> Value {
+    let value = match args.get("value") {
+        Some(v) => v,
+        None => return Value::Error("ValueError", "missing 'value'", None),
+    };
+
+    match to_json_value(value) {
+        Ok(json_val) => {
+            let mut buf = Vec::new();
+            serde_json::to_writer(&mut buf, &json_val).unwrap();
+            Value::String(String::from_utf8(buf).unwrap())
+        }
+        Err(e) => Value::Error("JSONError", to_static(e), None),
+    }
+}
+
+fn unescape_handler(args: &HashMap<String, Value>) -> Value {
+    let value = match args.get("value") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError", "expected string for 'value'", None),
+    };
+
+    match serde_json::from_str::<JsonValue>(value) {
+        Ok(json_val) => from_json_value(&json_val),
+        Err(e) => Value::Error("JSONError", to_static(e.to_string()), None),
+    }
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -162,6 +190,20 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("indent", "int", Value::Int(Int::from_i64(0))),
         ],
         "void"
+    );
+    insert_native_fn!(
+        map,
+        "escape",
+        escape_handler,
+        vec![Parameter::positional("value", "any")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "unescape",
+        unescape_handler,
+        vec![Parameter::positional("value", "str")],
+        "any"
     );
 
     map

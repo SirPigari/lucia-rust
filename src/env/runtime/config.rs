@@ -17,7 +17,6 @@ pub struct Config {
     pub supports_color: bool,
     pub use_lucia_traceback: bool,
     pub warnings: bool,
-    pub use_preprocessor: bool,
     pub cache_format: CacheFormat,
     pub allow_fetch: bool,
     pub allow_unsafe: bool,
@@ -51,7 +50,6 @@ impl Default for Config {
             use_lucia_traceback: true,
             cache_format: CacheFormat::NoCache,
             warnings: true,
-            use_preprocessor: true,
             allow_fetch: true,
             allow_unsafe: false,
             home_dir: "lucia/src/env/".to_string(),
@@ -119,14 +117,6 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Ok(())
             } else {
                 Err("Expected a boolean value for 'warnings'".to_string())
-            }
-        }
-        "use_preprocessor" => {
-            if let Value::Boolean(val) = value {
-                config.use_preprocessor = val;
-                Ok(())
-            } else {
-                Err("Expected a boolean value for 'use_preprocessor'".to_string())
             }
         }
         "cache_format" => {
@@ -217,7 +207,6 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "supports_color" => Value::Boolean(config.supports_color),
         "use_lucia_traceback" => Value::Boolean(config.use_lucia_traceback),
         "warnings" => Value::Boolean(config.warnings),
-        "use_preprocessor" => Value::Boolean(config.use_preprocessor),
         "cache_format" => Value::String(config.cache_format.to_string()),
         "allow_fetch" => Value::Boolean(config.allow_fetch),
         "allow_unsafe" => Value::Boolean(config.allow_unsafe),
