@@ -4,14 +4,13 @@ use std::io::{self, Read, Write};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use colored::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 use std::time::Duration;
-use sys_info;
 
 mod env {
     pub mod runtime {
@@ -774,623 +773,23 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
     Ok(())
 }
 
-fn lucia(args: Vec<String>) {
-    let cwd = std_env::current_dir()
-    .and_then(|p| p.canonicalize())
-    .unwrap_or_else(|e| {
-        eprintln!("Failed to get canonicalized current directory: {}", e);
-        exit(1);
-    });
-
-    let exe_path = std_env::current_exe()
-        .and_then(|p| p.canonicalize())
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to get canonicalized path to executable: {}", e);
-            exit(1);
-        });
-
-    let mut config_path = exe_path
-        .parent()
-        .map(|p| p.join("..").join("config.json"))
-        .ok_or_else(|| {
-            eprintln!("Failed to resolve parent of executable path.");
-            exit(1);
-        })
-        .unwrap();
-    
-    let libs_path = exe_path
-        .parent()
-        .map(|p| p.join("..").join("libs.json"))
-        .ok_or_else(|| {
-            eprintln!("Failed to resolve parent of executable path.");
-            exit(1);
-        })
-        .unwrap();
-
-    
-    if !config_path.exists() {
-        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
-        if let Err(e) = std::fs::write(&config_path, "{}") {
-            eprintln!("Failed to create empty config file: {}", e);
-            exit(1);
-        }
-    }    
-
-    let activate_flag = args.contains(&"--activate".to_string());
-    let mut no_color_flag = args.contains(&"--no-color".to_string());
-    if args.contains(&"--color".to_string()) {
-        no_color_flag = false;
-    }
-    let quiet_flag = args.contains(&"--quiet".to_string()) || args.contains(&"-q".to_string());
-    let debug_flag = args.contains(&"--debug".to_string()) || args.contains(&"-d".to_string());
-    let exit_flag = args.contains(&"--exit".to_string()) || args.contains(&"-e".to_string());
-    let help_flag = args.contains(&"--help".to_string()) || args.contains(&"-h".to_string());
-    let version_flag = args.contains(&"--version".to_string()) || args.contains(&"-v".to_string());
-    let disable_preprocessor = args.contains(&"--disable-preprocessor".to_string()) || args.contains(&"-dp".to_string());
-    let config_arg = args.iter().find(|arg| arg.starts_with("--config="));
-    let dump_pp_flag = args.contains(&"--dump-pp".to_string()) || args.contains(&"--dump".to_string());
-    let dump_ast_flag = args.contains(&"--dump-ast".to_string()) || args.contains(&"--dump".to_string());
-    let allow_unsafe = args.contains(&"--allow-unsafe".to_string());
-    let compile_flag = args.contains(&"--compile".to_string()) || args.contains(&"-c".to_string());
-    let run_flag = args.contains(&"--run".to_string()) || args.contains(&"-r".to_string());
-    let debug_mode_flag = args.contains(&"--debug-mode=".to_string());
-    let dump_dir = args.iter()
-        .find(|arg| arg.starts_with("--dump-dir="))
-        .map(|arg| (arg.trim_start_matches("--dump-dir="), true))
-        .unwrap_or((".", false));
-    let cache: (CacheFormat, bool) = match args.iter().find(|arg| arg.starts_with("--cache=")) {
-        Some(arg) => {
-            let val_str = arg.trim_start_matches("--cache=");
-            match CacheFormat::from_str(val_str) {
-                Some(val) => (val, true),
-                None => {
-                    eprintln!("Invalid value for --cache, defaulting to 'bin_le'.");
-                    (CacheFormat::BinLe, true)
-                }
-            }
-        },
-        None => (CacheFormat::NoCache, false),
-    };
-    let cls_cache_flag = args.contains(&"--clean-cache".to_string()) || args.contains(&"-cc".to_string()) || args.contains(&"--clear-cache".to_string()) || args.contains(&"--cls-cache".to_string());
-    let c_compiler = args.iter()
-        .find(|arg| arg.starts_with("--c-compiler="))
-        .map(|arg| arg.trim_start_matches("--c-compiler="))
-        .unwrap_or("gcc");
-    let argv_arg = args.iter()
-        .find(|arg| arg.starts_with("--argv="))
-        .map(|arg| arg.trim_start_matches("--argv="));
-
-    let mut argv = if let Some(val) = argv_arg {
-        let val = val.trim_start_matches('[').trim_end_matches(']');
-        val.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<String>>()
-    } else {
-        vec![]
-    };
-
-    if let Some(exe_path) = args.get(0) {
-        argv.insert(0, exe_path.clone());
-    }
-
-    if version_flag {
-        println!("Lucia-{}", VERSION);
-        exit(0);
-    }
-
-    let commands: Vec<String> = [
-        "--activate",
-        "-a",
-        "--no-color",
-        "--color",
-        "--quiet",
-        "-q",
-        "--debug",
-        "-d",
-        "--debug-mode=",
-        "--exit",
-        "-e",
-        "--info",
-        "-i",
-        "--help",
-        "-h",
-        "--version",
-        "-v",
-        "--build-info",
-        "--disable-preprocessor",
-        "-dp",
-        "--config=",
-        "--dump-pp",
-        "--dump-ast",
-        "--dump",
-        "--allow-unsafe",
-        "--stack-size=",
-        "--compile",
-        "-c",
-        "--run",
-        "-r",
-        "--cache=",
-        "--clean-cache",
-        "-cc",
-        "--clear-cache",
-        "--cls-cache",
-        "--c-compiler=",
-        "--argv=",
-        "--",
-        "--dump-dir=",
-    ].iter().map(|s| s.to_string()).collect();
-
-    for arg in &args {
-        if arg.starts_with("--") {
-            let is_valid = if commands.contains(arg) {
-                true
-            } else if let Some(eq_pos) = arg.find('=') {
-                let prefix = &arg[..=eq_pos];
-                commands.iter().any(|cmd| cmd == prefix)
-            } else {
-                false
-            };
-
-            if !is_valid {
-                eprintln!("Unknown argument: {}", arg);
-                if let Some(suggestion) = find_closest_match(arg, &commands) {
-                    eprintln!("Did you mean: {}", suggestion);
-                }
-                exit(1);
-            }
-        }
-    }
-
-    if help_flag {
-        println!("{}", "Usage:".bold());
-        println!("  lucia [options] [files...]\n");
-    
-        println!("{}", "Options:".bold());
-        let options = [
-            ("--activate, -a", "Activate the environment"),
-            ("--no-color", "Disable colored output"),
-            ("--color", "Enable colored output (default)"),
-            ("--quiet, -q", "Suppress debug and warning messages"),
-            ("--debug, -d", "Enable debug mode"),
-            ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal, none)"),
-            ("--exit, -e", "Exit if no files are provided"),
-            ("--info, -i", "Show build and environment information"),
-            ("--help, -h", "Show this help message"),
-            ("--version, -v", "Show version information"),
-            ("--build-info", "Show build information"),
-            ("--disable-preprocessor, -dp", "Disable preprocessor"),
-            ("--config=<path>", "Specify a custom config file path"),
-            ("--dump-pp", "Dump source code after preprocessing"),
-            ("--dump-ast", "Dump AST after parsing"),
-            ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
-            ("--allow-unsafe", "Allow unsafe operations"),
-            ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
-            ("--compile, -c", "Compile the source code to a binary"),
-            ("--run, -r", "Run the source code after compiling"),
-            ("--cache=<format>", "Enable or disable caching (default: 'no_cache') (check config-guide.md)"),
-            ("--clean-cache, -cc", "Clear the cache directory"),
-            ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
-            ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
-            ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
-        ];
-    
-        for (flag, desc) in options {
-            println!("  {:<32} {}", flag.cyan(), desc);
-        }
-    
-        exit(0);
-    }    
-
-    if args.contains(&"--build-info".to_string()) {
-        let info = get_build_info();
-
-        println!("{}", serde_json::to_string_pretty(&info).unwrap());
-        exit(0);
-    }
-
-    if args.contains(&"--info".to_string()) || args.contains(&"-i".to_string()) {
-        let info = get_build_info();
-        let binary_path = std_env::current_exe().unwrap();
-        let binary_size = fs::metadata(&binary_path).unwrap().len();
-    
-        let size_str = if binary_size >= 1024 * 1024 {
-            format!("{:.2} MB", binary_size as f64 / (1024.0 * 1024.0))
-        } else if binary_size >= 1024 {
-            format!("{:.2} KB", binary_size as f64 / 1024.0)
-        } else {
-            format!("{} B", binary_size)
-        };
-    
-        println!("{}", "Binary Info".bold().bright_cyan().underline());
-        println!("{:<35}{}", "Binary Path:".green(), binary_path.display());
-        println!("{:<35}{}", "Binary Size:".green(), size_str);
-        println!("{:<35}{}", "Target Triple:".green(), info.target);
-        println!("{:<35}{}", "Build Profile:".green(), info.profile);
-    
-        println!();
-        println!("{}", "Build Metadata".bold().bright_cyan().underline());
-        println!("{:<35}{}", "Name:".green(), info.name);
-        println!("{:<35}{}", "Version:".green(), info.version);
-        println!("{:<35}{}", "UUID:".green(), info.uuid);
-        println!("{:<35}{}", "Git Hash:".green(), info.git_hash);
-        println!("{:<35}{}", "File Hash:".green(), info.file_hash);
-        println!("{:<35}{}", "Build Date:".green(), info.build_date);
-        println!("{:<35}{}", "Repository:".green(), info.repository);
-    
-        println!();
-        println!("{}", "Environment".bold().bright_cyan().underline());
-        println!("{:<35}{}", "Rustc Version:".green(), info.rustc_version);
-        println!("{:<35}{}", "Rustc Channel:".green(), info.rustc_channel);
-        println!("{:<35}{}", "CI System:".green(), info.ci);
-        println!("{:<35}{}", "Dependencies:".green(), info.dependencies);
-
-        println!();
-        println!("{}", "Code Information".bold().bright_cyan().underline());
-        println!("{:<35}{}", "Rust lines of code:".green(), env!("RUST_LOC"));
-        println!("{:<35}{}", "Lucia lines of code:".green(), env!("LUCIA_LOC"));
-        println!("{:<35}{}", "Total lines of code:".green(), env!("TOTAL_LOC"));
-        println!("{:<35}{}", "Rust files:".green(), env!("RUST_FILES"));
-        println!("{:<35}{}", "Total files:".green(), env!("TOTAL_FILES"));
-        
-        exit(0);
-    }
-
-    if config_arg.is_some() {
-        let config_path_str = config_arg.unwrap().split('=').nth(1).unwrap_or("");
-        if config_path_str.is_empty() {
-            eprintln!("No config path provided. Use --config=<path> to specify a config file.");
-            exit(1);
-        }
-        config_path = PathBuf::from(config_path_str);
-        if !config_path.exists() {
-            eprintln!("Config file does not exist: {}", config_path.display());
-            exit(1);
-        }
-    }
-
-    let enviroment_dir = exe_path
-        .parent()
-        .map(|p| p.join(".."))
-        .ok_or_else(|| {
-            eprintln!("Failed to resolve parent of executable path.");
-            exit(1);
-        })
-        .and_then(|p| p.canonicalize().or_else(|e| {
-            eprintln!("Failed to canonicalize environment path: {}", e);
-            exit(1);
-        }))
-        .unwrap();
-
-    let mut config = if config_path.exists() {
-        match load_config(&config_path) {
-            Ok(config) => config,
-            Err(_) => {
-                eprintln!("Failed to read config file, activating environment...");
-                if let Err(err) = activate_environment(&enviroment_dir, true) {
-                    eprintln!("Failed to activate environment: {}", err);
-                    exit(1);
-                }
-                match load_config(&config_path) {
-                    Ok(config) => config,
-                    Err(e) => {
-                        eprintln!("Failed to load config file again after activation: {}", e);
-                        eprintln!("Creating new empty config file at {}", config_path.display());
-                        if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
-                            eprintln!("Failed to create new config file: {}", err);
-                            exit(1);
-                        }
-                        load_config(&config_path).unwrap_or_else(|e| {
-                            eprintln!("Failed to load new config file: {}", e);
-                            exit(1);
-                        })
-                    }
-                }
-            }
-        }
-    } else {
-        eprintln!("Config file not found, activating environment...");
-        if let Err(err) = activate_environment(&enviroment_dir, true) {
-            eprintln!("Failed to activate environment: {}", err);
-            exit(1);
-        }
-        match load_config(&config_path) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("Failed to load config file after activation: {}", e);
-                eprintln!("Creating new empty config file at {}", config_path.display());
-                if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
-                    eprintln!("Failed to create new config file: {}", err);
-                    exit(1);
-                }
-                load_config(&config_path).unwrap_or_else(|e| {
-                    eprintln!("Failed to load new config file: {}", e);
-                    exit(1);
-                })
-            }
-        }
-    };    
-    
-    if activate_flag {
-        println!("{}", format!("Activating environment at: {}", enviroment_dir.display()).cyan().bold());
-        if let Err(err) = activate_environment(&enviroment_dir, false) {
-            eprintln!("{}", format!("Failed to activate environment: {}", err).red().bold());
-            exit(1);
-        }
-        config = load_config(&config_path).unwrap();
-    }
-
-    let home_dir = config.home_dir
-    .to_string()
-    .replace("\\", "/");
-
-    let home_dir_path = PathBuf::from(home_dir.clone());
-
-    if let Err(_) = std_env::set_current_dir(&home_dir_path) {
-        if let Err(err) = activate_environment(&enviroment_dir, true) {
-            eprintln!("Failed to activate environment: {}", err);
-            exit(1);
-        }
-        config = load_config(&config_path).unwrap();
-    }
-
-    let home_dir = config.home_dir
-    .to_string()
-    .replace("\\", "/");
-
-    let home_dir_path = PathBuf::from(home_dir.clone());
-
-    let debug_mode: String = if debug_flag || debug_mode_flag {
-        args.iter()
-            .find(|arg| arg.starts_with("--debug-mode="))
-            .and_then(|arg| arg.split('=').nth(1))
-            .map(|mode| match mode {
-                "full" | "normal" | "minimal" => mode.into(),
-                "none" => {
-                    config.debug = false;
-                    "none".into()
-                }
-                _ => {
-                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', 'minimal' or 'none'.", mode);
-                    exit(1);
-                }
-            })
-            .unwrap_or("normal".into())
-    } else {
-        config.debug_mode.clone()
-    };
-
-    if let Err(e) = std_env::set_current_dir(&home_dir_path) {
-        eprintln!("Failed to change the directory: {}", e);
-        exit(1);
-    }
-
-    if !home_dir_path.exists() {
-        eprintln!("Home directory does not exist: {}", home_dir_path.display());
-        exit(1);
-    }
-
-    if debug_flag {
-        config.debug = true;
-        config.debug_mode = "full".to_string();
-    }
-    if debug_mode == "none" {
-        config.debug = false;
-        config.debug_mode = "normal".to_string();
-    } else {
-        config.debug_mode = debug_mode;
-    }
-    if quiet_flag {
-        config.debug = false;
-        config.use_lucia_traceback = false;
-        config.warnings = false;
-    }
-    if cache.1 {
-        config.cache_format = cache.0;
-    }
-
-    if cls_cache_flag {
-        config.cache_format = CacheFormat::NoCache;
-
-        let cache_dirs = vec![
-            (home_dir_path.join("cache"), true),    // optional
-            (home_dir_path.join(".cache"), false),  // must exist
-        ];
-
-        for (cache_dir, optional) in cache_dirs {
-            if !cache_dir.exists() {
-                if optional {
-                    continue;
-                } else {
-                    eprintln!("Required cache directory '.cache' does not exist.");
-                    exit(1);
-                }
-            }
-
-            if !cache_dir.is_dir() {
-                eprintln!("'{}' is not a directory.", cache_dir.display());
-                exit(1);
-            }
-
-            let mut error_found = false;
-
-            match fs::read_dir(&cache_dir) {
-                Ok(entries) => {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-
-                        if path.is_file() {
-                            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                                let _ = fs::remove_file(&path);
-                            } else {
-                                eprintln!("Found non-.bin file in '{}': {:?}, aborting.", cache_dir.display(), path);
-                                error_found = true;
-                                break;
-                            }
-                        } else if path.is_dir() {
-                            let mut valid_subdir = true;
-
-                            match fs::read_dir(&path) {
-                                Ok(sub_entries) => {
-                                    for sub_entry in sub_entries.flatten() {
-                                        let sub_path = sub_entry.path();
-                                        if sub_path.is_dir() {
-                                            eprintln!("Found nested directory in subdir '{:?}', aborting.", sub_path);
-                                            error_found = true;
-                                            valid_subdir = false;
-                                            break;
-                                        }
-                                        if sub_path.extension().and_then(|e| e.to_str()) == Some("bin") {
-                                            let _ = fs::remove_file(&sub_path);
-                                        } else {
-                                            eprintln!("Found non-.bin file in subdir '{:?}', aborting.", sub_path);
-                                            error_found = true;
-                                            valid_subdir = false;
-                                            break;
-                                        }
-                                    }
-
-                                    if valid_subdir && !error_found {
-                                        let _ = fs::remove_dir(&path);
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to read subdir '{}': {}", path.display(), e);
-                                    error_found = true;
-                                    break;
-                                }
-                            }
-                        } else {
-                            eprintln!("Unknown entry in cache: {:?}", path);
-                            error_found = true;
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to read cache directory '{}': {}", cache_dir.display(), e);
-                    exit(1);
-                }
-            }
-
-            if error_found {
-                eprintln!("Aborting cache clean due to invalid files in '{}'.", cache_dir.display());
-                exit(1);
-            }
-
-            if cache_dir.ends_with("cache") {
-                let _ = fs::remove_dir(&cache_dir);
-            } else {
-                println!("Cache directory '{}' cleaned successfully.", fix_path(cache_dir.display().to_string()));
-            }
-        }
-    }
-
-    let args: Vec<String> = std_env::args().collect();
-
-    let non_flag_args: Vec<String> = args.iter()
-        .skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .cloned()
-        .filter_map(|arg| {
-            let mut path: PathBuf = PathBuf::from(&arg);
-
-            if path.is_relative() {
-                path = cwd.join(path);
-            }
-
-            if !path.exists() {
-                eprintln!("Error: File '{}' does not exist or is not a valid file", fix_path(path.display().to_string()));
-                exit(1);
-            };
-
-            Some(path.display().to_string())
-        })
-        .collect();
-
-    if exit_flag {
-        if non_flag_args.is_empty() {
-            eprintln!("No files provided to execute. Exiting.");
-            exit(0);
-        }
-    }
-
-    let moded = config.moded.clone();
-    if allow_unsafe {
-        config.allow_unsafe = true;
-    }
-    if !supports_color() {
-        config.supports_color = false;
-    }
-    if no_color_flag {
-        config.supports_color = false;
-    }
-
-    match load_std_libs(&libs_path.display().to_string(), moded) {
-        Ok((_, (f, n))) => {
-            if f {
-                print_colored(
-                    &format!("Warning: Standard libraries mismatch for {}. Running in moded mode.", n),
-                    &config.color_scheme.warning,
-                    Some(config.supports_color),
-                );
-            }
-        }
-        Err((e, m)) => {
-            if m {
-                handle_error(
-                    &Error::with_help(
-                        "ModedSTDLibError",
-                        &e,
-                        "Set 'moded' to true in your config file to ignore this error.",
-                        to_static(exe_path.display().to_string()),
-                    ),
-                    "",
-                    &config,
-                );
-            } else {
-                handle_error(
-                    &Error::new(
-                        "STDLibError",
-                        &e,
-                        to_static(exe_path.display().to_string()),
-                    ),
-                    "",
-                    &config,
-                );
-            }
-            exit(1);
-        }
-    }
-
-    if config.version != VERSION {
-        if !moded {
-            handle_error(
-                &Error::with_help(
-                    "VersionMismatchError",
-                    to_static(format!(
-                        "Lucia version mismatch: expected {}, got {}. Please update your Lucia installation.",
-                        VERSION, config.version
-                    )),
-                    "Set 'moded' to true in your config file to ignore this error.",
-                    to_static(exe_path.display().to_string()),
-                ),
-                "",
-                &config,
-            );
-            exit(1);
-        } else if config.warnings {
-            print_colored(
-                &format!(
-                    "Warning: Lucia version mismatch: expected {}, got {}. Running in moded mode.",
-                    VERSION, config.version
-                ),
-                &config.color_scheme.warning,
-                Some(config.supports_color),
-            );
-        }
-    }
-
+fn lucia(
+    config: Config,
+    non_flag_args: Vec<String>,
+    cwd: PathBuf,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    dump_dir: (String, bool),
+    dump_pp_flag: bool,
+    dump_ast_flag: bool,
+    run_flag: bool,
+    c_compiler: &str,
+    compile_flag: bool,
+    disable_preprocessor: bool,
+    argv: Vec<String>,
+    quiet_flag: bool
+) {
+    let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
     if compile_flag {
         if non_flag_args.is_empty() {
             eprintln!("No files provided to compile. Exiting.");
@@ -2218,7 +1617,7 @@ fn compile(
 }
 
 fn main() {
-    let args: Vec<String> = std_env::args().collect();
+    let args: HashSet<String> = std_env::args().collect();
 
     panic::set_hook(Box::new(|panic_info| {
         const CUSTOM_PANIC_MARKER: u8 = 0x1B;
@@ -2270,34 +1669,636 @@ fn main() {
     }));
     
 
-    let stack_size = args.iter()
-        .find(|arg| arg.starts_with("--stack-size="))
-        .and_then(|arg| arg.split('=').nth(1))
-        .and_then(|size| size.parse::<usize>().ok())
-        .unwrap_or_else(|| {
-            match sys_info::mem_info() {
-                Ok(mem) => {
-                    let total_ram_bytes = mem.total * 1024;
+    let cwd = std_env::current_dir()
+    .and_then(|p| p.canonicalize())
+    .unwrap_or_else(|e| {
+        eprintln!("Failed to get canonicalized current directory: {}", e);
+        exit(1);
+    });
 
-                    if total_ram_bytes > 16 * 1024 * 1024 * 1024 {
-                        128 * 1024 * 1024
-                    } else if total_ram_bytes > 8 * 1024 * 1024 * 1024 {
-                        64 * 1024 * 1024
-                    } else {
-                        32 * 1024 * 1024
-                    }
-                }
-                Err(_) => {
-                    32 * 1024 * 1024
-                }
-            }
+    let exe_path = std_env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to get canonicalized path to executable: {}", e);
+            exit(1);
         });
 
+    let mut config_path = exe_path
+        .parent()
+        .map(|p| p.join("..").join("config.json"))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .unwrap();
+    
+    let libs_path = exe_path
+        .parent()
+        .map(|p| p.join("..").join("libs.json"))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .unwrap();
+
+    
+    if !config_path.exists() {
+        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
+        if let Err(e) = std::fs::write(&config_path, "{}") {
+            eprintln!("Failed to create empty config file: {}", e);
+            exit(1);
+        }
+    }
+    
+    let commands = [
+        ("--activate, -a", "Activate the environment"),
+        ("--no-color", "Disable colored output"),
+        ("--color", "Enable colored output (default)"),
+        ("--quiet, -q", "Suppress debug and warning messages"),
+        ("--debug, -d", "Enable debug mode"),
+        ("--debug-mode=<mode>", "Set debug mode (full, normal, minimal, none)"),
+        ("--exit, -e", "Exit if no files are provided"),
+        ("--info, -i", "Show build and environment information"),
+        ("--help, -h", "Show this help message"),
+        ("--version, -v", "Show version information"),
+        ("--build-info", "Show build information"),
+        ("--disable-preprocessor, -dp", "Disable preprocessor"),
+        ("--config=<path>", "Specify a custom config file path"),
+        ("--dump-pp", "Dump source code after preprocessing"),
+        ("--dump-ast", "Dump AST after parsing"),
+        ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
+        ("--allow-unsafe", "Allow unsafe operations"),
+        ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
+        ("--compile, -c", "Compile the source code to a binary"),
+        ("--run, -r", "Run the source code after compiling"),
+        ("--cache=<format>", "Enable or disable caching (default: 'no_cache') (check config-guide.md)"),
+        ("--clean-cache, -cc", "Clear the cache directory"),
+        ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
+        ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
+        ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
+    ];
+
+    let mut activate_flag = false;
+    let mut no_color_flag = false;
+    let mut quiet_flag = false;
+    let mut debug_flag = false;
+    let mut exit_flag = false;
+    let mut help_flag = false;
+    let mut version_flag = false;
+    let mut disable_preprocessor = false;
+    let mut config_arg: Option<String> = None;
+    let mut dump_pp_flag = false;
+    let mut dump_ast_flag = false;
+    let mut allow_unsafe = false;
+    let mut compile_flag = false;
+    let mut run_flag = false;
+    let mut debug_mode_flag = false;
+    let mut stack_size: (usize, bool) = (16_777_216, false);
+    let mut dump_dir: (String, bool) = (".".to_string(), false);
+    let mut cache: (CacheFormat, bool) = (CacheFormat::NoCache, false);
+    let mut cls_cache_flag = false;
+    let mut c_compiler = "gcc".to_string();
+    let mut argv_arg: Option<String> = None;
+
+    for arg in &args {
+        match arg.as_str() {
+            "--activate" | "-a" => activate_flag = true,
+            "--no-color" => no_color_flag = true,
+            "--color" => no_color_flag = false,
+            "--quiet" | "-q" => quiet_flag = true,
+            "--debug" | "-d" => debug_flag = true,
+            "--exit" | "-e" => exit_flag = true,
+            "--help" | "-h" => help_flag = true,
+            "--version" | "-v" => version_flag = true,
+            "--disable-preprocessor" | "-dp" => disable_preprocessor = true,
+            "--dump-pp" => dump_pp_flag = true,
+            "--dump-ast" => dump_ast_flag = true,
+            "--dump" => { dump_pp_flag = true; dump_ast_flag = true; }
+            "--allow-unsafe" => allow_unsafe = true,
+            "--compile" | "-c" => compile_flag = true,
+            "--run" | "-r" => run_flag = true,
+            "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
+            arg if arg.starts_with("--stack-size=") => {
+                if let Ok(size) = arg["--stack-size=".len()..].parse::<usize>() {
+                    stack_size = (size, true);
+                }
+            },
+            "--build-info" => {
+                let info = get_build_info();
+
+                println!("{}", serde_json::to_string_pretty(&info).unwrap());
+                exit(0);
+            }
+            "--info" | "-i" => {
+                let info = get_build_info();
+                let binary_path = std_env::current_exe().unwrap();
+                let binary_size = fs::metadata(&binary_path).unwrap().len();
+            
+                let size_str = if binary_size >= 1024 * 1024 {
+                    format!("{:.2} MB", binary_size as f64 / (1024.0 * 1024.0))
+                } else if binary_size >= 1024 {
+                    format!("{:.2} KB", binary_size as f64 / 1024.0)
+                } else {
+                    format!("{} B", binary_size)
+                };
+            
+                println!("{}", "Binary Info".bold().bright_cyan().underline());
+                println!("{:<35}{}", "Binary Path:".green(), binary_path.display());
+                println!("{:<35}{}", "Binary Size:".green(), size_str);
+                println!("{:<35}{}", "Target Triple:".green(), info.target);
+                println!("{:<35}{}", "Build Profile:".green(), info.profile);
+            
+                println!();
+                println!("{}", "Build Metadata".bold().bright_cyan().underline());
+                println!("{:<35}{}", "Name:".green(), info.name);
+                println!("{:<35}{}", "Version:".green(), info.version);
+                println!("{:<35}{}", "UUID:".green(), info.uuid);
+                println!("{:<35}{}", "Git Hash:".green(), info.git_hash);
+                println!("{:<35}{}", "File Hash:".green(), info.file_hash);
+                println!("{:<35}{}", "Build Date:".green(), info.build_date);
+                println!("{:<35}{}", "Repository:".green(), info.repository);
+            
+                println!();
+                println!("{}", "Environment".bold().bright_cyan().underline());
+                println!("{:<35}{}", "Rustc Version:".green(), info.rustc_version);
+                println!("{:<35}{}", "Rustc Channel:".green(), info.rustc_channel);
+                println!("{:<35}{}", "CI System:".green(), info.ci);
+                println!("{:<35}{}", "Dependencies:".green(), info.dependencies);
+
+                println!();
+                println!("{}", "Code Information".bold().bright_cyan().underline());
+                println!("{:<35}{}", "Rust lines of code:".green(), env!("RUST_LOC"));
+                println!("{:<35}{}", "Lucia lines of code:".green(), env!("LUCIA_LOC"));
+                println!("{:<35}{}", "Total lines of code:".green(), env!("TOTAL_LOC"));
+                println!("{:<35}{}", "Rust files:".green(), env!("RUST_FILES"));
+                println!("{:<35}{}", "Total files:".green(), env!("TOTAL_FILES"));
+                
+                exit(0);
+            }
+            "--" => {}
+            arg if arg.starts_with("--dump-dir=") => {
+                dump_dir = (arg["--dump-dir=".len()..].to_string(), true);
+            },
+            arg if arg.starts_with("--config=") => {
+                config_arg = Some(arg["--config=".len()..].to_string());
+            },
+            arg if arg.starts_with("--cache=") => {
+                let val_str = &arg["--cache=".len()..];
+                let format = CacheFormat::from_str(val_str).unwrap_or_else(|| {
+                    eprintln!("Invalid value for --cache, defaulting to 'bin_le'.");
+                    CacheFormat::BinLe
+                });
+                cache = (format, true);
+            },
+            arg if arg.starts_with("--c-compiler=") => {
+                c_compiler = arg["--c-compiler=".len()..].to_string();
+            },
+            arg if arg.starts_with("--argv=") => {
+                argv_arg = Some(arg["--argv=".len()..].to_string());
+            },
+            arg if arg.starts_with("--debug-mode=") => debug_mode_flag = true,
+            _ => {
+                if PathBuf::from(arg).exists() {
+                    continue;
+                }
+                eprintln!("Unknown argument: {}", arg);
+
+                let flag_vec: Vec<String> = commands.iter().map(|(flag, _)| flag.to_string()).collect();
+
+                if let Some(suggestion) = find_closest_match(arg, &flag_vec) {
+                    eprintln!("Did you mean: {}", suggestion);
+                }
+
+                exit(1);
+            }
+        }
+    }
+
+    let mut argv = if let Some(val) = argv_arg {
+        val.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+    } else {
+        vec![]
+    };
+
+    if let Some(exe_path) = args.iter().next() {
+        argv.insert(0, exe_path.clone());
+    }
+
+    if version_flag {
+        println!("Lucia-{}", VERSION);
+        exit(0);
+    }
+
+    if help_flag {
+        println!("{}", "Usage:".bold());
+        println!("  lucia [options] [files...]\n");
+    
+        println!("{}", "Options:".bold());
+
+    
+        for (flag, desc) in commands.iter() {
+            println!("  {:<32} {}", flag.cyan(), desc);
+        }
+    
+        exit(0);
+    }
+
+    if config_arg.is_some() {
+        let config_path_str = config_arg
+            .unwrap()
+            .split('=')
+            .nth(1)
+            .unwrap_or("")
+            .to_string();
+        if config_path_str.is_empty() {
+            eprintln!("No config path provided. Use --config=<path> to specify a config file.");
+            exit(1);
+        }
+        config_path = PathBuf::from(config_path_str);
+        if !config_path.exists() {
+            eprintln!("Config file does not exist: {}", config_path.display());
+            exit(1);
+        }
+    }
+
+    let enviroment_dir = exe_path
+        .parent()
+        .map(|p| p.join(".."))
+        .ok_or_else(|| {
+            eprintln!("Failed to resolve parent of executable path.");
+            exit(1);
+        })
+        .and_then(|p| p.canonicalize().or_else(|e| {
+            eprintln!("Failed to canonicalize environment path: {}", e);
+            exit(1);
+        }))
+        .unwrap();
+
+    let mut config = if config_path.exists() {
+        match load_config(&config_path) {
+            Ok(config) => config,
+            Err(_) => {
+                eprintln!("Failed to read config file, activating environment...");
+                if let Err(err) = activate_environment(&enviroment_dir, true) {
+                    eprintln!("Failed to activate environment: {}", err);
+                    exit(1);
+                }
+                match load_config(&config_path) {
+                    Ok(config) => config,
+                    Err(e) => {
+                        eprintln!("Failed to load config file again after activation: {}", e);
+                        eprintln!("Creating new empty config file at {}", config_path.display());
+                        if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
+                            eprintln!("Failed to create new config file: {}", err);
+                            exit(1);
+                        }
+                        load_config(&config_path).unwrap_or_else(|e| {
+                            eprintln!("Failed to load new config file: {}", e);
+                            exit(1);
+                        })
+                    }
+                }
+            }
+        }
+    } else {
+        eprintln!("Config file not found, activating environment...");
+        if let Err(err) = activate_environment(&enviroment_dir, true) {
+            eprintln!("Failed to activate environment: {}", err);
+            exit(1);
+        }
+        match load_config(&config_path) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to load config file after activation: {}", e);
+                eprintln!("Creating new empty config file at {}", config_path.display());
+                if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
+                    eprintln!("Failed to create new config file: {}", err);
+                    exit(1);
+                }
+                load_config(&config_path).unwrap_or_else(|e| {
+                    eprintln!("Failed to load new config file: {}", e);
+                    exit(1);
+                })
+            }
+        }
+    };    
+    
+    if activate_flag {
+        println!("{}", format!("Activating environment at: {}", enviroment_dir.display()).cyan().bold());
+        if let Err(err) = activate_environment(&enviroment_dir, false) {
+            eprintln!("{}", format!("Failed to activate environment: {}", err).red().bold());
+            exit(1);
+        }
+        config = load_config(&config_path).unwrap();
+    }
+
+    let home_dir = config.home_dir
+    .to_string()
+    .replace("\\", "/");
+
+    let home_dir_path = PathBuf::from(home_dir.clone());
+
+    if let Err(_) = std_env::set_current_dir(&home_dir_path) {
+        if let Err(err) = activate_environment(&enviroment_dir, true) {
+            eprintln!("Failed to activate environment: {}", err);
+            exit(1);
+        }
+        config = load_config(&config_path).unwrap();
+    }
+
+    let home_dir = config.home_dir
+    .to_string()
+    .replace("\\", "/");
+
+    let home_dir_path = PathBuf::from(home_dir.clone());
+
+    let debug_mode: String = if debug_flag || debug_mode_flag {
+        args.iter()
+            .find(|arg| arg.starts_with("--debug-mode="))
+            .and_then(|arg| arg.split('=').nth(1))
+            .map(|mode| match mode {
+                "full" | "normal" | "minimal" => mode.into(),
+                "none" => {
+                    config.debug = false;
+                    "none".into()
+                }
+                _ => {
+                    eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', 'minimal' or 'none'.", mode);
+                    exit(1);
+                }
+            })
+            .unwrap_or("normal".into())
+    } else {
+        config.debug_mode.clone()
+    };
+
+    if let Err(e) = std_env::set_current_dir(&home_dir_path) {
+        eprintln!("Failed to change the directory: {}", e);
+        exit(1);
+    }
+
+    if !home_dir_path.exists() {
+        eprintln!("Home directory does not exist: {}", home_dir_path.display());
+        exit(1);
+    }
+
+    if debug_flag {
+        config.debug = true;
+        config.debug_mode = "full".to_string();
+    }
+    if debug_mode == "none" {
+        config.debug = false;
+        config.debug_mode = "normal".to_string();
+    } else {
+        config.debug_mode = debug_mode;
+    }
+    if quiet_flag {
+        config.debug = false;
+        config.use_lucia_traceback = false;
+        config.warnings = false;
+    }
+    if cache.1 {
+        config.cache_format = cache.0;
+    }
+
+    if cls_cache_flag {
+        config.cache_format = CacheFormat::NoCache;
+
+        let cache_dirs = vec![
+            (home_dir_path.join("cache"), true),    // optional
+            (home_dir_path.join(".cache"), false),  // must exist
+        ];
+
+        for (cache_dir, optional) in cache_dirs {
+            if !cache_dir.exists() {
+                if optional {
+                    continue;
+                } else {
+                    eprintln!("Required cache directory '.cache' does not exist.");
+                    exit(1);
+                }
+            }
+
+            if !cache_dir.is_dir() {
+                eprintln!("'{}' is not a directory.", cache_dir.display());
+                exit(1);
+            }
+
+            let mut error_found = false;
+
+            match fs::read_dir(&cache_dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+
+                        if path.is_file() {
+                            if path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                                let _ = fs::remove_file(&path);
+                            } else {
+                                eprintln!("Found non-.bin file in '{}': {:?}, aborting.", cache_dir.display(), path);
+                                error_found = true;
+                                break;
+                            }
+                        } else if path.is_dir() {
+                            let mut valid_subdir = true;
+
+                            match fs::read_dir(&path) {
+                                Ok(sub_entries) => {
+                                    for sub_entry in sub_entries.flatten() {
+                                        let sub_path = sub_entry.path();
+                                        if sub_path.is_dir() {
+                                            eprintln!("Found nested directory in subdir '{:?}', aborting.", sub_path);
+                                            error_found = true;
+                                            valid_subdir = false;
+                                            break;
+                                        }
+                                        if sub_path.extension().and_then(|e| e.to_str()) == Some("bin") {
+                                            let _ = fs::remove_file(&sub_path);
+                                        } else {
+                                            eprintln!("Found non-.bin file in subdir '{:?}', aborting.", sub_path);
+                                            error_found = true;
+                                            valid_subdir = false;
+                                            break;
+                                        }
+                                    }
+
+                                    if valid_subdir && !error_found {
+                                        let _ = fs::remove_dir(&path);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to read subdir '{}': {}", path.display(), e);
+                                    error_found = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            eprintln!("Unknown entry in cache: {:?}", path);
+                            error_found = true;
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read cache directory '{}': {}", cache_dir.display(), e);
+                    exit(1);
+                }
+            }
+
+            if error_found {
+                eprintln!("Aborting cache clean due to invalid files in '{}'.", cache_dir.display());
+                exit(1);
+            }
+
+            if cache_dir.ends_with("cache") {
+                let _ = fs::remove_dir(&cache_dir);
+            } else {
+                println!("Cache directory '{}' cleaned successfully.", fix_path(cache_dir.display().to_string()));
+            }
+        }
+    }
+
+    let args: Vec<String> = std_env::args().collect();
+
+    let non_flag_args: Vec<String> = args.iter()
+        .skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .cloned()
+        .filter_map(|arg| {
+            let mut path: PathBuf = PathBuf::from(&arg);
+
+            if path.is_relative() {
+                path = cwd.join(path);
+            }
+
+            if !path.exists() {
+                eprintln!("Error: File '{}' does not exist or is not a valid file", fix_path(path.display().to_string()));
+                exit(1);
+            };
+
+            Some(path.display().to_string())
+        })
+        .collect();
+
+    if exit_flag {
+        if non_flag_args.is_empty() {
+            eprintln!("No files provided to execute. Exiting.");
+            exit(0);
+        }
+    }
+
+    let moded = config.moded.clone();
+    if allow_unsafe {
+        config.allow_unsafe = true;
+    }
+    if !supports_color() {
+        config.supports_color = false;
+    }
+    if no_color_flag {
+        config.supports_color = false;
+    }
+
+    match load_std_libs(&libs_path.display().to_string(), moded) {
+        Ok((_, (f, n))) => {
+            if f {
+                print_colored(
+                    &format!("Warning: Standard libraries mismatch for {}. Running in moded mode.", n),
+                    &config.color_scheme.warning,
+                    Some(config.supports_color),
+                );
+            }
+        }
+        Err((e, m)) => {
+            if m {
+                handle_error(
+                    &Error::with_help(
+                        "ModedSTDLibError",
+                        &e,
+                        "Set 'moded' to true in your config file to ignore this error.",
+                        to_static(exe_path.display().to_string()),
+                    ),
+                    "",
+                    &config,
+                );
+            } else {
+                handle_error(
+                    &Error::new(
+                        "STDLibError",
+                        &e,
+                        to_static(exe_path.display().to_string()),
+                    ),
+                    "",
+                    &config,
+                );
+            }
+            exit(1);
+        }
+    }
+
+    if stack_size.1 {
+        if stack_size.0 < 1_048_576 {
+            eprintln!("Stack size must be at least 1MB (1048576 bytes). Defaulting to 16MB.");
+            config.stack_size = 16_777_216;
+        } else {
+            config.stack_size = stack_size.0;
+        }
+    }
+
+    if config.version != VERSION {
+        if !moded {
+            handle_error(
+                &Error::with_help(
+                    "VersionMismatchError",
+                    to_static(format!(
+                        "Lucia version mismatch: expected {}, got {}. Please update your Lucia installation.",
+                        VERSION, config.version
+                    )),
+                    "Set 'moded' to true in your config file to ignore this error.",
+                    to_static(exe_path.display().to_string()),
+                ),
+                "",
+                &config,
+            );
+            exit(1);
+        } else if config.warnings {
+            print_colored(
+                &format!(
+                    "Warning: Lucia version mismatch: expected {}, got {}. Running in moded mode.",
+                    VERSION, config.version
+                ),
+                &config.color_scheme.warning,
+                Some(config.supports_color),
+            );
+        }
+    }
+
+    let stack_size_lucia = config.stack_size;
+
     let handle = thread::Builder::new()
-        .stack_size(stack_size)
+        .stack_size(stack_size_lucia)
         .name(format!("Lucia-{}", VERSION))
-        .spawn(|| {
-            lucia(args);
+        .spawn(move || {
+            lucia(
+                config,
+                non_flag_args,
+                cwd,
+                home_dir_path,
+                config_path,
+                dump_dir,
+                dump_pp_flag,
+                dump_ast_flag,
+                run_flag,
+                &c_compiler,
+                compile_flag,
+                disable_preprocessor,
+                argv,
+                quiet_flag
+            );
         })
         .unwrap();
 
