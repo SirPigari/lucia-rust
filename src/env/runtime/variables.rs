@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Type};
 use imagnum::{create_int, create_float};
 use crate::interpreter::Interpreter;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
@@ -824,18 +825,18 @@ impl Variable {
                 );
             }
             Value::List(_) => {
+                let self_arc = Arc::new(Mutex::new(self.clone()));
+
                 let append = {
-                    let val_clone = self.value.clone();
+                    let self_arc = Arc::clone(&self_arc);
                     make_native_method(
                         "append",
                         move |args| {
                             if let Some(item) = args.get("item") {
-                                if let Value::List(list) = &val_clone {
-                                    let mut new_list = list.clone();
-            
-                                    new_list.push(item.clone());
-            
-                                    return Value::List(new_list);
+                                let mut locked = self_arc.lock().unwrap();
+                                if let Value::List(list) = &mut locked.value {
+                                    list.push(item.clone());
+                                    return Value::List(list.clone()); // return self for chaining
                                 }
                             }
                             Value::Null
@@ -846,17 +847,17 @@ impl Variable {
                         None,
                     )
                 };
-            
+
                 let extend = {
-                    let val_clone = self.value.clone();
+                    let self_arc = Arc::clone(&self_arc);
                     make_native_method(
                         "extend",
                         move |args| {
-                            if let Some(item) = args.get("item") {
-                                if let (Value::List(list), Value::List(to_extend)) = (&val_clone, item) {
-                                    let mut new_list = list.clone();
-                                    new_list.extend(to_extend.clone());
-                                    return Value::List(new_list);
+                            if let Some(Value::List(to_extend)) = args.get("item") {
+                                let mut locked = self_arc.lock().unwrap();
+                                if let Value::List(list) = &mut locked.value {
+                                    list.extend(to_extend.clone());
+                                    return Value::List(list.clone());
                                 }
                             }
                             Value::Null
@@ -869,16 +870,17 @@ impl Variable {
                 };
 
                 let into = {
-                    let val_clone = self.value.clone();
+                    let self_arc = Arc::clone(&self_arc);
                     make_native_method(
                         "into",
                         move |args| {
+                            let locked = self_arc.lock().unwrap();
                             let type_ = args
                                 .get("ty")
                                 .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
                                 .unwrap_or_else(|| "any".to_string());
 
-                            let item_vec = match &val_clone {
+                            let item_vec = match &locked.value {
                                 Value::List(list) => list.clone(),
                                 _ => return Value::Error("TypeError", "Expected a list", None),
                             };
@@ -893,9 +895,7 @@ impl Variable {
 
                             Value::List(list)
                         },
-                        vec![
-                            Parameter::positional("ty", "type"),
-                        ],
+                        vec![Parameter::positional("ty", "type")],
                         "list",
                         true, true, true,
                         None,

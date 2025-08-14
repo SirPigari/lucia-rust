@@ -7,19 +7,26 @@ pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(Token::default);
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
 pub struct Location {
     pub file: String,
+    pub lucia_source_loc: String,
     pub line_string: String,
     pub line_number: usize,
     pub range: (usize, usize),
 }
 
 impl Location {
-    pub fn new(file: impl Into<String>, line_string: impl Into<String>, line_number: usize, range: (usize, usize)) -> Self {
+    pub fn new(file: impl Into<String>, line_string: impl Into<String>, line_number: usize, range: (usize, usize), lucia_source_loc: impl Into<String>) -> Self {
         Self {
             file: file.into(),
+            lucia_source_loc: lucia_source_loc.into(),
             line_string: line_string.into(),
             line_number,
             range,
         }
+    }
+
+    pub fn set_lucia_source_loc(mut self, lucia_source_loc: String) -> Self {
+        self.lucia_source_loc = lucia_source_loc;
+        self
     }
 }
 

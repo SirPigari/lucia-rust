@@ -387,6 +387,7 @@ impl Value {
                                 let mut line_string = String::new();
                                 let mut line_number = 0;
                                 let mut range = (0, 0);
+                                let mut lucia_source_loc = String::new();
     
                                 for (k, v) in loc_keys.iter().zip(loc_values.iter()) {
                                     match (k, v) {
@@ -407,6 +408,9 @@ impl Value {
                                                 );
                                             }
                                         }
+                                        (Value::String(s), Value::String(val)) if s == "_lucia_source_loc" => {
+                                            lucia_source_loc = val.clone();
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -416,6 +420,7 @@ impl Value {
                                     line_string,
                                     line_number,
                                     range,
+                                    lucia_source_loc,
                                 });
                             }
                             continue;

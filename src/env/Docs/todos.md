@@ -17,16 +17,16 @@ _Total TODOs found: 6_
 - i want to also implement transpiling to javascript just for fun because everyone hates js
 - stick to C for now
 
-### [`src/interpreter.rs:5782:1`](../../../src/interpreter.rs#L5782) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5809:1`](../../../src/interpreter.rs#L5809) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
 
-### [`src/main.rs:355:1`](../../../src/main.rs#L355) _(added by **SirPigari** on **2025-07-19**)_
+### [`src/main.rs:369:1`](../../../src/main.rs#L369) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:4323:1`](../../../src/interpreter.rs#L4323) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:4347:1`](../../../src/interpreter.rs#L4347) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
 ---

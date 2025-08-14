@@ -129,6 +129,7 @@ pub fn handle_error(
 ) {
     let use_colors = config.supports_color;
     let use_lucia_traceback = config.use_lucia_traceback;
+    let debug = config.debug;
 
     let format_location = |loc: &Location| -> String {
         match loc {
@@ -148,6 +149,7 @@ pub fn handle_error(
             None => {
                 dummy_loc = Location {
                     file: "<unknown>".into(),
+                    lucia_source_loc: "<unknown>".into(),
                     line_string: String::new(),
                     line_number: 0,
                     range: (0, 0),
@@ -156,6 +158,11 @@ pub fn handle_error(
             }
         };
 
+        let lucia_source_loc = if debug && (loc.lucia_source_loc != "<unknown>") && !loc.lucia_source_loc.is_empty() {
+            format!("Raised from {}\n", loc.lucia_source_loc.clone())
+        } else {
+            String::new()
+        };
         let file_name = loc.file.strip_prefix(r"\\?\").unwrap_or(&loc.file);
         let line_number = loc.line_number;
         let range = loc.range;
@@ -196,6 +203,13 @@ pub fn handle_error(
                 arrows_under.replace_range(start..end, &"^".repeat(len.max(1)));
             }
         }
+
+        trace.push_str(&format!(
+            "{}{}{}",
+            hex_to_ansi(&config.color_scheme.debug, use_colors),
+            lucia_source_loc,
+            hex_to_ansi("reset", use_colors),
+        ));
 
         trace.push_str(&format!(
             "{}-> File '{}:{}:{}' got error:\n",

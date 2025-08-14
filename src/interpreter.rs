@@ -47,6 +47,7 @@ use reqwest;
 use serde_urlencoded;
 use std::io::{stdout, Write};
 use std::sync::Mutex;
+use std::panic::Location as PanicLocation;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -886,19 +887,36 @@ impl Interpreter {
         Ok(self.return_value.clone())
     }
 
+    #[track_caller]
     fn get_location_from_current_statement(&self) -> Option<Location> {
         match &self.current_statement {
-            Some(Statement::Statement { loc, .. }) => loc.clone(),
+            Some(Statement::Statement { loc, .. }) => match loc {
+                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+                None => None,
+            },
             _ => None,
         }
     }
 
+    fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
+        match &self.current_statement {
+            Some(Statement::Statement { loc, .. }) => match loc {
+                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[track_caller]
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Value {
-        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+        let rust_loc = PanicLocation::caller();
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
             line_string: "".to_string(),
             line_number: 0,
             range: (0, 0),
+            lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
         });
 
         self.err = Some(Error {
@@ -912,12 +930,15 @@ impl Interpreter {
         NULL
     }
 
+    #[track_caller]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
-        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+        let rust_loc = PanicLocation::caller();
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
             line_string: "".to_string(),
             line_number: 0,
             range: (0, 0),
+            lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
         });
 
         self.err = Some(Error {
@@ -931,12 +952,15 @@ impl Interpreter {
         NULL
     }
 
+    #[track_caller]
     pub fn raise_with_ref(&mut self, error_type: &str, msg: &str, ref_err: Error) -> Value {
-        let loc = self.get_location_from_current_statement().unwrap_or_else(|| Location {
+        let rust_loc = PanicLocation::caller();
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
             line_string: "".to_string(),
             line_number: 0,
             range: (0, 0),
+            lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
         });
 
         self.err = Some(Error {
@@ -4680,6 +4704,7 @@ impl Interpreter {
 
                 let mut loc = Location {
                     file: self.file_path.clone(),
+                    lucia_source_loc: "<unknown>".into(),
                     line_string: "".to_string(),
                     line_number: 0,
                     range: (0, 0),
@@ -4704,6 +4729,9 @@ impl Interpreter {
                             let end = end.to_i64().unwrap_or(0).max(0) as usize;
                             loc.range = (start, end);
                         }                        
+                    }
+                    if let Some(Value::String(lucia_source_loc)) = loc_map.get(&Value::String("_lucia_source_loc".to_string())) {
+                        loc.lucia_source_loc = lucia_source_loc.clone();
                     }
                 }
 
@@ -5742,7 +5770,6 @@ impl Interpreter {
                 return self.raise("RuntimeError", to_static(err.to_string()));
             }
         };
-        
     
         let method_name = method.as_str();
         let object_value = self.evaluate(object.convert_to_statement());

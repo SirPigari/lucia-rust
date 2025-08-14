@@ -253,11 +253,14 @@ impl Lexer {
                 let column_start = token_start_orig.saturating_sub(line_offset);
                 let column_end = token_end_orig.saturating_sub(line_offset);
 
+                let rust_loc = std::panic::Location::caller();
+
                 let location = Some(Location::new(
                     self.file_path.clone(),
                     self.code[line_offset..line_end].to_string(),
                     line_number + 1,
                     (column_start, column_end),
+                    format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
                 ));
 
                 let match_text = &code[token_start..token_end];

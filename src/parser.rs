@@ -40,36 +40,42 @@ impl Parser {
     }
 
     #[cold]
+    #[track_caller]
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Statement {
+        let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            loc: self.get_loc(),
+            loc: self.get_loc_caller(*rust_loc),
             ref_err: None,
         });
         Statement::Null
     }
 
     #[cold]
+    #[track_caller]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Statement {
+        let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: Some(help.to_string()),
-            loc: self.get_loc(),
+            loc: self.get_loc_caller(*rust_loc),
             ref_err: None,
         });
         Statement::Null
     }
 
     #[cold]
+    #[track_caller]
     pub fn raise_with_loc(&mut self, error_type: &str, msg: &str, loc: Location) -> Statement {
+        let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
             error_type: error_type.to_string(),
             msg: msg.to_string(),
             help: None,
-            loc: Some(loc),
+            loc: Some(loc.set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()))),
             ref_err: None,
         });
         Statement::Null
@@ -156,7 +162,29 @@ impl Parser {
         } else {
             None
         }
-    }     
+    }
+
+    pub fn get_loc_caller(&mut self, rust_loc: std::panic::Location) -> Option<Location> {
+        if let Some(token) = self.token() {
+            if token.2.is_some() {
+                Some(token.2.clone().unwrap().set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column())))
+            } else if self.pos > 0 {
+                match self.tokens.get(self.pos - 1).and_then(|t| t.2.clone()) {
+                    Some(loc) => Some(loc.set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()))),
+                    None => None,
+                }
+            } else {
+                None
+            }
+        } else if self.pos > 0 {
+            match self.tokens.get(self.pos - 1).and_then(|t| t.2.clone()) {
+                Some(loc) => Some(loc.set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()))),
+                None => None,
+            }
+        } else {
+            None
+        }
+    }
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();

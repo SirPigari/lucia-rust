@@ -24,6 +24,7 @@ impl Error {
                 line_string: "".to_string(),
                 line_number: 0,
                 range: (0, 0),
+                lucia_source_loc: "<unknown>".to_string(),
             }),
             ref_err: None,
         }
@@ -59,6 +60,7 @@ impl Error {
                 line_string: "".to_string(),
                 line_number: 0,
                 range: (0, 0),
+                lucia_source_loc: "<unknown>".to_string(),
             }),
             ref_err: None,
         }
@@ -74,6 +76,7 @@ impl Error {
                 line_string: "".to_string(),
                 line_number: 0,
                 range: (0, 0),
+                lucia_source_loc: "<unknown>".to_string(),
             }),
             ref_err: Some(Box::new(ref_err)),
         }

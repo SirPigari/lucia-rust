@@ -142,6 +142,7 @@ impl Statement {
                         let mut line_string = "".to_string();
                         let mut line_number = 0;
                         let mut range = (0, 0);
+                        let mut lucia_source_loc = "".to_string();
 
                         for (lk, lv) in loc_keys.iter().zip(loc_values.iter()) {
                             match (lk, lv) {
@@ -162,6 +163,9 @@ impl Statement {
                                         );
                                     }
                                 }
+                                (Value::String(s), Value::String(val)) if s == "_lucia_source_loc" => {
+                                    lucia_source_loc = val.clone();
+                                }
                                 _ => {}
                             }
                         }
@@ -171,6 +175,7 @@ impl Statement {
                             line_string,
                             line_number,
                             range,
+                            lucia_source_loc
                         });
                     }
                 } else {
