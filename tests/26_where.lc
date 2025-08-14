@@ -1,0 +1,38 @@
+#include <std/macros>
+
+// sqrt must be with () around it
+// (i dont like pythons style of 'from math import sqrt' so this is my way)
+import (sqrt) from math
+
+a: int = 42
+b: int = 69
+
+sq := sqrt(sqA + sqB) 
+    where
+        sqA = a * a
+        sqB = b * b
+    end
+
+assert_err!(sqA)  // NameError: Variable 'sqA' is not defined.
+assert_approx_eq!(sq, 80.77747210701756)
+
+c: int = 137
+d: int = 256
+
+sq2 := sqrt(sqC + sqD) 
+    where
+        sqC = c * c
+        sqD = d * d
+    then round(2)
+
+assert_eq!(sq2, 290.35)
+
+sq3 := sqrt(sqC + sqD) 
+    where
+        sqC = c * c
+        sqD = d * d
+    then round(2)
+    then * sqD
+    then format(sep="'")
+
+assert_eq!(sq3, "19'028'377.6")

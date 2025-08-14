@@ -6438,11 +6438,21 @@ impl Interpreter {
         let pos_args = match statement.get(&Value::String("pos_arguments".to_string())) {
             Some(Value::List(args)) => {
                 args.iter()
-                    .map(|stmt| self.evaluate(stmt.clone().convert_to_statement()))
+                    .map(|stmt| {
+                        if self.err.is_none() {
+                            self.evaluate(stmt.clone().convert_to_statement())
+                        } else {
+                            NULL
+                        }
+                    })
                     .collect::<Vec<Value>>()
             }
-            _ => return self.raise("TypeError", "Expected a list for function arguments"),
+            _ => return self.raise("RuntimeError", "Expected a list for function arguments"),
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let named_args = match statement.get(&Value::String("named_arguments".to_string())) {
             Some(Value::Map { keys, values }) => {

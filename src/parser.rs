@@ -389,6 +389,315 @@ impl Parser {
                     }
                 }
 
+                // fucking shit
+                ("IDENTIFIER", "where") => {
+                    self.next();
+                    let loc = self.get_loc();
+                    let mut body: Vec<Statement> = Vec::new();
+                    enum ThenOp {
+                        Call(String, Value, Value),
+                        Op(String, Statement)
+                    }
+                    let mut then_body: Vec<ThenOp> = Vec::new();
+                    let mut variable_names: Vec<String> = vec![];
+                    if self.token_is("SEPARATOR", ":") {
+                        self.next();
+                    }
+                    while let Some(tok) = self.token() {
+                        if tok.1 == "end" || tok.1 == "then" {
+                            break;
+                        }
+                        let stmt = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        if !["VARIABLE_DECLARATION", "ASSIGNMENT"].contains(&stmt.get_type().as_str()) {
+                            self.raise("SyntaxError", "Expected variable declaration in 'where' clause");
+                            return Statement::Null;
+                        }
+                        if stmt.get_type() == "ASSIGNMENT" {
+                            let left = stmt.get_value("left").unwrap_or(Value::Null).convert_to_statement();
+                            if left.get_type() != "VARIABLE" {
+                                self.raise("SyntaxError", "Expected variable on the left side of assignment in 'where' clause");
+                                return Statement::Null;
+                            }
+                            let right = stmt.get_value("right").unwrap_or(Value::Null);
+                            let var_name = left.get_value("name").unwrap_or(Value::Null).to_string();
+                            variable_names.push(var_name.clone());
+                            body.push(
+                                Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("name".to_string()),
+                                        Value::String("var_type".to_string()),
+                                        Value::String("value".to_string()),
+                                        Value::String("modifiers".to_string()),
+                                        Value::String("is_default".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("VARIABLE_DECLARATION".to_string()),
+                                        Value::String(var_name),
+                                        Statement::Statement {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("value".to_string()),
+                                                Value::String("type_kind".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String("TYPE".to_string()),
+                                                Value::String("any".to_string()),
+                                                Value::String("simple".to_string()),
+                                            ],
+                                            loc: loc.clone(),
+                                        }.convert_to_map(),
+                                        right,
+                                        Value::List(vec![]),
+                                        Value::Boolean(false),
+                                    ],
+                                    loc: loc.clone(),
+                                }
+                            )
+                        } else {
+                            let var_name = stmt.get_value("name").unwrap_or(Value::Null).to_string();
+                            variable_names.push(var_name);
+                            body.push(stmt);
+                        }
+                    }
+
+                    if !self.token_is("IDENTIFIER", "end") && !self.token_is("IDENTIFIER", "then") {
+                        self.raise_with_help("SyntaxError", "Expected 'end' after 'where' body", "Did you forget to add 'end'?");
+                        return Statement::Null;
+                    }
+                    if self.token_is("IDENTIFIER", "end") {
+                        self.next();
+                    }
+                    while self.token_is("IDENTIFIER", "then") || self.token_is("IDENTIFIER", "end") {
+                        if self.token_is("IDENTIFIER", "end") {
+                            self.next();
+                            break;
+                        }
+                        self.next();
+
+                        if let Some(tok) = self.token() && tok.0 == "OPERATOR" {
+                            let op = tok.1.clone();
+                            self.next();
+                            let right = self.parse_primary();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            then_body.push(ThenOp::Op(op, right));
+                        } else {
+                            let then_expr = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            if then_expr.get_type().as_str() != "CALL" {
+                                self.raise("SyntaxError", "Expected function call after 'then' in 'where' clause");
+                                return Statement::Null;
+                            }
+
+                            let name = then_expr.get_value("name").unwrap_or_else(|| {
+                                self.raise("SyntaxError", "Expected 'name' in function call after 'then' in 'where' clause");
+                                Value::Null
+                            });
+                            let pos_args = then_expr.get_value("pos_arguments").unwrap_or(Value::List(vec![]));
+                            let named_args = then_expr.get_value("named_arguments").unwrap_or(Value::Map {
+                                keys: vec![],
+                                values: vec![],
+                            });
+
+                            then_body.push(ThenOp::Call(name.to_string(), pos_args, named_args));
+                        }
+                    }
+
+                    // expr where x = y + 1
+                    // =>
+                    // \ x := y + 1 res := expr forget (x) return res \
+                    // expr where x = y + 1 then call(<args>) end
+                    // =>
+                    // \ x := y + 1 res := expr forget (x) return call(res, <args>) \
+                    let mangled_res_name = format!("where_res_{}", self.pos);
+                    let mut group_body = vec![];
+                    group_body.extend(body.into_iter().map(|e| e.convert_to_map()));
+                    group_body.push(
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("name".to_string()),
+                                Value::String("var_type".to_string()),
+                                Value::String("value".to_string()),
+                                Value::String("modifiers".to_string()),
+                                Value::String("is_default".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("VARIABLE_DECLARATION".to_string()),
+                                Value::String(mangled_res_name.clone()),
+                                Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("value".to_string()),
+                                        Value::String("type_kind".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("TYPE".to_string()),
+                                        Value::String("any".to_string()),
+                                        Value::String("simple".to_string()),
+                                    ],
+                                    loc: loc.clone(),
+                                }.convert_to_map(),
+                                expr.convert_to_map(),
+                                Value::List(vec![]),
+                                Value::Boolean(false),
+                            ],
+                            loc: loc.clone(),
+                        }.convert_to_map(),
+                    );
+                    for then_op in then_body {
+                        group_body.push(
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("left".to_string()),
+                                    Value::String("right".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("ASSIGNMENT".to_string()),
+                                    Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("name".to_string())
+                                        ],
+                                        values: vec![
+                                            Value::String("VARIABLE".to_string()),
+                                            Value::String(mangled_res_name.clone())
+                                        ],
+                                        loc: loc.clone(),
+                                    }.convert_to_map(),
+                                    match then_op {
+                                        ThenOp::Call(function_name, pos_args, named_args) => {
+                                            Statement::Statement {
+                                                keys: vec![
+                                                    Value::String("type".to_string()),
+                                                    Value::String("method".to_string()),
+                                                    Value::String("object".to_string()),
+                                                    Value::String("pos_args".to_string()),
+                                                    Value::String("named_args".to_string()),
+                                                ],
+                                                values: vec![
+                                                    Value::String("METHOD_CALL".to_string()),
+                                                    Value::String(function_name),
+                                                    Statement::Statement {
+                                                        keys: vec![
+                                                            Value::String("type".to_string()),
+                                                            Value::String("name".to_string())
+                                                        ],
+                                                        values: vec![
+                                                            Value::String("VARIABLE".to_string()),
+                                                            Value::String(mangled_res_name.clone())
+                                                        ],
+                                                        loc: loc.clone(),
+                                                    }.convert_to_map(),
+                                                    pos_args,
+                                                    named_args,
+                                                ],
+                                                loc: loc.clone(),
+                                            }.convert_to_map()
+                                        }
+                                        ThenOp::Op(op, val) => {
+                                            Statement::Statement {
+                                                keys: vec![
+                                                    Value::String("type".to_string()),
+                                                    Value::String("operator".to_string()),
+                                                    Value::String("left".to_string()),
+                                                    Value::String("right".to_string()),
+                                                ],
+                                                values: vec![
+                                                    Value::String("OPERATION".to_string()),
+                                                    Value::String(op.to_string()),
+                                                    Statement::Statement {
+                                                        keys: vec![
+                                                            Value::String("type".to_string()),
+                                                            Value::String("name".to_string()),
+                                                        ],
+                                                        values: vec![
+                                                            Value::String("VARIABLE".to_string()),
+                                                            Value::String(mangled_res_name.clone()),
+                                                        ],
+                                                        loc: loc.clone(),
+                                                    }.convert_to_map(),
+                                                    val.convert_to_map()
+                                                ],
+                                                loc: loc.clone(),
+                                            }.convert_to_map()
+                                        }
+                                    }
+                                ],
+                                loc: loc.clone(),
+                            }.convert_to_map()
+                        );
+                    }
+                    for var_name in variable_names {
+                        group_body.push(
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("value".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("FORGET".to_string()),
+                                    Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("name".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("VARIABLE".to_string()),
+                                            Value::String(var_name),
+                                        ],
+                                        loc: loc.clone(),
+                                    }.convert_to_map(),
+                                ],
+                                loc: loc.clone(),
+                            }.convert_to_map()
+                        );
+                    }
+                    group_body.push(
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("value".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("RETURN".to_string()),
+                                Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("name".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("VARIABLE".to_string()),
+                                        Value::String(mangled_res_name),
+                                    ],
+                                    loc: loc.clone(),
+                                }.convert_to_map(),
+                            ],
+                            loc: loc.clone(),
+                        }.convert_to_map()
+                    );
+                    return Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("expressions".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("GROUP".to_string()),
+                            Value::List(group_body)
+                        ],
+                        loc: loc.clone(),
+                    };
+                }
+
                 ("OPERATOR", "?") => {
                     let loc = self.get_loc();
                     self.next();
@@ -2265,12 +2574,17 @@ impl Parser {
                                         self.raise("SyntaxError", "Expected identifier or string after 'from'");
                                         return Statement::Null;
                                     };
-                                }
-
-                                if !self.token_is("IDENTIFIER", "as") && !self.token_is("EOF", "") {
-                                    from_path = Some(self.parse_primary());
-                                    if self.err.is_some() {
-                                        return Statement::Null;
+                                    
+                                    if self.token_is("IDENTIFIER", "from") {
+                                        self.next();
+                                        from_path = Some(self.parse_primary());
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                    }
+                                } else {
+                                    if !is_named_import && !self.token_is("IDENTIFIER", "as") && !self.token_is("EOF", "") {
+                                        from_path = Some(self.parse_primary());
                                     }
                                 }
                             } else if is_named_import {

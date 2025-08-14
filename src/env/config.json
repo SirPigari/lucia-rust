@@ -8,8 +8,8 @@
   "cache_format": "no_cache",
   "allow_fetch": true,
   "allow_unsafe": true,
-  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
-  "stack_size": 67108864,
+  "home_dir": "C:\\Users\\Ja\\Desktop\\projects\\lucia-rust\\src\\env",
+  "stack_size": 16777216,
   "version": "2.0.0",
   "color_scheme": {
     "exception": "#F44350",

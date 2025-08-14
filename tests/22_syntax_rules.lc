@@ -1,5 +1,8 @@
 #include <std/macros>
 
+// syntax rules are local to the file they are defined in
+// they cannot be exported or imported
+
 #syntax echo: "@echo\\s+\"((?:\\\\.|[^\"\\\\])*)\"" -> "print(\"$1\")"
 
 @echo "hello world"
