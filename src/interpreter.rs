@@ -167,6 +167,7 @@ impl Interpreter {
         insert_builtin("len", Value::Function(native::len_fn()));
         insert_builtin("help", Value::Function(native::help_fn()));
         insert_builtin("type_of", Value::Function(native::type_fn()));
+        insert_builtin("size_of", Value::Function(native::size_of_fn()));
         insert_builtin("sum", Value::Function(native::sum_fn()));
         insert_builtin("ord", Value::Function(native::ord_fn()));
         insert_builtin("char", Value::Function(native::char_fn()));

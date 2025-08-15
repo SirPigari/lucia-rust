@@ -32,6 +32,7 @@ mod env {
         pub mod internal_structs;
         pub mod precompile;
         pub mod cache;
+        // pub mod gc;
     }
     pub mod libs {
         pub mod math {
@@ -76,8 +77,8 @@ mod env {
             pub mod ffi;
         }
     }
-    pub mod transpiler {
-        pub mod transpiler;
+    pub mod bundler {
+        pub mod bundle;
     }
 }
 
@@ -86,7 +87,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme, Libs};
-use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys, unique_temp_name, KEYWORDS};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys, KEYWORDS};
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -99,7 +100,7 @@ use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, s
 use crate::parser::Parser;
 use crate::lexer::{Lexer, SyntaxRule};
 use crate::interpreter::Interpreter;
-use crate::env::transpiler::transpiler::Transpiler;
+use crate::env::bundler::bundle::bundle_to_exe;
 
 const VERSION: &str = env!("VERSION");
 
@@ -796,35 +797,10 @@ fn lucia(
     dump_dir: (String, bool),
     dump_pp_flag: bool,
     dump_ast_flag: bool,
-    run_flag: bool,
-    c_compiler: &str,
-    compile_flag: bool,
     disable_preprocessor: bool,
     argv: Vec<String>,
-    quiet_flag: bool
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
-    if compile_flag {
-        if non_flag_args.is_empty() {
-            eprintln!("No files provided to compile. Exiting.");
-            exit(1);
-        }
-        let result = compile(&config, non_flag_args.clone(), cwd, home_dir_path, config_path, dump_dir, dump_pp_flag, dump_ast_flag, run_flag, c_compiler);
-        match result {
-            Ok(message) => {
-                if !quiet_flag {
-                    println!("{}", message);
-                }
-                exit(0);
-            }
-            Err((code, errors)) => {
-                for error in errors {
-                    handle_error(&error, "", &config);
-                }
-                exit(code);
-            }
-        }
-    }
 
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
@@ -1452,186 +1428,48 @@ fn repl(
     }
 }
 
-fn compile(
-    config: &Config,
+fn bundle(
+    main_file: &str,
+    output_path: &str,
     files: Vec<String>,
     cwd: PathBuf,
-    home_dir_path: PathBuf,
     config_path: PathBuf,
-    dump_dir: (&str, bool),
-    dump_pp_flag: bool,
-    dump_ast_flag: bool,
     run_flag: bool,
-    c_compiler: &str,
+    std_libs: (bool, Vec<String>),
+    args: Vec<String>,
+    quiet_flag: bool,
+    command_to_run: Option<String>,
+    opt_level: String,
 ) -> Result<String, (i32, Vec<Error>)> {
-    std_env::set_current_dir(&cwd).ok();
-    for file in &files {
-        let mut errors: Vec<Error> = vec![];
-        let path = Path::new(file);
-        if !path.exists() || !path.is_file() {
-            return Err((1, vec![Error::new("FileNotFoundError", &format!("File '{}' does not exist or is not a valid file", file), file)]));
-        }
-        let mut lexer = Lexer::new(&fs::read_to_string(path).unwrap(), file, None);
-        let raw_tokens = lexer.tokenize();
-        let processed_tokens = {
-            let mut preprocessor = Preprocessor::new(
-                home_dir_path.join("libs"),
-                file,
-            );
-            match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
-                Ok(tokens) => tokens,
-                Err(e) => {
-                    return Err((1, vec![e]));
-                }
-            }
-        };
-        if dump_pp_flag && !processed_tokens.is_empty() {
-            let path = if dump_dir.1 {
-                dump_dir.0
-            } else {
-                path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
-            };
-            dump_pp(
-                processed_tokens.iter().collect(),
-                &path,
-                &Path::new(&file).file_name().unwrap_or_default().to_str().unwrap_or(""),
-                config,
-            );
-        }
-        let mut parser = Parser::new(processed_tokens);
-        let ast = match parser.parse_safe() {
-            Ok(stmts) => stmts,
-            Err(error) => {
-                errors.push(error);
-                return Err((1, errors));
-            }
-        };
-        if dump_ast_flag && !ast.is_empty() {
-            let file_path = path.with_extension("ast");
-            let path = if dump_dir.1 {
-                dump_dir.0
-            } else {
-                &file_path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
-            };
-            dump_ast(
-                ast.iter().collect(),
-                path,
-                &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
-                &config,
-            );
-        }
-        let mut transpiler = Transpiler::new(
-            ast,
-            config.clone(),
-            cwd.clone(),
-            home_dir_path.clone(),
-            config_path.clone(),
-        );
-        let c_code = match transpiler.transpile() {
-            Ok(code) => code,
-            Err(t_errors) => {
-                errors.extend(t_errors);
-                return Err((1, errors));
-            }
-        };
-
-        let c_path = unique_temp_name("c", &home_dir_path);
-
-        let mut c_file = match File::create(&c_path) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("Failed to create temp C file: {e}");
-                return Err((1, errors));
-            }
-        };
-
-        if let Err(e) = write!(c_file, "{}", c_code) {
-            eprintln!("Failed to write to C file: {e}");
-            return Err((1, errors));
-        }
-
-        let binary_path = {
-            let mut path = PathBuf::from(file);
-            if cfg!(windows) {
-                path.set_extension("exe");
-            } else {
-                path.set_extension("");
-            }
-            path
-        };
-
-        let mut compile_cmd = match c_compiler {
-            "gcc" | "clang" | "cc" => {
-                let mut cmd = Command::new(c_compiler);
-                cmd.arg(&c_path)
-                    .arg("-o")
-                    .arg(&binary_path)
-                    .arg("-O2");
-                cmd
-            }
-
-            "tcc" => {
-                let mut cmd = Command::new("tcc");
-                cmd.arg(&c_path)
-                    .arg("-o")
-                    .arg(&binary_path)
-                    .arg("-O");
-                cmd
-            }
-
-            "cl" => {
-                let mut cmd = Command::new("cl");
-                cmd.arg(&c_path)
-                    .arg(format!("/Fe:{}", binary_path.to_string_lossy()))
-                    .arg("/O2")
-                    .arg("/nologo");
-                cmd
-            }
-
-            other => {
-                let mut cmd = Command::new(other);
-                cmd.arg(&c_path)
-                    .arg("-o")
-                    .arg(&binary_path)
-                    .arg("-O2");
-                cmd
-            }
-        };
-
-        let output = match compile_cmd.output() {
-            Ok(out) => out,
-            Err(e) => {
-                eprintln!("Failed to invoke compiler '{c_compiler}': {e}");
-                return Err((1, errors));
-            }
-        };
-
-        if !output.status.success() {
-            eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
-            return Err((1, errors));
-        }
-
-        if run_flag {
-            let status = match Command::new(&binary_path).status() {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Failed to run binary: {e}");
-                    return Err((1, errors));
-                }
-            };
-
-            if !status.success() {
-                eprintln!("Program exited with non-zero status: {status}");
-                return Err((1, errors));
-            }
-        }
-        
-    }
-    Ok(String::new())
+    std::env::set_current_dir(&cwd).map_err(|e| (1, vec![Error::new("IOError", &format!("Failed to set current directory: {}", e), "<bundle>")]))?;
+    let libraries = if std_libs.0 {
+        let libs = crate::env::runtime::libs::_STD_LIBS
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .collect::<Vec<String>>();
+        libs
+    } else {
+        std_libs.1
+    };
+    
+    let res = bundle_to_exe(
+        &config_path.to_str().unwrap_or("config.json"),
+        &output_path,
+        main_file,
+        files.iter().map(|f| f.to_string()).collect(),
+        libraries,
+        args.iter().map(|a| a.to_string()).collect(),
+        command_to_run,
+        run_flag,
+        &opt_level,
+        quiet_flag,
+    );
+    return res;
 }
 
 fn main() {
-    let args: HashSet<String> = std_env::args().collect();
+    let vec_args: Vec<String> = std_env::args().collect();
+    let args: HashSet<String> = vec_args.clone().into_iter().collect();
 
     panic::set_hook(Box::new(|panic_info| {
         const CUSTOM_PANIC_MARKER: u8 = 0x1B;
@@ -1706,7 +1544,7 @@ fn main() {
         })
         .unwrap();
     
-    let libs_path = exe_path
+    let mut libs_path = exe_path
         .parent()
         .map(|p| p.join("..").join("libs.json"))
         .ok_or_else(|| {
@@ -1714,15 +1552,6 @@ fn main() {
             exit(1);
         })
         .unwrap();
-
-    
-    if !config_path.exists() {
-        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
-        if let Err(e) = std::fs::write(&config_path, "{}") {
-            eprintln!("Failed to create empty config file: {}", e);
-            exit(1);
-        }
-    }
     
     let commands = [
         ("--activate, -a", "Activate the environment"),
@@ -1764,15 +1593,117 @@ fn main() {
     let mut dump_pp_flag = false;
     let mut dump_ast_flag = false;
     let mut allow_unsafe = false;
-    let mut compile_flag = false;
-    let mut run_flag = false;
     let mut debug_mode_flag = false;
     let mut stack_size: (usize, bool) = (16_777_216, false);
     let mut dump_dir: (String, bool) = (".".to_string(), false);
     let mut cache: (CacheFormat, bool) = (CacheFormat::NoCache, false);
     let mut cls_cache_flag = false;
-    let mut c_compiler = "gcc".to_string();
     let mut argv_arg: Option<String> = None;
+
+    if args.contains("--bundle") || args.contains("-b") {
+        let args: Vec<String> = vec_args.clone();
+        let mut main_file = String::new();
+        let mut output_path = String::new();
+        let mut files = Vec::new();
+        let mut std_libs = (true, Vec::new());
+        let mut run_flag = false;
+        let mut opt_level = "0".to_string();
+        let mut command_to_run: Option<String> = None;
+        let mut i = 1;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--output" | "-o" => {
+                    if i + 1 < args.len() {
+                        output_path = args[i + 1].clone();
+                        i += 1;
+                    } else {
+                        eprintln!("Error: --output requires a value.");
+                        exit(1);
+                    }
+                }
+                "--" | "-f" => {
+                    if i + 1 < args.len() {
+                        files.push(args[i + 1].clone());
+                        i += 1;
+                    } else {
+                        eprintln!("Error: -- or -f requires a value.");
+                        exit(1);
+                    }
+                }
+                "--bundle" | "-b" => {}
+                "--quiet" | "-q" => quiet_flag = true,
+                "--std-libs" => std_libs.0 = true,
+                "--no-std-libs" | "-ns" => std_libs.0 = false,
+                "--run" | "-r" => run_flag = true,
+                "--cmd" | "-c" => {
+                    if i + 1 < args.len() {
+                        command_to_run = Some(args[i + 1].clone());
+                        i += 1;
+                    } else {
+                        eprintln!("Error: --cmd requires a value.");
+                        exit(1);
+                    }
+                }
+                arg if arg.starts_with("--std-lib=") => {
+                    let lib = arg["--std-lib=".len()..].to_string();
+                    std_libs.1.push(lib);
+                }
+                arg if arg.starts_with("-O") => {
+                    opt_level = arg[2..].to_string();
+                    if !["0", "1", "2", "3", "s", "S", "z", "Z"].contains(&opt_level.as_str()) {
+                        eprintln!("Error: Invalid optimization level '{}'. Use 0, 1, 2, 3, s, S, z, or Z.", opt_level);
+                        exit(1);
+                    }
+                }
+                _ => {
+                    if main_file.is_empty() && !(args[i].starts_with('-')) {
+                        main_file = args[i].clone();
+                        if !(PathBuf::from(&main_file).exists() && PathBuf::from(&main_file).is_file()) {
+                            eprintln!("Error: Main file '{}' does not exist.", main_file);
+                            exit(1);
+                        }
+                    } else {
+                        eprintln!("Error: Unexpected argument '{}'.", args[i]);
+                        exit(1);
+                    }
+                }
+            }
+            i += 1;
+        }
+        if main_file.is_empty() {
+            eprintln!("Error: Main file is required for bundling.");
+            exit(1);
+        }
+        if output_path.is_empty() {
+            output_path = format!("{}.exe", PathBuf::from(&main_file).file_stem().unwrap_or_default().to_str().unwrap_or_else(|| {
+                eprintln!("Error: Invalid main file name '{}'.", main_file);
+                exit(1);
+            }));
+        }
+        if cfg!(not(target_os = "windows")) {
+            eprintln!("Error: Bundling is only supported on Windows.");
+            exit(1);
+        }
+        bundle(
+            &main_file,
+            &output_path,
+            files,
+            cwd.clone(),
+            config_path.clone(),
+            run_flag,
+            std_libs,
+            args,
+            quiet_flag,
+            command_to_run,
+            opt_level,
+        ).unwrap_or_else(|(code, errors)| {
+            for error in errors {
+                handle_error(&error, &main_file, &Config::default());
+            }
+            exit(code);
+        });
+        exit(0);
+    }
 
     for arg in &args {
         match arg.as_str() {
@@ -1789,8 +1720,6 @@ fn main() {
             "--dump-ast" => dump_ast_flag = true,
             "--dump" => { dump_pp_flag = true; dump_ast_flag = true; }
             "--allow-unsafe" => allow_unsafe = true,
-            "--compile" | "-c" => compile_flag = true,
-            "--run" | "-r" => run_flag = true,
             "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
             arg if arg.starts_with("--stack-size=") => {
                 if let Ok(size) = arg["--stack-size=".len()..].parse::<usize>() {
@@ -1864,9 +1793,6 @@ fn main() {
                 });
                 cache = (format, true);
             },
-            arg if arg.starts_with("--c-compiler=") => {
-                c_compiler = arg["--c-compiler=".len()..].to_string();
-            },
             arg if arg.starts_with("--argv=") => {
                 argv_arg = Some(arg["--argv=".len()..].to_string());
             },
@@ -1923,19 +1849,23 @@ fn main() {
     }
 
     if config_arg.is_some() {
-        let config_path_str = config_arg
-            .unwrap()
-            .split('=')
-            .nth(1)
-            .unwrap_or("")
-            .to_string();
+        let config_path_str = config_arg.as_ref().unwrap();
         if config_path_str.is_empty() {
             eprintln!("No config path provided. Use --config=<path> to specify a config file.");
             exit(1);
         }
         config_path = PathBuf::from(config_path_str);
+        libs_path = config_path.parent().unwrap().join("libs");
         if !config_path.exists() {
             eprintln!("Config file does not exist: {}", config_path.display());
+            exit(1);
+        }
+    }
+
+    if !config_path.exists() {
+        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
+        if let Err(e) = std::fs::write(&config_path, "{}") {
+            eprintln!("Failed to create empty config file: {}", e);
             exit(1);
         }
     }
@@ -2306,12 +2236,8 @@ fn main() {
                 dump_dir,
                 dump_pp_flag,
                 dump_ast_flag,
-                run_flag,
-                &c_compiler,
-                compile_flag,
                 disable_preprocessor,
                 argv,
-                quiet_flag
             );
         })
         .unwrap();

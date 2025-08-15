@@ -116,4 +116,11 @@ impl Object {
             _ => None,
         }
     }
+
+    pub fn get_size(&self) -> usize {
+        match self {
+            Object::Class(c) => std::mem::size_of::<Class>() + c.meta.properties.len() * std::mem::size_of::<Variable>(),
+            Object::Instance(_, props) => std::mem::size_of::<Class>() + props.len() * std::mem::size_of::<Variable>(),
+        }
+    }
 }

@@ -545,6 +545,31 @@ impl Value {
             Value::Error(..) => Type::new_simple("error"),
         }
     }
+    pub fn get_size(&self) -> usize {
+        match self {
+            Value::Float(_) => std::mem::size_of::<Float>(),
+            Value::Int(_) => std::mem::size_of::<Int>(),
+            Value::String(s) => s.len(),
+            Value::Boolean(_) => std::mem::size_of::<bool>(),
+            Value::Null => 0,
+            Value::Map { keys, values } => {
+                let mut final_size: usize = 0;
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    final_size += k.get_size() + v.get_size();
+                }
+                final_size
+            }
+            Value::List(v) => v.iter().map(|item| item.get_size()).sum(),
+            Value::Tuple(items) => items.iter().map(|item| item.get_size()).sum(),
+            Value::Bytes(b) => b.len(),
+            Value::Type(_) => std::mem::size_of::<Type>(),
+            Value::Function(func) => func.get_size(),
+            Value::Generator(generator) => generator.get_size(),
+            Value::Module(obj, _) => obj.get_size(),
+            Value::Pointer(p) => Arc::strong_count(p),
+            Value::Error(_, _, _) => std::mem::size_of::<Error>(),
+        }
+    }
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Boolean(b) => *b,

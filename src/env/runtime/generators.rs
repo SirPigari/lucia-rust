@@ -66,6 +66,7 @@ pub trait GeneratorIterator: Iterator<Item = Value> + Send + Sync {
     fn is_infinite(&self) -> bool {
         false
     }
+    fn get_size(&self) -> usize;
 }
 
 impl Clone for Box<dyn GeneratorIterator> {
@@ -212,6 +213,13 @@ impl Generator {
         }
     }
 
+    pub fn get_size(&self) -> usize {
+        match &self.inner.lock().unwrap().kind {
+            GeneratorType::Native(native) => native.get_size(),
+            GeneratorType::Custom(custom) => custom.get_size(),
+        }
+    }
+
     pub fn is_infinite(&self) -> bool {
         match &self.inner.lock().unwrap().kind {
             GeneratorType::Native(native) => native.iter.is_infinite(),
@@ -293,6 +301,12 @@ pub struct NativeGenerator {
     pub iteration: usize,
 }
 
+impl NativeGenerator {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + (*self.iter).get_size()
+    }
+}
+
 impl Clone for NativeGenerator {
     fn clone(&self) -> Self {
         Self {
@@ -323,6 +337,12 @@ pub struct CustomGenerator {
     pub index: usize,
     pub done: bool,
     pub loop_stack: Vec<Frame>,
+}
+
+impl CustomGenerator {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.body.len() * std::mem::size_of::<Statement>()
+    }
 }
 
 impl PartialEq for CustomGenerator {
@@ -913,6 +933,10 @@ impl GeneratorIterator for RangeValueIter {
     fn is_done(&self) -> bool {
         self.done
     }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.current.get_size() + self.end.get_size() + self.step.get_size()
+    }
 }
 
 impl GeneratorIterator for RangeLengthIter {
@@ -921,6 +945,10 @@ impl GeneratorIterator for RangeLengthIter {
     }
     fn is_done(&self) -> bool {
         self.done
+    }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
     }
 }
 
@@ -936,6 +964,10 @@ impl GeneratorIterator for InfRangeIter {
     fn is_infinite(&self) -> bool {
         true
     }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 impl GeneratorIterator for EnumerateIter {
@@ -945,6 +977,10 @@ impl GeneratorIterator for EnumerateIter {
 
     fn is_done(&self) -> bool {
         self.done
+    }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
     }
 }
 
@@ -956,6 +992,10 @@ impl GeneratorIterator for VecIter {
     fn is_done(&self) -> bool {
         self.done
     }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 impl GeneratorIterator for FilterIter {
@@ -966,6 +1006,10 @@ impl GeneratorIterator for FilterIter {
     fn is_done(&self) -> bool {
         self.done
     }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 impl GeneratorIterator for MapIter {
@@ -975,5 +1019,9 @@ impl GeneratorIterator for MapIter {
 
     fn is_done(&self) -> bool {
         self.done
+    }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
     }
 }

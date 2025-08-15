@@ -63,6 +63,12 @@ pub struct NativeFunction {
 }
 
 impl NativeFunction {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.meta.parameters.len() * std::mem::size_of::<Parameter>()
+    }
+}
+
+impl NativeFunction {
     pub fn new<F>(
         name: &str,
         func: F,
@@ -109,6 +115,12 @@ pub struct UserFunction {
     pub body: Vec<Statement>,
 }
 
+impl UserFunction {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.body.len() * std::mem::size_of::<Statement>()
+    }
+}
+
 impl Callable for UserFunction {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
@@ -123,6 +135,12 @@ impl Callable for UserFunction {
 pub struct NativeMethod {
     pub func: Arc<dyn NativeCallable>,
     pub meta: FunctionMetadata,
+}
+
+impl NativeMethod {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 impl Callable for NativeMethod {
@@ -141,6 +159,12 @@ pub struct UserFunctionMethod {
     pub meta: FunctionMetadata,
     pub body: Vec<Statement>,
     pub interpreter: Arc<Mutex<Interpreter>>,
+}
+
+impl UserFunctionMethod {
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.body.len() * std::mem::size_of::<Statement>()
+    }
 }
 
 impl Hash for UserFunctionMethod {
@@ -233,6 +257,15 @@ impl Function {
             Function::Custom(f) => f.metadata(),
             Function::NativeMethod(f) => f.metadata(),
             Function::CustomMethod(f) => f.metadata(),
+        }
+    }
+
+    pub fn get_size(&self) -> usize {
+        match self {
+            Function::Native(f) => f.get_size(),
+            Function::Custom(f) => f.get_size(),
+            Function::NativeMethod(f) => f.get_size(),
+            Function::CustomMethod(f) => f.get_size(),
         }
     }
 

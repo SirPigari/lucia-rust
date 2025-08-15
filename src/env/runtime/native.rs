@@ -239,6 +239,13 @@ fn type_name(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "No value provided for type_name()", None)
 }
 
+fn size_of(args: &HashMap<String, Value>) -> Value {
+    if let Some(value) = args.get("obj") {
+        return Value::Int(Int::from_i64(value.get_size() as i64));
+    }
+    Value::Error("TypeError", "No value provided for size_of()", None)
+}
+
 fn sum(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::List(values)) = args.get("args") {
         let mut total = Float::from_f64(0.0);
@@ -538,6 +545,19 @@ pub fn type_fn() -> Function {
             Parameter::positional("obj", "any"),
         ],
         "type",
+        true, true, true,
+        None,
+    )))
+}
+
+pub fn size_of_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "size_of",
+        size_of,
+        vec![
+            Parameter::positional("obj", "any"),
+        ],
+        "int",
         true, true, true,
         None,
     )))

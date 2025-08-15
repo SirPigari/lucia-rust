@@ -24,6 +24,8 @@ bincode = "2.0.1"
 zstd = "0.13.3"
 libloading = "0.8.8"
 libffi = "4.1.1"
+tar = "0.4.44"
+flate2 = { version = "1.1.2", default-features = false, features = ["zlib"] }
 
 [build-dependencies]
 winres = "0.1.12"

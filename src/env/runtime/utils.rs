@@ -8,10 +8,6 @@ use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, 
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::value::{Value};
-use serde_json::Value as JsonValue;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::path::PathBuf;
-use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
@@ -714,18 +710,6 @@ pub fn create_function(metadata: FunctionMetadata, body: Vec<Statement>) -> Valu
     }.into()))
 }
 
-pub fn create_note(text: &str, use_colors: Option<bool>, note_color: &str) -> String {
-    let use_colors = use_colors.unwrap_or(false);
-    format!(
-        "{}{}Note:{} {}{}",
-        hex_to_ansi(note_color, use_colors),
-        check_ansi("\x1b[1m", &use_colors),
-        check_ansi("\x1b[22m", &use_colors),
-        text,
-        hex_to_ansi("reset", use_colors)
-    )
-}
-
 pub fn parse_usize_radix(value: &str) -> Option<usize> {
     if let Some(stripped) = value.strip_prefix("0b") {
         usize::from_str_radix(stripped, 2).ok()
@@ -928,53 +912,6 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
     return map;
 }
 
-pub fn deep_get<'a>(root: &'a Value, path: &[Value]) -> Option<&'a Value> {
-    let mut cur = root;
-    for key in path {
-        match cur {
-            Value::Map { keys, values } => {
-                let i = keys.iter().position(|k| k == key)?;
-                cur = &values[i];
-            }
-            _ => return None,
-        }
-    }
-    Some(cur)
-}
-
-pub fn deep_insert(root: &mut Value, path: &[Value], val: Value) -> bool {
-    let mut cur = root;
-    for (i, key) in path.iter().enumerate() {
-        match cur {
-            Value::Map { keys, values } => {
-                if let Some(pos) = keys.iter().position(|k| k == key) {
-                    if i + 1 == path.len() {
-                        values[pos] = val.clone();
-                        return true;
-                    } else {
-                        cur = &mut values[pos];
-                    }
-                } else {
-                    keys.push(key.clone());
-                    let new_val = if i + 1 == path.len() {
-                        val.clone()
-                    } else {
-                        Value::Map { keys: vec![], values: vec![] }
-                    };
-                    values.push(new_val);
-                    if i + 1 == path.len() {
-                        return true;
-                    } else {
-                        cur = values.last_mut().unwrap();
-                    }
-                }
-            }
-            _ => return false,
-        }
-    }
-    false
-}
-
 fn version_to_tuple(v: &str) -> Option<(u64, u64, u64)> {
     let parts: Vec<&str> = v.split('.').collect();
     if parts.len() != 3 {
@@ -1086,84 +1023,6 @@ pub fn fix_path(raw_path: String) -> String {
         .to_string()
 }
 
-fn remove_note_field(input: &str) -> String {
-    let re = regex::Regex::new(r#"(?s),?\s*_note:\s*[^,}]+,?"#).unwrap();
-    let result = re.replace_all(input, "");
-    result.trim().trim_start_matches(',').trim().to_string()
-}
-
-pub fn fix_and_parse_json(input: &str) -> Option<JsonValue> {
-    let no_note = remove_note_field(input);
-
-    let re_unicode = regex::Regex::new(r#"\\u\{([0-9a-fA-F]{1,4})\}"#).unwrap();
-    let fixed_unicode = re_unicode.replace_all(&no_note, |caps: &regex::Captures| {
-        format!("\\u{:0>4}", caps[1].to_uppercase())
-    });
-
-    let re_keys = regex::Regex::new(r#"(?P<prefix>[\{\s,])(?P<key>[a-zA-Z_][\w]*)\s*:"#).unwrap();
-    let fixed_keys = re_keys.replace_all(&fixed_unicode, r#"$prefix"$key":"#);
-
-    let re_unquoted_vals = regex::Regex::new(r#":\s*([\?&]?[a-zA-Z_][\w]*)"#).unwrap();
-    let mut fully_fixed = re_unquoted_vals.replace_all(&fixed_keys, |caps: &regex::Captures| {
-        let val = &caps[1];
-        if val == "true" || val == "false" || val == "null" {
-            format!(": {}", val)
-        } else {
-            format!(": \"{}\"", val)
-        }
-    }).to_string();
-
-    let re_unquoted_in_array = regex::Regex::new(r#"(\[|\s*,\s*)([\?&]?[a-zA-Z_][\w]*)"#).unwrap();
-    loop {
-        let new_fixed = re_unquoted_in_array.replace_all(&fully_fixed, |caps: &regex::Captures| {
-            format!("{}\"{}\"", &caps[1], &caps[2])
-        }).to_string();
-        if new_fixed == fully_fixed {
-            break;
-        }
-        fully_fixed = new_fixed;
-    }
-
-    serde_json::from_str(&fully_fixed).ok()
-}
-
-fn json_object_to_value_map(obj: &serde_json::Map<String, JsonValue>) -> (Vec<Value>, Vec<Value>) {
-    let mut keys = Vec::new();
-    let mut values = Vec::new();
-
-    for (k, v) in obj {
-        keys.push(Value::String(k.clone()));
-        values.push(json_to_value(v));
-    }
-
-    (keys, values)
-}
-
-pub fn json_to_value(v: &JsonValue) -> Value {
-    match v {
-        JsonValue::String(s) => Value::String(s.clone()),
-        JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Value::Int(i.into())
-            } else if let Some(f) = n.as_f64() {
-                Value::Float(f.into())
-            } else {
-                Value::Null
-            }
-        }
-        JsonValue::Bool(b) => Value::Boolean(*b),
-        JsonValue::Array(arr) => {
-            let list = arr.iter().map(json_to_value).collect();
-            Value::List(list)
-        }
-        JsonValue::Object(map) => {
-            let (k, v) = json_object_to_value_map(map);
-            Value::Map { keys: k, values: v }
-        }
-        JsonValue::Null => Value::Null,
-    }
-}
-
 pub fn remove_loc_keys(value: &Value) -> Value {
     match value {
         Value::Map { keys, values } => {
@@ -1223,13 +1082,6 @@ pub fn get_precedence(op: &str) -> u8 {
         "||" | "or" => 0,
         _ => 0,
     }
-}
-
-pub fn unique_temp_name(suffix: &str, home_dir: &Path) -> PathBuf {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-    let temp_dir = home_dir.join("transpiler").join("temp");
-    std::fs::create_dir_all(&temp_dir).ok();
-    temp_dir.join(format!("lucia_temp_{now}.{suffix}"))
 }
 
 pub fn convert_value_to_type(
