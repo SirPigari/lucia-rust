@@ -2,6 +2,7 @@
 Cargo.lock
 .vscode/
 /temp/
+test.lc
 
 # Binary outputs
 /src/env/bin/lucia.exe

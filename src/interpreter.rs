@@ -43,8 +43,7 @@ use std::path::{PathBuf, Path};
 use std::fs;
 use regex::Regex;
 use tokio::runtime::Runtime;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::thread::{JoinHandle};
 use once_cell::sync::Lazy;
 use reqwest;
 use serde_urlencoded;
@@ -72,6 +71,9 @@ pub struct Interpreter {
     use_colors: bool,
     pub current_statement: Option<Statement>,
     pub variables: HashMap<String, Variable>,
+    async_stuff: Option<
+        (Arc<Mutex<HashMap<String, Variable>>>, Arc<Mutex<Option<Error>>>)
+    >,
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
@@ -96,6 +98,7 @@ impl Interpreter {
             use_colors,
             current_statement: None,
             variables: HashMap::new(),
+            async_stuff: None,
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
             preprocessor_info,
@@ -1006,19 +1009,31 @@ impl Interpreter {
         let cwd = self.cwd.clone();
         let preprocessor_info = self.preprocessor_info.clone();
         let stack = self.stack.clone();
-        let variables = self.variables.clone();
         let mut scope_counter = self.internal_storage.when_scope_counter;
         self.internal_storage.when_scope_counter += 1;
 
         let mut handle_lock = WHEN_THREAD.lock().unwrap();
         if handle_lock.is_some() {
-            // already running
             return;
         }
 
-        *handle_lock = Some(thread::spawn(move || {
+        // Ensure async_stuff exists
+        if self.async_stuff.is_none() {
+            let vars = Arc::new(Mutex::new(self.variables.clone()));
+            let err = Arc::new(Mutex::new(self.err.clone()));
+            self.async_stuff = Some((vars, err));
+        }
+
+        let (variables, err_ptr) = self.async_stuff.as_ref().unwrap();
+        let variables = Arc::clone(variables);
+        let err_ptr = Arc::clone(err_ptr);
+
+        *handle_lock = Some(std::thread::spawn(move || {
             loop {
                 for (body, condition, sync) in &when_list {
+                    // Lock live variables for this iteration
+                    let vars_lock = variables.lock().unwrap();
+
                     let mut interp = Interpreter::new(
                         config.clone(),
                         use_colors,
@@ -1028,60 +1043,69 @@ impl Interpreter {
                         &[],
                     );
                     interp.stack = stack.clone();
-                    interp.variables = variables.clone();
 
-                    let debug = interp.config.debug;
-                    interp.config.debug = false; // disable debug in when threads
-                    let res = {
-                        let _stdout_guard = std::io::stdout().lock();
-                        interp.evaluate(condition.clone())
-                    };
-                    interp.config.debug = debug; // re-enable debug
+                    // Instead of trying to assign &mut reference, clone once, evaluate, then write back
+                    interp.variables = vars_lock.clone();
 
-                    // instead of return, just skip this condition if error
-                    if interp.err.is_some() {
+                    interp.config.debug = false;
+                    let res = interp.evaluate(condition.clone());
+                    interp.config.debug = interp.og_cfg.debug;
+
+                    // Capture error but continue thread
+                    if let Some(e) = interp.err.clone() {
+                        let mut err_lock = err_ptr.lock().unwrap();
+                        *err_lock = Some(e);
                         continue;
                     }
 
                     if res.is_truthy() {
                         if *sync {
-                            // run directly in watcher thread
                             for expr in body {
+                                let mut vars_lock = variables.lock().unwrap();
+                                interp.variables = vars_lock.clone();
                                 interp.evaluate(expr.clone());
-                                if interp.err.is_some() {
-                                    break; // stop this body, not the watcher
-                                }
-                                if matches!(interp.state, State::Break) {
+
+                                if let Some(e) = interp.err.clone() {
+                                    let mut err_lock = err_ptr.lock().unwrap();
+                                    *err_lock = Some(e);
                                     break;
                                 }
+
+                                // Write back any variable changes
+                                *vars_lock = interp.variables.clone();
                             }
                         } else {
-                            // run in a new detached thread
                             let scope_str = format!(
                                 "{}+scope.when_scope#{}",
                                 interp.scope,
                                 { let tmp = scope_counter; scope_counter += 1; tmp }
                             );
-                            let mut new_interpreter = interp.clone();
+                            let mut new_interp = interp.clone();
+                            new_interp.scope = scope_str;
                             let body = body.clone();
-                            thread::spawn(move || {
-                                new_interpreter.set_scope(&scope_str);
+                            let variables_clone = Arc::clone(&variables);
+                            let err_ptr = Arc::clone(&err_ptr);
+
+                            std::thread::spawn(move || {
                                 for expr in body {
-                                    new_interpreter.evaluate(expr.clone());
-                                    if new_interpreter.err.is_some() {
+                                    let mut vars_lock = variables_clone.lock().unwrap();
+                                    new_interp.variables = vars_lock.clone();
+                                    new_interp.evaluate(expr.clone());
+
+                                    if let Some(e) = new_interp.err.clone() {
+                                        let mut err_lock = err_ptr.lock().unwrap();
+                                        *err_lock = Some(e);
                                         break;
                                     }
-                                    if matches!(new_interpreter.state, State::Break) {
-                                        break;
-                                    }
+
+                                    *vars_lock = new_interp.variables.clone();
                                 }
                             });
                         }
                     }
                 }
 
-                // avoid 100% CPU usage
-                thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }));
     }
@@ -1251,6 +1275,20 @@ impl Interpreter {
 
         if !self.when_list.is_empty() && WHEN_THREAD.lock().unwrap().is_none() {
             self.start_when_thread();
+        }
+
+        debug_log(
+            &format!("<Registering when clause #{}>", self.when_list.len()),
+            &self.config.clone(),
+            Some(self.use_colors),
+        );
+
+        if !self.config.allow_unsafe {
+            return self.raise_with_help(
+                "UnsafeError",
+                "'when' is currently unsafe because of async. This will change in the future",
+                "If you want to use when now, enable the 'allow_unsafe' configuration"
+            );
         }
 
         return res;
@@ -7366,10 +7404,12 @@ impl Interpreter {
             return NULL;
         }
 
-        stdout.execute(MoveUp(1)).unwrap();
-        stdout.execute(MoveToColumn(0)).unwrap();
-        stdout.execute(Clear(ClearType::CurrentLine)).unwrap();
-        stdout.flush().unwrap();
+        if self.config.debug {
+            stdout.execute(MoveUp(1)).unwrap();
+            stdout.execute(MoveToColumn(0)).unwrap();
+            stdout.execute(Clear(ClearType::CurrentLine)).unwrap();
+            stdout.flush().unwrap();
+        }
 
         debug_log(
             &format!(
