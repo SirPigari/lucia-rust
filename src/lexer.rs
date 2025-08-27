@@ -295,7 +295,17 @@ impl Lexer {
             }
         }
 
-        tokens.push(Token("EOF".into(), "\0".into(), None));
+        tokens.push(Token("EOF".into(), "\0".into(), tokens.last().and_then(|t| {
+            let loc = t.2.clone();
+            match loc {
+                Some(mut l) => {
+                    l.range.0 += l.range.1 - l.range.0;
+                    l.range.1 = l.range.0 + 1;
+                    Some(l)
+                },
+                None => None
+            }
+        })));
         tokens
     }
 }

@@ -1,8 +1,8 @@
 #include <std/macros>
 import math
 
-fun create_number(base: int | float, exponent: int | float) -> int | float:
-    return base ^ exponent
+fun create_number(base: int | float, exponent: int | float) -> float:
+    return (base ^ exponent) as float
 end
 
 fun nth_root(value: float, n: int) -> float:

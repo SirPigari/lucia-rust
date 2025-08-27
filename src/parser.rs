@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix};
+use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix, is_valid_token};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
@@ -9,7 +9,6 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     statements: Vec<Statement>,
-    include_whitespace: bool,
     err: Option<Error>,
 }
 
@@ -19,20 +18,12 @@ impl Parser {
             tokens,
             pos: 0,
             statements: vec![],
-            include_whitespace: false,
             err: None,
         }
     }
 
-    fn token(&mut self) -> Option<&Token> {
-        while self.pos < self.tokens.len() {
-            let token = &self.tokens[self.pos];
-            if self.include_whitespace || token.0 != "WHITESPACE" {
-                return Some(token);
-            }
-            self.pos += 1;
-        }
-        None
+    fn token(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
     }
 
     fn token_is(&mut self, kind: &str, value: &str) -> bool {
@@ -137,15 +128,8 @@ impl Parser {
         (vec![], vec![])
     }
 
-    fn peek(&self) -> Option<&Token> {
-        let mut offset = 1;
-        while self.pos + offset < self.tokens.len() {
-            if self.tokens[self.pos + offset].0 != "WHITESPACE" || self.include_whitespace {
-                return Some(&self.tokens[self.pos + offset]);
-            }
-            offset += 1;
-        }
-        None
+    fn peek(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.pos + offset)
     }
 
     pub fn get_loc(&mut self) -> Option<Location> {
@@ -828,6 +812,39 @@ impl Parser {
                     };
                 }
 
+                ("OPERATOR", "!") => {
+                    let mut fact_level = 0;
+                    while self.token_is("OPERATOR", "!") {
+                        fact_level += 1;
+                        self.next();
+                    }
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("operator".to_string()),
+                            Value::String("left".to_string()),
+                            Value::String("right".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("OPERATION".to_string()),
+                            Value::String("!".to_string()),
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("value".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("NUMBER".to_string()),
+                                    Value::String(fact_level.to_string()),
+                                ],
+                                loc: self.get_loc(),
+                            }.convert_to_map(),
+                            expr.convert_to_map(),
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+
                 ("OPERATOR", op) if ["++", "--"].contains(&op) => {
                     let operator = match op {
                         "++" => "+",
@@ -1333,7 +1350,13 @@ impl Parser {
                 "OPERATOR" if ["+", "-", "!", "~", "nein", "isnt", "isn't", "not", "bnot"].contains(&token.1.as_str()) => {
                     let operator = token.1.clone();
                     self.next();
+                    if !is_valid_token(&self.token().cloned()) {
+                        let loc = self.get_loc().unwrap();
+                        self.raise_with_loc("SyntaxError", "Unexpected end of input after unary operator", loc);
+                        return Statement::Null;
+                    }
                     let operand = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -3475,7 +3498,7 @@ impl Parser {
                 }
 
                 "IDENTIFIER" => {
-                    let next_token = self.peek().cloned();
+                    let next_token = self.peek(1).cloned();
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "OPERATOR" && matches!(next_tok.1.as_str(), "+=" | "-=" | "*=" | "/=" | "%=" | "^=") {
                             return self.parse_compound_assignment();
@@ -3491,7 +3514,7 @@ impl Parser {
                 }
 
                 "NUMBER" => {
-                    let next_token = self.peek().cloned();
+                    let next_token = self.peek(1).cloned();
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             let left = self.parse_operand();
@@ -4016,7 +4039,7 @@ impl Parser {
         let loc = self.get_loc();
         let token_type = token.0.clone();
         let token_value = token.1.clone();        
-        let next_token = self.peek();
+        let next_token = self.peek(1);
         let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
         let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
         
@@ -4365,7 +4388,7 @@ impl Parser {
         let mut seen_named = false;
     
         while let Some(current_token) = self.token().cloned() {
-            let next_token = self.peek().cloned();
+            let next_token = self.peek(1).cloned();
     
             if self.token().is_none() {
                 self.raise("UEFError", "Unexpected end of input");

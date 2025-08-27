@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
 use regex::Regex;
 use crate::env::runtime::precompile::interpret;
+use crate::env::runtime::tokens::Token;
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
@@ -270,27 +271,6 @@ pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {
     let use_colors = use_colors.unwrap_or(true);
     let colored_message = format!("{}{}{}", hex_to_ansi(color, use_colors), message, hex_to_ansi("reset", use_colors));
     println!("{}", colored_message);
-}
-
-pub fn print_colored_no_newline(message: &str, color: &str, use_colors: Option<bool>) {
-    let use_colors = use_colors.unwrap_or(true);
-    let colored_message = format!("{}{}{}", hex_to_ansi(color, use_colors), message, hex_to_ansi("reset", use_colors));
-    print!("{}", colored_message);
-    std::io::stdout().flush().unwrap();
-}
-
-pub fn debug_log_no_newline(message: &str, config: &Config, use_colors: Option<bool>) {
-    let use_colors = use_colors.unwrap_or(true);
-    if config.debug && (config.debug_mode == "full" || config.debug_mode == "normal") {
-        let single_line_message = message
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-            .replace('\0', "\\0")
-            .replace('\x1b', "\\e")
-            .replace(r"\A", "\n");
-        print_colored_no_newline(&single_line_message, &config.color_scheme.debug, Some(use_colors));
-    }
 }
 
 pub fn read_input(prompt: &str) -> String {
@@ -1084,6 +1064,16 @@ pub fn get_precedence(op: &str) -> u8 {
     }
 }
 
+pub fn is_valid_token(token: &Option<Token>) -> bool {
+    match token {
+        Some(t) => match t.0.as_str() {
+            "EOF" | "EOL" => false,
+            _ => true,
+        },
+        None => false,
+    }
+}
+
 pub fn convert_value_to_type(
     target_type: &str,
     value: &Value,
@@ -1261,6 +1251,46 @@ static NUMBER_REGEX: Lazy<Regex> = Lazy::new(|| {
 
 pub fn is_number(n: &str) -> bool {
     NUMBER_REGEX.is_match(n)
+}
+
+pub fn gamma_lanczos(z: f64, level: usize) -> f64 {
+    // standard Lanczos approximation (Gamma(z))
+    fn gamma_core(z: f64) -> f64 {
+        const COEFFS: [f64; 9] = [
+            0.99999999999980993,
+            676.5203681218851,
+           -1259.1392167224028,
+            771.32342877765313,
+           -176.61502916214059,
+            12.507343278686905,
+           -0.13857109526572012,
+            9.9843695780195716e-6,
+            1.5056327351493116e-7,
+        ];
+        let g = 7.0;
+
+        if z < 0.5 {
+            std::f64::consts::PI / ((std::f64::consts::PI * z).sin() * gamma_core(1.0 - z))
+        } else {
+            let z = z - 1.0;
+            let mut x = COEFFS[0];
+            for (i, &c) in COEFFS.iter().enumerate().skip(1) {
+                x += c / (z + i as f64);
+            }
+            let t = z + g + 0.5;
+            (2.0 * std::f64::consts::PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * x
+        }
+    }
+
+    if level == 1 {
+        gamma_core(z) // standard gamma
+    } else {
+        // generalized factorial step-k
+        // n!_k = k^(n/k) * Γ(n/k + 1)
+        let n = z - 1.0;
+        let scaled = n / level as f64;
+        (level as f64).powf(scaled) * gamma_core(scaled + 1.0)
+    }
 }
 
 pub const KEYWORDS: &[&str] = &[

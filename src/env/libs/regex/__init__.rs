@@ -4,31 +4,48 @@ use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;
+use super::regex_engine::{RegexEngine, normal, fancy};
 use std::sync::Arc;
-use regex::Regex;
-
+use once_cell::sync::Lazy;
 use crate::insert_native_fn;
 
 // This module provides regular expression matching capabilities.
 // It includes functions for compiling, matching, and replacing patterns in strings.
 // Lucia version 2.0.0, module: regex@0.9.0
 
-static REGEX_CACHE: once_cell::sync::Lazy<Mutex<HashMap<String, Regex>>> = once_cell::sync::Lazy::new(|| {
+static REGEX_CACHE: Lazy<Mutex<HashMap<String, RegexEngine>>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
 
-fn get_cached_regex(pattern: &str) -> Result<Regex, String> {
+fn is_fancy_pattern(pattern: &str) -> bool {
+    // lookahead, lookbehind, backref, atomic groups
+    let fancy_features = ["(?=", "(?!", "(?<=", "(?<!", "\\1", "\\2", "(?>"];
+    fancy_features.iter().any(|f| pattern.contains(f))
+}
+
+
+fn get_cached_regex(pattern: &str) -> Result<RegexEngine, String> {
     let mut cache = REGEX_CACHE.lock().unwrap();
     if let Some(re) = cache.get(pattern) {
         return Ok(re.clone());
     }
 
-    match Regex::new(pattern) {
-        Ok(re) => {
-            cache.insert(pattern.to_string(), re.clone());
-            Ok(re)
+    if is_fancy_pattern(pattern) {
+        match fancy::Regex::new(pattern) {
+            Ok(re) => {
+                cache.insert(pattern.to_string(), RegexEngine::Fancy(re.clone()));
+                Ok(RegexEngine::Fancy(re))
+            }
+            Err(e) => Err(format!("Invalid fancy regex pattern: {}", e)),
         }
-        Err(e) => Err(format!("Invalid regex pattern: {}", e)),
+    } else {
+        match normal::Regex::new(pattern) {
+            Ok(re) => {
+                cache.insert(pattern.to_string(), RegexEngine::Normal(re.clone()));
+                Ok(RegexEngine::Normal(re))
+            }
+            Err(e) => Err(format!("Invalid regex pattern: {}", e)),
+        }
     }
 }
 
@@ -71,7 +88,7 @@ fn regex_replace(args: &HashMap<String, Value>) -> Value {
     match get_cached_regex(pattern) {
         Ok(re) => {
             let replaced = re.replace_all(value, replacement);
-            Value::String(replaced.into_owned())
+            Value::String(replaced.to_owned())
         }
         Err(e) => Value::Error("RegexError".into(), to_static(e), None),
     }
@@ -107,6 +124,7 @@ fn regex_find_all(args: &HashMap<String, Value>) -> Value {
     match get_cached_regex(pattern) {
         Ok(re) => {
             let matches: Vec<Value> = re.find_iter(value)
+                .into_iter()
                 .map(|m| Value::String(m.as_str().to_string()))
                 .collect();
             Value::List(matches)
@@ -128,6 +146,7 @@ fn regex_split(args: &HashMap<String, Value>) -> Value {
     match get_cached_regex(pattern) {
         Ok(re) => {
             let parts: Vec<Value> = re.split(value)
+                .into_iter()
                 .map(|s| Value::String(s.to_string()))
                 .collect();
             Value::List(parts)
@@ -147,7 +166,7 @@ fn regex_count(args: &HashMap<String, Value>) -> Value {
     };
 
     match get_cached_regex(pattern) {
-        Ok(re) => Value::Int((re.find_iter(value).count() as i64).into()),
+        Ok(re) => Value::Int((re.find_iter(value).len() as i64).into()),
         Err(_) => Value::Int(0.into()),
     }
 }
@@ -164,15 +183,14 @@ fn regex_capture(args: &HashMap<String, Value>) -> Value {
 
     match get_cached_regex(pattern) {
         Ok(re) => {
-            let caps = re.captures(value);
-            match caps {
+            match re.captures(value) {
                 Some(c) => {
                     let mut keys = Vec::new();
                     let mut values = Vec::new();
-                    for (i, mat) in c.iter().enumerate() {
+                    for (i, mat) in c.groups.iter().enumerate() {
                         keys.push(Value::String(i.to_string()));
                         values.push(match mat {
-                            Some(m) => Value::String(m.as_str().to_string()),
+                            Some(m) => Value::String(m.clone()),
                             None => Value::Null,
                         });
                     }
@@ -198,12 +216,13 @@ fn regex_match_all(args: &HashMap<String, Value>) -> Value {
     match get_cached_regex(pattern) {
         Ok(re) => {
             let matches: Vec<Value> = re.find_iter(value)
+                .into_iter()
                 .map(|m| {
                     let keys = vec!["match".into(), "start".into(), "end".into()];
                     let values = vec![
                         Value::String(m.as_str().to_string()),
-                        Value::Int((m.start() as i64).into()),
-                        Value::Int((m.end() as i64).into()),
+                        Value::Int((m.start as i64).into()),
+                        Value::Int((m.end as i64).into()),
                     ];
                     Value::Map { keys, values }
                 })
@@ -230,10 +249,10 @@ fn regex_named_groups(args: &HashMap<String, Value>) -> Value {
                 Some(caps) => {
                     let mut keys = Vec::new();
                     let mut values = Vec::new();
-                    for name in re.capture_names().flatten() {
-                        keys.push(Value::String(name.to_string()));
-                        values.push(match caps.name(name) {
-                            Some(m) => Value::String(m.as_str().to_string()),
+                    for name in re.capture_names().into_iter().flatten() {
+                        keys.push(Value::String(name.clone()));
+                        values.push(match caps.name(&name) {
+                            Some(m) => Value::String(m.to_string()),
                             None => Value::Null,
                         });
                     }

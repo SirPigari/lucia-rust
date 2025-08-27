@@ -55,6 +55,7 @@ mod env {
         }
         pub mod regex {
             pub mod __init__;
+            pub mod regex_engine;
         }
         pub mod collections {
             pub mod __init__;

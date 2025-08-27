@@ -11,6 +11,7 @@ use crate::env::runtime::errors::Error;
 
 const VERSION: &str = env!("VERSION");
 
+// TODO: fix it
 pub fn bundle_to_exe(
     config_path: &str,
     output_path: &str,

@@ -6,7 +6,6 @@ use crate::env::runtime::utils::{
     find_closest_match,
     TRUE, FALSE, NULL,
     debug_log,
-    debug_log_no_newline,
     check_ansi,
     unescape_string,
     to_static,
@@ -19,7 +18,8 @@ use crate::env::runtime::utils::{
     char_to_digit,
     get_remaining_stack_size,
     wrap_in_help,
-    is_number
+    is_number,
+    gamma_lanczos,
 };
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
@@ -7202,13 +7202,18 @@ impl Interpreter {
             .collect::<Vec<_>>()
             .join("::");
 
+        
+        let log_str = match operator.as_str() {
+            "abs" => format!("|{}|", format_value(&right)),
+            "!" => format!("{}{}", format_value(&right), "!".repeat(if let Value::Int(ref n) = left { n.to_usize().unwrap_or(1) } else { 1 })),
+            _ => format!("{} {} {}", format_value(&left), operator, format_value(&right)),
+        };
+
         if let Some(cached) = self.cache.operations.get(&cache_key) {
             debug_log(
                 &format!(
-                    "<CachedOperation: {} {} {} -> {}>",
-                    format_value(&left),
-                    operator,
-                    format_value(&right),
+                    "<CachedOperation: {} -> {}>",
+                    log_str,
                     format_value(cached)
                 ),
                 &self.config,
@@ -7218,12 +7223,10 @@ impl Interpreter {
         }
 
         let mut stdout = stdout();
-        debug_log_no_newline(
+        debug_log(
             &format!(
-                "<Operation: {} {} {} -> ...>",
-                format_value(&left),
-                operator,
-                format_value(&right),
+                "<Operation: {} -> ...>",
+                log_str
             ),
             &self.config,
             Some(self.use_colors.clone()),
@@ -7233,7 +7236,6 @@ impl Interpreter {
         let result = self.make_operation(left.clone(), right.clone(), &operator);
 
         if self.err.is_some() {
-            println!();
             return NULL;
         }
 
@@ -7244,10 +7246,8 @@ impl Interpreter {
 
         debug_log(
             &format!(
-                "<Operation: {} {} {} -> {}>",
-                format_value(&left),
-                operator,
-                format_value(&right),
+                "<Operation: {} -> {}>",
+                log_str,
                 format_value(&result)
             ),
             &self.config,
@@ -7335,7 +7335,6 @@ impl Interpreter {
             "nein" => "!=",
             "or" => "||",
             "and" => "&&",
-            "not" => "!",
             other => other,
         };
     
@@ -7351,12 +7350,6 @@ impl Interpreter {
         if left.is_infinity() || right.is_infinity() {
             return self.raise("MathError", "Operation with Infinity is not allowed");
         }
-        
-        let log_str = if operator == "abs" {
-            format!("<Operation: |{}| -> {{}}>", format_value(&right))
-        } else {
-            format!("<Operation: {} {} {} -> {{}}>", format_value(&left), operator, format_value(&right))
-        };
 
         let result = match operator {
             "+" => match (left, right) {
@@ -7475,8 +7468,8 @@ impl Interpreter {
                 _ => {
                     match (&left, &right) {
                         (Value::Int(l), Value::Int(r)) => {
-                            if (l.clone() % r.clone()).unwrap_or(Int::from(0)) == Int::from(0) {
-                                Value::Int((l.clone() / r.clone()).unwrap_or_else(|_| {
+                            if (l % r).unwrap_or(Int::from(0)) == Int::from(0) {
+                                Value::Int((l / r).unwrap_or_else(|_| {
                                     self.raise("TypeError", "Integer division failed");
                                     Int::from(0)
                                 }))
@@ -7491,20 +7484,20 @@ impl Interpreter {
                             }
                         }
                         (Value::Int(i), Value::Float(f)) => match Float::from_int(i) {
-                            Ok(left_f) => match left_f / f.clone() {
+                            Ok(left_f) => match &left_f / f {
                                 Ok(result) => Value::Float(result),
                                 Err(_) => self.raise("TypeError", "Failed to perform division"),
                             },
                             Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
                         }
                         (Value::Float(f), Value::Int(i)) => match Float::from_int(i) {
-                            Ok(right_f) => match f.clone() / right_f {
+                            Ok(right_f) => match f / &right_f {
                                 Ok(result) => Value::Float(result),
                                 Err(_) => self.raise("TypeError", "Failed to perform division"),
                             },
                             Err(_) => self.raise("TypeError", "Failed to convert Int to Float"),
                         }
-                        (Value::Float(f1), Value::Float(f2)) => match f1.clone() / f2.clone() {
+                        (Value::Float(f1), Value::Float(f2)) => match f1 / f2 {
                             Ok(result) => Value::Float(result),
                             Err(_) => self.raise("TypeError", "Failed to perform division"),
                         }
@@ -7548,7 +7541,7 @@ impl Interpreter {
                 (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
                 (_, Value::Float(b)) if b.is_zero() => Value::Float(1.0.into()),
 
-                (Value::Int(a), Value::Int(b)) if a.negative || b.negative => {
+                (Value::Int(a), Value::Int(b)) if a.is_negative() || b.is_negative() => {
                     let base = match Float::from_int(a) {
                         Ok(f) => f,
                         Err(_) => return self.raise("TypeError", "Failed to convert Int to Float"),
@@ -7606,7 +7599,7 @@ impl Interpreter {
             "^^" => match (&left, &right) {
                 (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
 
-                (Value::Int(base), Value::Int(height)) if !height.negative => {
+                (Value::Int(base), Value::Int(height)) if !height.is_negative() => {
                     fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
                         let key = format!("{}::{}::^", base, exp);
                         if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
@@ -7631,14 +7624,14 @@ impl Interpreter {
                                 return self.raise("ValueError", "Tetration interrupted by stop flag");
                             }
                             result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
-                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 
                         Value::Int(result)
                     }
                 }
 
-                (Value::Float(base), Value::Int(height)) if !height.negative => {
+                (Value::Float(base), Value::Int(height)) if !height.is_negative() => {
                     let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
                         let key = format!("{}::{}::^", base, exp);
                         if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
@@ -7668,7 +7661,7 @@ impl Interpreter {
                                 return self.raise("ValueError", "Tetration interrupted by stop flag");
                             }
                             result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
-                            count = (count + one.clone()).unwrap_or_else(|_| float_height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| float_height.clone());
                         }
 
                         Value::Float(result)
@@ -7688,7 +7681,7 @@ impl Interpreter {
             "^^^" => match (&left, &right) {
                 (_, Value::Int(b)) if b.is_zero() => Value::Int(1.into()),
 
-                (Value::Int(base), Value::Int(height)) if !height.negative => {
+                (Value::Int(base), Value::Int(height)) if !height.is_negative() => {
                     fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
                         let key = format!("{}::{}::^", base, exp);
                         if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
@@ -7719,7 +7712,7 @@ impl Interpreter {
                                 return None;
                             }
                             result = pow_cached(this, base, &result)?;
-                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 
                         Some(result)
@@ -7737,14 +7730,14 @@ impl Interpreter {
                                 return self.raise("ValueError", "Pentation interrupted by stop flag");
                             }
                             result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap();
-                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 
                         Value::Int(result)
                     }
                 }
 
-                (Value::Float(base), Value::Int(height)) if !height.negative => {
+                (Value::Float(base), Value::Int(height)) if !height.is_negative() => {
                     let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
                         let key = format!("{}::{}::^", base, exp);
                         if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
@@ -7775,7 +7768,7 @@ impl Interpreter {
                                 return None;
                             }
                             result = pow_cached(this, base, &result)?;
-                            count = (count + one.clone()).unwrap_or_else(|_| height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 
                         Some(result)
@@ -7798,7 +7791,7 @@ impl Interpreter {
                                 return self.raise("ValueError", "Pentation interrupted by stop flag");
                             }
                             result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap();
-                            count = (count + one.clone()).unwrap_or_else(|_| float_height.clone());
+                            count = (&count + &one).unwrap_or_else(|_| float_height.clone());
                         }
 
                         Value::Float(result)
@@ -7924,6 +7917,58 @@ impl Interpreter {
                 }
                 _ => self.raise("TypeError", "Bitwise OR requires two integers"),
             },
+            "!" => match (left, right) {
+                (Value::Int(level), Value::Int(a)) => {
+                    let a_i64 = match a.to_i64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert Int: {}", e)),
+                    };
+                    if a_i64 < 0 {
+                        return self.raise("ValueError", "Factorial is not defined for negative integers");
+                    }
+                    let level_usize = level.to_usize().unwrap_or(1);
+                    if level_usize <= 0 {
+                        return self.raise("ValueError", "Factorial level must be positive");
+                    }
+
+                    let mut res = Int::from(1);
+                    let mut i = a_i64;
+                    while i > 0 {
+                        res *= Int::from(i);
+                        i -= level_usize as i64;
+                    }
+                    Value::Int(res)
+                }
+                (Value::Int(level), Value::Float(a)) => {
+                    if a.is_integer_like() {
+                        let a_i64 = a.to_f64().unwrap_or_else(|e| {
+                            self.raise("ValueError", &format!("Failed to convert Float: {}", e));
+                            0.0
+                        }) as i64;
+                        let mut res = Int::from(1);
+                        for i in 1..=a_i64 {
+                            res *= Int::from(i);
+                        }
+                        return Value::Int(res);
+                    }
+                    let a_f64 = match a.to_f64() {
+                        Ok(val) => val,
+                        Err(e) => return self.raise("ValueError", &format!("Failed to convert Float: {}", e)),
+                    };
+                    if a_f64 < 0.0 {
+                        return self.raise("ValueError", "Factorial is not defined for negative numbers");
+                    }
+                    let level_usize = level.to_usize().unwrap_or(1);
+                    if level_usize <= 0 {
+                        return self.raise("ValueError", "Factorial level must be positive");
+                    }
+                    let res = gamma_lanczos(a_f64 + 1.0, level_usize);
+                    Value::Float(Float::from(res))
+                }
+                (_, t) => {
+                    self.raise("TypeError", &format!("Factorial is not defined for {}", t.get_type().display_simple()))
+                }
+            },
             "<<" | "lshift" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
                     let a_i64 = match a.to_i64() {
@@ -7960,12 +8005,10 @@ impl Interpreter {
                 }
                 _ => self.raise("TypeError", "Right shift requires two integers"),
             },
-            "abs" => {
-                match right {
-                    Value::Int(n) => Value::Int(n.abs()),
-                    Value::Float(f) => Value::Float(f.abs()),
-                    _ => self.raise("TypeError", &format!("Cannot apply 'abs' to {}", right.type_name())),
-                }
+            "abs" => match right {
+                Value::Int(n) => Value::Int(n.abs()),
+                Value::Float(f) => Value::Float(f.abs()),
+                _ => self.raise("TypeError", &format!("Cannot apply 'abs' to {}", right.type_name())),
             },
             "xor" => {
                 match (left, right) {
@@ -8005,12 +8048,6 @@ impl Interpreter {
             },
             _ => self.raise("SyntaxError", &format!("Unknown operator '{}'", operator)),
         };
-
-        debug_log(
-            &log_str.replace("{}", &format_value(&result)),
-            &self.config,
-            Some(self.use_colors.clone()),
-        );
         return result;
     }
 
