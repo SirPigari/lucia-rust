@@ -592,7 +592,7 @@ impl Value {
     pub fn to_string(&self) -> String {
         match self {
             Value::Float(f) => {
-                format_float(f)
+                f.to_str()
             }
             Value::Int(i) => {
                 format_int(i)

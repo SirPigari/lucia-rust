@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::types::{Float};
+use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{get_imagnum_error_message, to_static, parse_type};
 use crate::env::runtime::variables::Variable;
@@ -42,23 +42,6 @@ fn create_float_constant(name: &str, value: &str) -> Variable {
     )
 }
 
-fn float_unary<F>(args: &HashMap<String, Value>, f: F) -> Value
-where
-    F: Fn(f64) -> f64,
-{
-    match args.get("x") {
-        Some(Value::Float(v)) => match v.to_f64() {
-            Ok(n) => Value::Float(Float::from_f64(f(n))),
-            Err(e) => math_error(e),
-        },
-        Some(Value::Int(i)) => match i.to_i64() {
-            Ok(n) => Value::Float(Float::from_f64(f(n as f64))),
-            Err(e) => math_error(e),
-        },
-        _ => Value::Error("TypeError", "expected a float or int", None),
-    }
-}
-
 fn log_base(args: &HashMap<String, Value>) -> Value {
     let x_val = args.get("x");
     let base_val = args.get("base");
@@ -76,54 +59,86 @@ fn log_base(args: &HashMap<String, Value>) -> Value {
     }
 }
 
-fn sqrt(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::sqrt) }
-fn sin(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::sin) }
-fn cos(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::cos) }
-fn tan(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::tan) }
-fn ln(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::ln) }
-fn log10(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::log10) }
-fn abs(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::abs) }
-fn exp(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::exp) }
-fn floor(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::floor) }
-fn ceil(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::ceil) }
-fn round(args: &HashMap<String, Value>) -> Value { float_unary(args, f64::round) }
+macro_rules! define_unary {
+    ($name:ident, $int_fn:path, $float_fn:path, $return_int:path, $return_float:path) => {
+        fn $name(args: &HashMap<String, Value>) -> Value {
+            match args.get("x") {
+                Some(Value::Int(i)) => match $int_fn(i) {
+                    Ok(v) => $return_int(v),
+                    Err(e) => math_error(e),
+                },
+                Some(Value::Float(f)) => match $float_fn(f) {
+                    Ok(v) => $return_float(v),
+                    Err(e) => math_error(e),
+                },
+                _ => Value::Error("TypeError", "expected int or float", None),
+            }
+        }
+    };
+}
+
+fn int_abs(i: &Int) -> Result<Int, i16> { Ok(Int::abs(i)) }
+fn float_abs(f: &Float) -> Result<Float, i16> { Ok(Float::abs(f)) }
+fn int_log(i: &Int) -> Result<Float, i16> { Float::from_int(i).and_then(|f| Float::ln(&f)) }
+
+define_unary!(sqrt, Int::sqrt, Float::sqrt, Value::Float, Value::Float);
+define_unary!(sin, Int::sin, Float::sin, Value::Float, Value::Float);
+define_unary!(cos, Int::cos, Float::cos, Value::Float, Value::Float);
+define_unary!(tan, Int::tan, Float::tan, Value::Float, Value::Float);
+define_unary!(ln, Int::ln, Float::ln, Value::Float, Value::Float);
+define_unary!(abs, int_abs, float_abs, Value::Int, Value::Float);
+define_unary!(exp, Int::exp, Float::exp, Value::Float, Value::Float);
+define_unary!(floor, Int::floor, Float::floor, Value::Int, Value::Float);
+define_unary!(ceil, Int::ceil, Float::ceil, Value::Int, Value::Float);
+define_unary!(log, int_log, Float::log, Value::Float, Value::Float);
+
+fn round(args: &HashMap<String, Value>) -> Value {
+    let x = match args.get("x") {
+        Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+
+    let prec = match args.get("precision") {
+        Some(Value::Int(i)) => i.to_usize().unwrap_or(0),
+        Some(Value::Float(f)) => f.to_int().unwrap_or(Int::new()).to_usize().unwrap_or(0),
+        _ => 0,
+    };
+
+    match x {
+        Value::Int(i) => match Int::to_float(i) {
+            Ok(f) => Value::Float(f.round(prec)),
+            Err(e) => math_error(e),
+        },
+        Value::Float(f) => Value::Float(f.round(prec)),
+        _ => unreachable!(),
+    }
+}
+
 fn pow(args: &HashMap<String, Value>) -> Value {
     let x_val = args.get("x");
     let y_val = args.get("y");
 
+    let x_float = match x_val {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => Int::to_float(i).expect("Int to float failed"),
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+
+    let y_float = match y_val {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => Int::to_float(i).expect("Int to float failed"),
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+
     match (x_val, y_val) {
-        (Some(x), Some(y)) => {
-            fn value_to_f64(val: &Value) -> Result<f64, Value> {
-                match val {
-                    Value::Float(f) => f.to_f64().map_err(math_error),
-                    Value::Int(i) => i.to_i64().map(|v| v as f64).map_err(math_error),
-                    _ => Err(math_error(1)),
-                }
-            }
-
-            let x_f = match value_to_f64(x) {
-                Ok(v) => v,
-                Err(e) => return e,
-            };
-            let y_f = match value_to_f64(y) {
-                Ok(v) => v,
-                Err(e) => return e,
-            };
-
-            if x_f < 0.0 && y_f.fract() == 0.0 {
-                let y_i = y_f as i32;
-                let result = (x_f.abs()).powi(y_i);
-                let final_result = if y_i % 2 == 0 { result } else { -result };
-                return Value::Float(Float::from_f64(final_result));
-            }
-
-            if x_f < 0.0 {
-                return Value::Error("MathError", "negative base with fractional exponent", None);
-            }
-
-            Value::Float(Float::from_f64(x_f.powf(y_f)))
-        }
-        _ => Value::Error("TypeError", "pow(x, y) expects numeric args", None),
+        (Some(Value::Int(x)), Some(Value::Int(y))) => match Int::pow(x, y) {
+            Ok(v) => Value::Int(v),
+            Err(e) => math_error(e),
+        },
+        _ => match Float::pow(&x_float, &y_float) {
+            Ok(v) => Value::Float(v),
+            Err(e) => math_error(e),
+        },
     }
 }
 
@@ -136,7 +151,7 @@ pub fn register() -> HashMap<String, Variable> {
         ("cos", cos),
         ("tan", tan),
         ("ln", ln),
-        ("log", log10),
+        ("log", log),
         ("abs", abs),
         ("exp", exp),
         ("floor", floor),
@@ -181,7 +196,7 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "pow",
         pow,
-        vec![Parameter::positional("x", "any"), Parameter::positional("y", "any")],
+        vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_pt("y", &int_float_type)],
         "any"
     );
 

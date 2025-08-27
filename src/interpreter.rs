@@ -43,18 +43,22 @@ use std::path::{PathBuf, Path};
 use std::fs;
 use regex::Regex;
 use tokio::runtime::Runtime;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+use once_cell::sync::Lazy;
 use reqwest;
 use serde_urlencoded;
 use std::io::{stdout, Write};
 use std::sync::Mutex;
 use std::panic::Location as PanicLocation;
+use super::VERSION;
 
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::Parser;
 use crate::env::runtime::tokens::{Location};
 
-const VERSION: &str = env!("VERSION");
+static WHEN_THREAD: Lazy<Mutex<Option<JoinHandle<()>>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {
@@ -74,6 +78,7 @@ pub struct Interpreter {
     cache: Cache,
     internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
+    when_list: Vec<(Vec<Statement>, Statement, bool)>,
     scope: String,
     pub stop_flag: Option<Arc<AtomicBool>>,
 }
@@ -101,9 +106,11 @@ impl Interpreter {
             },
             internal_storage: InternalStorage {
                 lambda_counter: 0,
+                when_scope_counter: 0,
                 use_42: (false, false),
             },
             defer_stack: vec![],
+            when_list: vec![],
             scope: "main".to_owned(),
             stop_flag: None,
         };
@@ -988,14 +995,104 @@ impl Interpreter {
         }
         false
     }
-    
+
+    fn start_when_thread(&mut self) {
+        self.check_stop_flag();
+
+        let when_list = self.when_list.clone();
+        let config = self.config.clone();
+        let use_colors = self.use_colors;
+        let file_path = self.file_path.clone();
+        let cwd = self.cwd.clone();
+        let preprocessor_info = self.preprocessor_info.clone();
+        let stack = self.stack.clone();
+        let variables = self.variables.clone();
+        let mut scope_counter = self.internal_storage.when_scope_counter;
+        self.internal_storage.when_scope_counter += 1;
+
+        let mut handle_lock = WHEN_THREAD.lock().unwrap();
+        if handle_lock.is_some() {
+            // already running
+            return;
+        }
+
+        *handle_lock = Some(thread::spawn(move || {
+            loop {
+                for (body, condition, sync) in &when_list {
+                    let mut interp = Interpreter::new(
+                        config.clone(),
+                        use_colors,
+                        &file_path,
+                        &cwd,
+                        preprocessor_info.clone(),
+                        &[],
+                    );
+                    interp.stack = stack.clone();
+                    interp.variables = variables.clone();
+
+                    let debug = interp.config.debug;
+                    interp.config.debug = false; // disable debug in when threads
+                    let res = {
+                        let _stdout_guard = std::io::stdout().lock();
+                        interp.evaluate(condition.clone())
+                    };
+                    interp.config.debug = debug; // re-enable debug
+
+                    // instead of return, just skip this condition if error
+                    if interp.err.is_some() {
+                        continue;
+                    }
+
+                    if res.is_truthy() {
+                        if *sync {
+                            // run directly in watcher thread
+                            for expr in body {
+                                interp.evaluate(expr.clone());
+                                if interp.err.is_some() {
+                                    break; // stop this body, not the watcher
+                                }
+                                if matches!(interp.state, State::Break) {
+                                    break;
+                                }
+                            }
+                        } else {
+                            // run in a new detached thread
+                            let scope_str = format!(
+                                "{}+scope.when_scope#{}",
+                                interp.scope,
+                                { let tmp = scope_counter; scope_counter += 1; tmp }
+                            );
+                            let mut new_interpreter = interp.clone();
+                            let body = body.clone();
+                            thread::spawn(move || {
+                                new_interpreter.set_scope(&scope_str);
+                                for expr in body {
+                                    new_interpreter.evaluate(expr.clone());
+                                    if new_interpreter.err.is_some() {
+                                        break;
+                                    }
+                                    if matches!(new_interpreter.state, State::Break) {
+                                        break;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // avoid 100% CPU usage
+                thread::sleep(Duration::from_millis(10));
+            }
+        }));
+    }
+
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
 
         if self.check_stop_flag() {
             return NULL;
         }
-    
+
         self.variables.entry("_".to_string()).or_insert_with(|| {
             Variable::new("_".to_string(), NULL.clone(), "any".to_string(), true, true, false)
         });
@@ -1048,7 +1145,8 @@ impl Interpreter {
                 "SCOPE" => self.handle_scope(statement_map),
                 "MATCH" => self.handle_match(statement_map),
                 "GROUP" => self.handle_group(statement_map),
-    
+                "WHEN" => self.handle_when(statement_map),
+
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
                 "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
                 "RETURN" => self.handle_return(statement_map),
@@ -1127,6 +1225,35 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_when(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let condition: Statement = match statement.get(&Value::String("condition".to_string())) {
+            Some(v) => v.convert_to_statement(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'condition' in when"),
+        };
+
+        let body: Vec<Statement> = match statement.get(&Value::String("body".to_string())) {
+            Some(Value::List(b)) => b.iter().map(|v| v.convert_to_statement()).collect(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'body' in when"),
+        };
+
+        let sync = match statement.get(&Value::String("sync".to_string())) {
+            Some(Value::Boolean(s)) => *s,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'sync' in when"),
+        };
+
+        let res = self.evaluate(condition.clone());
+        if self.err.is_some() {
+            return NULL;
+        }
+        self.when_list.push((body.clone(), condition, sync));
+
+        if !self.when_list.is_empty() && WHEN_THREAD.lock().unwrap().is_none() {
+            self.start_when_thread();
+        }
+
+        return res;
     }
 
     fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -4408,7 +4535,7 @@ impl Interpreter {
                                     "Use this instead: '{}{}: {} = {}{}'",
                                     check_ansi("\x1b[4m", &self.use_colors),
                                     name,
-                                    right_value.type_name(),
+                                    right_value.get_type().display_simple(),
                                     format_value(&right_value),
                                     check_ansi("\x1b[24m", &self.use_colors),
                                 )
@@ -7729,7 +7856,7 @@ impl Interpreter {
                             if self.check_stop_flag() {
                                 return self.raise("ValueError", "Pentation interrupted by stop flag");
                             }
-                            result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap();
+                            result = tetration(self, base, &result, &pow_cached).ok_or_else(|| self.raise("ValueError", "Pentation failed")).unwrap_or(one.clone());
                             count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 

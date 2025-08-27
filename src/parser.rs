@@ -813,8 +813,12 @@ impl Parser {
                 }
 
                 ("OPERATOR", "!") => {
-                    let mut fact_level = 0;
+                    let mut fact_level: usize = 0;
                     while self.token_is("OPERATOR", "!") {
+                        if fact_level == usize::MAX {
+                            self.raise("OverflowError", "Maximum factorial level reached");
+                            return Statement::Null;
+                        }
                         fact_level += 1;
                         self.next();
                     }
@@ -1713,6 +1717,60 @@ impl Parser {
                             Value::String("WHILE".to_string()),
                             condition.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                        ],
+                        loc: self.get_loc(),
+                    }
+                }
+
+                "IDENTIFIER" if token.1 == "when" => {
+                    self.next();
+                    let mut sync = false;
+                    let condition = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    while ["sync", "async"].contains(&self.token().map(|t| t.1.as_str()).unwrap_or("")) {
+                        match self.token().unwrap().1.as_str() {
+                            "sync" => sync = true,
+                            "async" => sync = false,
+                            _ => {}
+                        }
+                        self.next();
+                    }
+                    if !(self.token_is("IDENTIFIER", "then") || self.token_is("SEPARATOR", ":")) {
+                        self.raise_with_help("SyntaxError", "Expected ':' after 'when' condition", "Did you forget to add ':'?");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    let mut body = vec![];
+                    while let Some(tok) = self.token() {
+                        if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                            break;
+                        }
+                        let stmt = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        body.push(stmt);
+                    }
+
+                    if !self.token_is("IDENTIFIER", "end") {
+                        self.raise_with_help("SyntaxError", "Expected 'end' after 'when' body", "Did you forget to add 'end'?");
+                        return Statement::Null;
+                    }
+                    self.next();
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("condition".to_string()),
+                            Value::String("body".to_string()),
+                            Value::String("sync".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("WHEN".to_string()),
+                            condition.convert_to_map(),
+                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                            Value::Boolean(sync),
                         ],
                         loc: self.get_loc(),
                     }

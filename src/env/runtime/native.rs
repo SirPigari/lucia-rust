@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{to_static, format_float, format_int, self};
+use crate::env::runtime::utils::{to_static, format_int, self};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
@@ -399,7 +399,7 @@ fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
 // Utility Functions
 fn format_value(value: &Value) -> String {
     match value {
-        Value::Float(n) => format_float(&n.clone()),
+        Value::Float(n) => n.to_str(),
         Value::Int(n) => format_int(&n.clone()),
         Value::String(s) => s.clone(),
         Value::Boolean(b) => b.to_string(),

@@ -14,7 +14,7 @@ _Total TODOs found: 6_
 ### [`src/env/libs/std/macros.lc:83:36`](../../../src/env/libs/std/macros.lc#L83) _(added by **SirPigari** on **2025-07-22**)_
 - Fix apollo time in time module (src/env/libs/time/__init__.rs)
 
-### [`src/interpreter.rs:5810:1`](../../../src/interpreter.rs#L5810) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:5939:1`](../../../src/interpreter.rs#L5939) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
@@ -23,7 +23,7 @@ _Total TODOs found: 6_
 ### [`src/main.rs:371:1`](../../../src/main.rs#L371) _(added by **SirPigari** on **2025-07-19**)_
 - Fix indentation and formatting for pp dump
 
-### [`src/interpreter.rs:4348:1`](../../../src/interpreter.rs#L4348) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:4477:1`](../../../src/interpreter.rs#L4477) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
 ---
