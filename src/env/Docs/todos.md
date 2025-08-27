@@ -8,6 +8,9 @@ Be free to fix them or add new ones.
 _Total TODOs found: 6_
 ---
 
+### [`src/env/bundler/bundle.rs:14:1`](../../../src/env/bundler/bundle.rs#L14) _(added by **SirPigari** on **2025-08-27**)_
+- fix it
+
 ### [`src/env/libs/std/macros.lc:83:36`](../../../src/env/libs/std/macros.lc#L83) _(added by **SirPigari** on **2025-07-22**)_
 - Fix apollo time in time module (src/env/libs/time/__init__.rs)
 
@@ -22,9 +25,6 @@ _Total TODOs found: 6_
 
 ### [`src/interpreter.rs:4348:1`](../../../src/interpreter.rs#L4348) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
-
-### [`src/env/bundler/bundle.rs:14:1`](../../../src/env/bundler/bundle.rs#L14) **(TODO not committed yet)**
-- fix it
 
 ---
 *Report generated automatically.*

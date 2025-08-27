@@ -274,6 +274,14 @@ fn regex_escape(args: &HashMap<String, Value>) -> Value {
     Value::String(regex::escape(value))
 }
 
+fn regex_is_fancy(args: &HashMap<String, Value>) -> Value {
+    let pattern = match args.get("pattern") {
+        Some(Value::String(s)) => s,
+        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+    };
+
+    Value::Boolean(is_fancy_pattern(pattern))
+}
 
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
@@ -352,7 +360,13 @@ pub fn register() -> HashMap<String, Variable> {
         vec![Parameter::positional("value", "str")],
         "str"
     );
-
+    insert_native_fn!(
+        map,
+        "is_fancy",
+        regex_is_fancy,
+        vec![Parameter::positional("pattern", "str")],
+        "bool"
+    );
 
     map
 }
