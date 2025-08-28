@@ -405,11 +405,11 @@ pub fn capitalize(s: &str) -> String {
     }
 }
 
-pub fn unescape_string_full(s: &str) -> Result<String, String> {
-    let wrapped = format!("\"{}\"", s);
-    serde_json::from_str::<String>(&wrapped)
-        .map_err(|e| format!("Failed to fully unescape: {}", e))
-}
+// pub fn unescape_string_full(s: &str) -> Result<String, String> {
+//     let wrapped = format!("\"{}\"", s);
+//     serde_json::from_str::<String>(&wrapped)
+//         .map_err(|e| format!("Failed to fully unescape: {}", e))
+// }
 
 pub fn escape_string(s: &str) -> Result<String, String> {
     serde_json::to_string(s)

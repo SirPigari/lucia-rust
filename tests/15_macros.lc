@@ -79,3 +79,36 @@ g!()
 #endmacro
 
 deprecated_macro!()
+
+// this macro uses [] for brackets
+// you can use () [] {} and <> for bracket type in macros
+#macro vec![$els...]:
+    [$els]
+#endmacro
+
+v: list = vec![1, 2, 3, 4, 5]
+assert_eq!(v, ([1, 2, 3, 4, 5]))
+
+// this still works, both macros have same name but different brackets
+#macro vec!($el):
+    [$el]
+#endmacro
+
+v_single: list = vec![1]
+assert_eq!(v_single, ([1]))
+
+#macro is_ident($token):
+    // similar to $!, $? doesnt return a list nor a tuple its on the macro to decide the type
+    // if foo is passed in the tokens are: [("IDENTIFIER", "foo")]
+    tokens: list = [$?token]
+    if len(tokens) == 1:
+        return tokens[0][0] == "IDENTIFIER"
+    else:
+        // must be in else because its a macro not a function
+        return false
+    end
+#endmacro
+
+assert_eq!(is_ident!(foo), true)
+assert_eq!(is_ident!(123), false)
+assert_eq!(is_ident!(foo bar), false)  // its 2 idents not one so its not an ident

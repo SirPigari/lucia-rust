@@ -4,13 +4,13 @@ use std::io::{self, Read, Write};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use colored::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod env {
     pub mod runtime {
@@ -98,7 +98,7 @@ use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::libs::load_std_libs;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
-use crate::lexer::{Lexer, SyntaxRule};
+use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 use crate::env::bundler::bundle::bundle_to_exe;
 
@@ -799,6 +799,7 @@ fn lucia(
     dump_ast_flag: bool,
     disable_preprocessor: bool,
     argv: Vec<String>,
+    timer_flag: bool
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
 
@@ -813,7 +814,7 @@ fn lucia(
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -823,7 +824,7 @@ fn lucia(
         };
 
         std_env::set_current_dir(&cwd).ok();
-        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag);
+        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag);
     }
 }
 
@@ -838,7 +839,8 @@ fn execute_file(
     argv: &Vec<String>,
     dump_dir: (&str, bool),
     dump_pp_flag: &bool,
-    dump_ast_flag: &bool
+    dump_ast_flag: &bool,
+    timer_flag: bool
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
@@ -861,6 +863,7 @@ fn execute_file(
             }
         }
 
+        let file_content_load_time = Instant::now();
         let file_content = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(e) => {
@@ -873,25 +876,37 @@ fn execute_file(
                 exit(1);
             }
         };
+        if timer_flag {
+            println!("{}", format!("{}File content load time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), file_content_load_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
-        let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone()), None).tokenize();
+        let lexering_time = Instant::now();
+        let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone())).tokenize();
+        if timer_flag {
+            println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
         let processed_tokens = if !disable_preprocessor {
             if !config.cache_format.is_enabled() {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
                     debug_log("Cache disabled, reprocessing tokens", &config);
                 }
+                let preprocessing_time = Instant::now();
                 let mut preprocessor = Preprocessor::new(
                     home_dir_path.join("libs"),
                     file_path.as_str(),
                 );
-                match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
+                let res = match preprocessor.process(raw_tokens.clone(), path.parent().unwrap_or(Path::new(""))) {
                     Ok(tokens) => tokens,
                     Err(e) => {
                         handle_error(&e, &file_content, &config);
                         exit(1);
                     }
+                };
+                if timer_flag {
+                    println!("{}", format!("{}Preprocessing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), preprocessing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
                 }
+                res
             } else {
                 let cached_processed = match load_tokens_from_cache(&cache_dir, &file_path, "processed", config.cache_format) {
                     Ok(opt) => opt,
@@ -924,6 +939,7 @@ fn execute_file(
                     if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
                         debug_log("Raw tokens changed or cache missing, reprocessing and updating cache", &config);
                     }
+                    let preprocessing_time = Instant::now();
                     let mut preprocessor = Preprocessor::new(
                         home_dir_path.join("libs"),
                         file_path.as_str(),
@@ -935,6 +951,9 @@ fn execute_file(
                             exit(1);
                         }
                     };
+                    if timer_flag {
+                        println!("{}", format!("{}Preprocessing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), preprocessing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+                    }
                     if let Err(e) = save_tokens_to_cache(&cache_dir, &file_path, "processed", &tokens, config.cache_format) {
                         debug_log(&format!("Failed to save processed tokens cache: {}", e), &config);
                     }
@@ -979,6 +998,7 @@ fn execute_file(
             debug_log(&format!("Tokens: {:?}", filtered), &config);
         }
 
+        let parsing_time = Instant::now();
         let tokens: Vec<Token> = processed_tokens;
         let mut parser = Parser::new(tokens.clone());
 
@@ -990,6 +1010,9 @@ fn execute_file(
                 exit(1);
             }
         };
+        if timer_flag {
+            println!("{}", format!("{}Parsing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), parsing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
         if *dump_ast_flag && !statements.is_empty() {
             let p = if dump_dir.1 {
@@ -1038,6 +1061,7 @@ fn execute_file(
                 .unwrap_or_else(|_| PathBuf::from("."))
         };
 
+        let creating_interpreter_time = Instant::now();
         let mut interpreter = Interpreter::new(
             config.clone(),
             config.supports_color,
@@ -1052,7 +1076,11 @@ fn execute_file(
                 interpreter.set_cache(cache);
             }
         }
+        if timer_flag {
+            println!("{}", format!("{}Creating interpreter time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), creating_interpreter_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
+        let interpreting_time = Instant::now();
         let _out: Value = match interpreter.interpret(statements, true) {
             Ok(out) => {
                 if config.cache_format.is_enabled() {
@@ -1060,10 +1088,16 @@ fn execute_file(
                         debug_log(&format!("Failed to save interpreter cache: {}", e), &config);
                     }
                 }
+                if timer_flag {
+                    println!("{}", format!("{}Interpreting time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), interpreting_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+                }
                 out
             }
             Err(error) => {
                 debug_log("Error while interpreting:", &config);
+                if timer_flag {
+                    println!("{}", format!("{}Interpreting time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), interpreting_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+                }
                 handle_error(&error, &file_content, &config);
                 exit(1);
             }
@@ -1084,6 +1118,7 @@ fn repl(
     dump_dir: (&str, bool),
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
+    timer_flag: bool
 ) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
@@ -1121,7 +1156,6 @@ fn repl(
     let print_intime_debug = matches!(debug_mode.as_deref(), Some("full" | "normal"));
 
     let mut line_number = 0;
-    let mut syntax_rules: HashMap<String, SyntaxRule> = HashMap::new();
 
     let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -1221,14 +1255,18 @@ fn repl(
             exit(0);
         }
 
-        let mut lexer = Lexer::new(&input, "<stdin>".into(), Some(syntax_rules.clone()));
+        let lexering_time = Instant::now();
+        let lexer = Lexer::new(&input, "<stdin>".into());
 
         let raw_tokens = lexer.tokenize();
 
-        syntax_rules = lexer.get_syntax_rules();
+        if timer_flag {
+            println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+        let preprocessing_time = Instant::now();
         let processed_tokens = if !disable_preprocessor {
             match preprocessor.process(raw_tokens.clone(), &current_dir) {
                 Ok(toks) => toks,
@@ -1252,6 +1290,10 @@ fn repl(
         } else {
             raw_tokens
         };
+
+        if timer_flag {
+            println!("{}", format!("{}Preprocessing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), preprocessing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
         if *dump_pp_flag && !processed_tokens.is_empty() {
             let file_path = cwd.join(format!("stdin-{}", line_number));
@@ -1281,6 +1323,7 @@ fn repl(
             debug_log(&format!("Tokens: {:?}", filtered), &config);
         }        
 
+        let parsing_time = Instant::now();
         let tokens = processed_tokens;
 
         let mut parser = Parser::new(
@@ -1300,6 +1343,10 @@ fn repl(
                 continue;
             }
         };
+
+        if timer_flag {
+            println!("{}", format!("{}Parsing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), parsing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
 
         if *dump_ast_flag && !statements.is_empty() {
             let file_path = cwd.join(format!("stdin-{}", line_number));
@@ -1333,6 +1380,7 @@ fn repl(
             );
         }
 
+        let creating_interpreter_time = Instant::now();
         stop_flag.store(false, Ordering::Relaxed);
 
         let stop_flag_clone = stop_flag.clone();
@@ -1370,6 +1418,12 @@ fn repl(
         let builder = thread::Builder::new()
             .name(format!("Lucia-{} REPL", VERSION))
             .stack_size(config.stack_size);
+
+        if timer_flag {
+            println!("{}", format!("{}Creating interpreter time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), creating_interpreter_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
+
+        let interpreting_time = Instant::now();
 
         let handle = builder.spawn(move || {
             let result = interpreter_clone.interpret(statements_clone, true);
@@ -1411,11 +1465,17 @@ fn repl(
                     }
                     exit(0);
                 }
+                if timer_flag {
+                    println!("{}", format!("{}Interpreting time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), interpreting_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+                }
                 out
             }
             Err(error) => {
                 if print_intime_debug {
                     debug_log("Error while interpreting:", &config);
+                }
+                if timer_flag {
+                    println!("{}", format!("{}Error while interpreting: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), error, hex_to_ansi("reset", config.supports_color)));
                 }
                 handle_error(&error.clone(), &input, &config);
                 continue;
@@ -1578,6 +1638,7 @@ fn main() {
         ("--clean-cache, -cc", "Clear the cache directory"),
         ("--c-compiler=<compiler>", "Specify the C compiler to use for compilation (default: gcc)"),
         ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
+        ("--timer, -t", "Enable timing information"),
         ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
     ];
 
@@ -1599,6 +1660,7 @@ fn main() {
     let mut cache: (CacheFormat, bool) = (CacheFormat::NoCache, false);
     let mut cls_cache_flag = false;
     let mut argv_arg: Option<String> = None;
+    let mut timer_flag = false;
 
     if args.contains("--bundle") || args.contains("-b") {
         let args: Vec<String> = vec_args.clone();
@@ -1720,6 +1782,7 @@ fn main() {
             "--dump-ast" => dump_ast_flag = true,
             "--dump" => { dump_pp_flag = true; dump_ast_flag = true; }
             "--allow-unsafe" => allow_unsafe = true,
+            "--timer" | "-t" => timer_flag = true,
             "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
             arg if arg.starts_with("--stack-size=") => {
                 if let Ok(size) = arg["--stack-size=".len()..].parse::<usize>() {
@@ -1870,6 +1933,7 @@ fn main() {
         }
     }
 
+    let config_load_time_start = Instant::now();
     let enviroment_dir = exe_path
         .parent()
         .map(|p| p.join(".."))
@@ -1930,8 +1994,20 @@ fn main() {
                 })
             }
         }
-    };    
+    };
+
     
+    if !supports_color() {
+        config.supports_color = false;
+    }
+    if no_color_flag {
+        config.supports_color = false;
+    }
+
+    if timer_flag {
+        println!("{}", format!("{}Config load time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), config_load_time_start.elapsed(), hex_to_ansi("reset", config.supports_color)));
+    }
+
     if activate_flag {
         println!("{}", format!("Activating environment at: {}", enviroment_dir.display()).cyan().bold());
         if let Err(err) = activate_environment(&enviroment_dir, false) {
@@ -2140,13 +2216,8 @@ fn main() {
     if allow_unsafe {
         config.allow_unsafe = true;
     }
-    if !supports_color() {
-        config.supports_color = false;
-    }
-    if no_color_flag {
-        config.supports_color = false;
-    }
 
+    let libs_load_time_start = Instant::now();
     match load_std_libs(&libs_path.display().to_string(), moded) {
         Ok((_, (f, n))) => {
             if f {
@@ -2182,6 +2253,10 @@ fn main() {
             }
             exit(1);
         }
+    }
+
+    if timer_flag {
+        println!("{}", format!("{}Libraries load time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), libs_load_time_start.elapsed(), hex_to_ansi("reset", config.supports_color)));
     }
 
     if stack_size.1 {
@@ -2223,6 +2298,9 @@ fn main() {
 
     let stack_size_lucia = config.stack_size;
 
+    let handle_creation_time_start = Instant::now();
+    let config_debug_color = config.color_scheme.debug.clone();
+    let config_supports_color = config.supports_color;
     let handle = thread::Builder::new()
         .stack_size(stack_size_lucia)
         .name(format!("Lucia-{}", VERSION))
@@ -2238,9 +2316,14 @@ fn main() {
                 dump_ast_flag,
                 disable_preprocessor,
                 argv,
+                timer_flag,
             );
         })
         .unwrap();
+
+    if timer_flag {
+        println!("{}", format!("{}Handle creation time: {:?}{}", hex_to_ansi(&config_debug_color, config_supports_color), handle_creation_time_start.elapsed(), hex_to_ansi("reset", config_supports_color)));
+    }
 
     handle.join().unwrap();
 }

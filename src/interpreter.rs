@@ -695,7 +695,7 @@ impl Interpreter {
             }
         };
         
-        let mut lexer = Lexer::new(&content, to_static(path.display().to_string()), None);
+        let lexer = Lexer::new(&content, to_static(path.display().to_string()));
         let raw_tokens = lexer.tokenize();
 
         let (pr1, _, ep) = self.preprocessor_info.clone();
@@ -6891,7 +6891,7 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let mut lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()), None);
+                                let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
                                 let mut parser = Parser::new(
@@ -6925,7 +6925,7 @@ impl Interpreter {
                                     &self.config,
                                     Some(self.use_colors.clone()),
                                 );
-                                let mut lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()), None);
+                                let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                                 let tokens = lexer.tokenize();
 
                                 let mut parser = Parser::new(
@@ -8210,8 +8210,8 @@ impl Interpreter {
                                         if brace_level != 0 {
                                             return self.raise("SyntaxError", "Unmatched '{' in f-string");
                                         }
-    
-                                        let tokens = Lexer::new(&expr, &self.file_path.clone(), None).tokenize();
+
+                                        let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
                                         if tokens.is_empty() {
                                             return self.raise("SyntaxError", "Empty expression inside {}");
                                         }

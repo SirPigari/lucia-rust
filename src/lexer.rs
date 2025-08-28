@@ -1,311 +1,392 @@
-use regex::Regex;
-use fancy_regex::Regex as FancyRegex;
-use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::utils::unescape_string_full;
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use crate::env::runtime::tokens::{Location, Token};
+use std::mem;
 
-#[derive(Debug, Clone)]
-pub struct SyntaxRule {
-    regex: FancyRegex,
-    replacement: String,
-}
-
-pub struct Lexer {
-    code: String,
-    file_path: String,
+pub struct Lexer<'a> {
+    code: &'a str,
+    file_path: &'a str,
     line_offsets: Vec<usize>,
-    syntax_rules: HashMap<String, SyntaxRule>,
 }
 
-impl Lexer {
-    pub fn new(code: &str, file_path: &str, syntax_rules_passed: Option<HashMap<String, SyntaxRule>>) -> Self {
-        let mut syntax_rules: HashMap<String, SyntaxRule> = HashMap::new();
-        if syntax_rules_passed.is_some() {
-            syntax_rules = syntax_rules_passed.unwrap();
-        }
-
-        let mut line_offsets = Vec::new();
-        line_offsets.push(0);
-        for (idx, ch) in code.char_indices() {
-            if ch == '\n' {
-                line_offsets.push(idx + 1);
-            }
-        }
-
-        Lexer {
-            code: code.to_string(),
-            file_path: file_path.to_string(),
+impl<'a> Lexer<'a> {
+    pub fn new(code: &'a str, file_path: &'a str) -> Self {
+        let mut line_offsets = vec![0];
+        line_offsets.extend(code.match_indices('\n').map(|(idx, _)| idx + 1));
+        Self {
+            code,
+            file_path,
             line_offsets,
-            syntax_rules,
         }
     }
 
-    pub fn get_syntax_rules(&self) -> HashMap<String, SyntaxRule> {
-        self.syntax_rules.clone()
+    fn make_token(&self, kind: &str, text: &str, start: usize, end: usize) -> Token {
+        let line_number = match self.line_offsets.binary_search(&start) {
+            Ok(l) => l,
+            Err(l) => if l == 0 { 0 } else { l - 1 },
+        };
+        let line_offset = self.line_offsets[line_number];
+        Token(
+            kind.to_string(),
+            text.to_string(),
+            Some(Location::new(
+                self.file_path.to_string(),
+                self.code[line_offset..]
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+                line_number + 1,
+                (start - line_offset, end - line_offset),
+                "".to_string(),
+            )),
+        )
     }
 
-    fn extract_syntax_rules(&mut self, code: &str) -> (String, Vec<usize>) {
-        let syntax_line_re = Regex::new(
-            r#"#syntax\s+([a-zA-Z_][\w]*)\s*:\s*"((?:\\.|[^"\\])*)"\s*->\s*"((?:\\.|[^"\\])*)""#
-        ).unwrap();
-        let remsyntax_re = Regex::new(r#"#remsyntax\s+([a-zA-Z_][\w]*)"#).unwrap();
+    // hell yeah from 23ms to 147.1µs
+    // pain to refactor but it pays off
+    // fuck regex
+    pub fn tokenize(&self) -> Vec<Token> {
+        let mut pos = 0;
+        let len = self.code.len();
+        let mut tokens = if mem::size_of::<usize>() == 8 {
+            Vec::with_capacity(256)
+        } else {
+            Vec::with_capacity(128)
+        };
 
-        let rules = &mut self.syntax_rules;
-        let mut position_map = Vec::new();
+        let symbol_operators = [
+            "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*",
+            "=/", "=^", "=", "<<", ">>", ":=", "^^^", "^^", "++", "--", "+", "-", "^", "*", "/",
+            ">", "<", "!", "%", "||", "&&", "??", "|", "#", "~", "$", "?", "&", "^=", "%=",
+        ];
+        let word_operators = [
+            "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift",
+            "rshift", "band", "bor", "bnot",
+        ];
+        let mut word_ops_sorted = word_operators.to_vec();
+        word_ops_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+        let separators = ["...", "..", "(", ")", "{", "}", "[", "]", ";", ":", ".", ",", "\\"];
 
-        for line in code.lines() {
-            for caps in syntax_line_re.captures_iter(line) {
-                let name = caps.get(1).unwrap().as_str().to_string();
-                let pattern_raw = caps.get(2).unwrap().as_str();
-                let replacement_raw = caps.get(3).unwrap().as_str();
+        'outer: while pos < len {
+            let slice = &self.code[pos..];
+            let mut chars = slice.char_indices();
 
-                let pattern = unescape_string_full(pattern_raw).unwrap_or_else(|_| pattern_raw.to_string());
-                let replacement = unescape_string_full(replacement_raw).unwrap_or_else(|_| replacement_raw.to_string());
-
-                if pattern.is_empty() || replacement.is_empty() {
-                    let error_token = r#"throw "Pattern or replacement cannot be empty" from "LexerError""#;
-                    return (format!("{}\n{}", error_token, code), (0..code.len()).collect());
-                }
-
-                let regex = match FancyRegex::new(&pattern) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        let error_token = r#"throw "Invalid regex pattern in syntax rule" from "LexerError""#;
-                        return (format!("{}\n{}", error_token, code), (0..code.len()).collect());
-                    }
-                };
-
-                rules.insert(name, SyntaxRule { regex, replacement });
-            }
-
-            for caps in remsyntax_re.captures_iter(line) {
-                let name = caps.get(1).unwrap().as_str();
-                rules.remove(name);
-            }
-        }
-
-        let mut cleaned_code = String::new();
-        let mut orig_index = 0;
-
-        for line in code.lines() {
-            let mut last_directive_end = 0;
-            for caps in syntax_line_re.captures_iter(line) {
-                let full = caps.get(0).unwrap();
-                last_directive_end = last_directive_end.max(full.end());
-            }
-            for caps in remsyntax_re.captures_iter(line) {
-                let full = caps.get(0).unwrap();
-                last_directive_end = last_directive_end.max(full.end());
-            }
-
-            let (before, after) = line.split_at(last_directive_end);
-
-            let mut after_transformed = after.to_string();
-            for rule in rules.values() {
-                after_transformed = rule.regex.replace_all(&after_transformed, &rule.replacement).to_string();
-            }
-
-            let transformed_line = format!("{}{}", before, after_transformed);
-
-            let transformed_line_cleaned = syntax_line_re.replace_all(&transformed_line, "").to_string();
-            let transformed_line_cleaned = remsyntax_re.replace_all(&transformed_line_cleaned, "").to_string();
-
-            for i in 0..transformed_line_cleaned.len() {
-                position_map.push(orig_index + i);
-            }
-
-            cleaned_code.push_str(&transformed_line_cleaned);
-            cleaned_code.push('\n');
-
-            orig_index += line.len() + 1;
-        }
-
-        (cleaned_code, position_map)
-    }
-
-    pub fn tokenize(&mut self) -> Vec<Token> {
-        let mut code = self.code.clone();
-
-        let (new_code, position_map) = self.extract_syntax_rules(&code);
-        if new_code != code {
-            code = new_code;
-        }
-
-        static REGEX: OnceLock<Regex> = OnceLock::new();
-        let regex = REGEX.get_or_init(|| {
-            let symbol_operators = [
-                "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*", "=/", "=^", "=", "<<", ">>", ":=", "^^^", "^^",
-                "++", "--", "+", "-", "^", "*", "/", ">", "<", "!", "%", "||", "&&", "??",
-                "|", "#", "~", "$", "?", "&", "^=", "%="
-            ];
-
-            let word_ops_no_boundaries = [
-                "-li"
-            ];
-
-            let word_operators = [
-                "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift", "rshift", "band", "bor", "bnot",
-            ];
-
-            let mut word_with_bounds_sorted = word_operators.iter()
-                .map(|s| regex::escape(*s))
-                .collect::<Vec<_>>();
-            word_with_bounds_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
-
-            let mut word_no_bounds_sorted = word_ops_no_boundaries.iter()
-                .map(|s| regex::escape(*s))
-                .collect::<Vec<_>>();
-            word_no_bounds_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
-
-            let mut symbol_ops_sorted = symbol_operators.iter()
-                .map(|s| regex::escape(*s))
-                .collect::<Vec<_>>();
-            symbol_ops_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
-
-            let word_with_bounds_pattern = format!(r"\b({})\b", word_with_bounds_sorted.join("|"));
-            let word_no_bounds_pattern = word_no_bounds_sorted.join("|");
-            let symbol_ops_pattern = symbol_ops_sorted.join("|");
-
-            let operator_pattern = format!("{}|{}|{}", word_with_bounds_pattern, word_no_bounds_pattern, symbol_ops_pattern);
-
-            let number_pattern = r"(?x)
-                -?
-                (
-                    \d+\#[0-9a-zA-Z_]+
-                    | 0[bB][01]+(?:_[01]+)*  
-                    | 0[oO][0-7]+(?:_[0-7]+)* 
-                    | 0[xX][\da-fA-F]+(?:_[\da-fA-F]+)* 
-                    | \.\d+(?:_\d+)*             
-                    |                         
-                    (?:\d+(?:_\d)*             
-                        (?:\.\d+(?:_\d+)*)?    
-                    )
-                    (?:[eE][+-]?\d+)?         
-                )
-            ";
-
-            let token_specifications = [
-                ("COMMENT_INLINE", r"<#.*?#>"),
-                ("COMMENT_SINGLE", r"//.*"),
-                ("COMMENT_MULTI", r"/\*[\s\S]*?\*/"),
-                ("RAW_STRING", r#"(?i)([fb]*r[fb]*)("([^"]*)"|'([^']*)')"#),
-                ("STRING", r#"(?i)([fb]{0,3})("([^"\\]|\\.)*"|'([^'\\]|\\.)*')"#),
-                ("BOOLEAN", r"\b(true|false|null)\b"),
-                ("NUMBER", &number_pattern),
-                ("OPERATOR", &operator_pattern),
-                ("IDENTIFIER", r"\bnon-static\b|[a-zA-Z_]\w*"),
-                ("SEPARATOR", r"\.\.\.|\.\.|[(){}\[\];:.,\?\\]"),
-                ("WHITESPACE", r"\s+"),
-                ("INVALID", r"."),
-            ];
-
-            let regex_parts: Vec<String> = token_specifications.iter()
-                .map(|(name, pattern)| format!(r"(?P<{}>{})", name, pattern))
-                .collect();
-
-            Regex::new(&regex_parts.join("|")).unwrap()
-        });
-
-        let capture_names: Vec<&str> = regex.capture_names().flatten().collect();
-
-        let mut tokens = Vec::new();
-        let mut byte_index = 0;
-
-        while byte_index < code.len() {
-            if let Some(mat) = regex.find_at(&code, byte_index) {
-                let token_start = mat.start();
-                let token_end = mat.end();
-
-                let token_start_orig = if token_start < position_map.len() { position_map[token_start] } else { token_start };
-                let token_end_orig = if token_end == 0 {
-                    0
-                } else if token_end - 1 < position_map.len() {
-                    position_map[token_end - 1] + 1
-                } else {
-                    token_end
-                };
-
-                let line_number = match self.line_offsets.binary_search(&token_start_orig) {
-                    Ok(line) => line,
-                    Err(next_line) => if next_line == 0 { 0 } else { next_line - 1 },
-                };
-
-                let line_len = self.code.len();
-
-                let line_offset = if line_number < self.line_offsets.len() {
-                    self.line_offsets[line_number]
-                } else {
-                    line_len
-                };
-
-                let search_slice = if line_offset <= line_len {
-                    &self.code[line_offset..]
-                } else {
-                    ""
-                };
-
-                let line_end = match search_slice.find('\n') {
-                    Some(pos) => pos + line_offset,
-                    None => line_len,
-                };
-
-                let column_start = token_start_orig.saturating_sub(line_offset);
-                let column_end = token_end_orig.saturating_sub(line_offset);
-
-                let rust_loc = std::panic::Location::caller();
-
-                let location = Some(Location::new(
-                    self.file_path.clone(),
-                    self.code[line_offset..line_end].to_string(),
-                    line_number + 1,
-                    (column_start, column_end),
-                    format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
-                ));
-
-                let match_text = &code[token_start..token_end];
-                let cap = regex.captures(match_text).unwrap();
-
-                let mut skip_token = false;
-                for &name in &capture_names {
-                    if let Some(value) = cap.name(name) {
-                        let val = value.as_str();
-
-                        if name.starts_with("COMMENT_") {
-                            skip_token = true;
-                            break;
-                        }
-
-                        if name != "WHITESPACE" && !skip_token {
-                            tokens.push(Token(name.to_string(), val.to_string(), location.clone()));
-                            skip_token = true;
-                            break;
-                        }
-                    }
-                }
-
-                if skip_token {
-                    byte_index = token_end;
+            if let Some((_, ch)) = chars.next() {
+                if ch.is_whitespace() {
+                    pos += ch.len_utf8();
                     continue;
                 }
+            }
 
-                byte_index = token_end;
-            } else {
-                break;
+            // INLINE COMMENT <# ... #>
+            if slice.starts_with("<#") {
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("#>") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                if end < len && self.code[end..].starts_with("#>") {
+                    end += 2;
+                }
+                pos = end;
+                continue;
+            }
+
+            // SINGLE-LINE COMMENT //
+            if slice.starts_with("//") {
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("\n") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                pos = end;
+                continue;
+            }
+
+            // MULTI-LINE COMMENT /* ... */
+            if slice.starts_with("/*") {
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("*/") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                if end < len && self.code[end..].starts_with("*/") {
+                    end += 2;
+                }
+                pos = end;
+                continue;
+            }
+
+            // STRINGS
+            if let Some((_, _)) = chars.next() {
+                let mut end = pos;
+                let mut quote = '\0';
+                let mut raw = false;
+
+                let mut iter = slice.char_indices();
+                let (_, first) = iter.next().unwrap();
+
+                if first == 'r' || first == 'f' || first == 'b' {
+                    if let Some((idx2, c2)) = iter.next() {
+                        if c2 == '"' || c2 == '\'' {
+                            quote = c2;
+                            end += idx2 + c2.len_utf8();
+                            raw = first == 'r';
+                        } else if c2 == 'r' {
+                            if let Some((idx3, q)) = iter.next() {
+                                if q == '"' || q == '\'' {
+                                    quote = q;
+                                    end += idx3 + q.len_utf8();
+                                    raw = true;
+                                }
+                            }
+                        }
+                    }
+                } else if first == '"' || first == '\'' {
+                    quote = first;
+                    end += first.len_utf8();
+                }
+
+                if quote != '\0' {
+                    let mut closed = false;
+                    let mut local_end = end;
+
+                    while local_end < len {
+                        let c = self.code[local_end..].chars().next().unwrap();
+                        let c_len = c.len_utf8();
+                        local_end += c_len;
+
+                        if c == quote {
+                            closed = true;
+                            break;
+                        }
+
+                        if c == '\\' && !raw && local_end < len {
+                            local_end += self.code[local_end..].chars().next().unwrap().len_utf8();
+                        }
+                    }
+
+                    let token_kind = if raw {
+                        "RAW_STRING"
+                    } else if closed {
+                        "STRING"
+                    } else {
+                        "INVALID"
+                    };
+
+                    if token_kind == "INVALID" {
+                        let mut invalid_pos = pos;
+                        while invalid_pos < local_end {
+                            let c_len = self.code[invalid_pos..].chars().next().unwrap().len_utf8();
+                            tokens.push(self.make_token(
+                                "INVALID",
+                                &self.code[invalid_pos..invalid_pos + c_len],
+                                invalid_pos,
+                                invalid_pos + c_len,
+                            ));
+                            invalid_pos += c_len;
+                        }
+                    } else {
+                        tokens.push(self.make_token(token_kind, &self.code[pos..local_end], pos, local_end));
+                    }
+
+                    pos = local_end;
+                    continue 'outer;
+                }
+            }
+
+            // BOOLEAN
+            for &b in &["true", "false", "null"] {
+                if slice.starts_with(b) {
+                    tokens.push(self.make_token("BOOLEAN", b, pos, pos + b.len()));
+                    pos += b.len();
+                    continue 'outer;
+                }
+            }
+
+            // NUMBERS
+            let start = pos;
+            let s = &self.code[start..];
+            let mut chars = s.char_indices().peekable();
+            let mut rel_end = 0;
+
+            if let Some(&(i, c)) = chars.peek() {
+                if c == '-' {
+                    rel_end = i + c.len_utf8();
+                    chars.next();
+                }
+            }
+
+            fn consume_while<F>(chars: &mut std::iter::Peekable<std::str::CharIndices>, rel_end: &mut usize, mut pred: F)
+            where F: FnMut(char) -> bool {
+                while let Some(&(i, c)) = chars.peek() {
+                    if pred(c) {
+                        *rel_end = i + c.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            {
+                let mut tmp = chars.clone();
+                let mut tmp_rel_end = rel_end;
+                let mut matched = false;
+
+                if let Some(&(_, c)) = tmp.peek() {
+                    if c.is_ascii_digit() {
+                        consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_digit());
+                        if let Some(&(i2, '#')) = tmp.peek() {
+                            tmp.next();
+                            tmp_rel_end = i2 + 1;
+                            consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_alphanumeric() || ch == '_');
+                            matched = true;
+                        }
+                    }
+                }
+
+                if matched {
+                    rel_end = tmp_rel_end;
+                    let end = start + rel_end;
+                    tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                    pos = end;
+                    continue;
+                }
+            }
+
+            if let Some(&(_, '0')) = chars.peek() {
+                let mut tmp = chars.clone();
+                tmp.next();
+                if let Some(&(i2, base)) = tmp.peek() {
+                    let digits = match base {
+                        'b' | 'B' => "01_",
+                        'o' | 'O' => "01234567_",
+                        'x' | 'X' => "0123456789abcdefABCDEF_",
+                        _ => "",
+                    };
+                    if !digits.is_empty() {
+                        tmp.next();
+                        let mut tmp_rel_end = i2 + base.len_utf8();
+                        consume_while(&mut tmp, &mut tmp_rel_end, |ch| digits.contains(ch));
+                        rel_end = tmp_rel_end;
+                        let end = start + rel_end;
+                        tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                        pos = end;
+                        continue;
+                    }
+                }
+            }
+
+            let mut has_digits = false;
+            let mut dot_seen = false;
+            let mut in_exponent = false;
+            let mut last_char: Option<char> = None;
+
+            while let Some(&(i, c)) = chars.peek() {
+                let accept = match c {
+                    '0'..='9' => { has_digits = true; true }
+                    '_' => true,
+                    '.' => {
+                        if dot_seen || in_exponent { false } else if let Some((_, next_ch)) = chars.clone().nth(1) {
+                            if next_ch == '.' { false } else { dot_seen = true; true }
+                        } else { dot_seen = true; true }
+                    }
+                    'e' | 'E' => { if has_digits && !in_exponent { in_exponent = true; true } else { false } }
+                    '+' | '-' => matches!(last_char, Some('e') | Some('E')),
+                    _ => false,
+                };
+                if !accept { break; }
+                rel_end = i + c.len_utf8();
+                last_char = Some(c);
+                chars.next();
+            }
+
+            if has_digits {
+                let end = start + rel_end;
+                tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                pos = end;
+                continue;
+            }
+
+            // WORD OPERATORS
+            let mut matched = false;
+            for &op in &word_ops_sorted {
+                if slice.starts_with(op) {
+                    let before_ok = pos == 0
+                        || !self.code[..pos].chars().rev().next().unwrap().is_alphanumeric()
+                        && self.code[..pos].chars().rev().next().unwrap() != '_';
+                    let after_pos = pos + op.len();
+                    let after_ok = after_pos >= len || {
+                        let next_ch = self.code[after_pos..].chars().next().unwrap();
+                        !next_ch.is_alphanumeric() && next_ch != '_'
+                    };
+
+                    if before_ok && after_ok {
+                        tokens.push(self.make_token("OPERATOR", op, pos, pos + op.len()));
+                        pos += op.len();
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if matched { continue; }
+
+            // -li operator
+            if slice.starts_with("-li") {
+                tokens.push(self.make_token("OPERATOR", "-li", pos, pos + 3));
+                pos += 3;
+                continue;
+            }
+
+            // SYMBOL OPERATORS
+            let mut op_matched = false;
+            for &op in &symbol_operators {
+                if slice.starts_with(op) {
+                    tokens.push(self.make_token("OPERATOR", op, pos, pos + op.len()));
+                    pos += op.len();
+                    op_matched = true;
+                    break;
+                }
+            }
+            if op_matched { continue; }
+
+            // SEPARATORS
+            let mut sep_matched = false;
+            for &sep in &separators {
+                if slice.starts_with(sep) {
+                    tokens.push(self.make_token("SEPARATOR", sep, pos, pos + sep.len()));
+                    pos += sep.len();
+                    sep_matched = true;
+                    break;
+                }
+            }
+            if sep_matched { continue; }
+
+            // IDENTIFIER
+            if let Some(c) = slice.chars().next() {
+                if c.is_alphabetic() || c == '_' {
+                    let mut end = pos + c.len_utf8();
+                    for ch in self.code[end..].chars() {
+                        if ch.is_alphanumeric() || ch == '_' {
+                            end += ch.len_utf8();
+                        } else { break; }
+                    }
+                    tokens.push(self.make_token("IDENTIFIER", &self.code[pos..end], pos, end));
+                    pos = end;
+                    continue;
+                }
+            }
+
+            // INVALID
+            if let Some(c) = slice.chars().next() {
+                tokens.push(self.make_token(
+                    "INVALID",
+                    &self.code[pos..pos + c.len_utf8()],
+                    pos,
+                    pos + c.len_utf8(),
+                ));
+                pos += c.len_utf8();
             }
         }
 
-        tokens.push(Token("EOF".into(), "\0".into(), tokens.last().and_then(|t| {
-            let loc = t.2.clone();
-            match loc {
-                Some(mut l) => {
-                    l.range.0 += l.range.1 - l.range.0;
-                    l.range.1 = l.range.0 + 1;
-                    Some(l)
-                },
-                None => None
-            }
-        })));
+        tokens.push(Token("EOF".into(), "\0".into(), tokens.last().and_then(|t| t.2.clone())));
         tokens
     }
 }

@@ -13,7 +13,7 @@ use std::sync::Mutex;
 static INTERPRETER: OnceCell<Mutex<Interpreter>> = OnceCell::new();
 
 pub fn interpret(input: &str) -> Result<Value, Error> {
-    let mut lexer = Lexer::new(input, "<internal>", None);
+    let lexer = Lexer::new(input, "<internal>");
     let tokens = lexer.tokenize();
     
     let mut parser = Parser::new(tokens);

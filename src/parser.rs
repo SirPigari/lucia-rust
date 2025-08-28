@@ -1655,21 +1655,9 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "while" => {
                     self.next();
-                    let mut parentheses = false;
-                    if self.token_is("SEPARATOR", "(") {
-                        parentheses = true;
-                        self.next();
-                    }
                     let condition = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
-                    }
-                    if parentheses {
-                        if !self.token_is("SEPARATOR", ")") {
-                            self.raise_with_help("SyntaxError", "Expected ')' after 'while' condition", "Did you forget to add ')'?");
-                            return Statement::Null;
-                        }
-                        self.next();
                     }
                     if self.token_is("IDENTIFIER", "end") {
                         return Statement::Statement {
@@ -1814,21 +1802,9 @@ impl Parser {
                         self.raise("SyntaxError", "Unexpected 'else' after 'if'");
                         return Statement::Null;
                     }
-                    let mut parentheses = false;
-                    if self.token_is("SEPARATOR", "(") {
-                        parentheses = true;
-                        self.next();
-                    }
                     let condition = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
-                    }
-                    if parentheses {
-                        if !self.token_is("SEPARATOR", ")") {
-                            self.raise_with_help("SyntaxError", "Expected ')' after 'if' condition", "Did you forget to add ')'?");
-                            return Statement::Null;
-                        }
-                        self.next();
                     }
 
                     if self.token_is("IDENTIFIER", "then") {

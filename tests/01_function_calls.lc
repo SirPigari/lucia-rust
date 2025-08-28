@@ -1,7 +1,6 @@
 // test functions
 
 print("hello!")
-input("yay input something here pls: ")
 print(len("this is 26 characters long"))
 
 // styled prints

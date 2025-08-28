@@ -141,10 +141,13 @@ fn len(args: &HashMap<String, Value>) -> Value {
         Some(v @ Value::Int(_) | v @ Value::Float(_)) => {
             Value::Int(format_value(v).len().into())
         }
+        Some(Value::Tuple(t)) => Value::Int(t.len().into()),
+        Some(Value::Boolean(_)) => Value::Int(1.into()),
+        Some(Value::Null) => Value::Int(0.into()),
         Some(v) => {
             let msg = format!(
                 "Function 'len()' doesn't support type '{}'",
-                v.type_name()
+                v.get_type().display_simple()
             );
             Value::Error("TypeError", to_static(msg), None)
         }
