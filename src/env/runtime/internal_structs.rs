@@ -294,7 +294,6 @@ pub struct Cache {
 #[derive(Debug, Clone)]
 pub struct InternalStorage {
     pub lambda_counter: usize,
-    pub when_scope_counter: usize,
     pub use_42: (bool, bool),
 }
 

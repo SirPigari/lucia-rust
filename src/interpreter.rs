@@ -43,8 +43,6 @@ use std::path::{PathBuf, Path};
 use std::fs;
 use regex::Regex;
 use tokio::runtime::Runtime;
-use std::thread::{JoinHandle};
-use once_cell::sync::Lazy;
 use reqwest;
 use serde_urlencoded;
 use std::io::{stdout, Write};
@@ -56,8 +54,6 @@ use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::Parser;
 use crate::env::runtime::tokens::{Location};
-
-static WHEN_THREAD: Lazy<Mutex<Option<JoinHandle<()>>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {
@@ -71,16 +67,12 @@ pub struct Interpreter {
     use_colors: bool,
     pub current_statement: Option<Statement>,
     pub variables: HashMap<String, Variable>,
-    async_stuff: Option<
-        (Arc<Mutex<HashMap<String, Variable>>>, Arc<Mutex<Option<Error>>>)
-    >,
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
     cache: Cache,
     internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
-    when_list: Vec<(Vec<Statement>, Statement, bool)>,
     scope: String,
     pub stop_flag: Option<Arc<AtomicBool>>,
 }
@@ -98,7 +90,6 @@ impl Interpreter {
             use_colors,
             current_statement: None,
             variables: HashMap::new(),
-            async_stuff: None,
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
             preprocessor_info,
@@ -109,11 +100,9 @@ impl Interpreter {
             },
             internal_storage: InternalStorage {
                 lambda_counter: 0,
-                when_scope_counter: 0,
                 use_42: (false, false),
             },
             defer_stack: vec![],
-            when_list: vec![],
             scope: "main".to_owned(),
             stop_flag: None,
         };
@@ -999,117 +988,6 @@ impl Interpreter {
         false
     }
 
-    fn start_when_thread(&mut self) {
-        self.check_stop_flag();
-
-        let when_list = self.when_list.clone();
-        let config = self.config.clone();
-        let use_colors = self.use_colors;
-        let file_path = self.file_path.clone();
-        let cwd = self.cwd.clone();
-        let preprocessor_info = self.preprocessor_info.clone();
-        let stack = self.stack.clone();
-        let mut scope_counter = self.internal_storage.when_scope_counter;
-        self.internal_storage.when_scope_counter += 1;
-
-        let mut handle_lock = WHEN_THREAD.lock().unwrap();
-        if handle_lock.is_some() {
-            return;
-        }
-
-        // Ensure async_stuff exists
-        if self.async_stuff.is_none() {
-            let vars = Arc::new(Mutex::new(self.variables.clone()));
-            let err = Arc::new(Mutex::new(self.err.clone()));
-            self.async_stuff = Some((vars, err));
-        }
-
-        let (variables, err_ptr) = self.async_stuff.as_ref().unwrap();
-        let variables = Arc::clone(variables);
-        let err_ptr = Arc::clone(err_ptr);
-
-        *handle_lock = Some(std::thread::spawn(move || {
-            loop {
-                for (body, condition, sync) in &when_list {
-                    // Lock live variables for this iteration
-                    let vars_lock = variables.lock().unwrap();
-
-                    let mut interp = Interpreter::new(
-                        config.clone(),
-                        use_colors,
-                        &file_path,
-                        &cwd,
-                        preprocessor_info.clone(),
-                        &[],
-                    );
-                    interp.stack = stack.clone();
-
-                    // Instead of trying to assign &mut reference, clone once, evaluate, then write back
-                    interp.variables = vars_lock.clone();
-
-                    interp.config.debug = false;
-                    let res = interp.evaluate(condition.clone());
-                    interp.config.debug = interp.og_cfg.debug;
-
-                    // Capture error but continue thread
-                    if let Some(e) = interp.err.clone() {
-                        let mut err_lock = err_ptr.lock().unwrap();
-                        *err_lock = Some(e);
-                        continue;
-                    }
-
-                    if res.is_truthy() {
-                        if *sync {
-                            for expr in body {
-                                let mut vars_lock = variables.lock().unwrap();
-                                interp.variables = vars_lock.clone();
-                                interp.evaluate(expr.clone());
-
-                                if let Some(e) = interp.err.clone() {
-                                    let mut err_lock = err_ptr.lock().unwrap();
-                                    *err_lock = Some(e);
-                                    break;
-                                }
-
-                                // Write back any variable changes
-                                *vars_lock = interp.variables.clone();
-                            }
-                        } else {
-                            let scope_str = format!(
-                                "{}+scope.when_scope#{}",
-                                interp.scope,
-                                { let tmp = scope_counter; scope_counter += 1; tmp }
-                            );
-                            let mut new_interp = interp.clone();
-                            new_interp.scope = scope_str;
-                            let body = body.clone();
-                            let variables_clone = Arc::clone(&variables);
-                            let err_ptr = Arc::clone(&err_ptr);
-
-                            std::thread::spawn(move || {
-                                for expr in body {
-                                    let mut vars_lock = variables_clone.lock().unwrap();
-                                    new_interp.variables = vars_lock.clone();
-                                    new_interp.evaluate(expr.clone());
-
-                                    if let Some(e) = new_interp.err.clone() {
-                                        let mut err_lock = err_ptr.lock().unwrap();
-                                        *err_lock = Some(e);
-                                        break;
-                                    }
-
-                                    *vars_lock = new_interp.variables.clone();
-                                }
-                            });
-                        }
-                    }
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }));
-    }
-
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
 
@@ -1169,7 +1047,6 @@ impl Interpreter {
                 "SCOPE" => self.handle_scope(statement_map),
                 "MATCH" => self.handle_match(statement_map),
                 "GROUP" => self.handle_group(statement_map),
-                "WHEN" => self.handle_when(statement_map),
 
                 "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
                 "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
@@ -1249,49 +1126,6 @@ impl Interpreter {
         }
     
         result
-    }
-
-    fn handle_when(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let condition: Statement = match statement.get(&Value::String("condition".to_string())) {
-            Some(v) => v.convert_to_statement(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'condition' in when"),
-        };
-
-        let body: Vec<Statement> = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(b)) => b.iter().map(|v| v.convert_to_statement()).collect(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'body' in when"),
-        };
-
-        let sync = match statement.get(&Value::String("sync".to_string())) {
-            Some(Value::Boolean(s)) => *s,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'sync' in when"),
-        };
-
-        let res = self.evaluate(condition.clone());
-        if self.err.is_some() {
-            return NULL;
-        }
-        self.when_list.push((body.clone(), condition, sync));
-
-        if !self.when_list.is_empty() && WHEN_THREAD.lock().unwrap().is_none() {
-            self.start_when_thread();
-        }
-
-        debug_log(
-            &format!("<Registering when clause #{}>", self.when_list.len()),
-            &self.config.clone(),
-            Some(self.use_colors),
-        );
-
-        if !self.config.allow_unsafe {
-            return self.raise_with_help(
-                "UnsafeError",
-                "'when' is currently unsafe because of async. This will change in the future",
-                "If you want to use when now, enable the 'allow_unsafe' configuration"
-            );
-        }
-
-        return res;
     }
 
     fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {

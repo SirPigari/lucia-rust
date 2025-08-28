@@ -32,7 +32,6 @@ mod env {
         pub mod internal_structs;
         pub mod precompile;
         pub mod cache;
-        // pub mod gc;
     }
     pub mod libs {
         pub mod math {
