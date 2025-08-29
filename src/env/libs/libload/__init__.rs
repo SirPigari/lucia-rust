@@ -5,6 +5,16 @@ use std::ffi::CString;
 use std::sync::Mutex;
 use once_cell::sync::OnceCell;
 
+#[cfg(unix)]
+use libc::{dlsym, RTLD_DEFAULT};
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetModuleHandleA(lpModuleName: *const i8) -> *mut u8;
+    fn GetProcAddress(hModule: *mut u8, lpProcName: *const i8) -> *mut u8;
+}
+
 use crate::env::runtime::functions::{NativeFunction, Parameter};
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::value::Value;
@@ -95,7 +105,9 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
                 "int" => Some(ValueType::Int),
                 "float" => Some(ValueType::Float),
                 "bool" => Some(ValueType::Boolean),
-                "any" | "str" => Some(ValueType::Ptr),
+                "void" => Some(ValueType::Void),
+                "any" | "str" | "ptr" => Some(ValueType::Ptr),
+                "" => Some(ValueType::Ptr),
                 _ => None,
             };
 
@@ -104,6 +116,8 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
                 .map(|v| {
                     if let Value::String(s) = v {
                         parse_ty(s)
+                    } else if let Value::Type(t) = v {
+                        parse_ty(&t.display_simple())
                     } else {
                         None
                     }
@@ -126,6 +140,75 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
             }
         }
         _ => libload_error("Expected (lib: ptr, name: str, args: [str], ret: str)"),
+    }
+}
+
+pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
+    let name_val = args.get("name");
+    let args_val = args.get("args");
+    let ret_val = args.get("ret");
+
+    match (name_val, args_val, ret_val) {
+        (Some(Value::String(name)), Some(Value::List(arg_tys)), Some(Value::String(ret_ty))) => {
+            let parse_basic_ty = |s: &str| match s {
+                "int" => Some(ValueType::Int),
+                "float" => Some(ValueType::Float),
+                "bool" => Some(ValueType::Boolean),
+                "void" => Some(ValueType::Void),
+                "any" | "str" | "ptr" => Some(ValueType::Ptr),
+                "" => Some(ValueType::Ptr),
+                _ => None,
+            };
+
+            let parse_ty = |s: &str| {
+                if let Some(stripped) = s.strip_prefix('*') {
+                    Some((parse_basic_ty(stripped)?, true))
+                } else {
+                    Some((parse_basic_ty(s)?, false))
+                }
+            };
+
+            let arg_types: Option<Vec<_>> = arg_tys.iter()
+                .map(|v| if let Value::String(s) = v { parse_ty(s) } else { None })
+                .collect();
+
+            let ret_type = parse_basic_ty(ret_ty);
+
+            match (arg_types, ret_type) {
+                (Some(arg_types), Some(_)) => {
+                    let is_variadic = arg_types.iter().any(|(_, var)| *var);
+
+                    let c_name = match CString::new(name.as_str()) {
+                        Ok(c) => c,
+                        Err(_) => return libload_error("Invalid function name"),
+                    };
+
+                    #[cfg(unix)]
+                    let f_ptr = unsafe { dlsym(RTLD_DEFAULT, c_name.as_ptr()) };
+
+                    #[cfg(windows)]
+                    let f_ptr = unsafe {
+                        let mut h_mod = GetModuleHandleA(b"ucrtbase.dll\0".as_ptr() as *const i8);
+                        if h_mod.is_null() {
+                            h_mod = GetModuleHandleA(b"msvcrt.dll\0".as_ptr() as *const i8);
+                        }
+                        if h_mod.is_null() {
+                            return libload_error("Failed to find CRT DLL");
+                        }
+                        GetProcAddress(h_mod, c_name.as_ptr())
+                    };
+
+                    if f_ptr.is_null() {
+                        return libload_error(&format!("Function not found: {}", name));
+                    }
+
+                    let fn_ptr = Box::into_raw(Box::new((f_ptr, is_variadic))) as usize as i64;
+                    Value::Pointer(Arc::new(Value::Int(fn_ptr.into())))
+                }
+                _ => libload_error("Invalid argument or return types"),
+            }
+        }
+        _ => libload_error("Expected (name: str, args: [str], ret: str)"),
     }
 }
 
@@ -181,6 +264,18 @@ pub fn register() -> HashMap<String, Variable> {
         get_fn,
         vec![
             Parameter::positional("lib", "any"),
+            Parameter::positional("name", "str"),
+            Parameter::positional("args", "list"),
+            Parameter::positional("ret", "str"),
+        ],
+        "any"
+    );
+
+    insert_native_fn!(
+        map,
+        "get_fn_std",
+        get_fn_std,
+        vec![
             Parameter::positional("name", "str"),
             Parameter::positional("args", "list"),
             Parameter::positional("ret", "str"),

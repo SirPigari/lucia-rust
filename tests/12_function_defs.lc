@@ -67,6 +67,15 @@ public static final fun mutableArgumentsFunction(mutable a: int, b: str) -> int:
     return a
 end
 
+fun variadicFunction(*args: list[int]) -> int:
+    print("This function takes a variable number of arguments")
+    return sum(args) as int
+end
+
+fun printNoEndline(*args: list[any]) -> void:
+    print(~args, end="")
+end
+
 // === Assertions ===
 
 voidFunction()
@@ -83,3 +92,5 @@ assert_eq!(recursiveFunction(0), 0)
 assert_eq!(recursiveFunction(1), 1)
 assert_eq!(higherOrderFunction(lowerOrderFunction, 10), 20)
 assert_eq!(mutableArgumentsFunction(10, "test"), 15)
+assert_eq!(variadicFunction(1, 2, 3, 4, 5), 15)
+printNoEndline("Hello", "World!")

@@ -19,6 +19,7 @@ use crate::env::runtime::utils::{
     get_remaining_stack_size,
     wrap_in_help,
     is_number,
+    is_number_parentheses,
     gamma_lanczos,
 };
 use crossterm::{
@@ -931,6 +932,30 @@ impl Interpreter {
     }
 
     #[track_caller]
+    pub fn warn(&mut self, warning_str: &str) -> Value {
+        let rust_loc = PanicLocation::caller();
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
+            file: self.file_path.clone(),
+            line_string: "".to_string(),
+            line_number: 0,
+            range: (0, 0),
+            lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
+        });
+        let loc_str = format!("{}:{}:{}", loc.file, loc.line_number, loc.range.0);
+
+
+        if self.config.debug {
+            println!("{}Raised from {}{}", hex_to_ansi(&self.config.color_scheme.debug, self.config.supports_color), loc.lucia_source_loc, hex_to_ansi("reset", self.config.supports_color));
+        }
+
+        if self.config.warnings {
+            eprintln!("{}[{}] {}{}", hex_to_ansi(&self.config.color_scheme.warning, self.config.supports_color), loc_str, warning_str, hex_to_ansi("reset", self.config.supports_color));
+        }
+
+        NULL
+    }
+
+    #[track_caller]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
@@ -1304,7 +1329,7 @@ impl Interpreter {
                     },
                     None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
                 };
-        
+
                 let type_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
                     Some(pos) => {
                         let type_val = &values[pos];
@@ -1318,27 +1343,39 @@ impl Interpreter {
                     }
                     None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
                 };
-        
+
                 let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
                     Some(pos) => match &values[pos] {
                         Value::List(l) => l.iter().filter_map(|v| {
                             if let Value::String(s) = v {
                                 Some(s.clone())
-                            } else {
-                                None
-                            }
+                            } else { None }
                         }).collect(),
                         _ => vec![],
                     },
                     None => vec![],
                 };
-        
-                parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
+
+                // New: check if the parameter is variadic
+                let is_variadic = match keys.iter().position(|k| k == &Value::String("variadic".to_string())) {
+                    Some(pos) => matches!(values[pos], Value::Boolean(true)),
+                    None => false,
+                };
+
+                if is_variadic {
+                    parameters.push(Parameter::variadic_optional(
+                        name.as_str(),
+                        "any",
+                        Value::List(vec![]),
+                    ).set_mods(mods));
+                } else {
+                    parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
+                }
             } else {
                 return self.raise("TypeError", "Expected a map for function parameter");
             }
         }
-        
+
         let named_args_hashmap = named_args.convert_to_hashmap().unwrap_or_else(|| {
             self.raise("TypeError", "Expected a map for named arguments");
             HashMap::new()
@@ -2393,6 +2430,9 @@ impl Interpreter {
                         }
                     }
                 } else if let Value::String(s) = value {
+                    if !is_number(&s) {
+                        return self.raise("ConversionError", &format!("Invalid number format: '{}'", s));
+                    }
                     let stmt = Statement::Statement {
                         keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
                         values: vec![Value::String("NUMBER".to_string()), Value::String(s.clone())],
@@ -2404,6 +2444,9 @@ impl Interpreter {
                     }
                     if let Value::Int(_) = result {
                         result
+                    } else if let Value::Float(_) = result {
+                        self.raise_with_help("ConversionError", &format!("Failed to convert string '{}' to int", s), "Maybe you meant to use 'float'?");
+                        NULL
                     } else {
                         self.raise("ConversionError", &format!("Failed to convert string '{}' to int", s));
                         NULL
@@ -3474,7 +3517,7 @@ impl Interpreter {
                     },
                     None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
                 };
-        
+
                 let type_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
                     Some(pos) => {
                         let type_val = &values[pos];
@@ -3485,22 +3528,34 @@ impl Interpreter {
                     }
                     None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
                 };
-        
+
                 let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
                     Some(pos) => match &values[pos] {
                         Value::List(l) => l.iter().filter_map(|v| {
                             if let Value::String(s) = v {
                                 Some(s.clone())
-                            } else {
-                                None
-                            }
+                            } else { None }
                         }).collect(),
                         _ => vec![],
                     },
                     None => vec![],
                 };
-        
-                parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
+
+                // New: check if the parameter is variadic
+                let is_variadic = match keys.iter().position(|k| k == &Value::String("variadic".to_string())) {
+                    Some(pos) => matches!(values[pos], Value::Boolean(true)),
+                    None => false,
+                };
+
+                if is_variadic {
+                    parameters.push(Parameter::variadic_optional(
+                        name.as_str(),
+                        "any",
+                        Value::List(vec![]),
+                    ).set_mods(mods));
+                } else {
+                    parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
+                }
             } else {
                 return self.raise("TypeError", "Expected a map for function parameter");
             }
@@ -5840,7 +5895,7 @@ impl Interpreter {
             Value::Function(func) => {
                 if let Some(state) = func.metadata().state.as_ref() {
                     if state == "deprecated" {
-                        println!("Warning: Method '{}' is deprecated", method_name);
+                        self.warn(&format!("Warning: Method '{}' is deprecated", method_name));
                     } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
                         return self.raise_with_help(
                             "NameError",
@@ -6026,27 +6081,51 @@ impl Interpreter {
                             }
                         }                        
                         ParameterKind::Variadic => {
-                            let variadic_args = positional[pos_index..].to_vec();
+                            let mut variadic_args = Vec::new();
 
-                            for (i, arg) in variadic_args.iter().enumerate() {
-                                let (is_valid, err) = self.check_type(arg, param_type);
-                                if !is_valid {
-                                    if let Some(err) = err {
-                                        return self.raise_with_ref(
-                                            "TypeError",
-                                            &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
-                                            err,
-                                        );
+                            for (i, arg) in positional[pos_index..].iter().enumerate() {
+                                match arg {
+                                    Value::Type(Type::Unwrap(l)) => {
+                                        for val in l {
+                                            let (is_valid, err) = self.check_type(val, param_type);
+                                            if !is_valid {
+                                                if let Some(err) = err {
+                                                    return self.raise_with_ref(
+                                                        "TypeError",
+                                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                                        err,
+                                                    );
+                                                }
+                                                return self.raise(
+                                                    "TypeError",
+                                                    &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                                );
+                                            }
+                                            variadic_args.push(val.clone());
+                                        }
                                     }
-                                    return self.raise(
-                                        "TypeError",
-                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
-                                    );
+                                    _ => {
+                                        let (is_valid, err) = self.check_type(arg, param_type);
+                                        if !is_valid {
+                                            if let Some(err) = err {
+                                                return self.raise_with_ref(
+                                                    "TypeError",
+                                                    &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                                    err,
+                                                );
+                                            }
+                                            return self.raise(
+                                                "TypeError",
+                                                &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                            );
+                                        }
+                                        variadic_args.push(arg.clone());
+                                    }
                                 }
                             }
-                    
+
                             final_args.insert(param_name.clone(), Value::List(variadic_args));
-                    
+
                             pos_index = positional.len();
                             named_map.remove(param_name);
                         }
@@ -6554,7 +6633,7 @@ impl Interpreter {
 
                 if let Some(state) = metadata.state.as_ref() {
                         if state == "deprecated" {
-                            println!("Warning: Function '{}' is deprecated", function_name);
+                            self.warn(&format!("Warning: Function '{}' is deprecated", function_name));
                         } else if let Some(alt_name) = state.strip_prefix("renamed_to: ") {
                             return self.raise_with_help(
                                 "NameError",
@@ -6735,9 +6814,32 @@ impl Interpreter {
                             }
                         }
                         ParameterKind::Variadic => {
-                            let variadic_args = positional[pos_index..].to_vec();
-                
-                            for (i, arg) in variadic_args.iter().enumerate() {
+                            let mut variadic_args = Vec::new();
+
+                            for (i, arg) in positional[pos_index..].iter().enumerate() {
+                                if let Value::Type(t) = arg {
+                                    if let Type::Unwrap(l) = t {
+                                        for val in l {
+                                            let (is_valid, err) = self.check_type(val, param_type);
+                                            if !is_valid {
+                                                if let Some(err) = err {
+                                                    return self.raise_with_ref(
+                                                        "TypeError",
+                                                        &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                                        err,
+                                                    );
+                                                }
+                                                return self.raise(
+                                                    "TypeError",
+                                                    &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
+                                                );
+                                            }
+                                            variadic_args.push(val.clone());
+                                        }
+                                        continue;
+                                    }
+                                }
+
                                 let (is_valid, err) = self.check_type(arg, param_type);
                                 if !is_valid {
                                     if let Some(err) = err {
@@ -6752,10 +6854,11 @@ impl Interpreter {
                                         &format!("Variadic argument #{} does not match expected type '{}'", i, param_type.display()),
                                     );
                                 }
+                                variadic_args.push(arg.clone());
                             }
-                
+
                             final_args.insert(param_name.clone(), (Value::List(variadic_args), param_mods.clone()));
-                
+
                             pos_index = positional.len();
                             named_map.remove(param_name);
                         }
@@ -7312,6 +7415,12 @@ impl Interpreter {
                 _ => return self.raise("TypeError", &format!("Cannot apply unary plus to {}", operand.type_name())),
             },
             "!" => Value::Boolean(!operand.is_truthy()),
+            "~" if matches!(operand, Value::List(_) | Value::Tuple(_)) => {
+                if let Value::List(l) | Value::Tuple(l) = operand {
+                    return Value::Type(Type::Unwrap(l));
+                }
+                unreachable!()
+            }
             "~" | "bnot" => match operand {
                 Value::Int(a) => {
                     let a_i64 = match a.to_i64() {
@@ -8062,10 +8171,6 @@ impl Interpreter {
         if s.is_empty() {
             return self.raise("RuntimeError", "Empty string provided for number");
         }
-
-        if !is_number(&s) {
-            return self.raise("RuntimeError", &format!("Invalid number format: '{}'", s));
-        }
     
         if let Some(cached) = self.cache.constants.get(s) {
             debug_log(
@@ -8126,6 +8231,10 @@ impl Interpreter {
             .map(Value::Int)
             .unwrap_or_else(|_| self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)))        
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
+            if is_number_parentheses(s) {
+                return Value::Float(imagnum::create_float(s));
+            }
+
             let f = match Float::from_str(s) {
                 Ok(f) => f,
                 Err(_) => return self.raise("RuntimeError", "Invalid float format"),

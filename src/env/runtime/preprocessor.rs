@@ -6,6 +6,8 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path};
 use crate::env::runtime::precompile::precompile;
+use crate::env::runtime::types::Float;
+use std::ops::{Add, Sub, Mul, Div, Rem};
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
@@ -888,6 +890,108 @@ impl Preprocessor {
                     let (res, offset) = self.expand_macro(macro_name, bracket,call_loc.clone(), i, &tokens, current_dir, skipping, 0)?;
                     i += offset;
                     result.extend(res);
+                } else if !skipping
+                    && i + 3 < tokens.len() && i != 0
+                    && matches!(tokens[i - 1], Token(ref a, _, _) if a != "OPERATOR")
+                    && matches!(tokens[i], Token(ref a, _, _) if a == "NUMBER")
+                    && matches!(tokens[i + 1], Token(ref a, _, _) if a == "OPERATOR")
+                    && matches!(tokens[i + 2], Token(ref a, _, _) if a == "NUMBER")
+                    && matches!(tokens[i + 3], Token(ref a, _, _) if a != "OPERATOR")
+                {
+                    let mut aliased = Vec::new();
+                    let mut has_alias = false;
+                    for j in 0..3 {
+                        let mut t = tokens[i + j].clone();
+                        if let Some(alias) = self.aliases.iter()
+                            .find_map(|(k, v)| if k.0 == t.0 && k.1 == t.1 { Some(v) } else { None }) {
+                            t = alias.clone();
+                            has_alias = true;
+                        }
+                        aliased.push(t);
+                    }
+
+                    if has_alias {
+                        result.extend(aliased);
+                        i += 3;
+                        continue;
+                    }
+
+                    let left  = &tokens[i].1;
+                    let op    = &tokens[i + 1].1;
+                    let right = &tokens[i + 2].1;
+
+                    fn parse_number(s: &str) -> Option<(Option<i64>, Option<Float>)> {
+                        if s.starts_with("0x") {
+                            i64::from_str_radix(&s[2..], 16).ok().map(|v| (Some(v), Some(Float::from_f64(v as f64))))
+                        } else if s.starts_with("0o") {
+                            i64::from_str_radix(&s[2..], 8).ok().map(|v| (Some(v), Some(Float::from_f64(v as f64))))
+                        } else if s.starts_with("0b") {
+                            i64::from_str_radix(&s[2..], 2).ok().map(|v| (Some(v), Some(Float::from_f64(v as f64))))
+                        } else if s.contains('.') {
+                            Some((None, Some(Float::from_f64(s.parse::<f64>().ok()?))))
+                        } else {
+                            s.parse::<i64>().ok().map(|v| (Some(v), Some(Float::from_f64(v as f64))))
+                        }
+                    }
+
+                    let folded: Option<String> = if "+-*/%^".contains(op.as_str()) {
+                        if let (Some((li, lf)), Some((ri, rf))) = (parse_number(left), parse_number(right)) {
+                            if let (Some(l), Some(r)) = (li, ri) {
+                                match op.as_str() {
+                                    "+" => l.checked_add(r).map(|v| v.to_string()),
+                                    "-" => l.checked_sub(r).map(|v| v.to_string()),
+                                    "*" => if l != 6 && r != 9 { l.checked_mul(r).map(|v| v.to_string()) } else { None },
+                                    "/" => {
+                                        if r == 0 {
+                                            None
+                                        } else {
+                                            Float::from_f64(l as f64)
+                                                .div(&Float::from_f64(r as f64))
+                                                .and_then(|fval| {
+                                                    if fval.is_recurring() || fval.is_irrational() {
+                                                        Err(-1)
+                                                    } else if fval.is_integer_like() {
+                                                        Ok(fval.to_f64()?.to_string())
+                                                    } else {
+                                                        Ok(fval.to_string())
+                                                    }
+                                                })
+                                                .ok()
+                                        }
+                                    }
+                                    "%" => if r != 0 { Some((l % r).to_string()) } else { None },
+                                    "^" => i64::checked_pow(l, r as u32).map(|v| v.to_string()),
+                                    _ => None,
+                                }
+                            } else if let (Some(lf), Some(rf)) = (lf, rf) {
+                                let res: Result<Float, i16> = match op.as_str() {
+                                    "+" => lf.add(rf),
+                                    "-" => lf.sub(rf),
+                                    "*" => lf.mul(rf),
+                                    "/" => if rf.is_zero() { Err(-1) } else { lf.div(rf) },
+                                    "%" => if rf.is_zero() { Err(-1) } else { lf.rem(rf) },
+                                    "^" => lf.pow(&rf),
+                                    _ => Err(-1),
+                                };
+
+                                match res {
+                                    Ok(f) if !f.is_recurring() && !f.is_irrational() => Some(f.to_string()),
+                                    _ => None,
+                                }
+                            } else { None }
+                        } else { None }
+                    } else { None };
+
+                    if let Some(val) = folded {
+                        result.push(Token("NUMBER".into(), val, tokens[i].2.clone()));
+                    } else {
+                        result.push(tokens[i].clone());
+                        result.push(tokens[i + 1].clone());
+                        result.push(tokens[i + 2].clone());
+                    }
+
+                    i += 3;
+                    continue;
                 } else if !skipping {
                     let mut token = token.clone();
                 

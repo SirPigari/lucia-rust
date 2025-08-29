@@ -36,17 +36,13 @@ pub enum Type {
         conditions: Vec<Value>,
         variables: Vec<Value>,
     },
-    EnumInstance {
-        name: String,
-        variant: String,
-        value: Box<Type>,
-    },
     Alias {
         name: String,
         base_type: Box<Type>,
         conditions: Vec<Value>,
         variables: Vec<Value>,
-    }
+    },
+    Unwrap(Vec<Value>),
 }
 
 impl Type {
@@ -75,8 +71,8 @@ impl Type {
             Type::Indexed { base_type, elements } => format!("<type '{}[{}]'>", base_type.display_simple(), elements.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ")),
             Type::Union(types) => format!("<union type '{}'>", types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(" | ")),
             Type::Enum { name, .. } => format!("<enum '{}'>", name),
-            Type::EnumInstance { name, variant, value } => format!("<type '{}::{}({})'>", name, variant, value.display_simple()),
             Type::Alias { name, base_type, .. } => format!("<type '{}' as '{}'>", name, base_type.display_simple()),
+            Type::Unwrap(values) => format!("<unwrap type '{}'>", values.iter().map(|v| v.get_type().display_simple()).collect::<Vec<_>>().join(", ")),
         }
     }
 
@@ -169,13 +165,12 @@ impl PartialEq for Type {
              Enum { name: n2, variants: v2, generics: g2, conditions: c2, .. }) =>
                 n1 == n2 && v1 == v2 && g1 == g2 && c1 == c2,
 
-            (EnumInstance { name: n1, variant: v1, value: val1 },
-             EnumInstance { name: n2, variant: v2, value: val2 }) =>
-                n1 == n2 && v1 == v2 && val1 == val2,
-
             (Alias { name: n1, base_type: b1, conditions: c1, .. },
              Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
                 n1 == n2 && b1 == b2 && c1 == c2,
+
+            (Unwrap(v1), Unwrap(v2)) =>
+                v1 == v2,
 
             _ => false
         }
@@ -209,13 +204,12 @@ impl PartialOrd for Type {
              Enum { name: n2, variants: v2, generics: g2, conditions: c2, .. }) =>
                 (n1, v1, g1, c1).partial_cmp(&(n2, v2, g2, c2)),
 
-            (EnumInstance { name: n1, variant: v1, value: val1 },
-             EnumInstance { name: n2, variant: v2, value: val2 }) =>
-                (n1, v1, val1).partial_cmp(&(n2, v2, val2)),
-
             (Alias { name: n1, base_type: b1, conditions: c1, .. },
              Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
                 (n1, b1, c1).partial_cmp(&(n2, b2, c2)),
+
+            (Unwrap(v1), Unwrap(v2)) =>
+                v1.partial_cmp(&v2),
 
             _ => None
         }
@@ -253,15 +247,13 @@ impl Hash for Type {
                 generics.hash(state);
                 conditions.hash(state);
             }
-            EnumInstance { name, variant, value } => {
-                name.hash(state);
-                variant.hash(state);
-                value.hash(state);
-            }
             Alias { name, base_type, conditions, .. } => {
                 name.hash(state);
                 base_type.hash(state);
                 conditions.hash(state);
+            }
+            Unwrap(values) => {
+                values.hash(state);
             }
         }
     }

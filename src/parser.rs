@@ -2068,22 +2068,31 @@ impl Parser {
 
                             while let Some(mut current_tok) = self.token().cloned() {
                                 let mut param_modifiers = vec![];
+                                let mut is_variadic = false;
 
                                 while current_tok.0 == "IDENTIFIER" &&
-                                    (current_tok.1 == "mutable" || current_tok.1 == "final" || current_tok.1 == "static" || current_tok.1 == "non-static")
+                                    ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_str())
                                 {
                                     param_modifiers.push(current_tok.1.clone());
                                     self.next();
-
-                                    if let Some(next_tok) = self.token() {
-                                        current_tok = next_tok.clone();
-                                    } else {
-                                        break;
-                                    }
+                                    if let Some(tok) = self.token() {
+                                        current_tok = tok.clone();
+                                    } else { break; }
                                 }
 
-                                if current_tok.0 == "SEPARATOR" && current_tok.1 == ")" {
-                                    break;
+                                if self.token_is("OPERATOR", "*") {
+                                    is_variadic = true;
+                                    self.next();
+                                    if let Some(tok) = self.token() {
+                                        current_tok = tok.clone();
+                                        if current_tok.0 == "IDENTIFIER" &&
+                                        ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_str())
+                                        {
+                                            param_modifiers.push(current_tok.1.clone());
+                                            self.next();
+                                            if let Some(tok2) = self.token() { current_tok = tok2.clone(); }
+                                        }
+                                    } else { self.raise("SyntaxError", "Expected identifier after '*'"); return Statement::Null; }
                                 }
 
                                 if current_tok.0 == "IDENTIFIER" {
@@ -2091,73 +2100,40 @@ impl Parser {
                                     self.next();
 
                                     let mut arg_type = Value::Map {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                            Value::String("type_kind".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("TYPE".to_string()),
-                                            Value::String("any".to_string()),
-                                            Value::String("simple".to_string()),
-                                        ],
+                                        keys: vec!["type".into(), "value".into(), "type_kind".into()],
+                                        values: vec!["TYPE".into(), "any".into(), "simple".into()],
                                     };
 
                                     if self.token_is("SEPARATOR", ":") {
                                         self.next();
                                         let type_expr = self.parse_type();
-                                        if self.err.is_some() {
-                                            return Statement::Null;
-                                        }
+                                        if self.err.is_some() { return Statement::Null; }
                                         arg_type = type_expr.convert_to_map();
                                     }
 
                                     let modifiers_value = Value::List(param_modifiers.into_iter().map(Value::String).collect());
 
-                                    if self.token_is("OPERATOR", "=") {
+                                    if self.token_is("OPERATOR", "=") && !is_variadic {
                                         self.next();
                                         let def_val = self.parse_expression();
-                                        if self.err.is_some() {
-                                            return Statement::Null;
-                                        }
-
-                                        let wrapped_named_arg = Value::Map {
-                                            keys: vec![
-                                                Value::String("type".to_string()),
-                                                Value::String("value".to_string()),
-                                                Value::String("modifiers".to_string()),
-                                            ],
-                                            values: vec![
-                                                arg_type.clone(),
-                                                def_val.convert_to_map(),
-                                                modifiers_value.clone(),
-                                            ],
-                                        };
-                                        named_args.push((arg_name, wrapped_named_arg));
+                                        if self.err.is_some() { return Statement::Null; }
+                                        named_args.push((arg_name.clone(), Value::Map {
+                                            keys: vec!["type".into(), "value".into(), "modifiers".into(), "variadic".into()],
+                                            values: vec![arg_type.clone(), def_val.convert_to_map(), modifiers_value.clone(), Value::Boolean(is_variadic)],
+                                        }));
                                     } else {
-                                        let mut keys = vec![
-                                            Value::String("name".to_string()),
-                                            Value::String("type".to_string()),
-                                        ];
-                                        let mut values = vec![
-                                            Value::String(arg_name.clone()),
-                                            arg_type,
-                                        ];
-
-                                        if let Value::List(_) = modifiers_value {
-                                            keys.push(Value::String("modifiers".to_string()));
-                                            values.push(modifiers_value);
-                                        }
-
-                                        let arg_stmt = Statement::Statement {
-                                            keys,
-                                            values,
+                                        pos_args.push(Statement::Statement {
+                                            keys: vec!["name".into(), "type".into(), "variadic".into(), "modifiers".into()],
+                                            values: vec![arg_name.into(), arg_type, Value::Boolean(is_variadic), modifiers_value],
                                             loc: self.get_loc(),
-                                        };
-                                        pos_args.push(arg_stmt);
+                                        });
                                     }
-                                } else if current_tok.0 == "SEPARATOR" && current_tok.1 == "," {
-                                    self.next();
+
+                                    if is_variadic { break; }
+
+                                    if self.token_is("SEPARATOR", ",") { self.next(); }
+                                } else if current_tok.0 == "SEPARATOR" && current_tok.1 == ")" {
+                                    break;
                                 } else {
                                     self.raise("SyntaxError", &format!("Unexpected token '{}'", current_tok.1));
                                     return Statement::Null;
@@ -3495,38 +3471,109 @@ impl Parser {
 
                 "NUMBER" => {
                     let next_token = self.peek(1).cloned();
+
                     if let Some(next_tok) = next_token {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
-                            let left = self.parse_operand();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            let old_pos = self.pos.clone();
-                            self.next();
-                            let right = self.parse_expression();
-                            if !self.token_is("SEPARATOR", ")") {
-                                self.pos = old_pos;
-                                self.err = None;
-                                return left;
-                            }
-                            self.next();
-                            if self.err.is_some() {
-                                return Statement::Null;
-                            }
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("operator".to_string()),
-                                    Value::String("left".to_string()),
-                                    Value::String("right".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("OPERATION".to_string()),
-                                    Value::String("*".to_string()),
-                                    left.convert_to_map(),
-                                    right.convert_to_map(),
-                                ],
-                                loc: self.get_loc(),
+                            if token.1.contains('.') {
+                                if let Some(inner) = self.peek(2).cloned() {
+                                    let inner_type = inner.0;
+                                    let inner_value = inner.1;
+                                    let third_tok = self.peek(3).cloned();
+
+                                    if inner_type == "NUMBER" 
+                                        && inner_value.chars().all(|c| c.is_ascii_digit())
+                                        && third_tok.as_ref().map(|t| t.0 == "SEPARATOR" && t.1 == ")") == Some(true)
+                                    {
+                                        self.next();
+                                        self.next();
+                                        self.next();
+                                        self.next();
+
+                                        Statement::Statement {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("value".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String("NUMBER".to_string()),
+                                                Value::String(format!("{}({})", token.1, inner_value)),
+                                            ],
+                                            loc: self.get_loc(),
+                                        }
+                                    } else {
+                                        let left = self.parse_operand();
+                                        if self.err.is_some() {
+                                            Statement::Null
+                                        } else {
+                                            let old_pos = self.pos.clone();
+                                            self.next();
+                                            let right = self.parse_expression();
+                                            if !self.token_is("SEPARATOR", ")") {
+                                                self.pos = old_pos;
+                                                self.err = None;
+                                                left
+                                            } else {
+                                                self.next();
+                                                if self.err.is_some() {
+                                                    Statement::Null
+                                                } else {
+                                                    Statement::Statement {
+                                                        keys: vec![
+                                                            Value::String("type".to_string()),
+                                                            Value::String("operator".to_string()),
+                                                            Value::String("left".to_string()),
+                                                            Value::String("right".to_string()),
+                                                        ],
+                                                        values: vec![
+                                                            Value::String("OPERATION".to_string()),
+                                                            Value::String("*".to_string()),
+                                                            left.convert_to_map(),
+                                                            right.convert_to_map(),
+                                                        ],
+                                                        loc: self.get_loc(),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    self.parse_operand()
+                                }
+                            } else {
+                                let left = self.parse_operand();
+                                if self.err.is_some() {
+                                    Statement::Null
+                                } else {
+                                    let old_pos = self.pos.clone();
+                                    self.next();
+                                    let right = self.parse_expression();
+                                    if !self.token_is("SEPARATOR", ")") {
+                                        self.pos = old_pos;
+                                        self.err = None;
+                                        left
+                                    } else {
+                                        self.next();
+                                        if self.err.is_some() {
+                                            Statement::Null
+                                        } else {
+                                            Statement::Statement {
+                                                keys: vec![
+                                                    Value::String("type".to_string()),
+                                                    Value::String("operator".to_string()),
+                                                    Value::String("left".to_string()),
+                                                    Value::String("right".to_string()),
+                                                ],
+                                                values: vec![
+                                                    Value::String("OPERATION".to_string()),
+                                                    Value::String("*".to_string()),
+                                                    left.convert_to_map(),
+                                                    right.convert_to_map(),
+                                                ],
+                                                loc: self.get_loc(),
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             self.parse_operand()

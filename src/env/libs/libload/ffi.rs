@@ -15,11 +15,11 @@ enum StoredValue {
     Float(f64),
     Boolean(u8),
     Ptr(*const std::ffi::c_void),
+    Null,
 }
 
 unsafe impl Send for StoredValue {}
 unsafe impl Sync for StoredValue {}
-
 
 #[derive(Clone, Debug)]
 pub enum ValueType {
@@ -27,6 +27,7 @@ pub enum ValueType {
     Float,
     Boolean,
     Ptr,
+    Void,
 }
 
 pub struct LuciaLib {
@@ -77,6 +78,7 @@ impl LuciaFfiFn {
             ValueType::Float => Type::f64(),
             ValueType::Boolean => Type::u8(),
             ValueType::Ptr => Type::pointer(),
+            ValueType::Void => Type::void(),
         }).collect();
 
         let ffi_ret_type = match self.ret_type {
@@ -84,6 +86,7 @@ impl LuciaFfiFn {
             ValueType::Float => Type::f64(),
             ValueType::Boolean => Type::u8(),
             ValueType::Ptr => Type::pointer(),
+            ValueType::Void => Type::void(),
         };
 
         let cif = Cif::new(ffi_arg_types.clone(), ffi_ret_type);
@@ -148,6 +151,7 @@ impl LuciaFfiFn {
                         Err("Expected Value::Int inside pointer Arc".into())
                     }
                 }
+                (Value::Null, ValueType::Void) => Ok(Arg::new(&StoredValue::Null)),
                 _ => Err("Unsupported Value/ValueType combination for ffi call".to_string()),
             }
         }).collect();
@@ -171,6 +175,10 @@ impl LuciaFfiFn {
             ValueType::Ptr => {
                 let ret: *const () = unsafe { cif.call(self.func_ptr, &ffi_args) };
                 Value::Pointer(Arc::new(Value::Int((ret as usize as i64).into())))
+            }
+            ValueType::Void => {
+                unsafe { cif.call::<()>(self.func_ptr, &ffi_args) };
+                Value::Null
             }
         };
 

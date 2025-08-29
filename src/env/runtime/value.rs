@@ -515,7 +515,7 @@ impl Value {
     pub fn is_zero(&self) -> bool {
         match self {
             Value::Int(val) if val == &Int::from_i64(0) => true,
-            Value::Float(f) if *f == 0.0.into() => true,
+            Value::Float(f) if *f == Float::from(0.0) => true,
             _ => false,
         }
     }
@@ -573,8 +573,8 @@ impl Value {
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Boolean(b) => *b,
-            Value::Int(n) => *n != 0.into(),
-            Value::Float(f) => *f != 0.0.into(),
+            Value::Int(n) => *n != Int::from_i64(0),
+            Value::Float(f) => *f != Float::from(0.0),
             Value::String(s) => !s.is_empty(),
             Value::List(l) => !l.is_empty(),
             Value::Map { keys, .. } => !keys.is_empty(),

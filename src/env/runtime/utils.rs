@@ -11,7 +11,6 @@ use crate::env::runtime::value::{Value};
 use std::str::FromStr;
 use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
-use regex::Regex;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
 use crossterm::{
@@ -1229,29 +1228,173 @@ pub fn parse_type(type_str: &str) -> Type {
     Type::new_simple("any")
 }
 
-static NUMBER_REGEX: Lazy<Regex> = Lazy::new(|| {
-    let number_pattern = r"(?x)
-        -?
-        (
-            \d+\#[0-9a-zA-Z_]+
-            | 0[bB][01]+(?:_[01]+)*
-            | 0[oO][0-7]+(?:_[0-7]+)*
-            | 0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*
-            | \.\d+(?:_\d+)*
-            |
-            (?:\d+(?:_\d)* 
-                (?:\.\d+(?:_\d+)*)?
-            )
-            (?:[eE][+-]?\d+)?
-        )
-    ";
-
-    Regex::new(number_pattern).unwrap()
-});
-
 pub fn is_number(n: &str) -> bool {
-    NUMBER_REGEX.is_match(n)
+    let s = n;
+    let len = s.len();
+    if len == 0 {
+        return false;
+    }
+
+    if is_number_parentheses(n) {
+        return true;
+    }
+
+    let mut chars = s.char_indices().peekable();
+    let mut rel_end = 0;
+
+    if let Some(&(i, c)) = chars.peek() {
+        if c == '-' {
+            rel_end = i + c.len_utf8();
+            chars.next();
+        }
+    }
+
+    fn consume_while<F>(chars: &mut std::iter::Peekable<std::str::CharIndices>, rel_end: &mut usize, mut pred: F)
+    where F: FnMut(char) -> bool {
+        while let Some(&(i, c)) = chars.peek() {
+            if pred(c) {
+                *rel_end = i + c.len_utf8();
+                chars.next();
+            } else {
+                break;
+            }
+        }
+    }
+
+    {
+        let mut tmp = chars.clone();
+        let mut tmp_rel_end = rel_end;
+        let mut matched = false;
+
+        if let Some(&(_, c)) = tmp.peek() {
+            if c.is_ascii_digit() {
+                consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_digit());
+                if let Some(&(i2, '#')) = tmp.peek() {
+                    tmp.next();
+                    tmp_rel_end = i2 + 1;
+                    consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_alphanumeric() || ch == '_');
+                    matched = true;
+                }
+            }
+        }
+
+        if matched {
+            return tmp_rel_end == len;
+        }
+    }
+
+    if let Some(&(_, '0')) = chars.peek() {
+        let mut tmp = chars.clone();
+        tmp.next();
+        if let Some(&(i2, base)) = tmp.peek() {
+            let digits = match base {
+                'b' | 'B' => "01_",
+                'o' | 'O' => "01234567_",
+                'x' | 'X' => "0123456789abcdefABCDEF_",
+                _ => "",
+            };
+            if !digits.is_empty() {
+                tmp.next();
+                let mut tmp_rel_end = i2 + base.len_utf8();
+                consume_while(&mut tmp, &mut tmp_rel_end, |ch| digits.contains(ch));
+                return tmp_rel_end == len;
+            }
+        }
+    }
+
+    let mut has_digits = false;
+    let mut dot_seen = false;
+    let mut in_exponent = false;
+    let mut last_char: Option<char> = None;
+
+    while let Some(&(i, c)) = chars.peek() {
+        let accept = match c {
+            '0'..='9' => { has_digits = true; true }
+            '_' => true,
+            '.' => {
+                if dot_seen || in_exponent {
+                    false
+                } else if let Some((_, next_ch)) = chars.clone().nth(1) {
+                    if next_ch == '.' {
+                        false
+                    } else {
+                        dot_seen = true;
+                        true
+                    }
+                } else {
+                    dot_seen = true;
+                    true
+                }
+            }
+            'e' | 'E' => {
+                if has_digits && !in_exponent {
+                    in_exponent = true;
+                    true
+                } else {
+                    false
+                }
+            }
+            '+' | '-' => matches!(last_char, Some('e') | Some('E')),
+            _ => false,
+        };
+        if !accept { break; }
+        rel_end = i + c.len_utf8();
+        last_char = Some(c);
+        chars.next();
+    }
+
+    has_digits && rel_end == len
 }
+
+pub fn is_number_parentheses(n: &str) -> bool {
+    let s = n.trim();
+    if s.is_empty() {
+        return false;
+    }
+
+    let mut chars = s.chars().peekable();
+    let mut seen_dot = false;
+    let mut main_digits = false;
+
+    while let Some(&c) = chars.peek() {
+        match c {
+            '0'..='9' => {
+                main_digits = true;
+                chars.next();
+            }
+            '.' => {
+                if seen_dot {
+                    return false;
+                }
+                seen_dot = true;
+                chars.next();
+            }
+            '(' => break,
+            _ => return false,
+        }
+    }
+
+    if !main_digits {
+        return false;
+    }
+
+    if let Some('(') = chars.next() {
+        let mut inner_digits = false;
+        while let Some(c) = chars.next() {
+            match c {
+                '0'..='9' => inner_digits = true,
+                ')' => {
+                    return inner_digits && chars.peek().is_none();
+                }
+                _ => return false,
+            }
+        }
+        return false;
+    }
+
+    chars.peek().is_none()
+}
+
 
 pub fn gamma_lanczos(z: f64, level: usize) -> f64 {
     // standard Lanczos approximation (Gamma(z))

@@ -41,8 +41,7 @@ impl<'a> Lexer<'a> {
         )
     }
 
-    // hell yeah from 23ms to 147.1µs
-    // pain to refactor but it pays off
+    // 23ms to 147.1µs
     // fuck regex
     pub fn tokenize(&self) -> Vec<Token> {
         let mut pos = 0;
