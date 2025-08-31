@@ -1,32 +1,118 @@
-// #include <std/macros>
+#include <std/macros>
 
-// a: str = "Hello, World!"
+a: str = "Hello, World!"
 
-// match (a):
-//     _ if (false) ->
-//         throw "This should not be reached"
-//     end
-//     "hello world":
-//         throw "This should not be reached"
-//     end
-//     "hello world": end
-//     (a):
-//         print("Matched: ", a)
-//         break
-//     end
-//     _:
-//         throw "This should not be reached"
-//     end
-// end
 
-// // no fallthrough
-// match (a):
-//     (a):
-//         // will not fallthrough to the next case
-//         print("Matched: ", a)
-//         pass
-//     end
-//     _:
-//         throw "This should not be reached"
-//     end
-// end
+// continue should skip a matching literal and go to the next one
+mutable hit1: bool = false
+mutable hit2: bool = false
+
+match (a):
+    "Hello, World!":
+        hit1 = true
+        continue
+    end
+
+    "Hello, World!":
+        hit2 = true
+        break
+    end
+
+    _ ->
+        throw "Wildcard reached unexpectedly in continue test"
+    end
+end
+
+assert!(hit1, "hit1 branch (first continue) did not execute")
+assert!(hit2, "hit2 branch (second after continue) did not execute")
+
+
+// break should exit early and not allow later matches
+mutable hit3: bool = false
+
+match (a):
+    "Hello, World!":
+        hit3 = true
+        break
+    end
+
+    "Hello, World!":
+        throw "Break failed: matched a later branch that should be skipped"
+    end
+
+    _ ->
+        throw "Break failed: wildcard branch executed unexpectedly"
+    end
+end
+
+assert!(hit3, "hit3 branch (break) did not execute")
+
+
+// combined guard + continue test
+mutable hit5: bool = false
+mutable hit6: bool = false
+
+match (a):
+    (val) if (val == "Hello, World!") ->
+        hit5 = true
+        continue
+    end
+
+    (val) ->
+        hit6 = true
+        break
+    end
+
+    _ ->
+        throw "Guard + continue test reached unexpected branch"
+    end
+end
+
+assert!(hit5, "hit5 branch (guard + continue) did not execute")
+assert!(hit6, "hit6 branch (after guard + continue) did not execute")
+
+
+// nested multiple continue before a break
+mutable hit9: bool = false
+
+match (a):
+    "Not me":
+        throw "Matched wrong literal in nested multiple continue test"
+    end
+
+    "Nope":
+        throw "Matched wrong literal in nested multiple continue test"
+    end
+
+    "Hello, World!":
+        hit9 = true
+        break
+    end
+
+    _ ->
+        throw "Nested multiple continue test reached unexpected wildcard"
+    end
+end
+
+assert!(hit9, "hit9 branch (final nested match) did not execute")
+
+
+// mixed pattern + literal test
+mutable hit11: bool = false
+
+match (a):
+    (val) if (val == "Nope") ->
+        throw "Matched wrong pattern in mixed pattern + literal test"
+    end
+
+    "Hello, World!":
+        hit11 = true
+        break
+    end
+
+    _ ->
+        throw "Mixed pattern + literal test reached unexpected wildcard"
+    end
+end
+
+assert!(hit11, "hit11 branch (literal after pattern) did not execute")

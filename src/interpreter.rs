@@ -22,6 +22,7 @@ use crate::env::runtime::utils::{
     is_number_parentheses,
     gamma_lanczos,
     get_inner_type,
+    check_pattern,
 };
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
@@ -1841,11 +1842,10 @@ impl Interpreter {
     }
 
     fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
-        self.raise("NotImplemented", "'match' statements are currently disabled.");
-        if self.err.is_some() {
-            return NULL;
-        }
-
+        // self.raise("NotImplemented", "'match' statements are currently disabled.");
+        // if self.err.is_some() {
+        //     return NULL;
+        // }
         let condition = match statement.get(&Value::String("condition".to_string())) {
             Some(v) => v,
             _ => {
@@ -1867,79 +1867,190 @@ impl Interpreter {
 
         for case in cases.iter() {
             if let Value::Map { keys, values } = case {
-                let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
-                    Some(pos) => values.get(pos).unwrap_or(&Value::Null),
-                    None => {
-                        self.raise("RuntimeError", "Expected 'pattern' in match case");
-                        return NULL;
-                    }
-                };
-
-                let guard: Option<Statement> = match (
-                    keys.iter().position(|k| k == &Value::String("guard".to_string())),
-                    values.get(keys.iter().position(|k| k == &Value::String("guard".to_string())).unwrap_or(usize::MAX)),
-                ) {
-                    (Some(_), Some(val)) => match val {
-                        Value::Map { .. } => Some(val.convert_to_statement()),
-                        Value::Null => None,
-                        _ => {
-                            self.raise("RuntimeError", "Expected 'guard' to be a map or null in match case");
-                            return NULL;
-                        }
-                    },
-                    _ => None,
-                };
-
-                let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
+                let style = match keys.iter().position(|k| k == &Value::String("style".to_string())) {
                     Some(pos) => match values.get(pos) {
-                        Some(Value::List(b)) => b,
+                        Some(Value::String(s)) => s.as_str(),
                         _ => {
-                            self.raise("RuntimeError", "Expected 'body' to be a list in match case");
+                            self.raise("RuntimeError", "Expected 'style' to be a string in match case");
                             return NULL;
                         }
                     },
                     None => {
-                        self.raise("RuntimeError", "Missing 'body' in match case");
+                        self.raise("RuntimeError", "Missing 'style' in match case");
                         return NULL;
                     }
                 };
 
-                let matched = match pattern {
-                    Value::Null => true,
-                    _ => {
-                        let check = Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("left".to_string()),
-                                Value::String("operator".to_string()),
-                                Value::String("right".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("OPERATION".to_string()),
-                                condition.clone(),
-                                Value::String("==".to_string()),
-                                pattern.clone(),
-                            ],
-                            loc: self.get_location_from_current_statement(),
+                match style {
+                    "pattern" => {
+                        let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
+                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
+                            None => {
+                                self.raise("RuntimeError", "Expected 'pattern' in match case");
+                                return NULL;
+                            }
                         };
-                        self.evaluate(check).is_truthy()
-                    }
-                };
 
-                if matched {
-                    if let Some(g) = guard {
-                        if !self.evaluate(g.clone()).is_truthy() {
-                            continue;
+                        let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
+                            Some(pos) => match values.get(pos) {
+                                Some(Value::List(b)) => b,
+                                _ => {
+                                    self.raise("RuntimeError", "Expected 'body' to be a list in match case");
+                                    return NULL;
+                                }
+                            },
+                            None => {
+                                self.raise("RuntimeError", "Missing 'body' in match case");
+                                return NULL;
+                            }
+                        };
+
+                        let guard = match keys.iter().position(|k| k == &Value::String("guard".to_string())) {
+                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
+                            None => {
+                                self.raise("RuntimeError", "Expected 'guard' in match case");
+                                return NULL;
+                            }
+                        };
+
+                        let eval_cond = self.evaluate(condition.convert_to_statement());
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let (matched, variables) = match check_pattern(&eval_cond, &pattern) {
+                            Ok(matched) => matched,
+                            Err((err_ty, err_msg)) => {
+                                self.raise(&err_ty, &err_msg);
+                                return NULL;
+                            }
+                        };
+
+                        let mut variables: HashMap<String, Variable> = HashMap::from_iter(variables.into_iter().map(|(k, v)| {
+                            (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
+                        }));
+                        variables.extend(self.variables.clone());
+
+                        if matched {
+                            let mut res = NULL;
+                            let mut cont = false;
+                            if guard != &Value::Null {
+                                let mut guard_interp = Interpreter::new(
+                                    self.config.clone(),
+                                    self.use_colors,
+                                    &self.file_path,
+                                    &self.cwd,
+                                    self.preprocessor_info.clone(),
+                                    &[],
+                                );
+                                guard_interp.variables.extend(variables.clone());
+                                let guard_result = guard_interp.evaluate(guard.convert_to_statement());
+                                if guard_interp.err.is_some() {
+                                    self.err = guard_interp.err.clone();
+                                    drop(guard_interp);
+                                    return NULL;
+                                }
+                                drop(guard_interp);
+                                if !guard_result.is_truthy() {
+                                    continue;
+                                }
+                            }
+                            let mut interp = Interpreter::new(
+                                self.config.clone(),
+                                self.use_colors,
+                                &self.file_path,
+                                &self.cwd,
+                                self.preprocessor_info.clone(),
+                                &[],
+                            );
+                            interp.variables.extend(variables);
+                            'outer: for stmt in body.iter() {
+                                let result = interp.evaluate(stmt.convert_to_statement());
+                                if interp.err.is_some() {
+                                    self.err = interp.err.clone();
+                                    return NULL;
+                                }
+                                match interp.state {
+                                    State::Continue => {
+                                        cont = true;
+                                        interp.state = State::Normal;
+                                        break 'outer;
+                                    }
+                                    State::Break => {
+                                        interp.state = State::Normal;
+                                        self.variables.extend(interp.variables.clone());
+                                        drop(interp);
+                                        return NULL;
+                                    }
+                                    _ => {}
+                                }
+                                res = result;
+                            }
+                            self.variables.extend(interp.variables.clone());
+                            drop(interp);
+                            if !cont {
+                                return res;
+                            }
                         }
                     }
+                    "literal" => {
+                        let pattern = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
+                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
+                            None => {
+                                self.raise("RuntimeError", "Expected 'pattern' in match case");
+                                return NULL;
+                            }
+                        };
 
-                    let _ = self.interpret(
-                        body.iter()
-                            .map(|item| item.clone().convert_to_statement())
-                            .collect(),
-                        true,
-                    );
-                    return NULL;
+                        let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
+                            Some(pos) => match values.get(pos) {
+                                Some(Value::List(b)) => b,
+                                _ => {
+                                    self.raise("RuntimeError", "Expected 'body' to be a list in match case");
+                                    return NULL;
+                                }
+                            },
+                            None => {
+                                self.raise("RuntimeError", "Missing 'body' in match case");
+                                return NULL;
+                            }
+                        };
+
+                        let matched = {
+                            self.evaluate(condition.convert_to_statement()) == self.evaluate(pattern.convert_to_statement())
+                        };
+
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+
+                        if matched {
+                            let mut res = NULL;
+                            let mut cont = false;
+                            'outer: for stmt in body.iter() {
+                                let result = self.evaluate(stmt.convert_to_statement());
+                                if self.err.is_some() {
+                                    return NULL;
+                                }
+                                match self.state {
+                                    State::Continue => {
+                                        cont = true;
+                                        self.state = State::Normal;
+                                        break 'outer;
+                                    },
+                                    State::Break => {
+                                        self.state = State::Normal;
+                                        return NULL
+                                    },
+                                    _ => {}
+                                }
+                                res = result;
+                            }
+                            if !cont {
+                                return res;
+                            }
+                        }
+                    }
+                    _ => return self.raise("RuntimeError", "Invalid style in 'match' statement"),
                 }
             } else {
                 self.raise("RuntimeError", "Invalid case in 'match' statement - expected map");

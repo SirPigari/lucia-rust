@@ -22,7 +22,7 @@ typedef enum Color2 {
     Blue,
 }
 
-assert_err!(Red) // 'Red' matches multiple enums, Color and Color2
+assert_err!(Red) // 'Red' is ambiguous
 
 typedef enum Rgb {
     Red(int),
@@ -40,7 +40,26 @@ c_value := c.unwrap()
 assert_eq!(c_value, 255)
 
 // option 2: pattern matching
-// match (c):
-//     Red(value) -> assert_eq!(value, 255),
-//     _ -> assert!(false, "Unexpected color"),
-// end
+match (c):
+    Red(value) -> assert_eq!(value, 255),
+    _ -> assert!(false, "Unexpected color"),
+end
+
+// more complex pattern matching
+match (c3):
+    Rgb(r, g, b) ->
+        assert_eq!(r, 255)
+        assert_eq!(g, 0)
+        assert_eq!(b, 127)
+    end
+    _ -> assert!(false, "Unexpected enum variant"),
+end
+
+match (c4):
+    Color.Rgb(r, g, b) ->
+        assert_eq!(r, 0)
+        assert_eq!(g, 255)
+        assert_eq!(b, 255)
+    end
+    _ -> assert!(false, "Unexpected enum variant"),
+end

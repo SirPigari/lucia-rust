@@ -3335,6 +3335,10 @@ impl Parser {
                     let mut cases = vec![];
 
                     loop {
+                        if !is_valid_token(&self.token().cloned()) {
+                            self.raise("SyntaxError", "Expected 'end' or a valid case body");
+                            return Statement::Null;
+                        }
                         match self.token().cloned() {
                             Some(Token(_, ref tok_val, _)) if tok_val == "end" => {
                                 self.next();
@@ -3395,18 +3399,18 @@ impl Parser {
                                     }
                                     self.next();
 
-                                    pattern = Some(pat_expr);
+                                    pattern = pat_expr;
                                 } else {
                                     let tok_val = self.token().unwrap().1.clone();
                                     pattern = if tok_val == "_" {
                                         self.next();
-                                        None
+                                        return self.raise_with_help("SyntaxError", "'_' is not allowed in 'match' literal case", "Did you mean to use pattern case? ('->' instead of ':')");
                                     } else {
                                         let p = self.parse_operand();
                                         if self.err.is_some() {
                                             return Statement::Null;
                                         }
-                                        Some(p.convert_to_map())
+                                        p.convert_to_map()
                                     };
 
                                     if !self.token_is("SEPARATOR", ":") {
@@ -3455,7 +3459,7 @@ impl Parser {
                                         ],
                                         values: vec![
                                             Value::String(style),
-                                            pattern.map_or(Value::Null, |p| p),
+                                            pattern,
                                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                         ],
                                     }
@@ -3469,7 +3473,7 @@ impl Parser {
                                         ],
                                         values: vec![
                                             Value::String(style),
-                                            pattern.map_or(Value::Null, |p| p),
+                                            pattern,
                                             guard.map_or(Value::Null, |g| g.convert_to_map()),
                                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                         ],
@@ -3932,7 +3936,7 @@ impl Parser {
                 Some(PathElement::Path { segments, args: vec![] })
             }
 
-            Some(Token(kind, _, _)) if kind == "SEPARATOR" && self.token_is("SEPARATOR", "(") => {
+            Some(Token(kind, val, _)) if kind == "SEPARATOR" && val == "(" => {
                 self.next();
                 let mut elems = Vec::new();
                 while !self.token_is("SEPARATOR", ")") {
@@ -3947,7 +3951,11 @@ impl Parser {
                     return None;
                 }
                 self.next();
-                Some(PathElement::Tuple(elems))
+                if elems.len() == 1 {
+                    Some(elems[0].clone())
+                } else {
+                    Some(PathElement::Tuple(elems))
+                }
             }
 
             _ => {

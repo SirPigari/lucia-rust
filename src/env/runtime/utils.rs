@@ -1413,6 +1413,91 @@ pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
     }
 }
 
+pub fn check_pattern(
+    value: &Value,
+    pattern: &Value,
+) -> Result<(bool, HashMap<String, Value>), (String, String)> {
+    use std::collections::HashMap;
+    let mut variables = HashMap::new();
+
+    fn inner(
+        value: &Value,
+        pat: &Value,
+        vars: &mut HashMap<String, Value>,
+    ) -> Result<bool, (String, String)> {
+        use Value::*;
+
+        match (value, pat) {
+            // Primitive match
+            (Int(a), Int(b)) if a == b => Ok(true),
+            (Float(a), Float(b)) if a == b => Ok(true),
+            (Boolean(a), Boolean(b)) if a == b => Ok(true),
+            (String(a), String(b)) if a == b => Ok(true),
+
+            // Tuple match
+            (Tuple(c_elems), Tuple(p_elems)) => {
+                if c_elems.len() != p_elems.len() { return Ok(false); }
+                for (c, p) in c_elems.iter().zip(p_elems.iter()) {
+                    if !inner(c, p, vars)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+
+            // Enum instance vs PathElement converted to Value
+            (Value::Enum(cond_enum), Value::Map { keys: p_keys, values: p_vals }) => {
+                if p_keys.len() != 2 || p_vals.len() != 2 { return Ok(false); }
+
+                let p_segments = match &p_vals[0] { Value::List(l) => l, _ => return Ok(false) };
+                let p_args = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
+
+                if p_segments.len() < 2 { return Ok(false); }
+                let pat_enum_name = match &p_segments[1] { Value::String(s) => s, _ => return Ok(false) };
+                if cond_enum.variant.0 != *pat_enum_name { return Ok(false); }
+
+                if p_args.len() != 1 { return Ok(false); }
+                let pat_arg = &p_args[0];
+
+                if let Value::Map { keys: _, values } = pat_arg {
+                    let seg = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
+                    if seg.len() == 1 {
+                        if let Value::String(var_name) = &seg[0] {
+                            vars.insert(var_name.clone(), (*cond_enum.variant.1).clone());
+                            return Ok(true);
+                        }
+                    }
+                }
+
+                Ok(false)
+            }
+
+            // Single-segment path pattern → bind variable to value
+            (val, Value::Map { keys: p_keys, values }) => {
+                if p_keys.len() == 2 && values.len() == 2 {
+                    let p_segments = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
+                    let p_args = match &values[1] { Value::List(l) => l, _ => return Ok(false) };
+                    if p_segments.len() == 1 && p_args.is_empty() {
+                        if let Value::String(var_name) = &p_segments[0] {
+                            vars.insert(var_name.clone(), val.clone());
+                            return Ok(true);
+                        }
+                    }
+                }
+                Ok(false)
+            }
+
+            _ => Ok(false),
+        }
+    }
+
+    let matched = inner(value, pattern, &mut variables)?;
+
+    if matched {
+        Ok((true, variables))
+    } else {
+        Ok((false, HashMap::new()))
+    }
+}
+
 pub fn gamma_lanczos(z: f64, level: usize) -> f64 {
     // standard Lanczos approximation (Gamma(z))
     fn gamma_core(z: f64) -> f64 {
@@ -1459,7 +1544,7 @@ pub const KEYWORDS: &[&str] = &[
     "while", "as", "from", "import", "in", "forget", "and", "or", "not",
     "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",
     "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
-    "type", "where", "true", "false", "null", "void", "any", "int",
+    "type", "typedef", "where", "enum", "struct", "true", "false", "null", "void", "any", "int",
     "float", "bool", "str", "map", "list", "function", "bytes", "tuple",
     "auto", "generator"
 ];
