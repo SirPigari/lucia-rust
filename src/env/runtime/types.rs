@@ -1,4 +1,5 @@
 use crate::env::runtime::value::Value;
+use crate::env::runtime::statements::Statement;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 pub use imagnum::{
@@ -31,10 +32,15 @@ pub enum Type {
     Union(Vec<Type>),
     Enum {
         name: String,
-        variants: Vec<Value>,
-        generics: Vec<Value>,
-        conditions: Vec<Value>,
-        variables: Vec<Value>,
+        variants: Vec<(String, Statement, Option<Value>)>,
+        generics: Vec<String>,
+        wheres: Vec<(String, Statement)>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<(String, Statement, Vec<String>)>,
+        generics: Vec<String>,
+        wheres: Vec<(String, Statement)>,
     },
     Alias {
         name: String,
@@ -70,8 +76,54 @@ impl Type {
             },
             Type::Indexed { base_type, elements } => format!("<type '{}[{}]'>", base_type.display_simple(), elements.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ")),
             Type::Union(types) => format!("<union type '{}'>", types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(" | ")),
-            Type::Enum { name, .. } => format!("<enum '{}'>", name),
-            Type::Alias { name, base_type, .. } => format!("<type '{}' as '{}'>", name, base_type.display_simple()),
+            Type::Enum { name, variants, .. } => {
+                let variants_str = if variants.is_empty() {
+                    "".to_string()
+                } else {
+                    if variants.len() == 1 {
+                        let (variant_name, _, _) = &variants[0];
+                        return format!("<enum '{}' with single variant '{}'>", name, variant_name);
+                    }
+                    let display_variants: Vec<String> = if variants.len() > 7 {
+                        variants.iter().take(5).map(|(name, _, _)| format!("{}", name)).collect()
+                    } else {
+                        variants.iter().map(|(name, _, _)| format!("{}", name)).collect()
+                    };
+                    let mut result = display_variants.join(", ");
+                    if variants.len() > 7 {
+                        result.push_str(", ...");
+                    }
+                    format!(" with variants: {}", result)
+                };
+                format!("<enum '{}'{}>", name, variants_str)
+            },
+            Type::Struct { name, fields, .. } => {
+                let fields_str = if fields.is_empty() {
+                    "".to_string()
+                } else {
+                    if fields.len() == 1 {
+                        let (field_name, _, _) = &fields[0];
+                        return format!("<struct '{}' with single field '{}'>", name, field_name);
+                    }
+                    let display_fields: Vec<String> = if fields.len() > 7 {
+                        fields.iter()
+                            .take(5)
+                            .map(|(k, _, _)| format!("{}", k))
+                            .collect()
+                    } else {
+                        fields.iter()
+                            .map(|(k, _, _)| format!("{}", k))
+                            .collect()
+                    };
+                    let mut result = display_fields.join(", ");
+                    if fields.len() > 7 {
+                        result.push_str(", ...");
+                    }
+                    format!(" with fields: {}", result)
+                };
+                format!("<struct '{}'{}>", name, fields_str)
+            },
+            Type::Alias { name, base_type, .. } => format!("<type '{}' as '{}'>", base_type.display_simple(), name),
             Type::Unwrap(values) => format!("<unwrap type '{}'>", values.iter().map(|v| v.get_type().display_simple()).collect::<Vec<_>>().join(", ")),
         }
     }
@@ -103,6 +155,7 @@ impl Type {
             },
             Type::Union(types) => types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(" | "),
             Type::Alias { name, .. } => name.to_string(),
+            Type::Enum { name, .. } => name.to_string(),
             _ => self.display(),
         }
     }
@@ -161,18 +214,22 @@ impl PartialEq for Type {
             (Union(u1), Union(u2)) =>
                 u1 == u2,
 
-            (Enum { name: n1, variants: v1, generics: g1, conditions: c1, .. },
-             Enum { name: n2, variants: v2, generics: g2, conditions: c2, .. }) =>
+            (Enum { name: n1, variants: v1, generics: g1, wheres: c1, .. },
+             Enum { name: n2, variants: v2, generics: g2, wheres: c2, .. }) =>
                 n1 == n2 && v1 == v2 && g1 == g2 && c1 == c2,
 
-            (Alias { name: n1, base_type: b1, conditions: c1, .. },
-             Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
+            (Struct { name: n1, fields: f1, generics: g1, wheres: c1, .. },
+             Struct { name: n2, fields: f2, generics: g2, wheres: c2, .. }) =>
+                n1 == n2 && f1 == f2 && g1 == g2 && c1 == c2,
+
+            (Alias { name: n1, base_type: b1, variables: c1, .. },
+             Alias { name: n2, base_type: b2, variables: c2, .. }) =>
                 n1 == n2 && b1 == b2 && c1 == c2,
 
             (Unwrap(v1), Unwrap(v2)) =>
                 v1 == v2,
 
-            _ => false
+            _ => false,
         }
     }
 }
@@ -200,9 +257,13 @@ impl PartialOrd for Type {
             (Union(u1), Union(u2)) =>
                 u1.partial_cmp(u2),
 
-            (Enum { name: n1, variants: v1, generics: g1, conditions: c1, .. },
-             Enum { name: n2, variants: v2, generics: g2, conditions: c2, .. }) =>
+            (Enum { name: n1, variants: v1, generics: g1, wheres: c1, .. },
+             Enum { name: n2, variants: v2, generics: g2, wheres: c2, .. }) =>
                 (n1, v1, g1, c1).partial_cmp(&(n2, v2, g2, c2)),
+
+            (Struct { name: n1, fields: f1, generics: g1, wheres: c1, .. },
+             Struct { name: n2, fields: f2, generics: g2, wheres: c2, .. }) =>
+                (n1, f1, g1, c1).partial_cmp(&(n2, f2, g2, c2)),
 
             (Alias { name: n1, base_type: b1, conditions: c1, .. },
              Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
@@ -211,7 +272,7 @@ impl PartialOrd for Type {
             (Unwrap(v1), Unwrap(v2)) =>
                 v1.partial_cmp(&v2),
 
-            _ => None
+            _ => None,
         }
     }
 }
@@ -241,11 +302,17 @@ impl Hash for Type {
             Union(u) => {
                 u.hash(state);
             }
-            Enum { name, variants, generics, conditions, .. } => {
+            Enum { name, variants, generics, wheres, .. } => {
                 name.hash(state);
                 variants.hash(state);
                 generics.hash(state);
-                conditions.hash(state);
+                wheres.hash(state);
+            }
+            Struct { name, fields, generics, wheres, .. } => {
+                name.hash(state);
+                fields.hash(state);
+                generics.hash(state);
+                wheres.hash(state);
             }
             Alias { name, base_type, conditions, .. } => {
                 name.hash(state);

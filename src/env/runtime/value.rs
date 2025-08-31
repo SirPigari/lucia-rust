@@ -2,7 +2,7 @@ use crate::env::runtime::types::{Float, Int, Type};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::objects::Object;
+use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{format_float, format_int};
 use crate::env::runtime::tokens::Location;
@@ -11,7 +11,6 @@ use std::hash::{Hash, Hasher};
 use std::fmt;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
 use serde::de::{Deserialize, Deserializer};
-use std::path::PathBuf;
 use bincode::{
     enc::{Encode, Encoder},
     de::{BorrowDecode, Decode, Decoder},
@@ -36,7 +35,7 @@ pub enum Value {
     Type(Type),
     Function(Function),
     Generator(Generator),
-    Module(Object, PathBuf),
+    Module(Module),
     Pointer(Arc<Value>),
     Error(&'static str, &'static str, Option<Error>),
 }
@@ -46,7 +45,7 @@ impl fmt::Debug for Value {
         match self {
             Value::Generator(_) => write!(f, "Generator(...)"),
             Value::Function(func) => write!(f, "Function('{}')", func.get_name()),
-            Value::Module(obj, _) => write!(f, "Module('{}')", obj.name()),
+            Value::Module(obj) => write!(f, "Module('{}')", obj.name()),
             Value::Pointer(arc) => {
                 let raw_ptr = Arc::as_ptr(arc);
                 let addr = raw_ptr as usize;
@@ -238,7 +237,7 @@ impl Encode for Value {
                 9u8.encode(encoder)?;
                 t.display().encode(encoder)
             }
-            Function(_) | Module(_, _) | Error(_, _, _) | Generator(_) => {
+            Function(_) | Module(_) | Error(_, _, _) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
             }
             Pointer(ptr) => {
@@ -339,15 +338,13 @@ impl Hash for Value {
                 generator.ptr().hash(state);
             }
 
-            Value::Module(obj, path) => {
+            Value::Module(obj) => {
                 obj.name().hash(state);
-                if let Some(props) = obj.get_properties() {
-                    for var in props.values() {
-                        var.value.hash(state);
-                    }
-                }                
+                let props = obj.get_properties();
+                for var in props.values() {
+                    var.value.hash(state);
+                }
                 obj.get_parameters().hash(state);
-                path.to_str().unwrap_or("").hash(state);
             }
 
             Value::Error(err_type, err_msg, referr) => {
@@ -565,7 +562,7 @@ impl Value {
             Value::Type(_) => std::mem::size_of::<Type>(),
             Value::Function(func) => func.get_size(),
             Value::Generator(generator) => generator.get_size(),
-            Value::Module(obj, _) => obj.get_size(),
+            Value::Module(obj) => obj.get_size(),
             Value::Pointer(p) => Arc::strong_count(p),
             Value::Error(_, _, _) => std::mem::size_of::<Error>(),
         }
@@ -585,7 +582,7 @@ impl Value {
             Value::Generator(_) => true,
             Value::Module(..) => true,
             Value::Error(_, _, _) => true,
-            Value::Pointer(_) => true,
+            Value::Pointer(p) => Arc::strong_count(p) > 0 && !p.is_null(),
             Value::Null => false,
         }
     }
@@ -637,9 +634,9 @@ impl Value {
                     None => format!("<generator at 0x{:X}>", addr),
                 }
             }
-            Value::Module(obj, _) => {
+            Value::Module(obj) => {
                 let addr = obj.ptr() as *const () as usize;
-                format!("<module '{}' at 0x{:X}>", obj.name(), addr)
+                format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
             }
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
@@ -654,51 +651,37 @@ impl Value {
     
             Value::Float(f) => Some(f.to_string().into_bytes()),
 
-            Value::Boolean(true) => Some(vec![1]),
-            Value::Boolean(false) => Some(vec![0]),
+            Value::Boolean(true) => Some(vec![0x01]),
+            Value::Boolean(false) => Some(vec![0x00]),
     
-            Value::Null => Some(vec![]),
+            Value::Null => Some(vec![0x00]),
     
             Value::Map { keys: _, values: _ } | Value::List(_) | Value::Tuple(_) => {
-                let description = format!("<{}>", self.type_name());
-                Some(description.into_bytes())
+                None
             }
 
             Value::Type(_) => {
                 None
             }
     
-            Value::Function(func) => {
-                let addr = func.ptr() as *const () as usize;
-                let description = format!("<function '{}' at 0x{:X}>", func.get_name(), addr);
-                Some(description.into_bytes())
+            Value::Function(_) => {
+                None
             }
 
-            Value::Generator(generator) => {
-                let addr = generator.ptr() as *const () as usize;
-                let description = match generator.name() {
-                    Some(name) => format!("<generator '{}' at 0x{:X}>", name, addr),
-                    None => format!("<generator at 0x{:X}>", addr),
-                };
-                Some(description.into_bytes())
+            Value::Generator(_) => {
+                None
             }
 
-            Value::Module(obj, _) => {
-                let addr = obj.ptr() as *const () as usize;
-                let description = format!("<module '{}' at 0x{:X}>", obj.name(), addr);
-                Some(description.into_bytes())
+            Value::Module(_) => {
+                None
             }
 
-            Value::Pointer(ptr) => {
-                let raw_ptr = Arc::as_ptr(ptr);
-                let addr = raw_ptr as usize;
-                let description = format!("<pointer to 0x{:X}>", addr);
-                Some(description.into_bytes())
+            Value::Pointer(_) => {
+                None
             }
     
-            Value::Error(kind, msg, _) => {
-                let error = format!("<{}: {}>", kind, msg);
-                Some(error.into_bytes())
+            Value::Error(_, _, _) => {
+                None
             }
         }
     }

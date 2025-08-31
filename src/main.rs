@@ -26,10 +26,11 @@ mod env {
         pub mod statements;
         pub mod pattern_reg;
         pub mod preprocessor;
-        pub mod objects;
+        pub mod modules;
         pub mod libs;
         pub mod tokens;
         pub mod internal_structs;
+        pub mod structs_and_enums;
         pub mod precompile;
         pub mod cache;
         pub mod fmt;

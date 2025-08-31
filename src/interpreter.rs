@@ -21,6 +21,7 @@ use crate::env::runtime::utils::{
     is_number,
     is_number_parentheses,
     gamma_lanczos,
+    get_inner_type,
 };
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
@@ -33,7 +34,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::objects::{Object, ObjectMetadata, Class};
+use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
@@ -436,7 +437,15 @@ impl Interpreter {
                 }
             }
             Type::Alias { name: alias_name, base_type, conditions, variables } => {
-                if value_type != **base_type {
+                let inner_type = match get_inner_type(&base_type) {
+                    Ok((_, t)) => t,
+                    Err(e) => {
+                        status = false;
+                        err = Some(make_err("TypeError", &e, self.get_location_from_current_statement()));
+                        Type::new_simple("any")
+                    }
+                };
+                if value_type != inner_type {
                     status = false;
                 }
                 if variables.len() > 1 {
@@ -1532,7 +1541,11 @@ impl Interpreter {
         };
 
         let generics = match statement.get(&Value::String("generics".to_string())) {
-            Some(Value::List(g)) => g.clone(),
+            Some(Value::List(g)) => g.iter().filter_map(|v| {
+                if let Value::String(s) = v {
+                    Some(s.clone())
+                } else { None }
+            }).collect(),
             _ => vec![],
         };
 
@@ -1575,72 +1588,241 @@ impl Interpreter {
             }
         }
 
-        let variants = match statement.get(&Value::String("variants".to_string())) {
-            Some(Value::List(v)) => v.clone(),
-            _ => vec![],
-        };
-
-        if type_kind == "alias" {
-            if variants.len() != 1 {
-                self.raise("RuntimeError", "Alias type must have exactly one variant");
-                return NULL;
-            }
-            let base_variant = &variants[0];
-            let base_type = match base_variant {
-                Value::Map { .. } => self.handle_type(base_variant.clone().convert_to_statement().convert_to_hashmap()),
-                _ => {
-                    self.raise("RuntimeError", "Expected variant to be a map for alias base type");
+        match type_kind.as_str() {
+            "alias" => {
+                let alias_type = match statement.get(&Value::String("alias".to_string())) {
+                    Some(Value::Map { .. }) => statement.get(&Value::String("alias".to_string())).unwrap(),
+                    _ => {
+                        self.raise("RuntimeError", "Expected a map for 'alias' in type declaration");
+                        return NULL;
+                    }
+                };
+                let alias_evaluated = self.evaluate(alias_type.convert_to_statement());
+                if self.err.is_some() {
                     return NULL;
                 }
-            };
+                let base_type = if let Value::Type(t) = alias_evaluated {
+                    t
+                } else {
+                    self.raise("TypeError", "Alias must evaluate to a Type");
+                    return NULL;
+                };
+                let alias_type = Value::Type(Type::Alias {
+                    name: name.clone(),
+                    base_type: Box::new(base_type),
+                    variables,
+                    conditions,
+                });
+                if self.variables.contains_key(&name) {
+                    if let Some(var) = self.variables.get(&name) {
+                        if var.is_final() {
+                            let s = if matches!(var.value, Value::Type(_)) { "type" } else { "variable" };
+                            self.raise("AssigmentError", &format!("Cannot redefine final {} '{}'", s, &name));
+                            return NULL;
+                        }
+                    }
+                }
+                self.variables.insert(
+                    name.clone(),
+                    Variable::new(
+                        name.clone(),
+                        alias_type,
+                        "type".to_string(),
+                        is_static,
+                        is_public,
+                        is_final,
+                    ),
+                );
+                self.variables.get(&name)
+                    .map_or(NULL, |var| var.value.clone())
+            }
+            "enum" => {
+                let variants = match statement.get(&Value::String("variants".to_string())) {
+                    Some(Value::List(v)) => v,
+                    _ => {
+                        self.raise("RuntimeError", "Expected a list for 'variants' in enum declaration");
+                        return NULL;
+                    }
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let wheres: Vec<(String, Statement)> = match statement.get(&Value::String("wheres".to_string())) {
+                    Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
+                        if let Value::String(s) = k {
+                            (s, v.convert_to_statement())
+                        } else {
+                            self.raise("RuntimeError", "Expected string keys in 'wheres' map");
+                            ("".to_string(), Statement::Null)
+                        }
+                    }).filter(|(k, _)| !k.is_empty()).collect(),
+                    _ => vec![],
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let mut variants_processed: Vec<(String, Statement, Option<Value>)> = Vec::new();
+                for v in variants {
+                    match v {
+                        Value::Map { keys, values } => {
+                            let n = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
+                                Some(pos) => match values.get(pos).cloned().unwrap_or(Value::Null) {
+                                    Value::String(s) => s,
+                                    _ => {
+                                        self.raise("RuntimeError", "Expected 'name' to be a string in enum variant");
+                                        return NULL;
+                                    }
+                                },
+                                None => {
+                                    self.raise("RuntimeError", "Expected 'name' in enum variant");
+                                    return NULL;
+                                }
+                            };
+                            let t = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
+                                Some(pos) => match values.get(pos).cloned().unwrap_or(Value::Null) {
+                                    Value::Map { keys, values } => {
+                                        let m = Value::Map { keys, values };
+                                        m.convert_to_statement()
+                                    }
+                                    Value::Null => Statement::Null,
+                                    _ => {
+                                        self.raise("RuntimeError", "Expected 'type' to be a map in enum variant");
+                                        return NULL;
+                                    }
+                                },
+                                None => {
+                                    self.raise("RuntimeError", "Expected 'type' in enum variant");
+                                    return NULL;
+                                }
+                            };
+                            let discriminant = match keys.iter().position(|k| k == &Value::String("discriminant".to_string())) {
+                                Some(pos) => values.get(pos).cloned(),
+                                None => None,
+                            };
+                            variants_processed.push((n, t, discriminant));
+                        }
+                        _ => {
+                            self.raise("RuntimeError", "Expected a map for enum variant");
+                            return NULL;
+                        }
+                    };
+                };
+                let enum_type = Value::Type(Type::Enum {
+                    name: name.clone(),
+                    variants: variants_processed,
+                    generics,
+                    wheres,
+                });
+                if self.variables.contains_key(&name) {
+                    if let Some(var) = self.variables.get(&name) {
+                        if var.is_final() {
+                            let s = if matches!(var.value, Value::Type(_)) { "type" } else { "variable" };
+                            self.raise("AssigmentError", &format!("Cannot redefine final {} '{}'", s, &name));
+                            return NULL;
+                        }
+                    }
+                }
+                self.variables.insert(
+                    name.clone(),
+                    Variable::new(
+                        name.clone(),
+                        enum_type,
+                        "type".to_string(),
+                        is_static,
+                        is_public,
+                        is_final,
+                    ),
+                );
+                self.variables.get(&name)
+                    .map_or(NULL, |var| var.value.clone())
+            }
+            "struct" => {
+                let fields: Vec<(String, Statement, Vec<String>)> = match statement.get(&Value::String("properties".to_string())) {
+                    Some(Value::Map { keys, values }) => {
+                        keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
+                            if let Value::String(s) = k {
+                                if let Value::Tuple(vec) = v {
+                                    if vec.len() == 2 {
+                                        let map_value = &vec[0];
+                                        let list_value = &vec[1];
 
-            let base_type_type = if let Value::Type(t) = base_type {
-                t
-            } else {
-                self.raise("RuntimeError", "Expected base type to be a Type");
+                                        if let (Value::Map { keys, values }, Value::List(list)) = (map_value.clone(), list_value.clone()) {
+                                            let stmt = Value::Map { keys, values }.convert_to_statement();
+                                            let strs: Vec<String> = list.into_iter().filter_map(|v| {
+                                                if let Value::String(s) = v { Some(s) } else { None }
+                                            }).collect();
+                                            (s, stmt, strs)
+                                        } else {
+                                            self.raise("RuntimeError", "Expected (Map, List) in tuple");
+                                            (s, Statement::Null, vec![])
+                                        }
+                                    } else {
+                                        self.raise("RuntimeError", "Expected tuple of length 2");
+                                        (s, Statement::Null, vec![])
+                                    }
+                                } else {
+                                    self.raise("RuntimeError", "Expected a tuple in properties");
+                                    (s, Statement::Null, vec![])
+                                }
+                            } else {
+                                self.raise("RuntimeError", "Expected string keys in 'properties' map");
+                                ("".to_string(), Statement::Null, vec![])
+                            }
+                        }).filter(|(k, _, _)| !k.is_empty()).collect()
+                    },
+                    _ => {
+                        self.raise("RuntimeError", "Expected a map for 'properties' in struct declaration");
+                        return NULL;
+                    }
+                };
+                let wheres: Vec<(String, Statement)> = match statement.get(&Value::String("wheres".to_string())) {
+                    Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
+                        if let Value::String(s) = k {
+                            (s, v.convert_to_statement())
+                        } else {
+                            self.raise("RuntimeError", "Expected string keys in 'wheres' map");
+                            ("".to_string(), Statement::Null)
+                        }
+                    }).filter(|(k, _)| !k.is_empty()).collect(),
+                    _ => vec![],
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let struct_type = Value::Type(Type::Struct {
+                    name: name.clone(),
+                    fields,
+                    generics,
+                    wheres,
+                });
+                if self.variables.contains_key(&name) {
+                    if let Some(var) = self.variables.get(&name) {
+                        if var.is_final() {
+                            let s = if matches!(var.value, Value::Type(_)) { "type" } else { "variable" };
+                            self.raise("AssigmentError", &format!("Cannot redefine final {} '{}'", s, &name));
+                            return NULL;
+                        }
+                    }
+                }
+                self.variables.insert(
+                    name.clone(),
+                    Variable::new(
+                        name.clone(),
+                        struct_type,
+                        "type".to_string(),
+                        is_static,
+                        is_public,
+                        is_final,
+                    ),
+                );
+                self.variables.get(&name)
+                    .map_or(NULL, |var| var.value.clone())
+            }
+            _ => {
+                self.raise("RuntimeError", "Unknown type kind in type declaration");
                 return NULL;
-            };
-
-            self.variables.insert(
-                name.clone(),
-                Variable::new(
-                    name.clone(),
-                    Value::Type(Type::Alias {
-                        name: name.clone(),
-                        base_type: Box::new(base_type_type),
-                        conditions,
-                        variables,
-                    }),
-                    "type".to_string(),
-                    is_static,
-                    is_public,
-                    is_final,
-                ),
-            );
-        } else if type_kind == "enum" {
-            self.variables.insert(
-                name.clone(),
-                Variable::new(
-                    name.clone(),
-                    Value::Type(Type::Enum {
-                        name: name.clone(),
-                        variants,
-                        generics,
-                        variables,
-                        conditions,
-                    }),
-                    "type".to_string(),
-                    is_static,
-                    is_public,
-                    is_final,
-                ),
-            );
-        } else {
-            self.raise("RuntimeError", "Unknown type kind in type declaration");
-            return NULL;
+            }
         }
-
-        NULL
     }
 
     fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -2524,10 +2706,10 @@ impl Interpreter {
             "map" => {
                 if let Value::Map { keys, values } = value {
                     Value::Map { keys: keys.clone(), values: values.clone() }
-                } else if let Value::Module(obj, _) = value {
+                } else if let Value::Module(obj) = value {
                     let mut keys = Vec::new();
                     let mut values = Vec::new();
-                    for (name, var) in obj.get_properties().iter().flat_map(|map| map.iter()) {
+                    for (name, var) in obj.get_properties().iter() {
                         keys.push(Value::String(name.clone()));
                         values.push(var.value.clone());
                     }
@@ -2548,8 +2730,8 @@ impl Interpreter {
                 }
             },
             "object" => {
-                if let Value::Module(obj, path) = value {
-                    Value::Module(obj.clone(), path.clone())
+                if let Value::Module(obj) = value {
+                    Value::Module(obj.clone())
                 } else {
                     self.raise("TypeError", &format!("Cannot convert '{}' to object", value.type_name()));
                     NULL
@@ -2600,33 +2782,16 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Missing or invalid 'to' in type conversion statement"),
         };
 
-        let target_type_type;
-        let target_type = match self.evaluate(target_type_opt.convert_to_statement()) {
-            Value::Type(t) => {
-                target_type_type = t;
-                match target_type_type {
-                    Type::Simple { .. } => target_type_type.display_simple(),
-                    Type::Alias { name: _, ref base_type, .. } => base_type.display_simple(),
-                    _ => {
-                        return self.raise(
-                            "RuntimeError",
-                            &format!(
-                                "Type '{}' is not a valid target type for conversion",
-                                value.type_name()
-                            ),
-                        )
-                    }
-                }
-            }
-            _ => {
-                return self.raise(
-                    "RuntimeError",
-                    &format!(
-                        "Type '{}' is not a valid target type for conversion",
-                        value.type_name()
-                    ),
-                )
-            }
+        let binding = self.evaluate(target_type_opt.convert_to_statement());
+        let (target_type, target_type_type) = match &binding {
+            Value::Type(tt) => match get_inner_type(tt) {
+                Ok((t, _)) => (t, tt),
+                Err(e) => return self.raise("TypeError", &e),
+            },
+            _ => return self.raise("TypeError", &format!(
+                    "Type '{}' is not a valid target type for conversion",
+                    value.type_name()
+                )),
         };
 
         if self.err.is_some() {
@@ -3367,7 +3532,7 @@ impl Interpreter {
         
             debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config, Some(self.use_colors.clone()));
 
-            let module_meta = ObjectMetadata {
+            let module = Value::Module(Module {
                 name: module_name.clone(),
                 properties,
                 parameters: Vec::new(),
@@ -3375,20 +3540,17 @@ impl Interpreter {
                 is_static,
                 is_final,
                 state: None,
-            };
-        
-            let class = Class::new(module_name.clone(), module_meta.clone());
-            let object = Object::Class(class);
-        
-            let module = Value::Module(object, PathBuf::from(module_path.clone()));
+                path: PathBuf::from(module_path.clone())
+            });
+
             self.variables.insert(
                 alias.to_string(),
-                Variable::new(alias.to_string(), module.clone(), "module".to_string(), is_static, is_public, is_final),
+                Variable::new(alias.to_string(), module, "module".to_string(), is_static, is_public, is_final),
             );
         
             self.stack.pop();
-        
-            module
+
+            self.variables.get(alias).unwrap().value.clone()
         }
     }
 
@@ -5838,12 +6000,11 @@ impl Interpreter {
             true,
             true,
         );
-        
-        if let Value::Module(ref o, _) = object_value {
-            if let Some(props) = o.get_properties() {
-                object_variable.properties = props.clone();
-                object_variable.set_name(o.name().to_string());
-            }
+
+        if let Value::Module(ref o) = object_value {
+            let props = o.get_properties();
+            object_variable.properties = props.clone();
+            object_variable.set_name(o.name().to_string());
         } else if !object_variable.is_init() {
             object_variable.init_properties(self);
             object_variable.set_name(object_value.get_type().display_simple());
@@ -6182,7 +6343,7 @@ impl Interpreter {
                     }
                 }
 
-                let name = if let Value::Module(obj, _) = &object_value {
+                let name = if let Value::Module(obj) = &object_value {
                     obj.name()
                 } else {
                     object_variable.get_name()
@@ -6216,8 +6377,8 @@ impl Interpreter {
             
                 if let Function::CustomMethod(func) = func {
                     let module_file_path = match &object_value {
-                        Value::Module(_, path) => path.clone(),
-                        _ => { 
+                        Value::Module(obj) => obj.path().clone(),
+                        _ => {
                             self.stack.pop();
                             return self.raise(
                                 "TypeError",
@@ -6319,7 +6480,7 @@ impl Interpreter {
                 } else {
                     if !metadata.is_native {
                         let module = match object_value {
-                            Value::Module(obj, _) => obj,
+                            Value::Module(obj) => obj,
                             _ => {
                                 self.stack.pop();
                                 return self.raise(
@@ -6329,8 +6490,8 @@ impl Interpreter {
                             }
                         };
                         let module_file_path = match &object_value {
-                            Value::Module(_, path) => path.clone(),
-                            _ => { 
+                            Value::Module(o) => o.path().clone(),
+                            _ => {
                                 self.stack.pop();
                                 return self.raise(
                                     "TypeError",
@@ -6348,16 +6509,8 @@ impl Interpreter {
                         );
                         new_interpreter.variables.extend(final_args_variables);
                         new_interpreter.stack = self.stack.clone();
-                        if let Some(props) = module.get_properties() {
-                            new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
-                        } else {
-                            self.stack.pop();
-                            self.raise(
-                                "RuntimeError",
-                                &format!("Module '{}' has no properties", module.name())
-                            );
-                            return NULL;
-                        }
+                        let props = module.get_properties();
+                        new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
                         let body = func.get_body();
                         let _ = new_interpreter.interpret(body, true);
                         if new_interpreter.err.is_some() {
@@ -6466,11 +6619,10 @@ impl Interpreter {
             true,
         );
         
-        if let Value::Module(ref o, _) = object_value {
-            if let Some(props) = o.get_properties() {
-                object_variable.properties = props.clone();
-                object_variable.set_name(o.name().to_string());
-            }
+        if let Value::Module(ref o) = object_value {
+            let props = o.get_properties();
+            object_variable.properties = props.clone();
+            object_variable.set_name(o.name().to_string());
         } else if !object_variable.is_init() {
             object_variable.init_properties(self);
             object_variable.set_name(object_value.get_type().display_simple());

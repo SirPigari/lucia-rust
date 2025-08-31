@@ -331,9 +331,9 @@ pub fn format_value(value: &Value) -> String {
             }
         }
 
-        Value::Module(obj, _) => {
+        Value::Module(obj) => {
             let addr = obj.ptr() as *const () as usize;
-            format!("<module '{}' at 0x{:X}>", obj.name(), addr)
+            format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
         }
 
         Value::Pointer(arc) => {
@@ -1395,6 +1395,20 @@ pub fn is_number_parentheses(n: &str) -> bool {
     chars.peek().is_none()
 }
 
+pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
+    match value {
+        Type::Simple { .. } => Ok((value.display_simple(), value.clone())),
+        Type::Alias { name: _, base_type, .. } => get_inner_type(base_type),
+        Type::Enum { .. } | Type::Struct { .. } => Err(format!(
+            "An 'as' expression can only be used to convert between primitive types, not '{}'",
+            value.display_simple()
+        )),
+        _ => Err(format!(
+            "Type '{}' is not a valid target type for conversion",
+            value.display_simple()
+        )),
+    }
+}
 
 pub fn gamma_lanczos(z: f64, level: usize) -> f64 {
     // standard Lanczos approximation (Gamma(z))

@@ -453,8 +453,8 @@ fn format_value(value: &Value) -> String {
         Value::Error(err_type, err_msg, _) => {
             format!("<{}: {}>", err_type, err_msg)
         }
-        Value::Module(obj, _) => {
-            format!("<object '{}' at {:p}>", obj.name(), obj.ptr())
+        Value::Module(obj) => {
+            format!("<module '{}' from '{}' at {:p}>", obj.name(), obj.path().display(), obj.ptr())
         }
         _ => "<unsupported value type>".to_string(),
     }
