@@ -7,6 +7,34 @@ use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum PathElement {
+    Path {
+        segments: Vec<String>,       // a::b::c
+        args: Vec<PathElement>,      // for variants like a::b(x, y)
+    },
+    Tuple(Vec<PathElement>),         // for (a, b, c)
+}
+
+impl PathElement {
+    pub fn to_value(&self) -> Value {
+        match self {
+            PathElement::Path { segments, args } => {
+                let seg_values = segments.iter().map(|s| Value::String(s.clone())).collect();
+                let arg_values = args.iter().map(|a| a.to_value()).collect();
+                Value::Map {
+                    keys: vec![Value::String("segments".into()), Value::String("args".into())],
+                    values: vec![Value::List(seg_values), Value::List(arg_values)],
+                }
+            }
+            PathElement::Tuple(elems) => {
+                Value::Tuple(elems.iter().map(|e| e.to_value()).collect())
+            }
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stack {
     pub frames: Vec<StackFrame>,
 }

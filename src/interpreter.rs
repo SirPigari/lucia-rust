@@ -40,6 +40,7 @@ use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind,
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
+use crate::env::runtime::structs_and_enums::Enum;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
@@ -478,6 +479,18 @@ impl Interpreter {
                         err = Some(make_err("TypeError", &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), self.get_location_from_current_statement()));
                         break;
                     }
+                }
+            }
+            Type::Enum { .. } => {
+                match value {
+                    Value::Enum(e) => {
+                        if e.ty == *expected {
+                            status = true;
+                        } else {
+                            status = false;
+                        }
+                    }
+                    _ => status = false,
                 }
             }
             _ => {
@@ -1733,6 +1746,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
+                debug_log(&format!("<Enum '{}' registered>", name), &self.config.clone(), Some(self.use_colors));
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -1815,6 +1829,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
+                debug_log(&format!("<Struct '{}' registered>", name), &self.config.clone(), Some(self.use_colors));
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -1826,6 +1841,11 @@ impl Interpreter {
     }
 
     fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
+        self.raise("NotImplemented", "'match' statements are currently disabled.");
+        if self.err.is_some() {
+            return NULL;
+        }
+
         let condition = match statement.get(&Value::String("condition".to_string())) {
             Some(v) => v,
             _ => {
@@ -3875,8 +3895,15 @@ impl Interpreter {
 
                 match self.variables.remove(name) {
                     Some(value) => {
-                        debug_log(&format!("<Variable '{}' forgotten>", name), &self.config, Some(self.use_colors.clone()));
-                        value.get_value().clone()
+                        debug_log(
+                            &format!("<Variable '{}' forgotten>", name),
+                            &self.config,
+                            Some(self.use_colors.clone())
+                        );
+
+                        let dropped_value = value.get_value().clone();
+                        drop(value);
+                        dropped_value
                     },
                     None => self.raise("NameError", &format!("Variable '{}' not found for forget", name)),
                 }
@@ -5255,10 +5282,55 @@ impl Interpreter {
             Some(Value::String(s)) => s,
             _ => return self.raise("SyntaxError", "Expected a string for variable name"),
         };
-    
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
         if let Some(var) = self.variables.get(name) {
             return var.get_value().clone();
         } else {
+            let mut candidates: Vec<(String, Type, Statement)> = vec![];
+            let mut seen = std::collections::HashSet::new();
+
+            // lazy my ass
+            for (k, v) in &self.variables {
+                if k == "_" { continue; }
+                if let Value::Type(t) = &v.value {
+                    if let Type::Enum { name: enum_name, variants, .. } = t {
+                        for variant in variants {
+                            if variant.0 == *name && variant.1 == Statement::Null {
+                                if seen.insert((enum_name.clone(), variant.0.clone())) {
+                                    candidates.push((variant.0.clone(), t.clone(), variant.1.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if candidates.len() == 1 {
+                if candidates[0].2 != Statement::Null {
+                    let eval_type = match self.evaluate(candidates[0].2.clone()) {
+                        Value::Type(t) => t,
+                        e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string())),
+                    };
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+                    return self.raise_with_help(
+                        "TypeError",
+                        &format!("Missing argument for '{}.{}' of type '{}'", candidates[0].1.display_simple(), candidates[0].0.clone(), eval_type.display_simple()),
+                        &format!("Did you mean to use '{}.{}({})'", candidates[0].1.display_simple(), candidates[0].0.clone(), eval_type.display()),
+                    );
+                }
+                return Value::Enum(Enum::new(candidates[0].1.clone(), (candidates[0].0.clone(), Value::Null)));
+            } else if candidates.len() > 1 {
+                let variant_list = candidates.iter()
+                    .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return self.raise_with_help("NameError", &format!("Variable '{}' is not defined.", name), &format!("However, it matches multiple enum variants: {}. Did you mean to use one of these?", variant_list));
+            }
             let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&name);
             let extensions = ["lc", "lucia", "rs", ""];
             for ext in extensions.iter() {
@@ -6001,13 +6073,84 @@ impl Interpreter {
             true,
         );
 
-        if let Value::Module(ref o) = object_value {
-            let props = o.get_properties();
-            object_variable.properties = props.clone();
-            object_variable.set_name(o.name().to_string());
-        } else if !object_variable.is_init() {
-            object_variable.init_properties(self);
-            object_variable.set_name(object_value.get_type().display_simple());
+        match object_value {
+            Value::Module(ref o) => {
+                let props = o.get_properties();
+                object_variable.properties = props.clone();
+                object_variable.set_name(o.name().to_string());
+            }
+            Value::Type(t) => {
+                match t {
+                    Type::Enum { ref name, ref variants, .. } => {
+                        let variant_name = method_name;
+                        let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
+                            Some(variant) => variant,
+                            None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
+                        };
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        if !named_args.is_empty() {
+                            return self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", name, variant_name));
+                        }
+                        let (variant_name, variant_ty, _) = variant;
+                        if *variant_ty == Statement::Null {
+                            if pos_args.is_empty() {
+                                return self.raise_with_help(
+                                    "TypeError",
+                                    &format!("Unexpected '()' for '{}.{}'", name, variant_name),
+                                    &format!("Remove '()' from '{}.{}()'", name, variant_name),
+                                );
+                            } else {
+                                return self.raise_with_help(
+                                    "TypeError",
+                                    &format!("Variant '{}.{}' doesn't accept any arguments", name, variant_name),
+                                    &format!("Did you mean to use '{}.{}'", name, variant_name),
+                                );
+                            }
+                        }
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let eval_type = match self.evaluate(variant_ty.clone()) {
+                            Value::Type(t) => t,
+                            e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
+                        };
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let variant_val = if pos_args.is_empty() {
+                            NULL
+                        } else if pos_args.len() == 1 {
+                            pos_args[0].clone()
+                        } else {
+                            Value::Tuple(pos_args)
+                        };
+                        if self.check_type(&NULL, &eval_type).0 {
+                            return self.raise_with_help(
+                                "TypeError",
+                                &format!("Expected a value of type '{}' for '{}.{}', but got none", eval_type.display_simple(), name, variant_name),
+                                &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
+                            );
+                        }
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let v = Enum::new(
+                            t.clone(),
+                            (variant_name.to_string(), variant_val)
+                        );
+                        return Value::Enum(v);
+                    }
+                    Type::Struct { .. } => {}
+                    _ => {}
+                }
+            }
+            _ if !object_variable.is_init() => {
+                object_variable.init_properties(self);
+                object_variable.set_name(object_value.get_type().display_simple());
+            }
+            _ => {}
         }
 
         if self.err.is_some() {
@@ -6619,13 +6762,97 @@ impl Interpreter {
             true,
         );
         
-        if let Value::Module(ref o) = object_value {
-            let props = o.get_properties();
-            object_variable.properties = props.clone();
-            object_variable.set_name(o.name().to_string());
-        } else if !object_variable.is_init() {
-            object_variable.init_properties(self);
-            object_variable.set_name(object_value.get_type().display_simple());
+        // if let Value::Module(ref o) = object_value {
+        //     let props = o.get_properties();
+        //     object_variable.properties = props.clone();
+        //     object_variable.set_name(o.name().to_string());
+        // } else if !object_variable.is_init() {
+        //     object_variable.init_properties(self);
+        //     object_variable.set_name(object_value.get_type().display_simple());
+        // }
+
+        match object_value {
+            Value::Module(ref o) => {
+                let props = o.get_properties();
+                object_variable.properties = props.clone();
+                object_variable.set_name(o.name().to_string());
+            }
+            Value::Type(t) => {
+                match t {
+                    Type::Enum { ref name, ref variants, .. } => {
+                        let variant_name = property_name;
+                        let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
+                            Some(variant) => variant,
+                            None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
+                        };
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let (variant_name, variant_ty, _) = variant;
+                        if *variant_ty != Statement::Null {
+                            let eval_type = match self.evaluate(variant_ty.clone()) {
+                                Value::Type(t) => t,
+                                e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
+                            };
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            return self.raise_with_help(
+                                "TypeError",
+                                &format!("Missing argument for '{}.{}' of type '{}'", name, variant_name, eval_type.display_simple()),
+                                &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
+                            );
+                        }
+                        return Value::Enum(Enum::new(
+                                t.clone(),
+                                (variant_name.clone(), NULL)
+                            ));
+                        // let mut props = HashMap::new();
+                        // for (variant_name, variant_ty, discriminant) in variants {
+                        //     if *variant_ty != Statement::Null {
+                        //         let eval_type = match self.evaluate(variant_ty.clone()) {
+                        //             Value::Type(t) => t,
+                        //             e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
+                        //         };
+                        //         if self.err.is_some() {
+                        //             return NULL;
+                        //         }
+                        //         return self.raise_with_help(
+                        //             "TypeError",
+                        //             &format!("Missing argument for '{}.{}' of type '{}'", name, variant_name, eval_type.display_simple()),
+                        //             &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
+                        //         );
+                        //     }
+                        //     let variant_var = Variable::new_pt(
+                        //         variant_name.clone(),
+                        //         Value::Enum(Enum::new(
+                        //             t.clone(),
+                        //             (variant_name.clone(), NULL)
+                        //         )),
+                        //         t.clone(),
+                        //         false,
+                        //         true,
+                        //         true,
+                        //     );
+                        //     if let Some(disc) = discriminant {
+                        //         if matches!(disc, Value::Int(_)) {
+                        //             props.insert(disc.to_string(), variant_var.clone());
+                        //         }
+                        //     }
+                        //     props.insert(variant_name.clone(), variant_var.clone());
+                        // }
+                        // object_variable.properties = props;
+                        // object_variable.set_name(name.clone());
+                    }
+                    Type::Struct { .. } => {}
+                    _ => {}
+                }
+            }
+            _ if !object_variable.is_init() => {
+                object_variable.init_properties(self);
+                object_variable.set_name(object_value.get_type().display_simple());
+            }
+            _ => {}
         }
 
         if self.err.is_some() {
@@ -6727,6 +6954,11 @@ impl Interpreter {
             }
             _ => return self.raise("TypeError", "Expected a map for named arguments"),
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
         self.call_function(function_name, pos_args, named_args)
     }
 
@@ -6748,6 +6980,69 @@ impl Interpreter {
             value = match self.variables.get(function_name) {
                 Some(v) => v.get_value().clone(),
                 None => {
+                    let mut candidates: Vec<(String, Type, Statement)> = vec![];
+                    let mut seen = std::collections::HashSet::new();
+                    let variant_name = function_name;
+
+                    for (k, v) in &self.variables {
+                        if k == "_" { continue; }
+                        if let Value::Type(t) = &v.value {
+                            if let Type::Enum { name: enum_name, variants, .. } = t {
+                                for variant in variants {
+                                    if variant.0 == *variant_name && variant.1 != Statement::Null {
+                                        if seen.insert((enum_name.clone(), variant.0.clone())) {
+                                            candidates.push((variant.0.clone(), t.clone(), variant.1.clone()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if candidates.len() == 1 {
+                        if !named_args.is_empty() {
+                            self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", candidates[0].1.display_simple(), variant_name));
+                        }
+                        if candidates[0].2 == Statement::Null {
+                            if pos_args.is_empty() {
+                                return self.raise_with_help(
+                                    "TypeError",
+                                    &format!("Unexpected '()' for '{}.{}'", candidates[0].1.display_simple(), variant_name),
+                                    &format!("Remove '()' from '{}.{}()'", candidates[0].1.display_simple(), variant_name),
+                                );
+                            } else {
+                                return self.raise_with_help(
+                                    "TypeError",
+                                    &format!("Variant '{}.{}' doesn't accept any arguments", candidates[0].1.display_simple(), variant_name),
+                                    &format!("Did you mean to use '{}.{}'", candidates[0].1.display_simple(), variant_name),
+                                );
+                            }
+                        }
+                        let eval_type = match self.evaluate(candidates[0].2.clone()) {
+                            Value::Type(t) => t,
+                            e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string())),
+                        };
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        let variant_value = if pos_args.is_empty() {
+                            NULL
+                        } else if pos_args.len() == 1 {
+                            pos_args[0].clone()
+                        } else {
+                            Value::Tuple(pos_args)
+                        };
+                        if self.check_type(&variant_value, &eval_type).0 {
+                            return Value::Enum(Enum::new(candidates[0].1.clone(), (candidates[0].0.clone(), variant_value)));
+                        } else {
+                            return self.raise("TypeError", &format!("Expected '{}' for '{}.{}' value, but got: {}", eval_type.display_simple(), candidates[0].1.display_simple(), variant_name, variant_value.get_type().display_simple()));
+                        }
+                    } else if candidates.len() > 1 {
+                        let variant_list = candidates.iter()
+                            .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        return self.raise_with_help("NameError", &format!("Variable '{}' is not defined.", variant_name), &format!("However, it matches multiple enum variants: {}. Did you mean to use one of these?", variant_list));
+                    }
                     let available_names: Vec<String> = self.variables.keys().cloned().collect();
                     if let Some(closest) = find_closest_match(function_name, &available_names) {
                         return self.raise_with_help(

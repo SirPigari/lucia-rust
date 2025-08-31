@@ -1,0 +1,46 @@
+#include <std/macros>
+
+typedef enum Color = {
+    Red,
+    Green,
+    Blue,
+    Rgb(int, int, int),
+}
+
+c1: Color = Red
+c2: Color = Color.Green
+c3: Color = Rgb(255, 0, 127)
+c4: Color = Color.Rgb(0, 255, 255)
+
+assert_eq!(c1, Color.Red)
+assert_eq!(c2, Color.Green)
+assert_ne!(c1, c2)
+
+typedef enum Color2 {
+    Red,
+    Green,
+    Blue,
+}
+
+assert_err!(Red) // 'Red' matches multiple enums, Color and Color2
+
+typedef enum Rgb {
+    Red(int),
+    Green(int),
+    Blue(int),
+}
+
+// here it knows because it has parameters
+c := Red(255)
+
+// to get the value from an enum
+
+// option 1: force unwrap
+c_value := c.unwrap()
+assert_eq!(c_value, 255)
+
+// option 2: pattern matching
+// match (c):
+//     Red(value) -> assert_eq!(value, 255),
+//     _ -> assert!(false, "Unexpected color"),
+// end

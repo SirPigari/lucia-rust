@@ -336,6 +336,9 @@ pub fn format_value(value: &Value) -> String {
             format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
         }
 
+        Value::Enum(enm) => enm.display(),
+        Value::Struct(strct) => strct.display(),
+
         Value::Pointer(arc) => {
             let raw_ptr = Arc::as_ptr(arc);
             let addr = raw_ptr as usize;

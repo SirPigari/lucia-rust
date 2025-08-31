@@ -6,6 +6,7 @@ use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{format_float, format_int};
 use crate::env::runtime::tokens::Location;
+use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::fmt;
@@ -36,6 +37,8 @@ pub enum Value {
     Function(Function),
     Generator(Generator),
     Module(Module),
+    Enum(Enum),
+    Struct(Struct),
     Pointer(Arc<Value>),
     Error(&'static str, &'static str, Option<Error>),
 }
@@ -93,7 +96,13 @@ impl Serialize for Value {
                 serializer.serialize_str("Generator(opaque)")
             }
             Value::Module(..) => {
-                serializer.serialize_str("Object(opaque)")
+                serializer.serialize_str("Module(opaque)")
+            }
+            Value::Enum(_) => {
+                serializer.serialize_str("Enum(opaque)")
+            }
+            Value::Struct(_) => {
+                serializer.serialize_str("Struct(opaque)")
             }
             Value::Error(kind, msg, _) => {
                 let mut s = serializer.serialize_struct("Error", 2)?;
@@ -235,13 +244,21 @@ impl Encode for Value {
             }
             Type(t) => {
                 9u8.encode(encoder)?;
-                t.display().encode(encoder)
+                t.encode(encoder)
             }
             Function(_) | Module(_) | Error(_, _, _) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
             }
-            Pointer(ptr) => {
+            Enum(enm) => {
+                10u8.encode(encoder)?;
+                enm.encode(encoder)
+            }
+            Struct(strct) => {
                 11u8.encode(encoder)?;
+                strct.encode(encoder)
+            }
+            Pointer(ptr) => {
+                12u8.encode(encoder)?;
                 ptr.encode(encoder)
             }
         }
@@ -274,8 +291,10 @@ impl<C> Decode<C> for Value {
             6 => Ok(Value::Tuple(Vec::<Value>::decode(decoder)?)),
             7 => Ok(Value::List(Vec::<Value>::decode(decoder)?)),
             8 => Ok(Value::Bytes(Vec::<u8>::decode(decoder)?)),
-            9 | 10 | 12 => Ok(Value::Null),
-            11 => Ok(Value::Pointer(unsafe { Arc::from_raw(usize::decode(decoder)? as *const Value) })),
+            9 => Ok(Value::Type(Type::decode(decoder)?)),
+            10 => Ok(Value::Enum(Enum::decode(decoder)?)),
+            11 => Ok(Value::Struct(Struct::decode(decoder)?)),
+            12 => Ok(Value::Pointer(unsafe { Arc::from_raw(usize::decode(decoder)? as *const Value) })),
             _ => Err(DecodeError::Other("invalid tag".into())),
         }
     }
@@ -345,6 +364,23 @@ impl Hash for Value {
                     var.value.hash(state);
                 }
                 obj.get_parameters().hash(state);
+            }
+
+            Value::Enum(enm) => {
+                enm.get_type().hash(state);
+                enm.variant.hash(state);
+            }
+
+            Value::Struct(strct) => {
+                strct.get_type().hash(state);
+
+                let mut entries: Vec<_> = strct.fields().iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+
+                for (k, v) in entries {
+                    k.hash(state);
+                    v.hash(state);
+                }
             }
 
             Value::Error(err_type, err_msg, referr) => {
@@ -534,6 +570,8 @@ impl Value {
             Value::Function(_) => Type::new_simple("function"),
             Value::Generator(_) => Type::new_simple("generator"),
             Value::Module(..) => Type::new_simple("object"),
+            Value::Enum(e) => e.get_type(),
+            Value::Struct(s) => s.get_type(),
             Value::Pointer(arc) => {
                 let mut t = arc.get_type();
                 t.set_reference(true);
@@ -563,6 +601,8 @@ impl Value {
             Value::Function(func) => func.get_size(),
             Value::Generator(generator) => generator.get_size(),
             Value::Module(obj) => obj.get_size(),
+            Value::Enum(enm) => enm.get_size(),
+            Value::Struct(strct) => strct.get_size(),
             Value::Pointer(p) => Arc::strong_count(p),
             Value::Error(_, _, _) => std::mem::size_of::<Error>(),
         }
@@ -581,6 +621,8 @@ impl Value {
             Value::Function(_) => true,
             Value::Generator(_) => true,
             Value::Module(..) => true,
+            Value::Enum(e) => e.is_truthy(),
+            Value::Struct(s) => s.is_truthy(),
             Value::Error(_, _, _) => true,
             Value::Pointer(p) => Arc::strong_count(p) > 0 && !p.is_null(),
             Value::Null => false,
@@ -638,6 +680,14 @@ impl Value {
                 let addr = obj.ptr() as *const () as usize;
                 format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
             }
+            Value::Enum(enm) => {
+                let addr = enm.ptr() as *const () as usize;
+                format!("<enum '{}' at 0x{:X}>", enm.get_type().display_simple(), addr)
+            }
+            Value::Struct(strct) => {
+                let addr = strct.ptr() as *const () as usize;
+                format!("<struct '{}' at 0x{:X}>", strct.get_type().display_simple(), addr)
+            }
             Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
         }
     }    
@@ -656,32 +706,13 @@ impl Value {
     
             Value::Null => Some(vec![0x00]),
     
-            Value::Map { keys: _, values: _ } | Value::List(_) | Value::Tuple(_) => {
-                None
-            }
-
-            Value::Type(_) => {
-                None
-            }
-    
-            Value::Function(_) => {
-                None
-            }
-
-            Value::Generator(_) => {
-                None
-            }
-
-            Value::Module(_) => {
-                None
-            }
-
-            Value::Pointer(_) => {
-                None
-            }
-    
-            Value::Error(_, _, _) => {
-                None
+            // opaque types
+            Value::Map { keys: _, values: _ } | Value::Type(_) | Value::Function(_) | Value::Generator(_) | Value::Module(_) | Value::Pointer(_) | Value::Error(_, _, _) | Value::Enum(_) | Value::Struct(_) | Value::List(_) | Value::Tuple(_) => {
+                let cfg = bincode::config::standard();
+                match bincode::encode_to_vec(&self, cfg) {
+                    Ok(vec) => Some(vec),
+                    Err(_) => None,
+                }
             }
         }
     }

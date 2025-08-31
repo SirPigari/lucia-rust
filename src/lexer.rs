@@ -1,5 +1,4 @@
 use crate::env::runtime::tokens::{Location, Token};
-use std::mem;
 
 pub struct Lexer<'a> {
     code: &'a str,
@@ -46,11 +45,7 @@ impl<'a> Lexer<'a> {
     pub fn tokenize(&self) -> Vec<Token> {
         let mut pos = 0;
         let len = self.code.len();
-        let mut tokens = if mem::size_of::<usize>() == 8 {
-            Vec::with_capacity(256)
-        } else {
-            Vec::with_capacity(128)
-        };
+        let mut tokens = Vec::with_capacity(len / 3);
 
         let symbol_operators = [
             "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*",

@@ -353,11 +353,7 @@ pub fn handle_error(
         }
     }
 
-    if let Some(loc) = error.loc.as_ref() {
-        if !(loc.file == "<stdin>") {
-            trace.push_str("\n");
-        }
-    }
+    trace.push_str(&hex_to_ansi("reset", use_colors));
 
     eprintln!("{}", trace);
 }

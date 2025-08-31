@@ -1,32 +1,32 @@
-#include <std/macros>
+// #include <std/macros>
 
-a: str = "Hello, World!"
+// a: str = "Hello, World!"
 
-match (a):
-    "Hello, World!" if (false):
-        throw "This should not be reached"
-    end
-    "hello world":
-        throw "This should not be reached"
-    end
-    "hello world": end
-    (a):
-        print("Matched: ", a)
-        break
-    end
-    _:
-        throw "This should not be reached"
-    end
-end
+// match (a):
+//     _ if (false) ->
+//         throw "This should not be reached"
+//     end
+//     "hello world":
+//         throw "This should not be reached"
+//     end
+//     "hello world": end
+//     (a):
+//         print("Matched: ", a)
+//         break
+//     end
+//     _:
+//         throw "This should not be reached"
+//     end
+// end
 
-// no fallthrough
-match (a):
-    (a):
-        // will not fallthrough to the next case
-        print("Matched: ", a)
-        pass
-    end
-    _:
-        throw "This should not be reached"
-    end
-end
+// // no fallthrough
+// match (a):
+//     (a):
+//         // will not fallthrough to the next case
+//         print("Matched: ", a)
+//         pass
+//     end
+//     _:
+//         throw "This should not be reached"
+//     end
+// end

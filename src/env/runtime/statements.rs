@@ -2,8 +2,10 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int};
 use std::collections::HashMap;
 use crate::env::runtime::tokens::Location;
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum Statement {
     Statement {
         keys: Vec<Value>,

@@ -1699,6 +1699,38 @@ impl Variable {
                     ),
                 );
             }
+            Value::Enum(_) => {
+                let unwrap = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "unwrap",
+                        move |_| {
+                            match &val_clone {
+                                Value::Enum(enm) => {
+                                    *enm.variant.1.clone()
+                                }
+                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                            }
+                        },
+                        vec![],
+                        "any",
+                        true, true, true,
+                        None,
+                    )
+                };
+
+                self.properties.insert(
+                    "unwrap".to_string(),
+                    Variable::new(
+                        "unwrap".to_string(),
+                        unwrap,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
             _ => {}
         };
     }

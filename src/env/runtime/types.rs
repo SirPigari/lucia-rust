@@ -2,6 +2,8 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
 pub use imagnum::{
     Int, Float
 };
@@ -10,7 +12,7 @@ pub const VALID_TYPES: &[&str] = &[
     "void", "any", "int", "float", "bool", "str", "map", "list", "function", "generator", "error", "bytes", "tuple", "object", "auto", "type",
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub enum Type {
     Simple {
         name: String,

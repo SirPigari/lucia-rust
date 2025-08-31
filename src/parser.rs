@@ -4,6 +4,7 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{VALID_TYPES};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
+use crate::env::runtime::internal_structs::PathElement;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -939,6 +940,11 @@ impl Parser {
 
                 ("OPERATOR", "=>") => {
                     self.next();
+                    if !is_valid_token(&self.token().cloned()) {
+                        let loc = self.get_loc().unwrap();
+                        self.raise_with_loc("SyntaxError", "Unexpected end of input after '=>'", loc);
+                        return Statement::Null;
+                    }
                     let body_expr = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
@@ -1135,6 +1141,11 @@ impl Parser {
 
                 ("OPERATOR", "=") => {
                     self.next();
+                    if !is_valid_token(&self.token().cloned()) {
+                        let loc = self.get_loc().unwrap();
+                        self.raise_with_loc("SyntaxError", "Unexpected end of input after '='", loc);
+                        return Statement::Null;
+                    }
                     let value = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
@@ -1189,7 +1200,7 @@ impl Parser {
                 None => break,
             };
 
-            if ["=", "=>", "as", "++", "--", "|", "-li"].contains(&op_str) {
+            if ["=", "=>", "as", "++", "--", "|", "-li", "->"].contains(&op_str) {
                 break;
             }
 
@@ -2032,6 +2043,18 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if ["struct", "enum"].contains(&token.1.as_str()) && !([Some(":="), Some(":"), Some("="), Some(","), Some("\0"), Some(""), Some(" ")].contains(&self.peek(1).map(|tok| tok.1.as_str()))) => {
+                    let next_name = self.peek(1)
+                        .and_then(|tok| if tok.0.as_str() == "IDENTIFIER" { Some(tok.1.as_str()) } else { None })
+                        .unwrap_or("Name");
+
+                    return self.raise_with_help(
+                        "SyntaxError",
+                        &format!("Unexpected keyword '{}'", token.1),
+                        &format!("Did you mean to use 'typedef {} {} = {{...}}'?", token.1, next_name),
+                    );
+                }
+
                 "IDENTIFIER" if ["fun", "gen", "typedef", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
                     let mut modifiers: Vec<String> = vec![];
 
@@ -2336,13 +2359,53 @@ impl Parser {
                                     let mut var_type = Value::Null;
                                     let mut discriminant = None;
 
-                                    if self.token_is("SEPARATOR", ":") {
+                                    if self.token_is("SEPARATOR", "(") {
                                         self.next();
-                                        let parsed_type = self.parse_type();
-                                        if self.err.is_some() {
+                                        let mut elements = Vec::new();
+                                        while !self.token_is("SEPARATOR", ")") {
+                                            let elem = self.parse_single_type();
+                                            if self.err.is_some() {
+                                                return Statement::Null;
+                                            }
+                                            elements.push(elem);
+                                            if self.token_is("SEPARATOR", ",") {
+                                                self.next();
+                                            }
+                                        }
+                                        if !self.token_is("SEPARATOR", ")") {
+                                            self.raise("SyntaxError", "Expected ')' after tuple type elements");
                                             return Statement::Null;
                                         }
-                                        var_type = parsed_type.convert_to_map();
+                                        self.next();
+                                        if elements.len() == 1 {
+                                            var_type = elements[0].as_ref().unwrap().1.convert_to_map();
+                                        } else {
+                                            var_type =  Statement::Statement {
+                                                keys: vec![
+                                                    Value::String("type".to_string()),
+                                                    Value::String("type_kind".to_string()),
+                                                    Value::String("base".to_string()),
+                                                    Value::String("elements".to_string()),
+                                                    Value::String("variadic".to_string()),
+                                                    Value::String("variadic_type".to_string()),
+                                                ],
+                                                values: vec![
+                                                    Value::String("TYPE".to_string()),
+                                                    Value::String("indexed".to_string()),
+                                                    Value::String("tuple".to_string()),
+                                                    Value::List(elements.into_iter().map(|t| {
+                                                        if let Some((_, stmt)) = t {
+                                                            stmt.convert_to_map()
+                                                        } else {
+                                                            Value::Null
+                                                        }
+                                                    }).collect()),
+                                                    Value::Boolean(false),
+                                                    Value::String("any".to_string()),
+                                                ],
+                                                loc: self.get_loc(),
+                                            }.convert_to_map();
+                                        }
                                     }
 
                                     if self.token_is("OPERATOR", "=") {
@@ -3254,102 +3317,118 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "match" => {
                     self.next();
-                    if !self.token_is("SEPARATOR", "(") {
-                        self.raise_with_help(
-                            "SyntaxError",
-                            "Expected '(' after 'match'",
-                            "Did you forget to add '('?"
-                        );
-                        return Statement::Null;
-                    }
-                    self.next();
+
                     let condition = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    if !self.token_is("SEPARATOR", ")") {
-                        self.raise_with_help(
-                            "SyntaxError",
-                            "Expected ')' after match condition",
-                            "Did you forget to close the parentheses?"
-                        );
-                        return Statement::Null;
-                    }
-                    self.next();
+
                     if !self.token_is("SEPARATOR", ":") {
-                        self.raise_with_help(
+                        self.raise(
                             "SyntaxError",
                             "Expected ':' after match condition",
-                            "Did you forget to add ':'?"
                         );
                         return Statement::Null;
                     }
                     self.next();
-                
+
                     let mut cases = vec![];
-                
+
                     loop {
                         match self.token().cloned() {
                             Some(Token(_, ref tok_val, _)) if tok_val == "end" => {
                                 self.next();
                                 break;
                             }
-                    
-                            Some(Token(_, ref tok_val, _)) => {
-                                let pattern = if tok_val == "_" {
+
+                            Some(Token(..)) => {
+                                let (style, pattern, guard);
+
+                                let saved_pos = self.pos;
+                                while !(self.token_is("SEPARATOR", ":") || self.token_is("OPERATOR", "->") || self.token_is("IDENTIFIER", "if")) {
                                     self.next();
-                                    None
-                                } else {
-                                    let pat = self.parse_operand();
-                                    if self.err.is_some() {
-                                        return Statement::Null;
-                                    }
-                                    Some(pat)
-                                };
-                    
-                                let guard = if self.token_is("IDENTIFIER", "if") {
-                                    self.next();
-                                    if !self.token_is("SEPARATOR", "(") {
-                                        self.raise_with_help(
-                                            "SyntaxError",
-                                            "Expected '(' after 'if' in case guard",
-                                            "Did you forget to add '('?"
-                                        );
-                                        return Statement::Null;
-                                    }
-                                    self.next();
-                                    let cond_expr = self.parse_expression();
-                                    if self.err.is_some() {
-                                        return Statement::Null;
-                                    }
-                                    if !self.token_is("SEPARATOR", ")") {
-                                        self.raise_with_help(
-                                            "SyntaxError",
-                                            "Expected ')' after if condition",
-                                            "Did you forget to close the parentheses?"
-                                        );
-                                        return Statement::Null;
-                                    }
-                                    self.next();
-                                    Some(cond_expr)
-                                } else {
-                                    None
-                                };
-                    
-                                if !self.token_is("SEPARATOR", ":") {
-                                    self.raise_with_help(
-                                        "SyntaxError",
-                                        "Expected ':' after pattern (and optional if guard)",
-                                        "Did you forget to add ':'?"
-                                    );
-                                    return Statement::Null;
                                 }
-                                self.next();
-                    
+                                match self.token().cloned() {
+                                    Some(Token(_, ref tok_val, _)) if tok_val == "->" || tok_val == "if" => {
+                                        self.pos = saved_pos;
+                                        style = "pattern".to_string();
+                                    }
+                                    Some(Token(_, ref tok_val, _)) if tok_val == ":" => {
+                                        self.pos = saved_pos;
+                                        style = "literal".to_string();
+                                    }
+                                    _ => {
+                                        self.pos = saved_pos;
+                                        self.raise(
+                                            "SyntaxError",
+                                            "Expected ':' or '->' or 'if' in match case",
+                                        );
+                                        return Statement::Null;
+                                    }
+                                }
+
+                                if &style == "pattern" {
+                                    let pat_expr = match self.parse_path() {
+                                        Some(p) => p.to_value(),
+                                        None => {
+                                            return Statement::Null;
+                                        }
+                                    };
+
+                                    guard = if self.token_is("IDENTIFIER", "if") {
+                                        self.next();
+                                        let cond_expr = self.parse_expression();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                        Some(cond_expr)
+                                    } else {
+                                        None
+                                    };
+
+                                    if !self.token_is("OPERATOR", "->") {
+                                        self.raise(
+                                            "SyntaxError",
+                                            "Expected '->' after pattern (and optional if guard)",
+                                        );
+                                        return Statement::Null;
+                                    }
+                                    self.next();
+
+                                    pattern = Some(pat_expr);
+                                } else {
+                                    let tok_val = self.token().unwrap().1.clone();
+                                    pattern = if tok_val == "_" {
+                                        self.next();
+                                        None
+                                    } else {
+                                        let p = self.parse_operand();
+                                        if self.err.is_some() {
+                                            return Statement::Null;
+                                        }
+                                        Some(p.convert_to_map())
+                                    };
+
+                                    if !self.token_is("SEPARATOR", ":") {
+                                        self.raise(
+                                            "SyntaxError",
+                                            "Expected ':' after literal pattern",
+                                        );
+                                        return Statement::Null;
+                                    }
+                                    self.next();
+
+                                    guard = None;
+                                }
+
                                 let mut body = vec![];
                                 loop {
                                     match self.token() {
                                         Some(&Token(ref t, ref v, _)) if t == "IDENTIFIER" && v == "end" => {
+                                            self.next();
+                                            break;
+                                        }
+                                        Some(&Token(ref t, ref v, _)) if t == "SEPARATOR" && v == "," && body.len() == 1 => {
                                             self.next();
                                             break;
                                         }
@@ -3366,24 +3445,56 @@ impl Parser {
                                         }
                                     }
                                 }
-                    
-                                cases.push((pattern, guard, body));
+
+                                let case_map = if style == "literal" {
+                                    Value::Map {
+                                        keys: vec![
+                                            Value::String("style".to_string()),
+                                            Value::String("value".to_string()),
+                                            Value::String("body".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String(style),
+                                            pattern.map_or(Value::Null, |p| p),
+                                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                        ],
+                                    }
+                                } else {
+                                    Value::Map {
+                                        keys: vec![
+                                            Value::String("style".to_string()),
+                                            Value::String("pattern".to_string()),
+                                            Value::String("guard".to_string()),
+                                            Value::String("body".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String(style),
+                                            pattern.map_or(Value::Null, |p| p),
+                                            guard.map_or(Value::Null, |g| g.convert_to_map()),
+                                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                        ],
+                                    }
+                                };
+
+                                cases.push(case_map);
                             }
-                    
+
                             None => {
                                 self.raise("SyntaxError", "Unexpected end of input inside match block");
                                 return Statement::Null;
                             }
                         }
                     }
+
                     if cases.is_empty() {
                         self.raise_with_help(
                             "SyntaxError",
                             "Match statement must have at least one case",
-                            "Add '_'",
+                            "Add '_ -> null'",
                         );
                         return Statement::Null;
-                    }                    
+                    }
+
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
@@ -3393,18 +3504,7 @@ impl Parser {
                         values: vec![
                             Value::String("MATCH".to_string()),
                             condition.convert_to_map(),
-                            Value::List(cases.into_iter().map(|(p, g, b)| {
-                                let pattern_value = p.map_or(Value::Null, |pat| pat.convert_to_map());
-                                let guard_value = g.map_or(Value::Null, |guard| guard.convert_to_map());
-                                Value::Map {
-                                    keys: vec![
-                                        Value::String("pattern".to_string()),
-                                        Value::String("guard".to_string()),
-                                        Value::String("body".to_string()),
-                                    ],
-                                    values: vec![pattern_value, guard_value, Value::List(b.into_iter().map(|s| s.convert_to_map()).collect())],
-                                }
-                            }).collect()),
+                            Value::List(cases),
                         ],
                         loc: self.get_loc(),
                     }
@@ -3432,6 +3532,11 @@ impl Parser {
                             if let Some(assign_token) = self.token() {
                                 if assign_token.0 == "OPERATOR" && (assign_token.1 == ":=" || assign_token.1 == "=") {
                                     self.next();
+                                    if !is_valid_token(&self.token().cloned()) {
+                                        let loc = self.get_loc().unwrap();
+                                        self.raise_with_loc("SyntaxError", "Unexpected end of input after ':='", loc);
+                                        return Statement::Null;
+                                    }
                                     let value = self.parse_expression();
 
                                     return Statement::Statement {
@@ -3475,6 +3580,11 @@ impl Parser {
                     if let Some(assign_token) = self.token() {
                         if assign_token.0 == "OPERATOR" && (assign_token.1 == ":=") {
                             self.next();
+                            if !is_valid_token(&self.token().cloned()) {
+                                let loc = self.get_loc().unwrap();
+                                self.raise_with_loc("SyntaxError", "Unexpected end of input after '='", loc);
+                                return Statement::Null;
+                            }
                             let value = self.parse_expression();
 
                             if self.err.is_some() {
@@ -3776,7 +3886,76 @@ impl Parser {
             ],
             loc
         }
-    }    
+    }
+
+    pub fn parse_path(&mut self) -> Option<PathElement> {
+        match self.token().cloned() {
+            Some(Token(kind, val, _)) if kind == "IDENTIFIER" => {
+                let mut segments: Vec<String> = vec![val.clone()];
+                self.next();
+
+                while self.token_is("SEPARATOR", ".") {
+                    self.next();
+                    if let Some(Token(kind, seg, _)) = self.token().cloned() {
+                        if kind == "IDENTIFIER" {
+                            self.next();
+                            segments.push(seg.clone());
+                        } else {
+                            self.raise("SyntaxError", "Expected identifier after '.'");
+                            return None;
+                        }
+                    } else {
+                        self.raise("SyntaxError", "Expected identifier after '.'");
+                        return None;
+                    }
+                }
+
+                if self.token_is("SEPARATOR", "(") {
+                    self.next();
+                    let mut args = Vec::new();
+                    while !self.token_is("SEPARATOR", ")") {
+                        let arg = self.parse_path()?;
+                        args.push(arg);
+                        if self.token_is("SEPARATOR", ",") {
+                            self.next();
+                        }
+                    }
+                    if !self.token_is("SEPARATOR", ")") {
+                        self.raise("SyntaxError", "Expected ')' in path args");
+                        return None;
+                    }
+                    self.next();
+
+                    return Some(PathElement::Path { segments, args });
+                }
+
+                Some(PathElement::Path { segments, args: vec![] })
+            }
+
+            Some(Token(kind, _, _)) if kind == "SEPARATOR" && self.token_is("SEPARATOR", "(") => {
+                self.next();
+                let mut elems = Vec::new();
+                while !self.token_is("SEPARATOR", ")") {
+                    let e = self.parse_path()?;
+                    elems.push(e);
+                    if self.token_is("SEPARATOR", ",") {
+                        self.next();
+                    }
+                }
+                if !self.token_is("SEPARATOR", ")") {
+                    self.raise("SyntaxError", "Expected ')' after tuple");
+                    return None;
+                }
+                self.next();
+                Some(PathElement::Tuple(elems))
+            }
+
+            _ => {
+                self.raise("SyntaxError", "Expected path");
+                None
+            }
+        }
+    }
 
     fn parse_single_type(&mut self) -> Option<(String, Statement)> {
         let mut is_ptr = false;
@@ -4211,6 +4390,11 @@ impl Parser {
                     ],
                     loc: loc.clone()
                 };
+                if !is_valid_token(&self.token().cloned()) {
+                    let loc = self.get_loc().unwrap();
+                    self.raise_with_loc("SyntaxError", "Unexpected end of input after ':='", loc);
+                    return Statement::Null;
+                }
                 let value = self.parse_expression().convert_to_map();
                 if self.err.is_some() {
                     return Statement::Null;
