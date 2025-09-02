@@ -23,6 +23,10 @@ use crate::env::runtime::utils::{
     gamma_lanczos,
     get_inner_type,
     check_pattern,
+    get_enum_idx,
+    unescape_string_premium_edition,
+    apply_format_spec,
+    remove_loc_keys,
 };
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
@@ -1675,7 +1679,7 @@ impl Interpreter {
                 if self.err.is_some() {
                     return NULL;
                 }
-                let mut variants_processed: Vec<(String, Statement, Option<Value>)> = Vec::new();
+                let mut variants_processed: Vec<(String, Statement, usize)> = Vec::new();
                 for v in variants {
                     match v {
                         Value::Map { keys, values } => {
@@ -1710,10 +1714,33 @@ impl Interpreter {
                                 }
                             };
                             let discriminant = match keys.iter().position(|k| k == &Value::String("discriminant".to_string())) {
-                                Some(pos) => values.get(pos).cloned(),
-                                None => None,
+                                Some(pos) => values.get(pos).unwrap().convert_to_statement(),
+                                None => return self.raise("RuntimeError", "Expected 'discriminant' in enum variant"),
                             };
-                            variants_processed.push((n, t, discriminant));
+                            let usize_disc = match self.evaluate(discriminant.clone()) {
+                                Value::Int(n) => match n.to_usize() {
+                                    Ok(u) => u,
+                                    Err(_) => {
+                                        self.raise_with_help("ValueError", "Discriminant integer too large in enum variant", &format!("expected in range between 0 and {}", usize::MAX));
+                                        return NULL;
+                                    }
+                                },
+                                _ => {
+                                    match discriminant {
+                                        Statement::Statement { loc, .. } => {
+                                            self.raise("TypeError", "Expected 'discriminant' to be an integer in enum variant");
+                                            if let Some(mut err) = self.err.take() {
+                                                err.loc = loc;
+                                                self.err = Some(err);
+                                            }
+                                            NULL
+                                        },
+                                        _ => self.raise("TypeError", "Expected 'discriminant' to be an integer in enum variant")
+                                    };
+                                    return NULL
+                                }
+                            };
+                            variants_processed.push((n, t, usize_disc));
                         }
                         _ => {
                             self.raise("RuntimeError", "Expected a map for enum variant");
@@ -1865,7 +1892,11 @@ impl Interpreter {
             }
         };
 
+        let mut match_result: (Option<Value>, bool) = (None, false);
         for case in cases.iter() {
+            if match_result.1 {
+                break;
+            }
             if let Value::Map { keys, values } = case {
                 let style = match keys.iter().position(|k| k == &Value::String("style".to_string())) {
                     Some(pos) => match values.get(pos) {
@@ -1928,7 +1959,10 @@ impl Interpreter {
                         let mut variables: HashMap<String, Variable> = HashMap::from_iter(variables.into_iter().map(|(k, v)| {
                             (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
                         }));
-                        variables.extend(self.variables.clone());
+                        let mut merged = self.variables.clone();
+                        merged.extend(variables);
+                        variables = merged;
+
 
                         if matched {
                             let mut res = NULL;
@@ -1962,7 +1996,7 @@ impl Interpreter {
                                 self.preprocessor_info.clone(),
                                 &[],
                             );
-                            interp.variables.extend(variables);
+                            interp.variables = variables;
                             'outer: for stmt in body.iter() {
                                 let result = interp.evaluate(stmt.convert_to_statement());
                                 if interp.err.is_some() {
@@ -1987,8 +2021,10 @@ impl Interpreter {
                             }
                             self.variables.extend(interp.variables.clone());
                             drop(interp);
-                            if !cont {
-                                return res;
+                            if cont {
+                                match_result = (Some(NULL), false);
+                            } else {
+                                match_result = (Some(res), true);
                             }
                         }
                     }
@@ -2045,8 +2081,10 @@ impl Interpreter {
                                 }
                                 res = result;
                             }
-                            if !cont {
-                                return res;
+                            if cont {
+                                match_result = (Some(NULL), false);
+                            } else {
+                                match_result = (Some(res), true);
                             }
                         }
                     }
@@ -2057,7 +2095,15 @@ impl Interpreter {
             }
         }
 
-        NULL
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        if match_result.0.is_none() {
+            return self.raise_with_help("ValueError", "No value matched cases in match statement", "Add a '_ -> ...' case");
+        }
+
+        match_result.0.unwrap_or(NULL)
     }
 
     fn handle_scope(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -5146,6 +5192,11 @@ impl Interpreter {
                 }
                 keys.len()
             }
+            Value::Type(t) => if let Type::Enum { variants, ..} = t {
+                variants.iter().max_by_key(|x| x.2).map(|x| x.2).unwrap_or(variants.len())
+            }  else {
+                return self.raise("TypeError", "Object not indexable");
+            }
             _ => return self.raise("TypeError", "Object not indexable"),
         };
     
@@ -5281,6 +5332,26 @@ impl Interpreter {
                             .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
                         Value::Tuple(t) => t.get(start_idx).cloned()
                             .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+                        Value::Type(t) => {
+                            if let Type::Enum { variants, name, .. } = t {
+                                for (variant_name, ty, idx) in variants {
+                                    if *idx == start_idx {
+                                        if *ty != Statement::Null {
+                                            match self.evaluate(ty.clone()) {
+                                                Value::Type(t) => self.raise_with_help("TypeError", "Discriminant index access works only for non-value variants", &format!("'{}.{}' accepts type '{}'", name, variant_name, t.display_simple())),
+                                                _ => self.raise("TypeError", "Discriminant index access works only for non-value variants"),
+                                            };
+                                            let ref_err = self.err.clone().unwrap();
+                                            return self.raise_with_ref("NotImplemented", "Discriminant index access for value variants is not supported yet", ref_err);
+                                        }
+                                        return Value::Enum(Enum::new(t.clone(), (*idx, Value::Null)));
+                                    }
+                                }
+                                return self.raise("ValueError", &format!("No enum variant with value {}", start_idx));
+                            } else {
+                                return self.raise("TypeError", "Object not indexable");
+                            }
+                        }
                         _ => return self.raise("TypeError", "Object not indexable"),
                     };
                 }                
@@ -5434,7 +5505,11 @@ impl Interpreter {
                         &format!("Did you mean to use '{}.{}({})'", candidates[0].1.display_simple(), candidates[0].0.clone(), eval_type.display()),
                     );
                 }
-                return Value::Enum(Enum::new(candidates[0].1.clone(), (candidates[0].0.clone(), Value::Null)));
+                let idx = match get_enum_idx(&candidates[0].1, &candidates[0].0) {
+                    Some(u) => u,
+                    None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
+                };
+                return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, Value::Null)));
             } else if candidates.len() > 1 {
                 let variant_list = candidates.iter()
                     .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
@@ -6247,9 +6322,13 @@ impl Interpreter {
                         if self.err.is_some() {
                             return NULL;
                         }
+                        let idx = match get_enum_idx(&t, &variant_name) {
+                            Some(u) => u,
+                            None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
+                        };
                         let v = Enum::new(
                             t.clone(),
-                            (variant_name.to_string(), variant_val)
+                            (idx, variant_val)
                         );
                         return Value::Enum(v);
                     }
@@ -6872,15 +6951,6 @@ impl Interpreter {
             true,
             true,
         );
-        
-        // if let Value::Module(ref o) = object_value {
-        //     let props = o.get_properties();
-        //     object_variable.properties = props.clone();
-        //     object_variable.set_name(o.name().to_string());
-        // } else if !object_variable.is_init() {
-        //     object_variable.init_properties(self);
-        //     object_variable.set_name(object_value.get_type().display_simple());
-        // }
 
         match object_value {
             Value::Module(ref o) => {
@@ -6914,46 +6984,14 @@ impl Interpreter {
                                 &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
                             );
                         }
+                        let idx = match get_enum_idx(&t, &variant_name) {
+                            Some(u) => u,
+                            None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
+                        };
                         return Value::Enum(Enum::new(
-                                t.clone(),
-                                (variant_name.clone(), NULL)
-                            ));
-                        // let mut props = HashMap::new();
-                        // for (variant_name, variant_ty, discriminant) in variants {
-                        //     if *variant_ty != Statement::Null {
-                        //         let eval_type = match self.evaluate(variant_ty.clone()) {
-                        //             Value::Type(t) => t,
-                        //             e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
-                        //         };
-                        //         if self.err.is_some() {
-                        //             return NULL;
-                        //         }
-                        //         return self.raise_with_help(
-                        //             "TypeError",
-                        //             &format!("Missing argument for '{}.{}' of type '{}'", name, variant_name, eval_type.display_simple()),
-                        //             &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
-                        //         );
-                        //     }
-                        //     let variant_var = Variable::new_pt(
-                        //         variant_name.clone(),
-                        //         Value::Enum(Enum::new(
-                        //             t.clone(),
-                        //             (variant_name.clone(), NULL)
-                        //         )),
-                        //         t.clone(),
-                        //         false,
-                        //         true,
-                        //         true,
-                        //     );
-                        //     if let Some(disc) = discriminant {
-                        //         if matches!(disc, Value::Int(_)) {
-                        //             props.insert(disc.to_string(), variant_var.clone());
-                        //         }
-                        //     }
-                        //     props.insert(variant_name.clone(), variant_var.clone());
-                        // }
-                        // object_variable.properties = props;
-                        // object_variable.set_name(name.clone());
+                            t.clone(),
+                            (idx, NULL)
+                        ));
                     }
                     Type::Struct { .. } => {}
                     _ => {}
@@ -7143,7 +7181,11 @@ impl Interpreter {
                             Value::Tuple(pos_args)
                         };
                         if self.check_type(&variant_value, &eval_type).0 {
-                            return Value::Enum(Enum::new(candidates[0].1.clone(), (candidates[0].0.clone(), variant_value)));
+                            let idx = match get_enum_idx(&candidates[0].1, &candidates[0].0) {
+                                Some(u) => u,
+                                None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
+                            };
+                            return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, variant_value)));
                         } else {
                             return self.raise("TypeError", &format!("Expected '{}' for '{}.{}' value, but got: {}", eval_type.display_simple(), candidates[0].1.display_simple(), variant_name, variant_value.get_type().display_simple()));
                         }
@@ -8841,7 +8883,7 @@ impl Interpreter {
             let mut modified_string = s.clone();
             let mut is_raw = false;
             let mut is_bytes = false;
-    
+
             if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
                 for mod_value in mods {
                     if let Value::String(modifier) = mod_value {
@@ -8849,7 +8891,7 @@ impl Interpreter {
                             "f" => {
                                 let mut output = String::new();
                                 let mut chars = modified_string.chars().peekable();
-    
+
                                 while let Some(c) = chars.next() {
                                     if c == '{' {
                                         if let Some(&'{') = chars.peek() {
@@ -8857,12 +8899,27 @@ impl Interpreter {
                                             output.push('{');
                                             continue;
                                         }
-    
+
                                         let mut expr = String::new();
+                                        let mut format_spec: Option<String> = None;
                                         let mut brace_level = 1;
-    
+                                        let mut in_string: Option<char> = None;
+
                                         while let Some(&next_c) = chars.peek() {
                                             chars.next();
+
+                                            if let Some(quote) = in_string {
+                                                expr.push(next_c);
+                                                if next_c == quote {
+                                                    in_string = None;
+                                                }
+                                                continue;
+                                            } else if next_c == '"' || next_c == '\'' {
+                                                in_string = Some(next_c);
+                                                expr.push(next_c);
+                                                continue;
+                                            }
+
                                             if next_c == '{' {
                                                 brace_level += 1;
                                             } else if next_c == '}' {
@@ -8871,60 +8928,114 @@ impl Interpreter {
                                                     break;
                                                 }
                                             }
+
+                                            if brace_level == 1
+                                                && next_c == ':'
+                                                && chars.peek() == Some(&':')
+                                            {
+                                                chars.next();
+                                                let mut spec = String::new();
+                                                while let Some(&spec_c) = chars.peek() {
+                                                    if spec_c == '}' { break; }
+                                                    chars.next();
+                                                    spec.push(spec_c);
+                                                }
+                                                format_spec = Some(spec.trim().to_string());
+                                                continue;
+                                            }
+
                                             expr.push(next_c);
                                         }
-    
+
+                                        expr = match unescape_string_premium_edition(&expr) {
+                                            Ok(unescaped) => unescaped,
+                                            Err(err) => {
+                                                return self.raise("UnescapeError", &err);
+                                            }
+                                        };
+
                                         if brace_level != 0 {
                                             return self.raise("SyntaxError", "Unmatched '{' in f-string");
                                         }
 
                                         let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
-                                        if tokens.is_empty() {
-                                            return self.raise("SyntaxError", "Empty expression inside {}");
-                                        }
-                                        let filtered = tokens
-                                            .iter()
+
+                                        let filtered = tokens.iter()
                                             .filter(|token| {
                                                 let t = &token.0;
                                                 t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
                                             })
                                             .collect::<Vec<_>>();
-                        
-                                        debug_log(&format!("Generated f-string tokens: {:?}", filtered), &self.config, Some(self.use_colors));
-                                        
-                                        let parsed = match Parser::new(tokens).parse_safe() {
+
+                                        let formatted_toks = filtered.iter()
+                                            .map(|token| (&token.0, &token.1))
+                                            .collect::<Vec<_>>();
+
+                                        debug_log(
+                                            &format!("Generated f-string tokens: {:?}", formatted_toks),
+                                            &self.config,
+                                            Some(self.use_colors),
+                                        );
+
+                                        let parsed = match Parser::new(tokens.clone()).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
-                                                return self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));
+                                                return self.raise(
+                                                    "SyntaxError",
+                                                    &format!("Error parsing f-string expression: {}", error.msg),
+                                                );
                                             }
                                         };
-                                        if parsed.is_empty() {
-                                            return self.raise("SyntaxError", "Empty expression inside {}");
-                                        }
-                                        if parsed.len() > 1 {
-                                            return self.raise("SyntaxError", "Expected a single expression inside {} in f-string");
-                                        }
+
                                         debug_log(
                                             &format!(
-                                                "Generated f-string statements: [{}]",
-                                                parsed
-                                                    .iter()
-                                                    .map(|stmt| format_value(&stmt.convert_to_map()))
-                                                    .collect::<Vec<String>>()
-                                                    .join(", ")
+                                                "Generated f-string statement: {}",
+                                                parsed.iter().map(|stmt| {
+                                                    let cleaned = remove_loc_keys(&stmt.convert_to_map());
+                                                    format_value(&cleaned)
+                                                }).collect::<Vec<String>>().join(", ")
                                             ),
                                             &self.config,
                                             Some(self.use_colors),
                                         );
 
                                         debug_log(
-                                            &format!("<FString: {}>", expr.clone()),
+                                            &format!("<FString: {}>", expr.clone().trim()),
                                             &self.config,
-                                            Some(self.use_colors.clone()),
+                                            Some(self.use_colors),
                                         );
-    
-                                        let result = self.evaluate(parsed[0].clone());
-                                        output.push_str(&result.to_string());
+
+                                        let result_val = self.evaluate(parsed[0].clone());
+
+                                        // if let Some(spec) = format_spec {
+                                        //     if spec == "?" {
+                                        //         result = match escape_string(&format_value(&self.evaluate(parsed[0].clone()))) {
+                                        //             Ok(res) => res,
+                                        //             Err(e) => return self.raise("UnicodeError", &e),
+                                        //         };
+                                        //     } else if spec.len() >= 2 {
+                                        //         let pad_len = spec[1..].parse::<usize>().unwrap_or(0);
+                                        //         match spec.chars().next().unwrap() {
+                                        //             '<' => result = format!("{:<width$}", result, width = pad_len),
+                                        //             '>' => result = format!("{:>width$}", result, width = pad_len),
+                                        //             '^' => result = format!("{:^width$}", result, width = pad_len),
+                                        //             _ => return self.raise("RuntimeError", &format!("Unknown format specifier: {}", spec)),
+                                        //         }
+                                        //     } else {
+                                        //         return self.raise("RuntimeError", &format!("Unknown format specifier: {}", spec));
+                                        //     }
+                                        // }
+                                        let result;
+                                        if let Some(spec) = format_spec {
+                                            result = match apply_format_spec(&result_val, &spec) {
+                                                Ok(res) => res,
+                                                Err(e) => return self.raise("SyntaxError", &e),
+                                            };
+                                        } else {
+                                            result = result_val.to_string();
+                                        }
+
+                                        output.push_str(&result);
                                     } else if c == '}' {
                                         if let Some(&'}') = chars.peek() {
                                             chars.next();
@@ -8937,15 +9048,11 @@ impl Interpreter {
                                         output.push(c);
                                     }
                                 }
-    
+
                                 modified_string = output;
                             }
-                            "r" => {
-                                is_raw = true;
-                            }
-                            "b" => {
-                                is_bytes = true;
-                            }
+                            "r" => is_raw = true,
+                            "b" => is_bytes = true,
                             _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
                         }
                     } else {
@@ -8955,30 +9062,31 @@ impl Interpreter {
                 }
             }
 
-            if !is_raw {
+            if is_raw {
+                let unquoted = if modified_string.len() >= 2 {
+                    let first = modified_string.chars().next().unwrap();
+                    let last = modified_string.chars().last().unwrap();
+                    if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+                        modified_string[1..modified_string.len() - 1].to_string()
+                    } else {
+                        modified_string
+                    }
+                } else {
+                    modified_string
+                };
+                modified_string = unquoted;
+            } else {
                 modified_string = match unescape_string(&modified_string) {
                     Ok(unescaped) => unescaped,
                     Err(e) => return self.raise("UnicodeError", &e),
                 };
             }
-            
-            let unquoted = if modified_string.len() >= 2 {
-                let first = modified_string.chars().next().unwrap();
-                let last = modified_string.chars().last().unwrap();
-                if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-                    modified_string[1..modified_string.len() - 1].to_string()
-                } else {
-                    modified_string
-                }
-            } else {
-                modified_string
-            };
 
             if is_bytes {
-                return Value::Bytes(unquoted.clone().into_bytes());
+                return Value::Bytes(modified_string.clone().into_bytes());
             }
-    
-            Value::String(unquoted)
+
+            Value::String(modified_string)
         } else {
             self.raise("RuntimeError", "Missing 'value' in string statement")
         }

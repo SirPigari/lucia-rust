@@ -67,12 +67,14 @@
     // its on the macro to decide the type
     // here we use a list (denoted by the [])
     values: list = [$value]
+    mutable output: str = ""  // output builder 
     for ((i, n) in values.enumerate()):
         // $!value means the stringified version of the value tokens
         // split by backticks to get the identifiers (backticks aren't used in lucia)
-        print($!`value.split("`")[i].trim(), "=", _collections.format_value(n).trim())
+        output += $!`value.split("`")[i].trim() + " = " + _collections.format_value(n).trim() + "\n\r"
     end
     forget values
+    print(output, end="")
     null  // otherwise it will return the last value (values)
 #endmacro
 

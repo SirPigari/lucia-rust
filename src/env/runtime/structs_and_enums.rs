@@ -1,6 +1,6 @@
 use crate::env::runtime::types::Type;
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::format_value;
+use crate::env::runtime::utils::{format_value, get_variant_name};
 use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Enum {
     pub ty: Type,
-    pub variant: (String, Box<Value>),
+    pub variant: (usize, Box<Value>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
@@ -18,12 +18,23 @@ pub struct Struct {
 }
 
 impl Enum {
-    pub fn new(ty: Type, variant: (String, Value)) -> Self {
+    pub fn new(ty: Type, variant: (usize, Value)) -> Self {
         Self { ty, variant: (variant.0, Box::new(variant.1)) }
     }
 
     pub fn display(&self) -> String {
-        format!("{}.{}{}", self.ty.display_simple(), self.variant.0, if matches!(*self.variant.1, Value::Null) { "".to_string() } else { format!("({})", format_value(&self.variant.1)) })
+        format!("{}.{}{}", self.ty.display_simple(), get_variant_name(&self.ty, self.variant.0).unwrap_or(self.variant.0.to_string()), if matches!(*self.variant.1, Value::Null) { "".to_string() } else { format!("({})", format_value(&self.variant.1)) })
+    }
+
+    pub fn is_variant(&self, name: &str) -> bool {
+        if let Type::Enum { variants, .. } = &self.ty {
+            return variants
+                .iter()
+                .enumerate()
+                .find(|(idx, (v_name, _, _))| v_name == name && *idx == self.variant.0)
+                .is_some();
+        }
+        false
     }
 
     pub fn get_type(&self) -> Type {

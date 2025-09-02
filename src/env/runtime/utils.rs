@@ -284,7 +284,7 @@ pub fn format_value(value: &Value) -> String {
     match value {
         Value::Float(n) => format_float(&n),
         Value::Int(n) => format_int(&n),
-        Value::String(s) => format!("\"{}\"", s),
+        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('\"', "\\\"")),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
 
@@ -450,6 +450,77 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     } else {
         Err("String not properly quoted".into())
     }
+}
+
+pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            result.push(c);
+            continue;
+        }
+
+        // We have a backslash
+        let next_c = chars.next().ok_or("Trailing backslash in string literal")?;
+        match next_c {
+            '\\' => result.push('\\'),
+            '\'' => result.push('\''),
+            '"' => result.push('"'),
+            'n' => result.push('\n'),
+            'r' => result.push('\r'),
+            't' => result.push('\t'),
+            '0' => result.push('\0'),
+            'a' => result.push('\x07'),
+            'b' => result.push('\x08'),
+            'f' => result.push('\x0c'),
+            'v' => result.push('\x0b'),
+            'x' => {
+                // Hex escape \xNN
+                let hex: String = chars.by_ref().take(2).collect();
+                if hex.len() != 2 { return Err(format!("Invalid hex escape: \\x{}", hex)); }
+                let val = u8::from_str_radix(&hex, 16)
+                    .map_err(|_| format!("Invalid hex escape: \\x{}", hex))?;
+                result.push(val as char);
+            }
+            'u' => {
+                // Unicode escape \uNNNN
+                let hex: String = chars.by_ref().take(4).collect();
+                if hex.len() != 4 { return Err(format!("Invalid unicode escape: \\u{}", hex)); }
+                let val = u32::from_str_radix(&hex, 16)
+                    .map_err(|_| format!("Invalid unicode escape: \\u{}", hex))?;
+                result.push(std::char::from_u32(val).ok_or("Invalid unicode codepoint")?);
+            }
+            'U' => {
+                // Unicode escape \UNNNNNNNN
+                let hex: String = chars.by_ref().take(8).collect();
+                if hex.len() != 8 { return Err(format!("Invalid unicode escape: \\U{}", hex)); }
+                let val = u32::from_str_radix(&hex, 16)
+                    .map_err(|_| format!("Invalid unicode escape: \\U{}", hex))?;
+                result.push(std::char::from_u32(val).ok_or("Invalid unicode codepoint")?);
+            }
+            '0'..='7' => {
+                // Octal escape \NNN (up to 3 digits)
+                let mut oct = next_c.to_string();
+                for _ in 0..2 {
+                    if let Some(&next_digit) = chars.peek() {
+                        if next_digit >= '0' && next_digit <= '7' {
+                            oct.push(chars.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                let val = u8::from_str_radix(&oct, 8)
+                    .map_err(|_| format!("Invalid octal escape: \\{}", oct))?;
+                result.push(val as char);
+            }
+            other => return Err(format!("Unknown escape sequence: \\{}", other)),
+        }
+    }
+
+    Ok(result)
 }
 
 pub fn make_native_method<F>(
@@ -1417,28 +1488,41 @@ pub fn check_pattern(
     value: &Value,
     pattern: &Value,
 ) -> Result<(bool, HashMap<String, Value>), (String, String)> {
-    use std::collections::HashMap;
-    let mut variables = HashMap::new();
-
+    let mut variables: HashMap<String, Value> = HashMap::new();
     fn inner(
         value: &Value,
         pat: &Value,
         vars: &mut HashMap<String, Value>,
     ) -> Result<bool, (String, String)> {
-        use Value::*;
+        // Wildcard '_' handling
+        if let Value::Map { values, .. } = pat {
+            if let Value::List(p_segments) = &values[0] {
+                if p_segments.len() == 1 {
+                    if let Value::String(s) = &p_segments[0] {
+                        if s == "_" {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
 
         match (value, pat) {
             // Primitive match
-            (Int(a), Int(b)) if a == b => Ok(true),
-            (Float(a), Float(b)) if a == b => Ok(true),
-            (Boolean(a), Boolean(b)) if a == b => Ok(true),
-            (String(a), String(b)) if a == b => Ok(true),
+            (Value::Int(a), Value::Int(b)) if a == b => Ok(true),
+            (Value::Float(a), Value::Float(b)) if a == b => Ok(true),
+            (Value::Boolean(a), Value::Boolean(b)) if a == b => Ok(true),
+            (Value::String(a), Value::String(b)) if a == b => Ok(true),
 
             // Tuple match
-            (Tuple(c_elems), Tuple(p_elems)) => {
-                if c_elems.len() != p_elems.len() { return Ok(false); }
+            (Value::Tuple(c_elems), Value::Tuple(p_elems)) => {
+                if c_elems.len() != p_elems.len() {
+                    return Ok(false);
+                }
                 for (c, p) in c_elems.iter().zip(p_elems.iter()) {
-                    if !inner(c, p, vars)? { return Ok(false); }
+                    if !inner(c, p, vars)? {
+                        return Ok(false);
+                    }
                 }
                 Ok(true)
             }
@@ -1450,31 +1534,74 @@ pub fn check_pattern(
                 let p_segments = match &p_vals[0] { Value::List(l) => l, _ => return Ok(false) };
                 let p_args = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
 
-                if p_segments.len() < 2 { return Ok(false); }
-                let pat_enum_name = match &p_segments[1] { Value::String(s) => s, _ => return Ok(false) };
-                if cond_enum.variant.0 != *pat_enum_name { return Ok(false); }
+                if p_segments.len() < 1 { return Ok(false); }
+                let pat_variant_name = match &p_segments[p_segments.len() - 1] {
+                    Value::String(s) => s,
+                    _ => return Ok(false),
+                };
 
-                if p_args.len() != 1 { return Ok(false); }
-                let pat_arg = &p_args[0];
+                // check variant name
+                let variant_name = match get_variant_name(&cond_enum.ty, cond_enum.variant.0) {
+                    Some(name) => name,
+                    None => return Ok(false),
+                };
+                if variant_name != *pat_variant_name {
+                    return Ok(false);
+                }
 
-                if let Value::Map { keys: _, values } = pat_arg {
-                    let seg = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
-                    if seg.len() == 1 {
-                        if let Value::String(var_name) = &seg[0] {
-                            vars.insert(var_name.clone(), (*cond_enum.variant.1).clone());
-                            return Ok(true);
+                // now match payload
+                match &*cond_enum.variant.1 {
+                    Value::Tuple(payload_elems) => {
+                        if payload_elems.len() != p_args.len() { return Ok(false); }
+                        for (payload, arg_pat) in payload_elems.iter().zip(p_args.iter()) {
+                            if let Value::Map { values, .. } = arg_pat {
+                                if let Value::List(segs) = &values[0] {
+                                    if segs.len() == 1 {
+                                        if let Value::String(var_name) = &segs[0] {
+                                            vars.insert(var_name.clone(), payload.clone());
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                            if !inner(payload, arg_pat, vars)? {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    }
+                    other_val => {
+                        if p_args.len() == 1 {
+                            // pattern expects 1 arg, bind directly
+                            if let Value::Map { values, .. } = &p_args[0] {
+                                if let Value::List(segs) = &values[0] {
+                                    if segs.len() == 1 {
+                                        if let Value::String(var_name) = &segs[0] {
+                                            vars.insert(var_name.clone(), other_val.clone());
+                                            return Ok(true);
+                                        }
+                                    }
+                                }
+                            }
+                            inner(other_val, &p_args[0], vars)
+                        } else {
+                            Ok(false)
                         }
                     }
                 }
-
-                Ok(false)
             }
 
             // Single-segment path pattern → bind variable to value
             (val, Value::Map { keys: p_keys, values }) => {
                 if p_keys.len() == 2 && values.len() == 2 {
-                    let p_segments = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
-                    let p_args = match &values[1] { Value::List(l) => l, _ => return Ok(false) };
+                    let p_segments = match &values[0] {
+                        Value::List(l) => l,
+                        _ => return Ok(false),
+                    };
+                    let p_args = match &values[1] {
+                        Value::List(l) => l,
+                        _ => return Ok(false),
+                    };
                     if p_segments.len() == 1 && p_args.is_empty() {
                         if let Value::String(var_name) = &p_segments[0] {
                             vars.insert(var_name.clone(), val.clone());
@@ -1536,6 +1663,184 @@ pub fn gamma_lanczos(z: f64, level: usize) -> f64 {
         let scaled = n / level as f64;
         (level as f64).powf(scaled) * gamma_core(scaled + 1.0)
     }
+}
+
+pub fn get_enum_idx(enm: &Type, name: &str) -> Option<usize> {
+    if let Type::Enum { variants, .. } = enm {
+        variants.iter().find(|(v_name, _, _)| v_name == name).map(|(_, _, idx)| *idx)
+    } else {
+        None
+    }
+}
+
+pub fn get_variant_name(enm: &Type, idx: usize) -> Option<String> {
+    if let Type::Enum { variants, .. } = enm {
+        variants.get(idx).map(|(name, _, _)| name.clone())
+    } else {
+        None
+    }
+}
+
+pub fn format_with_dynamic_fill(s: &str, fill: char, width: usize, align: char) -> String {
+    let len = s.chars().count();
+    if width <= len {
+        return s.to_string();
+    }
+    let pad = width - len;
+    match align {
+        '<' => {
+            let mut result = s.to_string();
+            result.extend(std::iter::repeat(fill).take(pad));
+            result
+        }
+        '>' => {
+            let mut result = String::with_capacity(width);
+            result.extend(std::iter::repeat(fill).take(pad));
+            result.push_str(s);
+            result
+        }
+        '^' => {
+            let left = pad / 2;
+            let right = pad - left;
+            let mut result = String::with_capacity(width);
+            result.extend(std::iter::repeat(fill).take(left));
+            result.push_str(s);
+            result.extend(std::iter::repeat(fill).take(right));
+            result
+        }
+        _ => s.to_string(),
+    }
+}
+
+pub fn apply_format_spec(value: &Value, spec: &str) -> Result<String, String> {
+    let mut s = value.to_string();
+
+    if spec.trim() == "?" {
+        s = escape_string(&format_value(&value))?;
+        return Ok(s);
+    }
+
+    let mut chars = spec.chars().peekable();
+    let mut fill = ' ';
+    let mut align = None;
+    let mut width = None;
+    let mut precision = None;
+    let mut sign = None;
+    let mut typ = None;
+
+    if let Some(&c1) = chars.peek() {
+        if let Some(c2) = chars.clone().nth(1) {
+            if matches!(c2, '<' | '>' | '^') {
+                fill = c1;
+                align = Some(c2);
+                chars.next();
+                chars.next();
+            }
+        }
+    }
+    if align.is_none() {
+        if let Some(&c) = chars.peek() {
+            if matches!(c, '<' | '>' | '^') {
+                align = Some(c);
+                chars.next();
+            }
+        }
+    }
+
+    let mut width_str = String::new();
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() {
+            width_str.push(c);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if !width_str.is_empty() {
+        width = width_str.parse::<usize>().ok();
+    }
+
+    if let Some(&'.') = chars.peek() {
+        chars.next();
+        let mut prec_str = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                prec_str.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if !prec_str.is_empty() {
+            precision = prec_str.parse::<usize>().ok();
+        }
+    }
+
+    if let Some(&c) = chars.peek() {
+        if matches!(c, '+' | '-') {
+            sign = Some(c);
+            chars.next();
+        }
+    }
+
+    if let Some(c) = chars.next() {
+        typ = Some(c);
+    }
+
+    if precision.is_some() {
+        match typ {
+            Some(c) if matches!(c, 'f' | 'F' | 'e' | 'E') => {}
+            _ => return Err("Precision specified but type is not a float".to_string()),
+        }
+    }
+
+    if let Some(t) = typ {
+        match t {
+            'b' => {
+                let val: i128 = s.parse().map_err(|_| "Invalid integer")?;
+                s = format!("{:b}", val);
+            }
+            'o' => {
+                let val: i128 = s.parse().map_err(|_| "Invalid integer")?;
+                s = format!("{:o}", val);
+            }
+            'x' => {
+                let val: i128 = s.parse().map_err(|_| "Invalid integer")?;
+                s = format!("{:x}", val);
+            }
+            'X' => {
+                let val: i128 = s.parse().map_err(|_| "Invalid integer")?;
+                s = format!("{:X}", val);
+            }
+            'f' | 'F' => {
+                let prec = precision.unwrap_or(6);
+                let val: f64 = s.parse().map_err(|_| "Invalid float")?;
+                s = format!("{:.*}", prec, val);
+                if t == 'F' { s = s.to_uppercase(); }
+            }
+            'e' | 'E' => {
+                let prec = precision.unwrap_or(6);
+                let val: f64 = s.parse().map_err(|_| "Invalid float")?;
+                s = format!("{:.*e}", prec, val);
+                if t == 'E' { s = s.to_uppercase(); }
+            }
+            'U' | 'u' => s = s.to_uppercase(),
+            'L' | 'l' => s = s.to_lowercase(),
+            _ => return Err(format!("Unknown format type: {}", t)),
+        }
+    }
+
+    if let Some(sign_char) = sign {
+        if sign_char == '+' && !s.starts_with('-') && !s.starts_with('+') && s.parse::<i128>().is_ok() {
+            s = format!("+{}", s);
+        }
+    }
+
+    if let Some(w) = width {
+        s = format_with_dynamic_fill(&s, fill, w, align.unwrap_or('>'));
+    }
+
+    Ok(s)
 }
 
 pub const KEYWORDS: &[&str] = &[

@@ -55,6 +55,8 @@ impl fmt::Debug for Value {
                 write!(f, "Pointer(0x{:X})", addr)
             },
             Value::Error(kind, msg, _) => write!(f, "Error({}, {})", kind, msg),
+            Value::Struct(v) => write!(f, "{}", v.display()),
+            Value::Enum(v) => write!(f, "{}", v.display()),
             _ => write!(f, "{:?}", self.to_string()),
         }
     }

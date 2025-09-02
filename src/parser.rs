@@ -2346,7 +2346,7 @@ impl Parser {
                                 }
                                 self.next();
 
-                                let mut has_discriminants = None;
+                                let mut discriminants_counter = 0;
                                 while !self.token_is("SEPARATOR", "}") {
                                     let variant_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
                                     if variant_token.0 != "IDENTIFIER" {
@@ -2357,7 +2357,18 @@ impl Parser {
                                     self.next();
 
                                     let mut var_type = Value::Null;
-                                    let mut discriminant = None;
+                                    let mut discriminant = Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string())
+                                        ],
+                                        values: vec![
+                                            Value::String("NUMBER".to_string()),
+                                            Value::String(discriminants_counter.to_string())
+                                        ],
+                                        loc: self.get_loc(),
+                                    }.convert_to_map();
+                                    discriminants_counter += 1;
 
                                     if self.token_is("SEPARATOR", "(") {
                                         self.next();
@@ -2414,19 +2425,14 @@ impl Parser {
                                         if self.err.is_some() {
                                             return Statement::Null;
                                         }
-                                        discriminant = Some(expr.convert_to_map());
+                                        discriminant = expr.convert_to_map()
                                     }
 
                                     let mut keys = vec![Value::String("name".to_string()), Value::String("type".to_string())];
                                     let mut values = vec![Value::String(variant_name), var_type];
 
-                                    if let Some(d) = discriminant {
-                                        keys.push(Value::String("discriminant".to_string()));
-                                        values.push(d);
-                                        has_discriminants = Some(true);
-                                    } else {
-                                        has_discriminants = Some(false).filter(|_| has_discriminants.is_none());
-                                    }
+                                    keys.push(Value::String("discriminant".to_string()));
+                                    values.push(discriminant);
 
                                     variants.push(Value::Map { keys, values });
 
@@ -2440,20 +2446,20 @@ impl Parser {
                                 self.next();
 
                                 // check consistency of discriminant usage
-                                let all_have = variants.iter().all(|v| {
-                                    if let Value::Map { keys, .. } = v {
-                                        keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
-                                    } else { false }
-                                });
-                                let none_have = variants.iter().all(|v| {
-                                    if let Value::Map { keys, .. } = v {
-                                        !keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
-                                    } else { true }
-                                });
-                                if !all_have && !none_have {
-                                    self.raise("SyntaxError", "All enum variants must either have discriminants or none");
-                                    return Statement::Null;
-                                }
+                                // let all_have = variants.iter().all(|v| {
+                                //     if let Value::Map { keys, .. } = v {
+                                //         keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
+                                //     } else { false }
+                                // });
+                                // let none_have = variants.iter().all(|v| {
+                                //     if let Value::Map { keys, .. } = v {
+                                //         !keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
+                                //     } else { true }
+                                // });
+                                // if !all_have && !none_have {
+                                //     self.raise("SyntaxError", "All enum variants must either have discriminants or none");
+                                //     return Statement::Null;
+                                // }
 
                                 body = Value::List(variants);
                             } else if kind == "struct" {

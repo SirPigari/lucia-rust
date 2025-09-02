@@ -3,7 +3,7 @@ use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_s
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
 use std::collections::HashMap;
-use crate::env::runtime::types::{Float, Type};
+use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
 use crate::interpreter::Interpreter;
 use std::sync::{Arc, Mutex};
@@ -1718,12 +1718,76 @@ impl Variable {
                         None,
                     )
                 };
+                let unwrap_or = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "unwrap_or",
+                        move |args| {
+                            match &val_clone {
+                                Value::Enum(enm) => {
+                                    if *enm.variant.1 != Value::Null {
+                                        *enm.variant.1.clone()
+                                    } else {
+                                        args.get("default").cloned().unwrap_or(Value::Null)
+                                    }
+                                }
+                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                            }
+                        },
+                        vec![
+                            Parameter::positional("default", "any")
+                        ],
+                        "any",
+                        true, true, true,
+                        None,
+                    )
+                };
+                let discriminant = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "discriminant",
+                        move |_| {
+                            match &val_clone {
+                                Value::Enum(enm) => {
+                                    Value::Int(Int::from_i64(enm.variant.0 as i64))
+                                }
+                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                            }
+                        },
+                        vec![],
+                        "int",
+                        true, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "unwrap".to_string(),
                     Variable::new(
                         "unwrap".to_string(),
                         unwrap,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "unwrap_or".to_string(),
+                    Variable::new(
+                        "unwrap_or".to_string(),
+                        unwrap_or,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "discriminant".to_string(),
+                    Variable::new(
+                        "discriminant".to_string(),
+                        discriminant,
                         "function".to_string(),
                         false,
                         true,

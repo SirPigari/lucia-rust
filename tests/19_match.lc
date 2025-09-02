@@ -116,3 +116,22 @@ match (a):
 end
 
 assert!(hit11, "hit11 branch (literal after pattern) did not execute")
+
+mutable hit_12: bool = false
+a = "Something else"
+
+match (a):
+    "Hello, World!":
+        throw "Wildcard test matched wrong literal"
+    end
+
+    (val) if (val == "Another string") ->
+        throw "Wildcard test matched wrong pattern"
+    end
+
+    _ ->
+        hit_12 = true
+    end
+end
+
+assert!(hit_12, "Wildcard branch (_) did not execute")

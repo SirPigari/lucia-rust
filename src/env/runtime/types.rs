@@ -34,7 +34,7 @@ pub enum Type {
     Union(Vec<Type>),
     Enum {
         name: String,
-        variants: Vec<(String, Statement, Option<Value>)>,
+        variants: Vec<(String, Statement, usize)>,
         generics: Vec<String>,
         wheres: Vec<(String, Statement)>,
     },

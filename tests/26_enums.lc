@@ -16,6 +16,7 @@ assert_eq!(c1, Color.Red)
 assert_eq!(c2, Color.Green)
 assert_ne!(c1, c2)
 
+// the '=' after 'enum' keyword is optional
 typedef enum Color2 {
     Red,
     Green,
@@ -63,3 +64,16 @@ match (c4):
     end
     _ -> assert!(false, "Unexpected enum variant"),
 end
+
+// discriminants
+
+// i have no idea for an example
+typedef enum DiscriminantsTest = {
+    Test1 = 1,
+    Test69 = 69,
+    Test2,  // auto 2 because it continues as it should
+}
+
+assert_eq!(DiscriminantsTest.Test1, DiscriminantsTest[1])
+assert_eq!(DiscriminantsTest.Test69, DiscriminantsTest[69])
+assert_eq!(DiscriminantsTest.Test2.discriminant(), 2)
