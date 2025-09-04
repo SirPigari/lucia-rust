@@ -8,12 +8,20 @@ use crate::env::runtime::types::Type;
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
 use std::sync::Mutex;
+use serde::ser::{Serialize, Serializer};
+use serde::de::{Deserialize, Deserializer};
+use bincode::{
+    enc::{Encode, Encoder},
+    de::{BorrowDecode, Decode, Decoder},
+    error::{EncodeError, DecodeError},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ParameterKind {
     Positional,
     Variadic,
-    KeywordVariadic
+    KeywordVariadic,
+    Instance,
 }
 
 #[derive(Clone, Debug, PartialEq, Hash, PartialOrd)]
@@ -36,6 +44,21 @@ pub struct FunctionMetadata {
     pub is_final: bool,
     pub is_native: bool,
     pub state: Option<String>,
+}
+
+impl std::default::Default for FunctionMetadata {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            parameters: Vec::new(),
+            return_type: Type::new_simple("any"),
+            is_public: false,
+            is_static: false,
+            is_final: false,
+            is_native: false,
+            state: None,
+        }
+    }
 }
 
 pub trait Callable: Send + Sync {
@@ -223,6 +246,60 @@ pub enum Function {
     CustomMethod(Arc<UserFunctionMethod>),
 }
 
+impl Serialize for Function {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str("Function(opaque)")
+    }
+}
+
+impl<'de> Deserialize<'de> for Function {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let _: String = Deserialize::deserialize(deserializer)?;
+        let func = Arc::new(NativeFunction {
+            func: Arc::new(PlaceholderNativeCallable) as Arc<dyn NativeCallable>,
+            meta: FunctionMetadata::default(),
+        });
+        Ok(Function::Native(func))
+    }
+}
+
+impl Encode for Function {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        0xFFu8.encode(encoder)
+    }
+}
+
+
+impl<C> Decode<C> for Function {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let _: u8 = Decode::decode(decoder)?;
+        let func = Arc::new(NativeFunction {
+            func: Arc::new(PlaceholderNativeCallable) as Arc<dyn NativeCallable>,
+            meta: FunctionMetadata::default(),
+        });
+        Ok(Function::Native(func))
+    }
+}
+
+impl<'de, C> BorrowDecode<'de, C> for Function {
+    fn borrow_decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        Decode::decode(decoder)
+    }
+}
+
+struct PlaceholderNativeCallable;
+impl NativeCallable for PlaceholderNativeCallable {
+    fn call(&self, _args: &HashMap<String, Value>) -> Value {
+        Value::Null
+    }
+}
+
 impl Function {
     pub fn call(&self, args: &HashMap<String, Value>) -> Value {
         match self {
@@ -260,6 +337,15 @@ impl Function {
         }
     }
 
+    pub fn metadata_mut(&mut self) -> &mut FunctionMetadata {
+        match self {
+            Function::Native(f) => &mut Arc::make_mut(f).meta,
+            Function::Custom(f) => &mut Arc::make_mut(f).meta,
+            Function::NativeMethod(f) => &mut Arc::make_mut(f).meta,
+            Function::CustomMethod(f) => &mut Arc::make_mut(f).meta,
+        }
+    }
+
     pub fn get_size(&self) -> usize {
         match self {
             Function::Native(f) => f.get_size(),
@@ -285,6 +371,10 @@ impl Function {
         &self.metadata().parameters
     }
 
+    pub fn set_parameters(&mut self, parameters: Vec<Parameter>) {
+        self.metadata_mut().parameters = parameters;
+    }
+
     pub fn is_native(&self) -> bool {
         match self {
             Function::Native(_) => true,
@@ -292,6 +382,14 @@ impl Function {
             Function::NativeMethod(_) => true,
             Function::CustomMethod(_) => false,
         }
+    }
+
+    pub fn is_static(&self) -> bool {
+        self.metadata().is_static
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.metadata().is_final
     }
 }
 
@@ -428,13 +526,21 @@ impl Parameter {
         }
     }
 
-    pub fn instance() -> Self {
+    pub fn is_positional(&self) -> bool {
+        self.kind == ParameterKind::Positional
+    }
+
+    pub fn is_positional_optional(&self) -> bool {
+        self.default.is_some()
+    }
+
+    pub fn instance(name: &str, ty: &Type, mods: Vec<String>) -> Self {
         Self {
-            name: "self".to_string(),
-            ty: Type::new_simple("any"),
+            name: name.to_string(),
+            ty: ty.clone(),
             default: None,
-            kind: ParameterKind::Positional,
-            mods: vec!["mutable".to_string()],
+            kind: ParameterKind::Instance,
+            mods,
         }
     }
 }

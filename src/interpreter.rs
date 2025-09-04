@@ -45,7 +45,7 @@ use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind,
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
-use crate::env::runtime::structs_and_enums::Enum;
+use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
@@ -490,6 +490,18 @@ impl Interpreter {
                 match value {
                     Value::Enum(e) => {
                         if e.ty == *expected {
+                            status = true;
+                        } else {
+                            status = false;
+                        }
+                    }
+                    _ => status = false,
+                }
+            }
+            Type::Struct { .. } => {
+                match value {
+                    Value::Struct(s) => {
+                        if s.ty == *expected {
                             status = true;
                         } else {
                             status = false;
@@ -1132,7 +1144,10 @@ impl Interpreter {
                 "TYPE" => self.handle_type(statement_map),
                 "TYPE_CONVERT" => self.handle_type_conversion(statement_map),
                 "TYPE_DECLARATION" => self.handle_type_declaration(statement_map),
-    
+
+                "STRUCT_CREATION" => self.handle_struct_creation(statement_map),
+                "STRUCT_METHODS" => self.handle_struct_methods(statement_map),
+
                 "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.handle_pointer(statement_map),
     
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
@@ -1178,6 +1193,167 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_struct_methods(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let struct_name = match statement.get(&Value::String("struct_name".to_string())) {
+            Some(Value::String(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'struct_name' in struct methods"),
+        };
+
+        let methods_ast = match statement.get(&Value::String("methods".to_string())) {
+            Some(Value::List(methods)) => methods,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'methods' in struct methods"),
+        };
+        let mut methods: HashMap<String, Value> = HashMap::new();
+
+        let mut struct_variable = match self.variables.get(struct_name) {
+            Some(v) => v.clone(),
+            None => return self.raise("NameError", &format!("Struct '{}' is not defined", struct_name)),
+        };
+        let mut struct_value;
+
+        if let Value::Type(Type::Struct { .. }) = &struct_variable.value {
+            struct_value = struct_variable.value.clone();
+        } else {
+            return self.raise("TypeError", &format!("'{}' is not a struct type", struct_name));
+        }
+
+        let saved_variables = self.variables.clone();
+        self.variables.extend::<HashMap<String, Variable>>(HashMap::from_iter(vec![
+            ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
+        ]));
+        for method in methods_ast {
+            let func = self.handle_function_declaration(method.convert_to_hashmap_value());
+            if let Value::Function(f) = func {
+                if !f.is_static() {
+                    let mut func_params = f.get_parameters().to_vec();
+                    if func_params.is_empty() || !(func_params[0].is_positional() && !func_params[0].is_positional_optional()) {
+                        self.variables = saved_variables;
+                        return self.raise(
+                            "TypeError",
+                            &format!("Non-static method '{}' must have the first parameter positional and not optional", f.get_name())
+                        );
+                    }
+                    let instance = Parameter::instance(&func_params[0].name, &func_params[0].ty, func_params[0].mods.clone());
+                    func_params[0] = instance;
+                    let mut new_method = f.clone();
+                    new_method.set_parameters(func_params);
+                    methods.insert(new_method.get_name().to_string(), Value::Function(new_method));
+                } else {
+                    methods.insert(f.get_name().to_string(), Value::Function(f));
+                }
+            } else {
+                return self.raise("TypeError", "Expected a function in struct methods");
+            }
+        }
+        self.variables = saved_variables;
+
+        if let Value::Type(Type::Struct { methods: existing_methods, .. }) = &mut struct_value {
+            for (name, method) in methods {
+                if existing_methods.iter().any(|(method_name, mmethod)| (name == *method_name) && mmethod.is_final()) {
+                    return self.raise("NameError", &format!("Method '{}' is already defined in struct '{}'", name, struct_name));
+                }
+                let f = if let Value::Function(f) = method {
+                    f
+                } else {
+                    return self.raise("TypeError", "Expected a function in struct methods");
+                };
+                existing_methods.push((name, f));
+            }
+        } else {
+            return self.raise("TypeError", &format!("'{}' is not a struct type", struct_name));
+        }
+
+        struct_variable.set_value(struct_value);
+        self.variables.insert(struct_name.clone(), struct_variable);
+
+        Value::Null
+    }
+
+    fn handle_struct_creation(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let struct_name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(n)) => n,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in struct creation"),
+        };
+
+        let fields: HashMap<String, Box<Value>> = match statement.get(&Value::String("fields".to_string())) {
+            Some(Value::Map { keys, values }) => keys
+                .iter()
+                .zip(values.iter())
+                .map(|(k, v)| (k.to_string(), Box::new(v.clone())))
+                .collect(),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'fields' in struct creation"),
+        };
+
+        let mut new_fields = HashMap::new();
+        for (k, v) in &fields {
+            new_fields.insert(k.clone(), Box::new(self.evaluate(v.convert_to_statement())));
+            if self.err.is_some() {
+                return NULL;
+            }
+        }
+        let fields = new_fields;
+
+        let is_null = match statement.get(&Value::String("is_null".to_string())) {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        };
+
+        let struct_ty = match self.variables.get(struct_name) {
+            Some(Variable { value: Value::Type(ty), .. }) => match ty {
+                Type::Struct { .. } => ty.clone(),
+                _ => return self.raise("TypeError", &format!("'{}' is not a struct type. ({})", struct_name, ty.display_simple())),
+            },
+            Some(v) => {
+                return self.raise("TypeError", &format!("'{}' is not a struct type. ({})", struct_name, v.get_type().display_simple()))
+            }
+            _ => return self.raise("TypeError", &format!("Struct '{}' does not exist", struct_name)),
+        };
+
+        if is_null {
+            Value::Struct(Struct::new_as_null(struct_ty))
+        } else {
+            let type_fields = if let Type::Struct { fields, .. } = &struct_ty {
+                fields
+            } else {
+                &vec![]
+            };
+
+            let type_fields_names: Vec<_> = type_fields.iter().map(|(name, _, _)| name).collect();
+
+            for (name, _, _) in type_fields {
+                if !fields.contains_key(name) {
+                    return self.raise("ValueError", &format!("Missing field '{}' in struct '{}'", name, struct_name));
+                }
+                if !type_fields_names.contains(&name) {
+                    return self.raise("NameError", &format!("Field '{}' is not defined in struct type '{}'", name, &struct_name));
+                }
+            }
+
+            for (field, val) in &fields {
+                let ty_opt = type_fields
+                    .iter()
+                    .find(|(name, _, _)| name == field)
+                    .map(|(_, ty, _)| ty.clone());
+
+                let expected_type = ty_opt.map(|ty| self.evaluate(ty)).unwrap_or(Value::Null);
+
+                if self.err.is_some() {
+                    return NULL;
+                }
+
+                if let Value::Type(t) = expected_type {
+                    if !self.check_type(&*val, &t).0 {
+                        return self.raise("TypeError", &format!("Expected type '{}' for field '{}' of struct '{}' but got '{}'", t.display_simple(), field, &struct_name, val.get_type().display_simple()));
+                    }
+                } else {
+                    return self.raise("TypeError", "Expected a type in struct field definition");
+                }
+            }
+
+            Value::Struct(Struct::new_with_fields(struct_ty, fields))
+        }
     }
 
     fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1834,6 +2010,7 @@ impl Interpreter {
                 let struct_type = Value::Type(Type::Struct {
                     name: name.clone(),
                     fields,
+                    methods: vec![],
                     generics,
                     wheres,
                 });
@@ -1869,10 +2046,6 @@ impl Interpreter {
     }
 
     fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
-        // self.raise("NotImplemented", "'match' statements are currently disabled.");
-        // if self.err.is_some() {
-        //     return NULL;
-        // }
         let condition = match statement.get(&Value::String("condition".to_string())) {
             Some(v) => v,
             _ => {
@@ -6332,9 +6505,60 @@ impl Interpreter {
                         );
                         return Value::Enum(v);
                     }
-                    Type::Struct { .. } => {}
+                    Type::Struct { name: ref s_name, ref methods, .. } => {
+                        let props = {
+                            let mut m: HashMap<String, Variable> = HashMap::new();
+                            for (name, method) in methods {
+                                if !method.is_static() && method.get_name() == method_name {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Static method '{}' cannot be called on an instance", name),
+                                        &format!("Did you mean to call it as 'i: {} = {} {{null}} i.{}(...)'?", s_name, s_name, name),
+                                    );
+                                }
+                                m.insert(name.clone(), Variable::new(
+                                    name.clone(),
+                                    Value::Function(method.clone()),
+                                    "function".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ));
+                            }
+                            m
+                        };
+                        object_variable.properties = props.clone();
+                        object_variable.set_name(s_name.to_string());
+                    }
                     _ => {}
                 }
+            }
+            Value::Struct(s) => {
+                let props = if let Type::Struct { ref methods, .. } = s.ty {
+                    let mut m: HashMap<String, Variable> = HashMap::new();
+                    for (name, method) in methods {
+                        if method.is_static() && method.get_name() == method_name {
+                            return self.raise_with_help(
+                                "TypeError",
+                                &format!("Static method '{}' cannot be called on an instance", name),
+                                &format!("Did you mean to call it as '{}.{}(...)'?", s.name(), name),
+                            );
+                        }
+                        m.insert(name.clone(), Variable::new(
+                            name.clone(),
+                            Value::Function(method.clone()),
+                            "function".to_string(),
+                            false,
+                            true,
+                            true,
+                        ));
+                    }
+                    m
+                } else {
+                    return self.raise("TypeError", &format!("'{}' is not a struct type", s.ty.display_simple()));
+                };
+                object_variable.properties = props.clone();
+                object_variable.set_name(s.clone().name().to_string());
             }
             _ if !object_variable.is_init() => {
                 object_variable.init_properties(self);
@@ -6485,16 +6709,23 @@ impl Interpreter {
 
                 let mut pos_index = 0;
                 let required_positional_count = metadata.parameters
-                .iter()
-                .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
-                .count();
-                
+                    .iter()
+                    .filter(|p| p.kind == ParameterKind::Positional && p.default.is_none())
+                    .count();
+
                 let mut matched_positional_count = 0;
+
                 for param in &metadata.parameters {
-                    if param.kind == ParameterKind::Positional && param.default.is_none() {
-                        if pos_index < positional.len() || named_map.contains_key(&param.name) {
+                    match param.kind {
+                        ParameterKind::Instance => {
                             matched_positional_count += 1;
                         }
+                        ParameterKind::Positional => {
+                            if pos_index < positional.len() || named_map.contains_key(&param.name) {
+                                matched_positional_count += 1;
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 
@@ -6641,6 +6872,9 @@ impl Interpreter {
                             } else if let Some(default) = param_default {
                                 final_args.insert(param_name.clone(), default.clone());
                             }
+                        }
+                        ParameterKind::Instance => {
+                            final_args.insert(param_name.clone(), object_value.clone());
                         }
                     }
                 }
@@ -6890,7 +7124,7 @@ impl Interpreter {
                 }
                 self.stack.pop();
                 debug_log(
-                    &format!("<Method '{}' returned {}>", method_name, format_value(&result)),
+                    &format!("<Method '{}.{}' returned {}>", object_variable.get_name(), method_name, format_value(&result)),
                     &self.config,
                     Some(self.use_colors.clone()),
                 );
@@ -6996,6 +7230,11 @@ impl Interpreter {
                     Type::Struct { .. } => {}
                     _ => {}
                 }
+            }
+            Value::Struct(s) => {
+                object_variable.set_name(s.name().to_string());
+                object_variable.set_type(s.ty.clone());
+                object_variable.properties = s.get_properties();
             }
             _ if !object_variable.is_init() => {
                 object_variable.init_properties(self);
@@ -7480,6 +7719,12 @@ impl Interpreter {
                             } else if let Some(default) = param_default {
                                 final_args.insert(param_name.clone(), (default.clone(), param_mods.clone()));
                             }
+                        }
+                        ParameterKind::Instance => {
+                            self.raise(
+                                "RuntimeError",
+                                &format!("Instance argument '{}' in static function", param_name),
+                            );
                         }
                     }
                 }

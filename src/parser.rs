@@ -78,6 +78,7 @@ impl Parser {
         self.token()
     }
 
+    #[track_caller]
     fn check_for(&mut self, expected_type: &str, expected_value: &str) -> (Vec<Value>, Vec<(Value, Value)>) {
         if let Some(token) = self.token() {
             let (token_type, token_value) = (token.0.clone(), token.1.clone());
@@ -206,7 +207,6 @@ impl Parser {
             let tok = tok_ref.clone();
             match (tok.0.as_str(), tok.1.as_str()) {
                 ("SEPARATOR", "[") => {
-                    self.check_for("SEPARATOR", "[");
                     self.next();
                 
                     let mut start_expr = None;
@@ -275,6 +275,155 @@ impl Parser {
                                         .unwrap_or(Value::Null),
                                 ],
                             },
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+
+                ("SEPARATOR", "{") => {
+                    if expr.get_type() != "VARIABLE" {
+                        return expr;
+                    }
+                    let saved_pos = self.pos;
+                    self.next();
+
+                    let is_struct_def = if self.token_is("SEPARATOR", "}") {
+                        true
+                    } else if let Some(Token(ttype, _, _)) = self.token() {
+                        if ttype == "IDENTIFIER" {
+                            self.next();
+                            self.token_is("OPERATOR", "=")
+                        } else if ttype == "BOOLEAN" {
+                            self.next();
+                            self.token_is("SEPARATOR", "}")
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    self.pos = saved_pos;
+                    if !is_struct_def {
+                        return expr;
+                    }
+                    let struct_name = expr.get_value("name").unwrap();
+                    self.check_for("SEPARATOR", "{");
+                    self.next();
+                    match self.token() {
+                        Some(Token(token_type, token_value, _)) if token_type == "BOOLEAN" && token_value == "null" => {
+                            self.next();
+                            self.check_for("SEPARATOR", "}");
+                            self.next();
+                            return Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("name".to_string()),
+                                    Value::String("fields".to_string()),
+                                    Value::String("is_null".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("STRUCT_CREATION".to_string()),
+                                    struct_name,
+                                    Value::Map {
+                                        keys: vec![],
+                                        values: vec![],
+                                    },
+                                    Value::Boolean(true),
+                                ],
+                                loc: self.get_loc(),
+                            };
+                        }
+                        Some(Token(token_type, token_value, _)) if token_type == "BOOLEAN" && (token_value == "true" || token_value == "false") => {
+                            self.raise_with_help(
+                                "SyntaxError",
+                                "Unexpected boolean value",
+                                "If you want to zeroe the struct use 'null'",
+                            );
+                        }
+                        _ => {}
+                    }
+                    if self.token_is("SEPARATOR", "}") {
+                        self.next();
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("name".to_string()),
+                                Value::String("fields".to_string()),
+                                Value::String("is_null".to_string())
+                            ],
+                            values: vec![
+                                Value::String("STRUCT_CREATION".to_string()),
+                                Value::String(struct_name.to_string()),
+                                Value::Map {
+                                    keys: vec![],
+                                    values: vec![],
+                                },
+                            ],
+                            loc: self.get_loc(),
+                        };
+                    }
+                    let mut fields = std::collections::HashMap::new();
+                    while !self.token_is("SEPARATOR", "}") {
+                        let name = match self.token().cloned() {
+                            Some(Token(ty, id, _)) => if ty == "IDENTIFIER" {
+                                id
+                            } else {
+                                self.raise("SyntaxError", "Expected identifier for a struct field");
+                                return Statement::Null;
+                            }
+                            _ => {
+                                self.raise("SyntaxError", "Expected identifier for a struct field");
+                                return Statement::Null;
+                            }
+                        };
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        self.next();
+                        if self.token_is("SEPARATOR", ":") {
+                            return self.raise_with_help("SyntaxError", "Unexpected ':' after field name", "Did you mean to use '='?");
+                        }
+                        if !self.token_is("OPERATOR", "=") {
+                            return self.raise("SyntaxError", "Expected '=' after field name");
+                        }
+                        self.next();
+                        let value = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        fields.insert(name, value);
+                        if self.token_is("SEPARATOR", ",") {
+                            self.next();
+                        }
+                    }
+                    self.check_for("SEPARATOR", "}");
+                    self.next();
+
+                    let keys: Vec<Value> = fields
+                        .keys()
+                        .map(|k| Value::String(k.clone()))
+                        .collect();
+
+                    let values: Vec<Value> = fields
+                        .values()
+                        .map(|v| v.clone().convert_to_map())
+                        .collect();
+
+                    return Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("name".to_string()),
+                            Value::String("fields".to_string()),
+                            Value::String("is_null".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("STRUCT_CREATION".to_string()),
+                            Value::String(struct_name.to_string()),
+                            Value::Map {
+                                keys,
+                                values,
+                            },
+                            Value::Boolean(false),
                         ],
                         loc: self.get_loc(),
                     };
@@ -1554,6 +1703,8 @@ impl Parser {
                 "IDENTIFIER" if token.1 == "for" => {
                     self.next();
 
+                    let loc = self.get_loc();
+
                     if self.token_is("SEPARATOR", "else") {
                         self.raise("SyntaxError", "Unexpected 'else' after 'for'");
                         return Statement::Null;
@@ -1607,8 +1758,51 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    self.check_for("OPERATOR", "in");
-                    self.next();
+                    if self.token_is("OPERATOR", "in") {
+                        self.next();
+                    } else if self.token_is("SEPARATOR", ":") {
+                        self.next();
+                        let mut functions: Vec<Statement> = Vec::new();
+                        while !self.token_is("IDENTIFIER", "end") {
+                            if !["public", "private", "static", "non-static", "final", "mutable", "fun"].contains(&self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone()).1.as_str()) {
+                                self.raise("SyntaxError", "Expected function definition in methods block");
+                                return Statement::Null;
+                            }
+                            let func = self.parse_primary();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            if func.get_type() != "FUNCTION_DECLARATION" {
+                                if func.get_type() == "VARIABLE_DECLARATION" {
+                                    self.raise_with_help("SyntaxError", "Expected function definition in methods block", "Did you mean to put this into the struct definition?");
+                                } else {
+                                    self.raise("SyntaxError", "Expected function definition in methods block");
+                                }
+                                return Statement::Null;
+                            }
+                            functions.push(func);
+                            if self.token_is("SEPARATOR", ",") {
+                                self.next();
+                            }
+                        }
+                        self.next();
+                        return Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("struct_name".to_string()),
+                                Value::String("methods".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("STRUCT_METHODS".to_string()),
+                                variable,
+                                Value::List(functions.into_iter().map(|f| f.convert_to_map()).collect()),
+                            ],
+                            loc,
+                        };
+                    } else {
+                        self.raise("SyntaxError", "Expected 'in' after 'for' variable or ':' for methods implementation for a struct");
+                        return Statement::Null;
+                    }
 
                     let iterable = self.parse_expression();
                     if self.err.is_some() {

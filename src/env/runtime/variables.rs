@@ -16,7 +16,6 @@ pub struct Variable {
     is_static: bool,
     is_public: bool,
     is_final: bool,
-    pub marked: bool,
     pub properties: HashMap<String, Variable>,
 }
 
@@ -30,7 +29,6 @@ impl Variable {
             is_static,
             is_public,
             is_final,
-            marked: false,
             properties: HashMap::new(),
         }
     }
@@ -43,7 +41,6 @@ impl Variable {
             is_static,
             is_public,
             is_final,
-            marked: false,
             properties: HashMap::new(),
         }
     }

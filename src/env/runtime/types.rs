@@ -1,5 +1,6 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::functions::Function;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use serde::{Serialize, Deserialize};
@@ -41,6 +42,7 @@ pub enum Type {
     Struct {
         name: String,
         fields: Vec<(String, Statement, Vec<String>)>,
+        methods: Vec<(String, Function)>,
         generics: Vec<String>,
         wheres: Vec<(String, Statement)>,
     },
@@ -158,6 +160,7 @@ impl Type {
             Type::Union(types) => types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(" | "),
             Type::Alias { name, .. } => name.to_string(),
             Type::Enum { name, .. } => name.to_string(),
+            Type::Struct { name, .. } => name.to_string(),
             _ => self.display(),
         }
     }

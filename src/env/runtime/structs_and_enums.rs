@@ -1,5 +1,6 @@
 use crate::env::runtime::types::Type;
 use crate::env::runtime::value::Value;
+use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::{format_value, get_variant_name};
 use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
@@ -80,10 +81,57 @@ impl Struct {
         }
     }
 
+    pub fn new_with_fields(ty: Type, fields: HashMap<String, Box<Value>>) -> Self {
+        Self { ty, fields }
+    }
+
+    pub fn new_as_null(ty: Type) -> Self {
+        let type_fields = if let Type::Struct { fields, .. } = &ty {
+            fields
+        } else {
+            &vec![]
+        };
+        let mut fields = vec![];
+        for field in type_fields {
+            fields.push((field.0.clone(), Box::new(Value::Null)));
+        }
+        Self {
+            ty,
+            fields: HashMap::from_iter(fields),
+        }
+    }
+
+    pub fn get_field_mods(&self, field: &str) -> Option<(bool, bool, bool)> {
+        if let Type::Struct { fields: ty_fields, .. } = &self.ty {
+            if let Some((_, _, mods)) = ty_fields.iter().find(|(name, _, _)| name == field) {
+                let mut is_public = false;
+                let mut is_static = false;
+                let mut is_final = false;
+                for m in mods {
+                    match m.as_str() {
+                        "public" => is_public = true,
+                        "static" => is_static = true,
+                        "final" => is_final = true,
+                        "private" => is_public = false,
+                        "non-static" => is_static = false,
+                        "mutable" => is_final = false,
+                        _ => {}
+                    }
+                }
+                return Some((is_public, is_static, is_final));
+            }
+        }
+        None
+    }
+
     pub fn display(&self) -> String {
-        format!("{} {{ {} }}", self.ty.display_simple(), self.fields.iter()
-            .map(|(k, v)| format!("{} = {}", k, format_value(&v)))
-            .collect::<Vec<_>>().join(", "))
+        if self.fields.is_empty() {
+            format!("{} {{}}", self.ty.display_simple())
+        } else {
+            format!("{} {{ {} }}", self.ty.display_simple(), self.fields.iter()
+                .map(|(k, v)| format!("{} = {}", k, format_value(&v)))
+                .collect::<Vec<_>>().join(", "))
+        }
     }
 
     pub fn get_type(&self) -> Type {
@@ -103,6 +151,30 @@ impl Struct {
 
     pub fn ptr(&self) -> *const Self {
         self as *const Self
+    }
+
+    pub fn name(&self) -> &str {
+        if let Type::Struct { name, .. } = &self.ty {
+            name
+        } else {
+            "<struct>"
+        }
+    }
+
+    pub fn get_properties(&self) -> HashMap<String, Variable> {
+        let mut map: HashMap<String, Variable> = HashMap::new();
+        for field in self.fields.iter() {
+            let (is_public, is_static, is_final) = self.get_field_mods(&field.0).unwrap_or((true, false, false));
+            map.insert(field.0.clone(), Variable::new_pt(
+                field.0.clone(),
+                *field.1.clone(),
+                self.ty.clone(),
+                is_static,
+                is_public,
+                is_final,
+            ));
+        }
+        map
     }
 
     pub fn get(&self, field: &str) -> Option<&Value> {

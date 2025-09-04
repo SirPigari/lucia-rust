@@ -1,0 +1,44 @@
+#include <std/macros>
+
+// this test is not complete because structs are not complete
+
+typedef struct Point = {
+    x: int,
+    y: int,
+}
+
+p1: Point = Point { x = 10, y = 20 }
+p2: Point = Point { x = 30, y = 40 }
+
+x_p1: int = p1.x
+y_p1: int = p1.y
+x_p2: int = p2.x
+y_p2: int = p2.y
+
+assert_eq!(x_p1, 10)
+assert_eq!(y_p1, 20)
+assert_eq!(x_p2, 30)
+assert_eq!(y_p2, 40)
+
+assert_ne!(p1, p2)
+
+for Point:
+    static fun new(x: int, y: int) -> Self:
+        return Point { x = x, y = y }
+    end
+
+    fun display(self) -> str:
+        return f"Point({self.x}, {self.y})"
+    end
+end
+
+// display was not defined at the time of creation
+assert_err!(p2.display())
+
+p3: Point = Point { x = 30, y = 40 }
+
+assert_eq!(p3.display(), "Point(30, 40)")
+
+p4 := Point.new(50, 60)
+
+assert_eq!(p4.display(), "Point(50, 60)")
