@@ -292,7 +292,7 @@ impl Parser {
                     } else if let Some(Token(ttype, _, _)) = self.token() {
                         if ttype == "IDENTIFIER" {
                             self.next();
-                            self.token_is("OPERATOR", "=")
+                            self.token_is("OPERATOR", "=") || self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "}")
                         } else if ttype == "BOOLEAN" {
                             self.next();
                             self.token_is("SEPARATOR", "}")
@@ -383,13 +383,28 @@ impl Parser {
                         if self.token_is("SEPARATOR", ":") {
                             return self.raise_with_help("SyntaxError", "Unexpected ':' after field name", "Did you mean to use '='?");
                         }
-                        if !self.token_is("OPERATOR", "=") {
-                            return self.raise("SyntaxError", "Expected '=' after field name");
-                        }
-                        self.next();
-                        let value = self.parse_expression();
-                        if self.err.is_some() {
-                            return Statement::Null;
+                        let value;
+                        if self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "}") {
+                            value = Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("name".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("VARIABLE".to_string()),
+                                    Value::String(name.clone()),
+                                ],
+                                loc: self.get_loc(),
+                            };
+                        } else {
+                            if !self.token_is("OPERATOR", "=") {
+                                return self.raise("SyntaxError", "Expected '=' after field name");
+                            }
+                            self.next();
+                            value = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
                         }
                         fields.insert(name, value);
                         if self.token_is("SEPARATOR", ",") {
@@ -1061,6 +1076,10 @@ impl Parser {
             (expr, _) = self.parse_binops(expr, 0);
         }
 
+        if self.err.is_some() {
+            return Statement::Null;
+        }
+
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
 
@@ -1333,6 +1352,56 @@ impl Parser {
                     };
                 }
 
+                
+                ("OPERATOR", val) if ["+=", "-=", "*=", "/=", "%=", "^="].contains(&val) => {
+                    let operator = match val {
+                        "+=" => "+",
+                        "-=" => "-",
+                        "*=" => "*",
+                        "/=" => "/",
+                        "%=" => "%",
+                        "^=" => "^",
+                        _ => unreachable!(),
+                    }.to_string();
+                    self.next();
+                    if !is_valid_token(&self.token().cloned()) {
+                        let loc = self.get_loc().unwrap();
+                        self.raise_with_loc("SyntaxError", &format!("Unexpected end of input after '{}'", val), loc);
+                        return Statement::Null;
+                    }
+                    let right = self.parse_expression();
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("left".to_string()),
+                            Value::String("right".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("ASSIGNMENT".to_string()),
+                            expr.convert_to_map(),
+                            Statement::Statement {
+                                keys: vec![
+                                    Value::String("type".to_string()),
+                                    Value::String("left".to_string()),
+                                    Value::String("right".to_string()),
+                                    Value::String("operator".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("OPERATION".to_string()),
+                                    expr.convert_to_map(),
+                                    right.convert_to_map(),
+                                    Value::String(operator),
+                                ],
+                                loc: self.get_loc(),
+                            }.convert_to_map(),
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+
                 _ => break,
             }
         }
@@ -1360,6 +1429,10 @@ impl Parser {
                     &format!("Did you mean to use '{}'?", op_str.chars().rev().collect::<String>()),
                 );
                 return (Statement::Null, false);
+            }
+
+            if ["+=", "-=", "*=", "/=", "^=", "%="].contains(&op_str) {
+                break;
             }
 
             if tok_type != "OPERATOR" {
@@ -3714,6 +3787,10 @@ impl Parser {
                     }
                 }
 
+                "IDENTIFIER" if token.1 == "impl" => {
+                    self.parse_impl()
+                }
+
                 "SEPARATOR" if token.1 == "(" => {
                     self.next();
                     let mut values = vec![];
@@ -3911,9 +3988,6 @@ impl Parser {
                 "IDENTIFIER" => {
                     let next_token = self.peek(1).cloned();
                     if let Some(next_tok) = next_token {
-                        if next_tok.0 == "OPERATOR" && matches!(next_tok.1.as_str(), "+=" | "-=" | "*=" | "/=" | "%=" | "^=") {
-                            return self.parse_compound_assignment();
-                        }
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.parse_function_call()
                         } else {
@@ -4063,33 +4137,6 @@ impl Parser {
         };
         
         self.parse_postfix(expr)
-    }
-
-    fn parse_compound_assignment(&mut self) -> Statement {
-        let identifier = self.token().cloned().unwrap();
-        let loc = self.get_loc();
-    
-        self.next();
-        let operator = self.token().cloned().unwrap();
-        self.next();
-    
-        let expr = self.parse_expression();
-    
-        Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("target".to_string()),
-                Value::String("operator".to_string()),
-                Value::String("value".to_string()),
-            ],
-            values: vec![
-                Value::String("COMPOUND_ASSIGN".to_string()),
-                Value::String(identifier.1),
-                Value::String(operator.1),
-                expr.convert_to_map(),
-            ],
-            loc
-        }
     }
 
     pub fn parse_path(&mut self) -> Option<PathElement> {
@@ -4267,9 +4314,123 @@ impl Parser {
                 loc: self.get_loc(),
             },
         ))
-    }    
+    }
+
+    fn parse_impl(&mut self) -> Statement {
+        self.check_for("IDENTIFIER", "impl");
+        self.next();
+        let mut impls = vec![];
+
+        loop {
+            let mut mods: Vec<String> = vec![];
+            while is_valid_token(&self.token().cloned()) {
+                match self.token().cloned() {
+                    Some(Token(ref t, ref v, _)) if t == "IDENTIFIER" && (v == "static" || v == "final" || v == "mutable" || v == "non-static") => {
+                        mods.push(v.clone());
+                        self.next();
+                    }
+                    _ => break,
+                }
+            }
+            let name_token = self.token().cloned();
+            if name_token.is_none() || name_token.as_ref().unwrap().0 != "IDENTIFIER" {
+                self.raise("SyntaxError", "Expected function name after 'impl'");
+                return Statement::Null;
+            }
+            let func_name = name_token.unwrap().1;
+            self.next();
+
+            if !self.token_is("SEPARATOR", "[") {
+                self.raise("SyntaxError", "Expected '[' after function name");
+                return Statement::Null;
+            }
+            self.next();
+
+            let mut arg_types = vec![];
+            while !self.token_is("SEPARATOR", "]") {
+                let arg_type = self.parse_type();
+                if arg_type == Statement::Null {
+                    return Statement::Null;
+                }
+                arg_types.push(arg_type.convert_to_map());
+
+                if self.token_is("SEPARATOR", ",") {
+                    self.next();
+                } else if self.token_is("SEPARATOR", "]") {
+                    break;
+                } else {
+                    self.raise("SyntaxError", "Expected ',' or ']' in argument list");
+                    return Statement::Null;
+                }
+            }
+            self.next();
+
+            let ret_type = if self.token_is("OPERATOR", "->") {
+                self.next();
+                let r = self.parse_type();
+                if r == Statement::Null {
+                    return Statement::Null;
+                }
+                r.convert_to_map()
+            } else {
+                Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("type_kind".to_string()),
+                        Value::String("value".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("TYPE".to_string()),
+                        Value::String("simple".to_string()),
+                        Value::String("any".to_string()),
+                    ],
+                    loc: self.get_loc(),
+                }.convert_to_map()
+            };
+
+            impls.push(Statement::Statement {
+                keys: vec![
+                    Value::String("name".to_string()),
+                    Value::String("args".to_string()),
+                    Value::String("return_type".to_string()),
+                    Value::String("modifiers".to_string()),
+                ],
+                values: vec![
+                    Value::String(func_name),
+                    Value::List(arg_types),
+                    ret_type,
+                    Value::List(mods.iter().map(|s| Value::String(s.clone())).collect()),
+                ],
+                loc: self.get_loc(),
+            });
+
+            if self.token_is("OPERATOR", "+") {
+                self.next();
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        Statement::Statement {
+            keys: vec![
+                Value::String("type".to_string()),
+                Value::String("type_kind".to_string()),
+                Value::String("impls".to_string()),
+            ],
+            values: vec![
+                Value::String("TYPE".to_string()),
+                Value::String("impl".to_string()),
+                Value::List(impls.into_iter().map(|s| s.convert_to_map()).collect()),
+            ],
+            loc: self.get_loc(),
+        }
+    }
 
     fn parse_type(& mut self) -> Statement {
+        if self.token_is("IDENTIFIER", "impl") {
+            return self.parse_impl();
+        }
         let (base_str, base_stmt) = match self.parse_single_type() {
             Some(v) => v,
             None => return Statement::Null,

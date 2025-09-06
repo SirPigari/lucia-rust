@@ -1,7 +1,5 @@
 #include <std/macros>
 
-// this test is not complete because structs are not complete
-
 typedef struct Point = {
     x: int,
     y: int,
@@ -24,7 +22,11 @@ assert_ne!(p1, p2)
 
 for Point:
     static fun new(x: int, y: int) -> Self:
-        return Point { x = x, y = y }
+        return Point { x, y }
+    end
+
+    static mutable fun origin() -> Self:
+        return Point { x = 0, y = 0 }
     end
 
     fun display(self) -> str:
@@ -42,3 +44,62 @@ assert_eq!(p3.display(), "Point(30, 40)")
 p4 := Point.new(50, 60)
 
 assert_eq!(p4.display(), "Point(50, 60)")
+
+assert_eq!(p4.x, 50)
+
+p4.x = 70
+
+assert_eq!(p4.x, 70)
+
+for Point:
+    fun move(self, dx: int, dy: int):
+        self.x += dx
+        self.y += dy
+    end
+end
+
+p5: Point = Point.origin()
+p5.move(10, 20)
+
+assert_eq!(p5.x, 10)
+assert_eq!(p5.y, 20)
+
+for Point:
+    fun shifted(self, dx: int, dy: int) -> Self:
+        return Point { x = self.x + dx, y = self.y + dy }
+    end
+end
+
+p6 := Point.origin().shifted(5, 5)
+assert_eq!(p6, (Point { x = 5, y = 5 }))
+
+assert_err!((Point { x = 1 }))                  // missing field
+assert_err!((Point { x = 1, y = 2, z = 3 }))    // extra field
+assert_err!((Point { x = "hello", y = 2 }))     // wrong type
+
+p7 := Point.new(0, 0)
+p7.x = 42
+assert_eq!(p7.display(), "Point(42, 0)")
+
+p8a := Point.new(5, 5)
+p8b := Point.new(5, 5)
+assert_eq!(p8a, p8b)
+
+p8a.x = 99
+assert_ne!(p8a, p8b)
+
+// display is final
+assert_err!(
+    for Point:
+        fun display(self):
+            return f"Point({self.x}, {self.y})"
+        end
+    end
+)
+
+// origin is mutable
+for Point:
+    static fun origin() -> Self:
+        return Point { x = 0, y = 0 }
+    end
+end

@@ -46,8 +46,8 @@ pub enum Value {
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Generator(_) => write!(f, "Generator(...)"),
-            Value::Function(func) => write!(f, "Function('{}')", func.get_name()),
+            Value::Generator(g) => write!(f, "{:#?}", g),
+            Value::Function(func) => write!(f, "{:#?}", func),
             Value::Module(obj) => write!(f, "Module('{}')", obj.name()),
             Value::Pointer(arc) => {
                 let raw_ptr = Arc::as_ptr(arc);

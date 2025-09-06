@@ -27,6 +27,7 @@ use crate::env::runtime::utils::{
     unescape_string_premium_edition,
     apply_format_spec,
     remove_loc_keys,
+    type_matches,
 };
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
@@ -391,14 +392,27 @@ impl Interpreter {
                     status = true;
                     let return_type = f.get_return_type();
                     let parameter_types = f.get_parameter_types();
-                    if return_type != **expected_return_type {
+                    if !type_matches(&return_type, expected_return_type) {
                         err = Some(make_err("TypeError", &format!("Expected return type '{}', got '{}'", expected_return_type.display(), return_type.display()), self.get_location_from_current_statement()));
                         status = false;
                     }
-                    for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
-                        if param_type != expected_param_type {
-                            err = Some(make_err("TypeError", &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()), self.get_location_from_current_statement()));
-                            status = false;
+                    if parameter_types.len() != expected_parameter_types.len() {
+                        err = Some(make_err(
+                            "TypeError",
+                            &format!("Expected {} parameters, got {}", expected_parameter_types.len(), parameter_types.len()),
+                            self.get_location_from_current_statement(),
+                        ));
+                        status = false;
+                    } else {
+                        for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
+                            if !type_matches(param_type, expected_param_type) {
+                                err = Some(make_err(
+                                    "TypeError",
+                                    &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()),
+                                    self.get_location_from_current_statement(),
+                                ));
+                                status = false;
+                            }
                         }
                     }
                 } else {
@@ -423,7 +437,7 @@ impl Interpreter {
 
                     if let Some(parameter_types) = g.get_parameter_types() {
                         for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
-                            if param_type != expected_param_type {
+                            if !type_matches(param_type, expected_param_type) {
                                 err = Some(make_err(
                                     "TypeError",
                                     &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()),
@@ -451,8 +465,10 @@ impl Interpreter {
                         Type::new_simple("any")
                     }
                 };
-                if value_type != inner_type {
+                let (status_check, err_check) = self.check_type(value, &inner_type);
+                if !status_check {
                     status = false;
+                    err = err_check.or(Some(make_err("TypeError", &format!("Alias '{}' expects type '{}', got '{}'", alias_name, inner_type.display(), value.get_type().display()), self.get_location_from_current_statement())));    
                 }
                 if variables.len() > 1 {
                     status = false;
@@ -508,6 +524,86 @@ impl Interpreter {
                         }
                     }
                     _ => status = false,
+                }
+            }
+            Type::Impl { implementations } => {
+                if let Some((_, props)) = self.get_properties(value) {
+                    let mut all_matched = true;
+                    for (name, ty, mods) in implementations {
+                        let mut is_static = false;
+                        let mut is_final = true;
+                        for m in mods {
+                            match m.as_str() {
+                                "static" => is_static = true,
+                                "non-static" => is_static = false,
+                                "final" => is_final = true,
+                                "mutable" => is_final = false,
+                                _ => {}
+                            }
+                        }
+                        let t = match get_inner_type(ty) {
+                            Ok((_, mut t)) => {
+                                if let Type::Function { parameter_types, .. } = &mut t {
+                                    if !is_static {
+                                        parameter_types.insert(0, Type::new_simple("any"));
+                                    }
+                                }
+                                t
+                            }
+                            Err(e) => {
+                                err = Some(make_err("TypeError", &e,  self.get_location_from_current_statement()));
+                                all_matched = false;
+                                break;
+                            }
+                        };
+                        if let Some(prop) = props.get(name) {
+                            if let Value::Function(f) = &prop.value {
+                                if is_final != f.is_final() {
+                                    let expected = if is_final { "final" } else { "non-final" };
+                                    let actual = if f.is_final() { "final" } else { "non-final" };
+                                    err = Some(make_err(
+                                        "TypeError",
+                                        &format!("Method '{}' is {} but expected {}", name, actual, expected),
+                                        self.get_location_from_current_statement(),
+                                    ));
+                                    all_matched = false;
+                                    break;
+                                }
+
+                                if is_static != f.is_static() {
+                                    let expected = if is_static { "static" } else { "non-static" };
+                                    let actual = if f.is_static() { "static" } else { "non-static" };
+                                    err = Some(make_err(
+                                        "TypeError",
+                                        &format!("Method '{}' is {} but expected {}", name, actual, expected),
+                                        self.get_location_from_current_statement(),
+                                    ));
+                                    all_matched = false;
+                                    break;
+                                }
+                            } else {
+                                err = Some(make_err("TypeError", &format!("Property '{}' is not a function", name), self.get_location_from_current_statement()));
+                                all_matched = false;
+                                break;
+                            }
+                            let (status, e) = self.check_type(&prop.value, &t);
+                            if !status {
+                                err = e.or(Some(make_err("TypeError", &format!("Property '{}' expected to be of type '{}', got '{}'", name, ty.display(), prop.value.get_type().display()), self.get_location_from_current_statement())));
+                                all_matched = false;
+                                break;
+                            }
+                        } else {
+                            err = Some(make_err("TypeError", &format!("Property '{}' not found in value", name), self.get_location_from_current_statement()));
+                            all_matched = false;
+                            break;
+                        }
+                    }
+                    if !all_matched {
+                        status = false;
+                    }
+                } else {
+                    status = false;
+                    err = Some(make_err("TypeError", &format!("Expected type compatible with 'impl', got incompatible '{}'", value.get_type().display()), self.get_location_from_current_statement()));
                 }
             }
             _ => {
@@ -1134,7 +1230,6 @@ impl Interpreter {
     
                 "OPERATION" => self.handle_operation(statement_map),
                 "UNARY_OPERATION" => self.handle_unary_op(statement_map),
-                "COMPOUND_ASSIGN" => self.handle_compound_assignment(statement_map),
     
                 "CALL" => self.handle_call(statement_map),
                 "METHOD_CALL" => self.handle_method_call(statement_map),
@@ -1224,7 +1319,15 @@ impl Interpreter {
             ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
         ]));
         for method in methods_ast {
-            let func = self.handle_function_declaration(method.convert_to_hashmap_value());
+            let mut m = method.convert_to_hashmap_value();
+            m.entry(Value::String("modifiers".to_string()))
+                .and_modify(|v| {
+                    if let Value::List(mods) = v {
+                        mods.insert(0, Value::String("final".to_string()));
+                    }
+                })
+                .or_insert_with(|| Value::List(vec![Value::String("final".to_string())]));
+            let func = self.handle_function_declaration(m);
             if let Value::Function(f) = func {
                 if !f.is_static() {
                     let mut func_params = f.get_parameters().to_vec();
@@ -1332,6 +1435,14 @@ impl Interpreter {
             }
 
             for (field, val) in &fields {
+                if type_fields_names.iter().all(|name| *name != field) {
+                    let owned: Vec<String> = type_fields_names.iter().map(|s| s.to_string()).collect();
+                    let closest_match = find_closest_match(field, &owned);
+                    if let Some(closest_match) = closest_match {
+                        return self.raise("NameError", &format!("Field '{}' is not defined in struct '{}'. Did you mean '{}'?", field, struct_name, closest_match));
+                    }
+                    return self.raise("NameError", &format!("Field '{}' is not defined in struct '{}'", field, &struct_name));
+                }
                 let ty_opt = type_fields
                     .iter()
                     .find(|(name, _, _)| name == field)
@@ -2490,78 +2601,6 @@ impl Interpreter {
         }
     
         NULL
-    }
-    
-    fn handle_compound_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let target_str = match statement.get(&Value::String("target".to_string())) {
-            Some(Value::String(s)) => s.clone(),
-            _ => {
-                self.raise("SyntaxError", "Expected a string for 'target' in compound assignment");
-                return NULL;
-            }
-        };
-    
-        let value_expr = match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v,
-            _ => {
-                self.raise("SyntaxError", "Missing 'value' in compound assignment");
-                return NULL;
-            }
-        };
-    
-        let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(op)) => op.clone(),
-            _ => {
-                self.raise("SyntaxError", "Expected a string for 'operator' in compound assignment");
-                return NULL;
-            }
-        };
-    
-        let rhs_value = self.evaluate(value_expr.convert_to_statement());
-        if self.err.is_some() {
-            return NULL;
-        }
-    
-        let (is_final, lhs_value) = match self.variables.get(to_static(target_str.clone())) {
-            Some(var) => (var.is_final(), var.value.clone()),
-            None => {
-                self.raise("NameError", &format!("Variable '{}' is not defined", target_str));
-                return NULL;
-            }
-        };
-    
-        if is_final {
-            self.raise("PermissionError", &format!("Variable '{}' is final and cannot be modified", target_str));
-            return NULL;
-        }
-
-        let operator = match operator.as_str() {
-            "+=" => "+".to_string(),
-            "-=" => "-".to_string(),
-            "*=" => "*".to_string(),
-            "/=" => "/".to_string(),
-            "%=" => "%".to_string(),
-            "^=" => "^".to_string(),
-            _ => {
-                self.raise("SyntaxError", &format!("Unsupported compound assignment operator: {}", operator));
-                return NULL;
-            }
-        };
-    
-        let result = self.make_operation(lhs_value, rhs_value, &operator);
-        if self.err.is_some() {
-            return NULL;
-        }
-    
-        if let Some(var_mut) = self.variables.get_mut(to_static(target_str.clone())) {
-            var_mut.set_value(result.clone());
-        }
-    
-        if self.err.is_some() {
-            return NULL;
-        }
-    
-        result
     }
 
     fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -4413,8 +4452,6 @@ impl Interpreter {
                     results.push(forgotten_value);
                 }
 
-                debug_log(&format!("<Variables '{}' forgotten>", names.join(", ")), &self.config, Some(self.use_colors.clone()));
-
                 Value::Tuple(results)
             }
 
@@ -4675,6 +4712,88 @@ impl Interpreter {
                 Type::Indexed {
                     base_type: Box::new(base),
                     elements: elements,
+                }
+            }
+
+            "impl" => {
+                let impls_ast = match statement.get(&Value::String("impls".to_string())) {
+                    Some(Value::List(l)) => l,
+                    _ => {
+                        self.raise("RuntimeError", "Missing or invalid 'impls' in impl type statement");
+                        return NULL;
+                    }
+                };
+                let mut impls: Vec<(String, Box<Type>, Vec<String>)> = Vec::new();
+                for impl_ast in impls_ast {
+                    let impl_map = match impl_ast {
+                        Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
+                        _ => {
+                            self.raise("RuntimeError", "Each impl must be a map");
+                            return NULL;
+                        }
+                    };
+                    let name = match impl_map.get(&Value::String("name".to_string())) {
+                        Some(Value::String(n)) => n.clone(),
+                        _ => {
+                            self.raise("RuntimeError", "Missing or invalid 'name' in impl");
+                            return NULL;
+                        }
+                    };
+                    let args = match impl_map.get(&Value::String("args".to_string())) {
+                        Some(Value::List(l)) => l,
+                        _ => {
+                            self.raise("RuntimeError", "Missing 'type' in impl");
+                            return NULL;
+                        }
+                    };
+                    let mods = match impl_map.get(&Value::String("modifiers".to_string())) {
+                        Some(Value::List(l)) => l.iter().filter_map(|v| {
+                            if let Value::String(s) = v {
+                                Some(s.clone())
+                            } else { None }
+                        }).collect(),
+                        _ => vec![],
+                    };
+                    let return_type = match impl_map.get(&Value::String("return_type".to_string())) {
+                        Some(rt) => match self.evaluate(rt.convert_to_statement()) {
+                            Value::Type(t) => t,
+                            _ => {
+                                self.raise("TypeError", "Impl return type must be a valid type");
+                                return NULL;
+                            }
+                        },
+                        None => {
+                            self.raise("RuntimeError", "Missing 'return_type' in impl");
+                            return NULL;
+                        }
+                    };
+
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+
+                    let mut elements: Vec<Type> = Vec::new();
+                    for arg in args {
+                        let arg_map = arg.convert_to_hashmap_value();
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        match self.handle_type(arg_map) {
+                            Value::Type(t) => elements.push(t),
+                            _ => {
+                                self.raise("TypeError", "Impl parameter types must be valid types");
+                                return NULL;
+                            }
+                        }
+                    }
+
+                    impls.push((name, Box::new(Type::Function {
+                        parameter_types: elements,
+                        return_type: Box::new(return_type),
+                    }), mods));
+                }
+                Type::Impl {
+                    implementations: impls,
                 }
             }
 
@@ -5268,6 +5387,82 @@ impl Interpreter {
                         }
                     };
                 }
+            }
+            "PROPERTY_ACCESS" => {
+                let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(v) => self.evaluate(v.convert_to_statement()),
+                    None => return self.raise("RuntimeError", "Missing 'object' in property access assignment"),
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                let property_name = match left_hashmap.get(&Value::String("property".to_string())) {
+                    Some(Value::String(n)) => n,
+                    _ => return self.raise("RuntimeError", "Missing or invalid 'property' in property access assignment"),
+                };
+                let var_name = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(v) => match v.convert_to_statement().get_value("name") {
+                        Some(Value::String(n)) => n.clone(),
+                        _ => return self.raise("ValueError", "Cannot determine variable name from object in property access assignment"),
+                    },
+                    None => return self.raise("RuntimeError", "Missing 'object' in property access assignment"),
+                };
+                let o = match object_val {
+                    Value::Struct(mut s) => {
+                        let is_final = s.get_field_mods(property_name)
+                            .map_or(false, |(_, _, f)| f);
+
+                        if is_final {
+                            return self.raise(
+                                "AssignmentError",
+                                &format!("Cannot assign to final property '{}'", property_name),
+                            );
+                        }
+
+                        if let Some(box_val) = s.fields.get_mut(property_name) {
+                            let expected_type = box_val.get_type();
+                            let (is_valid, err) = self.check_type(&right_value, &expected_type);
+
+                            if !is_valid {
+                                if let Some(err) = err {
+                                    self.raise_with_ref(
+                                        "TypeError",
+                                        &format!(
+                                            "Invalid type for property '{}': expected '{}', got '{}'",
+                                            property_name, expected_type.display(), right_value.type_name()
+                                        ),
+                                        err,
+                                    );
+                                } else {
+                                    return self.raise(
+                                        "TypeError",
+                                        &format!(
+                                            "Invalid type for property '{}': expected '{}', got '{}'",
+                                            property_name, expected_type.display(), right_value.type_name()
+                                        ),
+                                    );
+                                }
+                            }
+
+                            **box_val = right_value;
+                            Value::Struct(s)
+                        } else {
+                            return self.raise(
+                                "AttributeError",
+                                &format!("Property '{}' not found in struct", property_name),
+                            );
+                        }
+                    }
+                    t => self.raise("TypeError", &format!("Property assignment not supported on type '{}'", t.get_type().display_simple())),
+                };
+                if self.err.is_some() {
+                    return NULL;
+                }
+                if self.variables.contains_key(&var_name) {
+                    let var = self.variables.get_mut(&var_name).unwrap();
+                    var.set_value(o);
+                }
+                NULL
             }
             // fuck my parser
             "POINTER_DEREF" => {
@@ -6400,9 +6595,72 @@ impl Interpreter {
         }
     }
 
+    fn get_properties(&mut self, object_value: &Value) -> Option<(String, HashMap<String, Variable>)> {
+        match object_value {
+            Value::Module(o) => {
+                let props = o.get_properties();
+                return Some((o.name().to_string(), props.clone()));
+            }
+            Value::Type(t) => {
+                match t {
+                    Type::Struct { name: s_name, methods, .. } => {
+                        let props = {
+                            let mut m: HashMap<String, Variable> = HashMap::new();
+                            for (name, method) in methods {
+                                if !method.is_static() {
+                                    continue;
+                                }
+                                m.insert(name.clone(), Variable::new(
+                                    name.clone(),
+                                    Value::Function(method.clone()),
+                                    "function".to_string(),
+                                    false,
+                                    true,
+                                    true,
+                                ));
+                            }
+                            m
+                        };
+                        return Some((s_name.to_string(), props));
+                    }
+                    _ => { return None; }
+                }
+            }
+            Value::Struct(s) => {
+                let props = if let Type::Struct { ref methods, .. } = s.ty {
+                    let mut m: HashMap<String, Variable> = HashMap::new();
+                    for (name, method) in methods {
+                        if method.is_static() {
+                            continue;
+                        }
+                        m.insert(name.clone(), Variable::new(
+                            name.clone(),
+                            Value::Function(method.clone()),
+                            "function".to_string(),
+                            false,
+                            true,
+                            true,
+                        ));
+                    }
+                    m
+                } else {
+                    self.raise("TypeError", &format!("'{}' is not a struct type", s.ty.display_simple()));
+                    return None;
+                };
+                return Some((s.clone().name().to_string(), props));
+            }
+            _ => None,
+        }
+    }
+
     fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
         let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
             return Value::Error("RuntimeError", "Missing 'object' in method call", None);
+        };
+
+        let var_name = match object.convert_to_statement().get_value("name") {
+            Some(Value::String(name)) => name,
+            _ => "_".to_string(),
         };
     
         let Some(Value::String(method)) = statement.get(&Value::String("method".to_string())).cloned() else {
@@ -6433,14 +6691,9 @@ impl Interpreter {
         );
 
         match object_value {
-            Value::Module(ref o) => {
-                let props = o.get_properties();
-                object_variable.properties = props.clone();
-                object_variable.set_name(o.name().to_string());
-            }
-            Value::Type(t) => {
+            Value::Type(ref t) => {
                 match t {
-                    Type::Enum { ref name, ref variants, .. } => {
+                    Type::Enum { name, variants, .. } => {
                         let variant_name = method_name;
                         let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
                             Some(variant) => variant,
@@ -6505,66 +6758,18 @@ impl Interpreter {
                         );
                         return Value::Enum(v);
                     }
-                    Type::Struct { name: ref s_name, ref methods, .. } => {
-                        let props = {
-                            let mut m: HashMap<String, Variable> = HashMap::new();
-                            for (name, method) in methods {
-                                if !method.is_static() && method.get_name() == method_name {
-                                    return self.raise_with_help(
-                                        "TypeError",
-                                        &format!("Static method '{}' cannot be called on an instance", name),
-                                        &format!("Did you mean to call it as 'i: {} = {} {{null}} i.{}(...)'?", s_name, s_name, name),
-                                    );
-                                }
-                                m.insert(name.clone(), Variable::new(
-                                    name.clone(),
-                                    Value::Function(method.clone()),
-                                    "function".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ));
-                            }
-                            m
-                        };
-                        object_variable.properties = props.clone();
-                        object_variable.set_name(s_name.to_string());
-                    }
                     _ => {}
                 }
             }
-            Value::Struct(s) => {
-                let props = if let Type::Struct { ref methods, .. } = s.ty {
-                    let mut m: HashMap<String, Variable> = HashMap::new();
-                    for (name, method) in methods {
-                        if method.is_static() && method.get_name() == method_name {
-                            return self.raise_with_help(
-                                "TypeError",
-                                &format!("Static method '{}' cannot be called on an instance", name),
-                                &format!("Did you mean to call it as '{}.{}(...)'?", s.name(), name),
-                            );
-                        }
-                        m.insert(name.clone(), Variable::new(
-                            name.clone(),
-                            Value::Function(method.clone()),
-                            "function".to_string(),
-                            false,
-                            true,
-                            true,
-                        ));
-                    }
-                    m
-                } else {
-                    return self.raise("TypeError", &format!("'{}' is not a struct type", s.ty.display_simple()));
-                };
-                object_variable.properties = props.clone();
-                object_variable.set_name(s.clone().name().to_string());
-            }
-            _ if !object_variable.is_init() => {
-                object_variable.init_properties(self);
-                object_variable.set_name(object_value.get_type().display_simple());
-            }
             _ => {}
+        }
+
+        if let Some((var_name, props)) = self.get_properties(&object_value) {
+            object_variable.properties = props;
+            object_variable.set_name(var_name.clone());
+        } else if !object_variable.is_init() {
+            object_variable.init_properties(self);
+            object_variable.set_name(object_value.get_type().display_simple());
         }
 
         if self.err.is_some() {
@@ -6572,7 +6777,8 @@ impl Interpreter {
         }
 
         return self.call_method(
-            &object_variable,
+            &mut object_variable,
+            &var_name,
             method_name,
             pos_args,
             named_args,
@@ -6582,7 +6788,8 @@ impl Interpreter {
     // TODO: Refactor this method to pass mutable reference of Variable to the method
     pub fn call_method(
         &mut self,
-        object_variable: &Variable,
+        object_variable: &mut Variable,
+        variable_name: &str,
         method_name: &str,
         pos_args: Vec<Value>,
         named_args: HashMap<String, Value>,
@@ -6714,6 +6921,7 @@ impl Interpreter {
                     .count();
 
                 let mut matched_positional_count = 0;
+                let mut instance_variables: Vec<String> = vec![];
 
                 for param in &metadata.parameters {
                     match param.kind {
@@ -6875,6 +7083,7 @@ impl Interpreter {
                         }
                         ParameterKind::Instance => {
                             final_args.insert(param_name.clone(), object_value.clone());
+                            instance_variables.push(param_name.clone());
                         }
                     }
                 }
@@ -7040,6 +7249,12 @@ impl Interpreter {
                             return NULL;
                         }
                         result = new_interpreter.return_value.clone();
+                        for var in instance_variables {
+                            if let Some(v) = new_interpreter.variables.get_mut(&var) {
+                                object_variable.set_value(v.get_value().clone());
+                            }
+                        }
+                        self.variables.insert(variable_name.to_string(), object_variable.clone());
                         self.stack = new_interpreter.stack;
                     } else {
                         result = func.call(&final_args);

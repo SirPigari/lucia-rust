@@ -46,6 +46,9 @@ pub enum Type {
         generics: Vec<String>,
         wheres: Vec<(String, Statement)>,
     },
+    Impl {
+        implementations: Vec<(String, Box<Type>, Vec<String>)>,
+    },
     Alias {
         name: String,
         base_type: Box<Type>,
@@ -128,6 +131,10 @@ impl Type {
                 format!("<struct '{}'{}>", name, fields_str)
             },
             Type::Alias { name, base_type, .. } => format!("<type '{}' as '{}'>", base_type.display_simple(), name),
+            Type::Impl { implementations } => {
+                let methods_str = implementations.iter().map(|(name, func, _)| func.display_simple().replacen("function", &name, 1)).collect::<Vec<_>>().join(" + ");
+                format!("<impl {}>", methods_str)
+            },
             Type::Unwrap(values) => format!("<unwrap type '{}'>", values.iter().map(|v| v.get_type().display_simple()).collect::<Vec<_>>().join(", ")),
         }
     }
@@ -161,6 +168,19 @@ impl Type {
             Type::Alias { name, .. } => name.to_string(),
             Type::Enum { name, .. } => name.to_string(),
             Type::Struct { name, .. } => name.to_string(),
+            Type::Impl { implementations } => {
+                let methods_str = implementations
+                    .iter()
+                    .map(|(name, func, mods)| {
+                        mods.iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" + ") + " " + &func.display_simple().replacen("function", &name, 1)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                format!("impl {}", methods_str)
+            },
             _ => self.display(),
         }
     }
@@ -201,8 +221,9 @@ impl PartialEq for Type {
         use Type::*;
         match (self, other) {
             (Simple { name: n1, is_reference: r1, is_maybe_type: m1 },
-             Simple { name: n2, is_reference: r2, is_maybe_type: m2 }) =>
-                n1 == n2 && r1 == r2 && m1 == m2,
+             Simple { name: n2, is_reference: r2, is_maybe_type: m2 }) => {
+                n1 == n2 && r1 == r2 && m1 == m2
+            },
 
             (Function { parameter_types: p1, return_type: r1 },
              Function { parameter_types: p2, return_type: r2 }) =>
@@ -230,6 +251,10 @@ impl PartialEq for Type {
             (Alias { name: n1, base_type: b1, variables: c1, .. },
              Alias { name: n2, base_type: b2, variables: c2, .. }) =>
                 n1 == n2 && b1 == b2 && c1 == c2,
+
+            (Impl { implementations: m1, .. },
+             Impl { implementations: m2, .. }) =>
+                m1 == m2,
 
             (Unwrap(v1), Unwrap(v2)) =>
                 v1 == v2,
@@ -273,6 +298,10 @@ impl PartialOrd for Type {
             (Alias { name: n1, base_type: b1, conditions: c1, .. },
              Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
                 (n1, b1, c1).partial_cmp(&(n2, b2, c2)),
+
+            (Impl { implementations: m1, .. },
+             Impl { implementations: m2, .. }) =>
+                m1.partial_cmp(&m2),
 
             (Unwrap(v1), Unwrap(v2)) =>
                 v1.partial_cmp(&v2),
@@ -323,6 +352,9 @@ impl Hash for Type {
                 name.hash(state);
                 base_type.hash(state);
                 conditions.hash(state);
+            }
+            Impl { implementations, .. } => {
+                implementations.hash(state);
             }
             Unwrap(values) => {
                 values.hash(state);

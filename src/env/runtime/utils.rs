@@ -1477,10 +1477,7 @@ pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
             "An 'as' expression can only be used to convert between primitive types, not '{}'",
             value.display_simple()
         )),
-        _ => Err(format!(
-            "Type '{}' is not a valid target type for conversion",
-            value.display_simple()
-        )),
+        _ => Ok((value.display_simple(), value.clone())),
     }
 }
 
@@ -1841,6 +1838,22 @@ pub fn apply_format_spec(value: &Value, spec: &str) -> Result<String, String> {
     }
 
     Ok(s)
+}
+
+pub fn type_matches(actual: &Type, expected: &Type) -> bool {
+    use Type::*;
+
+    match expected {
+        Simple { name, is_reference, .. } if name == "any" => {
+            let actual_ref = match actual {
+                Simple { is_reference, .. } => *is_reference,
+                _ => false,
+            };
+            *is_reference == actual_ref
+        }
+
+        _ => actual == expected,
+    }
 }
 
 pub const KEYWORDS: &[&str] = &[

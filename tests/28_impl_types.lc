@@ -1,0 +1,136 @@
+#include <std/macros>
+
+typedef Displayable = impl display[] -> str
+
+typedef struct Point = {
+    x: int,
+    y: int,
+}
+
+typedef struct Circle = {
+    center: Point,
+    radius: int,
+}
+
+typedef struct Rectangle = {
+    top_left: Point,
+    bottom_right: Point,
+}
+
+for Point:
+    static fun new(x: int, y: int) -> Self:
+        return Point { x, y }
+    end
+
+    fun display(self) -> str:
+        return f"Point({self.x}, {self.y})"
+    end
+end
+
+for Circle:
+    static fun new(center: Point, radius: int) -> Self:
+        return Circle { center, radius }
+    end
+
+    fun display(self) -> str:
+        return f"Circle(center: {self.center.display()}, radius: {self.radius})"
+    end
+end
+
+for Rectangle:
+    static fun new(top_left: Point, bottom_right: Point) -> Self:
+        return Rectangle { top_left, bottom_right }
+    end
+end
+
+a: impl display[] -> str = Point.new(5, 10)
+b: Displayable = Circle.new(a, 15)
+
+assert_eq!(a.display(), "Point(5, 10)")
+assert_eq!(b.display(), "Circle(center: Point(5, 10), radius: 15)")
+
+assert_err!(
+    // rectangle does not implement display
+    c: Displayable = (Rectangle.new(Point.new(0, 0), Point.new(10, 10)))
+)
+
+for Rectangle:
+    mutable fun display(self) -> int:
+        return 42
+    end
+end
+
+assert_err!(
+    // rectangle does implement display now, but the return type is wrong
+    c: Displayable = (Rectangle.new(Point.new(0, 0), Point.new(69, 10)))
+)
+
+for Rectangle:
+    fun display(self, h: int) -> str:
+        return f"Rectangle(top_left: {self.top_left.display()}, bottom_right: {self.bottom_right.display()}, height: {h})"
+    end
+end
+
+assert_err!(
+    // rectangle does implement display, but the argument types are wrong
+    c: Displayable = (Rectangle.new(Point.new(0, 0), Point.new(69, 67)))
+)
+
+fun display_shape(s: Displayable) -> str:
+    return s.display()
+end
+
+assert_eq!(display_shape(a), "Point(5, 10)")
+assert_eq!(display_shape(b), "Circle(center: Point(5, 10), radius: 15)")
+
+forget (Point, Circle, Rectangle, Displayable, a, b, display_shape)
+
+typedef Counter = impl add[any] -> int + sub[any] -> int
+
+typedef struct H = {
+    value: int,
+}
+
+for H:
+    fun add(self, amount: int) -> int:
+        self.value += amount
+        return self.value
+    end
+
+    fun sub(self, amount: int) -> int:
+        self.value -= amount
+        return self.value
+    end
+end
+
+c: Counter = H { value = 10 }
+
+fun test_counter(mutable c: Counter) -> Counter:
+    c.add(5)
+    c.sub(3)
+    return c
+end
+
+assert_eq!(test_counter(c).value, 12)
+
+forget (H, Counter, c, test_counter)
+
+typedef Creatable = impl static new[] -> any
+
+typedef struct A = {
+    x: int,
+}
+
+for A:
+    static fun new() -> Self:
+        return A { x = 42 }
+    end
+end
+
+a: Creatable = A
+
+fun create(c: Creatable) -> any:
+    return c.new()
+end
+
+assert_eq!(create(a).x, 42)
