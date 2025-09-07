@@ -145,8 +145,8 @@ impl Interpreter {
                 "__dir__".to_owned(),
                 Value::String(dir),
                 "str".to_owned(),
-                false,
                 true,
+                false,
                 true,
             ),
         );
@@ -156,8 +156,8 @@ impl Interpreter {
                 "__file__".to_owned(),
                 Value::String(file_path.to_owned()),
                 "str".to_owned(),
-                false,
                 true,
+                false,
                 true,
             ),
         );
@@ -183,7 +183,7 @@ impl Interpreter {
         insert_builtin("array", Value::Function(native::array_fn()));
         this.variables.insert(
             "00__placeholder__".to_owned(),
-            Variable::new("__placeholder__".to_owned(), Value::Function(native::placeholder_fn()), "function".to_owned(), false, true, true),
+            Variable::new("__placeholder__".to_owned(), Value::Function(native::placeholder_fn()), "function".to_owned(), true, false, true),
         );
     
         this
@@ -1156,7 +1156,7 @@ impl Interpreter {
         }
 
         self.variables.entry("_".to_string()).or_insert_with(|| {
-            Variable::new("_".to_string(), NULL.clone(), "any".to_string(), true, true, false)
+            Variable::new("_".to_string(), NULL.clone(), "any".to_string(), true, false, false)
         });
     
         self.variables.entry("_err".to_string()).or_insert_with(|| {
@@ -1165,7 +1165,7 @@ impl Interpreter {
                 Value::Tuple(vec![]),
                 "tuple".to_string(),
                 true,
-                true,
+                false,
                 true,
             )
         });
@@ -3776,11 +3776,15 @@ impl Interpreter {
                                 
                                 if actual_value != expected_value {
                                     self.stack.pop();
-                                    return self.raise("ImportError", &format!(
+                                    return self.raise_with_help("ImportError", &format!(
                                         "Config key '{}' value mismatch. Expected: {}, Found: {}",
                                         key,
                                         format_value(&expected_value),
                                         format_value(&actual_value)
+                                    ), &format!(
+                                        "Use #config {} = {} to set the expected value.",
+                                        key,
+                                        format_value(&expected_value)
                                     ));
                                 }
                             }
@@ -4723,6 +4727,10 @@ impl Interpreter {
                         return NULL;
                     }
                 };
+                let joins_ast = match statement.get(&Value::String("joins".to_string())) {
+                    Some(Value::List(l)) => l,
+                    _ => &vec![],
+                };
                 let mut impls: Vec<(String, Box<Type>, Vec<String>)> = Vec::new();
                 for impl_ast in impls_ast {
                     let impl_map = match impl_ast {
@@ -4791,6 +4799,40 @@ impl Interpreter {
                         parameter_types: elements,
                         return_type: Box::new(return_type),
                     }), mods));
+                }
+                for join in joins_ast {
+                    if let Value::String(s) = join {
+                        if !self.variables.contains_key(s) {
+                            self.raise("NameError", &format!("Unknown type '{}'", s));
+                            return NULL;
+                        }
+                        if let Some(var) = self.variables.get(s) {
+                            if let Value::Type(t) = &var.value {
+                                if let Ok((_, inner)) = get_inner_type(t) {
+                                    match inner {
+                                        Type::Impl { implementations } => {
+                                            for (name, func_type, mods) in implementations {
+                                                impls.push((name.clone(), func_type.clone(), mods.clone()));
+                                            }
+                                        }
+                                        _ => {
+                                            self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
+                                            return NULL;
+                                        }
+                                    }
+                                } else {
+                                    self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
+                                    return NULL;
+                                }
+                            } else {
+                                self.raise("TypeError", &format!("'{}' is a variable name, not a type", s));
+                                return NULL;
+                            }
+                        }
+                    } else {
+                        self.raise("TypeError", "Join names must be strings");
+                        return NULL;
+                    }
                 }
                 Type::Impl {
                     implementations: impls,
@@ -8793,7 +8835,10 @@ impl Interpreter {
                             if self.check_stop_flag() {
                                 return self.raise("ValueError", "Tetration interrupted by stop flag");
                             }
-                            result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
+                            result = match pow_cached(self, base, &result) {
+                                Some(res) => res,
+                                None => return self.raise("ValueError", "Tetration failed"),
+                            };
                             count = (&count + &one).unwrap_or_else(|_| height.clone());
                         }
 
@@ -8830,7 +8875,10 @@ impl Interpreter {
                             if self.check_stop_flag() {
                                 return self.raise("ValueError", "Tetration interrupted by stop flag");
                             }
-                            result = pow_cached(self, base, &result).ok_or_else(|| self.raise("ValueError", "Tetration failed")).unwrap();
+                            result = match pow_cached(self, base, &result) {
+                                Some(res) => res,
+                                None => return self.raise("ValueError", "Tetration failed"),
+                            };
                             count = (&count + &one).unwrap_or_else(|_| float_height.clone());
                         }
 

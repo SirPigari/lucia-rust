@@ -1456,10 +1456,12 @@ fn main() {
             eprintln!("{}", "https://github.com/SirPigari/lucia-rust/issues/new".blue().underline());
             eprintln!("{}", "------------------".dimmed());
         }
+
+        eprintln!("{}", "Press any key to continue...".yellow());
+        let _ = io::stdin().read(&mut [0u8]).unwrap();
     
-        exit(101);        
+        exit(101);
     }));
-    
 
     let cwd = std_env::current_dir()
     .and_then(|p| p.canonicalize())

@@ -12,6 +12,12 @@ test.lc
 /tests/run_benchmarks.exe
 /tests/run_benchmarks
 
+# Lym
+/src/env/assets/lym
+
+# Installer
+/src/env/assets/installer/LuciaInstaller.exe
+
 # Test directories and outputs
 /src/tests/
 /tests/benchmark-results/

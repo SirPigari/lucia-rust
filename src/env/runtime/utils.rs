@@ -333,7 +333,7 @@ pub fn format_value(value: &Value) -> String {
 
         Value::Module(obj) => {
             let addr = obj.ptr() as *const () as usize;
-            format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
+            format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), fix_path(obj.path().display().to_string()), addr)
         }
 
         Value::Enum(enm) => enm.display(),
@@ -1864,7 +1864,7 @@ pub const KEYWORDS: &[&str] = &[
     "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
     "type", "typedef", "where", "enum", "struct", "true", "false", "null", "void", "any", "int",
     "float", "bool", "str", "map", "list", "function", "bytes", "tuple",
-    "auto", "generator"
+    "auto", "generator", "impl"
 ];
 
 pub const NULL: Value = Value::Null;

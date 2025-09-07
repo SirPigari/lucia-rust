@@ -891,12 +891,12 @@ impl Preprocessor {
                     i += offset;
                     result.extend(res);
                 } else if !skipping
-                    && i + 3 < tokens.len() && i != 0
-                    && matches!(tokens[i - 1], Token(ref a, _, _) if a != "OPERATOR")
+                    && i + 3 < tokens.len()
                     && matches!(tokens[i], Token(ref a, _, _) if a == "NUMBER")
                     && matches!(tokens[i + 1], Token(ref a, _, _) if a == "OPERATOR")
                     && matches!(tokens[i + 2], Token(ref a, _, _) if a == "NUMBER")
                     && matches!(tokens[i + 3], Token(ref a, _, _) if a != "OPERATOR")
+                    && (i == 0 || matches!(tokens[i - 1], Token(ref a, _, _) if a != "OPERATOR"))
                 {
                     let mut aliased = Vec::new();
                     let mut has_alias = false;

@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{to_static, format_int, self};
+use crate::env::runtime::utils::{to_static, format_int, fix_path, self};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
@@ -454,7 +454,7 @@ fn format_value(value: &Value) -> String {
             format!("<{}: {}>", err_type, err_msg)
         }
         Value::Module(obj) => {
-            format!("<module '{}' from '{}' at {:p}>", obj.name(), obj.path().display(), obj.ptr())
+            format!("<module '{}' from '{}' at {:p}>", obj.name(), fix_path(obj.path().display().to_string()), obj.ptr())
         }
         _ => "<unsupported value type>".to_string(),
     }

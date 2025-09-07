@@ -4320,6 +4320,7 @@ impl Parser {
         self.check_for("IDENTIFIER", "impl");
         self.next();
         let mut impls = vec![];
+        let mut joins = vec![];
 
         loop {
             let mut mods: Vec<String> = vec![];
@@ -4341,8 +4342,13 @@ impl Parser {
             self.next();
 
             if !self.token_is("SEPARATOR", "[") {
-                self.raise("SyntaxError", "Expected '[' after function name");
-                return Statement::Null;
+                joins.push(func_name.clone());
+                if self.token_is("OPERATOR", "+") {
+                    self.next();
+                    continue;
+                } else {
+                    break;
+                }
             }
             self.next();
 
@@ -4417,11 +4423,13 @@ impl Parser {
                 Value::String("type".to_string()),
                 Value::String("type_kind".to_string()),
                 Value::String("impls".to_string()),
+                Value::String("joins".to_string()),
             ],
             values: vec![
                 Value::String("TYPE".to_string()),
                 Value::String("impl".to_string()),
                 Value::List(impls.into_iter().map(|s| s.convert_to_map()).collect()),
+                Value::List(joins.into_iter().map(|s| Value::String(s)).collect()),
             ],
             loc: self.get_loc(),
         }

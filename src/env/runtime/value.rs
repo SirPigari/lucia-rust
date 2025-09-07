@@ -4,7 +4,7 @@ use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::utils::{format_float, format_int};
+use crate::env::runtime::utils::{format_float, format_int, fix_path};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::collections::HashMap;
@@ -680,7 +680,7 @@ impl Value {
             }
             Value::Module(obj) => {
                 let addr = obj.ptr() as *const () as usize;
-                format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), obj.path().display(), addr)
+                format!("<module '{}' from '{}' at 0x{:X}>", obj.name(), fix_path(obj.path().display().to_string()), addr)
             }
             Value::Enum(enm) => {
                 let addr = enm.ptr() as *const () as usize;
