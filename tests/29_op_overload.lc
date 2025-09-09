@@ -1,0 +1,123 @@
+#include <std/macros>
+
+typedef struct Point = {
+    x: int,
+    y: int,
+}
+
+for Point:
+    static fun new(x: int, y: int) -> Self:
+        return Point { x, y }
+    end
+
+    fun op_add(self, other: Point) -> Point:
+        return Point { x = self.x + other.x, y = self.y + other.y }
+    end
+
+    fun op_sub(self, other: Point) -> Point:
+        return Point { x = self.x - other.x, y = self.y - other.y }
+    end
+
+    fun op_mul(self, other: Point) -> Point:
+        return Point { x = self.x * other.x, y = self.y * other.y }
+    end
+
+    fun op_div(self, other: Point) -> Point:
+        return Point { x = self.x / other.x, y = self.y / other.y }
+    end
+
+    fun op_eq(self, other: Point) -> bool:
+        return self.x == other.x and self.y == other.y
+    end
+
+    fun op_ne(self, other: Point) -> bool:
+        return not (self == other)
+    end
+
+    fun op_gt(self, other: Point) -> bool:
+        return (self.x > other.x) and (self.y > other.y)
+    end
+
+    fun op_lt(self, other: Point) -> bool:
+        return (self.x < other.x) and (self.y < other.y)
+    end
+
+    fun op_ge(self, other: Point) -> bool:
+        return (self.x >= other.x) and (self.y >= other.y)
+    end
+
+    fun op_le(self, other: Point) -> bool:
+        return (self.x <= other.x) and (self.y <= other.y)
+    end
+end
+
+a: Point = Point.new(5, 10)
+b: Point = Point.new(15, 20)
+
+c: Point = a + b
+d: Point = b - a
+e: Point = a * b
+f: Point = b / a
+
+assert_eq!(c.x, 20)
+assert_eq!(c.y, 30)
+
+assert_eq!(d.x, 10)
+assert_eq!(d.y, 10)
+
+assert_eq!(e.x, 75)
+assert_eq!(e.y, 200)
+
+assert_eq!(f.x, 3)
+assert_eq!(f.y, 2)
+
+assert!(a != b)
+assert!(a < b)
+assert!(b > a)
+assert!(c >= b)
+assert!(d <= b)
+
+typedef struct Point3D = {
+    x: int,
+    y: int,
+    z: int,
+}
+
+for Point3D:
+    static fun new(x: int, y: int, z: int) -> Self:
+        return Point3D { x, y, z }
+    end
+end
+
+p1: Point3D = Point3D.new(1, 2, 3)
+p2: Point3D = Point3D.new(4, 5, 6)
+
+assert_err!(p1 + p2)
+// equality and order operators are implemented defaultly for structs, but can be overridden
+assert_ne!(p1, p2)
+assert!(p1 < p2)
+assert!(p2 > p1)
+
+for Point3D:
+    fun op_eq(self, other: Point3D) -> bool:
+        return self.x == other.x and self.y == other.y and self.z == other.z
+    end
+end
+
+p3: Point3D = Point3D.new(1, 2, 3)
+assert_eq!(p1, p3)
+
+assert_err!(a != p3)  // different types
+assert_err!(a < p3)
+
+for Point3D:
+    static fun from_point(p: Point) -> Self:
+        return Point3D { x = p.x, y = p.y, z = 0 }
+    end
+end
+
+p4: Point3D = Point3D.from_point(a)
+assert_eq!(p4, Point3D.new(5, 10, 0))
+assert_err!(a + p4)  // different types
+
+assert_ne!(p3, p4)

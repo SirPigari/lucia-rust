@@ -1841,18 +1841,26 @@ pub fn apply_format_spec(value: &Value, spec: &str) -> Result<String, String> {
 }
 
 pub fn type_matches(actual: &Type, expected: &Type) -> bool {
+    let inner_actual = match get_inner_type(actual) {
+        Ok((_, inner)) => inner,
+        Err(_) => actual.clone(),
+    };
+    let inner_expected = match get_inner_type(expected) {
+        Ok((_, inner)) => inner,
+        Err(_) => expected.clone(),
+    };
     use Type::*;
 
-    match expected {
+    match inner_expected {
         Simple { name, is_reference, .. } if name == "any" => {
-            let actual_ref = match actual {
-                Simple { is_reference, .. } => *is_reference,
+            let actual_ref = match inner_actual {
+                Simple { is_reference, .. } => is_reference,
                 _ => false,
             };
-            *is_reference == actual_ref
+            is_reference == actual_ref
         }
 
-        _ => actual == expected,
+        _ => inner_actual == inner_expected,
     }
 }
 

@@ -86,7 +86,8 @@ assert_eq!(display_shape(b), "Circle(center: Point(5, 10), radius: 15)")
 forget (Point, Circle, Rectangle, Displayable, a, b, display_shape)
 
 typedef Add = impl add[any] -> int
-typedef Sub = impl sub[any] -> int
+// Self is also in scope here
+typedef Sub = impl sub[Self] -> int
 typedef Counter = impl Add + Sub
 
 typedef struct H = {

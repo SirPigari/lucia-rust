@@ -319,6 +319,13 @@ impl Function {
         }
     }
 
+    pub fn get_type(&self) -> Type {
+        Type::Function {
+            parameter_types: self.get_parameter_types(),
+            return_type: Box::new(self.get_return_type()),
+        }
+    }
+
     pub fn ptr(&self) -> *const () {
         match self {
             Function::Native(arc) => Arc::as_ptr(arc) as *const (),

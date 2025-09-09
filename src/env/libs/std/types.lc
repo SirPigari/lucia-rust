@@ -1,0 +1,7 @@
+#ifndef LUCIA_STD_TYPES
+#define LUCIA_STD_TYPES true
+
+// this file is not finished yet
+public final typedef number = int | float
+
+#endif

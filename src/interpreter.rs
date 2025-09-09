@@ -4762,21 +4762,27 @@ impl Interpreter {
                         }).collect(),
                         _ => vec![],
                     };
+                    let vars_clone = self.variables.clone();
+                    self.variables.insert("Self".to_string(), Variable::new("Self".to_string(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true));
+                    
                     let return_type = match impl_map.get(&Value::String("return_type".to_string())) {
                         Some(rt) => match self.evaluate(rt.convert_to_statement()) {
                             Value::Type(t) => t,
                             _ => {
+                                self.variables = vars_clone;
                                 self.raise("TypeError", "Impl return type must be a valid type");
                                 return NULL;
                             }
                         },
                         None => {
+                            self.variables = vars_clone;
                             self.raise("RuntimeError", "Missing 'return_type' in impl");
                             return NULL;
                         }
                     };
 
                     if self.err.is_some() {
+                        self.variables = vars_clone;
                         return NULL;
                     }
 
@@ -4784,16 +4790,20 @@ impl Interpreter {
                     for arg in args {
                         let arg_map = arg.convert_to_hashmap_value();
                         if self.err.is_some() {
+                            self.variables = vars_clone;
                             return NULL;
                         }
+                        
                         match self.handle_type(arg_map) {
                             Value::Type(t) => elements.push(t),
                             _ => {
                                 self.raise("TypeError", "Impl parameter types must be valid types");
+                                self.variables = vars_clone;
                                 return NULL;
                             }
                         }
                     }
+                    self.variables = vars_clone;
 
                     impls.push((name, Box::new(Type::Function {
                         parameter_types: elements,
@@ -8542,6 +8552,209 @@ impl Interpreter {
         result
     }
 
+    fn handle_struct_operation(&mut self, left: Value, right: Value, operator: &str) -> Value {
+        match (&left, &right) {
+            (Value::Struct(s1), Value::Struct(s2)) => {
+                let struct_type_1 = s1.get_type();
+                let struct_type_2 = s2.get_type();
+
+                if struct_type_1 != struct_type_2 {
+                    if let Type::Struct { methods, .. } = &struct_type_1 {
+                        for (method_name, func) in methods {
+                            let is_static = s1.get_field_mods(method_name)
+                                .map(|(_, s, _)| s)
+                                .unwrap_or(false);
+                            if !is_static {
+                                continue;
+                            }
+
+                            if let Type::Function { parameter_types, return_type } = &func.get_type() {
+                                if parameter_types.len() == 1 &&
+                                type_matches(&parameter_types[0], &struct_type_2) &&
+                                type_matches(&return_type, &struct_type_1) {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Cannot perform struct operation between different struct types: '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple()),
+                                        &format!("Try calling '{}.{}({})'", method_name, method_name, s2.display()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    return self.raise(
+                        "TypeError",
+                        &format!("Cannot perform struct operation between different struct types: '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple())
+                    );
+                }
+
+                let func_name = match operator {
+                    "+" =>           "op_add",
+                    "-" =>           "op_sub",
+                    "*" =>           "op_mul",
+                    "/" =>           "op_div",
+                    "%" =>           "op_mod",
+                    "==" =>          "op_eq",
+                    "!=" =>          "op_ne",
+                    ">" =>           "op_gt",
+                    "<" =>           "op_lt",
+                    ">=" =>          "op_ge",
+                    "<=" =>          "op_le",
+                    "and" | "&&" =>  "op_and",
+                    "or" | "||" =>   "op_or",
+                    _ => {
+                        return self.raise(
+                            "SyntaxError",
+                            &format!("Unsupported struct operator: '{}'", operator)
+                        );
+                    }
+                };
+
+                let methods: HashMap<String, Function> = if let Type::Struct { methods, .. } = &struct_type_1 {
+                    HashMap::from_iter(methods.clone())
+                } else {
+                    return self.raise(
+                        "TypeError",
+                        "Expected a struct type"
+                    );
+                };
+
+                let method = match methods.get(func_name) {
+                    Some(m) => m,
+                    None => {
+                        match operator {
+                            "==" => return Value::Boolean(s1 == s2),
+                            "!=" => return Value::Boolean(s1 != s2),
+                            ">"  => return Value::Boolean(s1 >  s2),
+                            "<"  => return Value::Boolean(s1 <  s2),
+                            ">=" => return Value::Boolean(s1 >= s2),
+                            "<=" => return Value::Boolean(s1 <= s2),
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    &format!("Struct type '{}' does not implement operator '{}'", struct_type_1.display_simple(), operator)
+                                );
+                            }
+                        }
+                    }
+                };
+
+                let ret_type = if ["==", "!=", ">", "<", ">=", "<="].contains(&operator) {
+                    Type::new_simple("bool")
+                } else {
+                    struct_type_1.clone()
+                };
+
+                if let Type::Function { parameter_types, return_type } = &method.get_type() {
+                    if parameter_types.len() != 2 {
+                        return self.raise(
+                            "ParameterError",
+                            &format!("Expected 2 parameters for '{}', got {}", func_name, parameter_types.len())
+                        );
+                    }
+                    if !type_matches(&struct_type_1, &parameter_types[0]) {
+                        return self.raise(
+                            "TypeError",
+                            &format!("Expected parameter type '{}' for '{}', got '{}'", struct_type_2.display_simple(), func_name, parameter_types[0].display_simple())
+                        );
+                    }
+                    if !type_matches(&struct_type_2, &parameter_types[1]) {
+                        return self.raise(
+                            "TypeError",
+                            &format!("Expected parameter type '{}' for '{}', got '{}'", struct_type_2.display_simple(), func_name, parameter_types[1].display_simple())
+                        );
+                    }
+                    if !type_matches(&return_type, &ret_type) {
+                        return self.raise(
+                            "TypeError",
+                            &format!("Expected return type '{}' for '{}', got '{}'", ret_type.display_simple(), func_name, return_type.display_simple())
+                        );
+                    }
+                    let struct_temp_name = &format!(
+                        "_temp_struct_{}",
+                        rand::Rng::random_range(&mut rand::rng(), 10u128.pow(23)..10u128.pow(24))
+                    );
+                    let mut object_variable = Variable::new(
+                        struct_temp_name.to_string(),
+                        Value::Struct(s1.clone()),
+                        struct_type_1.display_simple(),
+                        false,
+                        false,
+                        true,
+                    );
+                    if let Some((_, props)) = self.get_properties(&left) {
+                        object_variable.properties = props;
+                    } else {
+                        return self.raise(
+                            "RuntimeError",
+                            "Failed to get struct properties"
+                        );
+                    }
+                    if method.is_static() {
+                        return self.call_method(
+                            &mut object_variable,
+                            &struct_temp_name,
+                            func_name,
+                            vec![Value::Struct(s1.clone()), Value::Struct(s2.clone())],
+                            HashMap::new(),
+                        );
+                    } else {
+                        return self.call_method(
+                            &mut object_variable,
+                            &struct_temp_name,
+                            func_name,
+                            vec![Value::Struct(s2.clone())],
+                            HashMap::new(),
+                        );
+                    }
+                } else {
+                    return self.raise(
+                        "TypeError",
+                        &format!("Expected a function type for method '{}'", func_name)
+                    );
+                }
+            }
+
+            (Value::Struct(s), other) | (other, Value::Struct(s)) => {
+                let struct_type = s.get_type();
+                let other_type = other.get_type();
+
+                if let Type::Struct { methods, .. } = &struct_type {
+                    for (method_name, func) in methods {
+                        let is_static = s.get_field_mods(method_name)
+                            .map(|(_, s, _)| s)
+                            .unwrap_or(false);
+                        if !is_static {
+                            continue;
+                        }
+
+                        if let Type::Function { parameter_types, return_type } = &func.get_type() {
+                            if parameter_types.len() == 1 &&
+                            type_matches(&parameter_types[0], &other_type) &&
+                            type_matches(&return_type, &struct_type) {
+                                return self.raise_with_help(
+                                    "TypeError",
+                                    &format!("No applicable struct operation found for types '{}' and '{}'", struct_type.display_simple(), other_type.display_simple()),
+                                    &format!("Try calling '{}.{}({})'", method_name, method_name, format_value(&other)),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                return self.raise(
+                    "TypeError",
+                    &format!("No applicable struct operation found for types '{}' and '{}'", struct_type.display_simple(), other_type.display_simple())
+                );
+            }
+
+            _ => return self.raise(
+                    "TypeError",
+                    &format!("Struct operations are only supported between struct instances, got '{}' and '{}'", left.type_name(), right.type_name())
+                )
+        }
+    }
+
     fn make_operation(&mut self, left: Value, right: Value, mut operator: &str) -> Value {
         operator = match operator {
             "nein" => "!=",
@@ -8561,6 +8774,17 @@ impl Interpreter {
     
         if left.is_infinity() || right.is_infinity() {
             return self.raise("MathError", "Operation with Infinity is not allowed");
+        }
+
+        match (&left, &right) {
+            (Value::Struct(_), Value::Struct(_)) | (Value::Struct(_), _) | (_, Value::Struct(_)) => {
+                let res = self.handle_struct_operation(left, right, operator);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                return res;
+            }
+            _ => {}
         }
 
         let result = match operator {

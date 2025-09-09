@@ -1,5 +1,7 @@
 #include <std/macros>
 
+// https://www.youtube.com/watch?v=ctkpsRAxUSE
+
 a: list[int] = [0..5].collect()
 assert_eq!(a, ([0, 1, 2, 3, 4, 5]))
 

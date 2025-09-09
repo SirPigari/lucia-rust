@@ -569,7 +569,7 @@ impl Value {
             Value::Tuple(_) => Type::new_simple("tuple"),
             Value::Bytes(_) => Type::new_simple("bytes"),
             Value::Type(_) => Type::new_simple("type"),
-            Value::Function(_) => Type::new_simple("function"),
+            Value::Function(f) => f.get_type(),
             Value::Generator(_) => Type::new_simple("generator"),
             Value::Module(..) => Type::new_simple("object"),
             Value::Enum(e) => e.get_type(),
