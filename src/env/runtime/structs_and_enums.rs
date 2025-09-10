@@ -77,7 +77,7 @@ impl Struct {
     pub fn new(ty: Type) -> Self {
         Self {
             ty,
-            fields: HashMap::new(),
+            fields: HashMap::default(),
         }
     }
 
@@ -162,7 +162,7 @@ impl Struct {
     }
 
     pub fn get_properties(&self) -> HashMap<String, Variable> {
-        let mut map: HashMap<String, Variable> = HashMap::new();
+        let mut map: HashMap<String, Variable> = HashMap::default();
         for field in self.fields.iter() {
             let (is_public, is_static, is_final) = self.get_field_mods(&field.0).unwrap_or((true, false, false));
             map.insert(field.0.clone(), Variable::new_pt(

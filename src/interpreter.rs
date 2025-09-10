@@ -1070,13 +1070,13 @@ impl Interpreter {
     pub fn warn(&mut self, warning_str: &str) -> Value {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
-            file: self.file_path.clone(),
+            file: fix_path(self.file_path.clone()),
             line_string: "".to_string(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
         });
-        let loc_str = format!("{}:{}:{}", loc.file, loc.line_number, loc.range.0);
+        let loc_str = format!("{}:{}:{}", fix_path(loc.file), loc.line_number, loc.range.0);
 
 
         if self.config.debug {
@@ -3850,14 +3850,16 @@ impl Interpreter {
     
         let mut categorized: BTreeMap<&str, Vec<&String>> = BTreeMap::new();
     
-        for (name, var) in properties.iter() {
-            let category = match &var.value {
-                Value::Module(..) => "object",
-                Value::Function(_) if var.is_public() => "function",
-                _ if var.is_final() => "constant",
-                _ => "variable",
-            };
-            categorized.entry(category).or_default().push(name);
+        if self.config.debug {
+            for (name, var) in properties.iter() {
+                let category = match &var.value {
+                    Value::Module(..) => "object",
+                    Value::Function(_) if var.is_public() => "function",
+                    _ if var.is_final() => "constant",
+                    _ => "variable",
+                };
+                categorized.entry(category).or_default().push(name);
+            }
         }
     
         let order = ["object", "function", "constant", "variable"];
@@ -3891,16 +3893,18 @@ impl Interpreter {
                     return self.raise("ImportError", &format!("Variable '{}' not found in module '{}'", name, module_name));
                 }
             }
-            for &category in &order {
-                if let Some(n) = categorized.get(category) {
-                    for name in n {
-                        if !names.contains_key(name.as_str()) {
-                            continue;
-                        }
-                        if let Some(alias) = names.get(name.as_str()) {
-                            debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config, Some(self.use_colors.clone()));
-                        } else {
-                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+            if self.config.debug {
+                for &category in &order {
+                    if let Some(n) = categorized.get(category) {
+                        for name in n {
+                            if !names.contains_key(name.as_str()) {
+                                continue;
+                            }
+                            if let Some(alias) = names.get(name.as_str()) {
+                                debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config, Some(self.use_colors.clone()));
+                            } else {
+                                debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                            }
                         }
                     }
                 }
@@ -3911,10 +3915,12 @@ impl Interpreter {
             }
             Value::Null
         } else {
-            for &category in &order {
-                if let Some(names) = categorized.get(category) {
-                    for name in names {
-                        debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+            if self.config.debug {
+                for &category in &order {
+                    if let Some(names) = categorized.get(category) {
+                        for name in names {
+                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                        }
                     }
                 }
             }
@@ -7624,7 +7630,7 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "00__set_cfg__", "00__set_dir__"
+            "exit", "fetch", "exec", "eval", "warn", "00__set_cfg__", "00__set_dir__"
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
@@ -8164,6 +8170,22 @@ impl Interpreter {
                                 return self.raise("TypeError", "Expected a string in 'code' argument in eval");
                             }
                         }
+                        "warn" => {
+                            self.stack.pop();
+                            let msg = if let Some(msg) = named_args.get("message") {
+                                msg.clone()
+                            } else if !pos_args.is_empty() {
+                                pos_args[0].clone()
+                            } else {
+                                Value::Error("ValueError", "Missing 'message' argument in warn", None)
+                            };
+                            if let Value::String(s) = msg {
+                                self.warn(&s);
+                                return NULL;
+                            } else {
+                                return self.raise("TypeError", "Expected a string in 'message' argument in warn");
+                            }
+                        }
                         "00__set_cfg__" => {
                             self.stack.pop();
                             if let Some(Value::String(key)) = final_args_no_mods.get("key") {
@@ -8561,10 +8583,7 @@ impl Interpreter {
                 if struct_type_1 != struct_type_2 {
                     if let Type::Struct { methods, .. } = &struct_type_1 {
                         for (method_name, func) in methods {
-                            let is_static = s1.get_field_mods(method_name)
-                                .map(|(_, s, _)| s)
-                                .unwrap_or(false);
-                            if !is_static {
+                            if !func.is_static() {
                                 continue;
                             }
 
@@ -8574,8 +8593,27 @@ impl Interpreter {
                                 type_matches(&return_type, &struct_type_1) {
                                     return self.raise_with_help(
                                         "TypeError",
-                                        &format!("Cannot perform struct operation between different struct types: '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple()),
-                                        &format!("Try calling '{}.{}({})'", method_name, method_name, s2.display()),
+                                        &format!("Cannot perform struct operation between different struct types '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple()),
+                                        &format!("Try calling '{}.{}({})'", s1.display(), method_name, s2.display()),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    if let Type::Struct { methods, .. } = &struct_type_2 {
+                        for (method_name, func) in methods {
+                            if !func.is_static() {
+                                continue;
+                            }
+
+                            if let Type::Function { parameter_types, return_type } = &func.get_type() {
+                                if parameter_types.len() == 1 &&
+                                type_matches(&parameter_types[0], &struct_type_1) &&
+                                type_matches(&return_type, &struct_type_2) {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Cannot perform struct operation between different struct types '{}' and '{}'", struct_type_2.display_simple(), struct_type_1.display_simple()),
+                                        &format!("Try calling '{}.{}({})'", struct_type_2.display_simple(), method_name, s1.display()),
                                     );
                                 }
                             }
@@ -8584,7 +8622,7 @@ impl Interpreter {
 
                     return self.raise(
                         "TypeError",
-                        &format!("Cannot perform struct operation between different struct types: '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple())
+                        &format!("Cannot perform struct operation between different struct types '{}' and '{}'", struct_type_1.display_simple(), struct_type_2.display_simple())
                     );
                 }
 
@@ -8625,10 +8663,6 @@ impl Interpreter {
                         match operator {
                             "==" => return Value::Boolean(s1 == s2),
                             "!=" => return Value::Boolean(s1 != s2),
-                            ">"  => return Value::Boolean(s1 >  s2),
-                            "<"  => return Value::Boolean(s1 <  s2),
-                            ">=" => return Value::Boolean(s1 >= s2),
-                            "<=" => return Value::Boolean(s1 <= s2),
                             _ => {
                                 return self.raise(
                                     "TypeError",
@@ -8721,10 +8755,7 @@ impl Interpreter {
 
                 if let Type::Struct { methods, .. } = &struct_type {
                     for (method_name, func) in methods {
-                        let is_static = s.get_field_mods(method_name)
-                            .map(|(_, s, _)| s)
-                            .unwrap_or(false);
-                        if !is_static {
+                        if !func.is_static() {
                             continue;
                         }
 
@@ -8737,6 +8768,27 @@ impl Interpreter {
                                     &format!("No applicable struct operation found for types '{}' and '{}'", struct_type.display_simple(), other_type.display_simple()),
                                     &format!("Try calling '{}.{}({})'", method_name, method_name, format_value(&other)),
                                 );
+                            }
+                        }
+                    }
+                }
+                if let Some((_, props)) = self.get_properties(&left) {
+                    for (method_name, var) in props {
+                        if let Value::Function(func) = var.value {
+                            if !func.is_static() {
+                                continue;
+                            }
+
+                            if let Type::Function { parameter_types, return_type } = &func.get_type() {
+                                if parameter_types.len() == 1 &&
+                                type_matches(&parameter_types[0], &other_type) &&
+                                type_matches(&return_type, &struct_type) {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("No applicable struct operation found for types '{}' and '{}'", struct_type.display_simple(), other_type.display_simple()),
+                                        &format!("Try calling '{}.{}({})'", method_name, method_name, format_value(&other)),
+                                    );
+                                }
                             }
                         }
                     }

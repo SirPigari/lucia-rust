@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path};
+use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path, escape_string, get_inner_string};
 use crate::env::runtime::precompile::precompile;
 use crate::env::runtime::types::Float;
 use std::ops::{Add, Sub, Mul, Div, Rem};
@@ -21,14 +21,14 @@ struct MangleContext {
 impl MangleContext {
     fn new() -> Self {
         Self {
-            mangled_names: vec![HashMap::new()],
+            mangled_names: vec![HashMap::default()],
             counter: 0,
             current_mangle_index: 0,
         }
     }
 
     fn enter_scope(&mut self) {
-        self.mangled_names.push(HashMap::new());
+        self.mangled_names.push(HashMap::default());
         self.current_mangle_index += 1;
     }
     fn exit_scope(&mut self) {
@@ -141,9 +141,9 @@ impl Preprocessor {
     pub fn new<P: Into<PathBuf>>(lib_dir: P, file_path: &str) -> Self {
         Self {
             lib_dir: lib_dir.into(),
-            defines: HashMap::new(),
-            aliases: HashMap::new(),
-            macros: HashMap::new(),
+            defines: HashMap::default(),
+            aliases: HashMap::default(),
+            macros: HashMap::default(),
             mangle_context: MangleContext::new(),
             file_path: file_path.to_string(),
         }
@@ -305,21 +305,25 @@ impl Preprocessor {
                                 "deprecated" => {
                                     macro_metadata.deprecated.0 = true;
                                     i += 1;
+                                    let mut msg = None;
                                     if i + 1 < tokens.len() && tokens[i].1 == "(" {
                                         i += 1;
-                                        let msg = if i + 1 < tokens.len() && tokens[i].0 == "STRING" {
-                                            i += 1;
-                                            Some(tokens[i].1.clone())
+                                        msg = if i + 1 < tokens.len() && tokens[i].0 == "STRING" {
+                                            match get_inner_string(&tokens[i].1) {
+                                                Ok(inner) => Some(inner),
+                                                Err(err) => return Err(create_err(&err, &tokens[i])),
+                                            }
                                         } else {
                                             return Err(create_err("Expected string after #deprecated(", &tokens[i]));
                                         };
+                                        i += 1;
                                         if tokens[i].1 != ")" {
                                             return Err(create_err("Expected ')' after #deprecated message", &tokens[i]));
                                         }
-                                        macro_metadata.deprecated.1 = msg;
                                     } else {
                                         i -= 1
                                     }
+                                    macro_metadata.deprecated.1 = msg;
                                 }
                                 "raw" => {
                                     macro_metadata.raw = true;
@@ -1114,6 +1118,7 @@ impl Preprocessor {
         let mangling_enabled = meta.mangling_enabled;
         let raw = meta.raw;
         let inherit_location = meta.inherit_location;
+        let deprecated: (bool, Option<String>) = meta.deprecated;
         let contextual = meta.contextual;
         let param_names = meta.args.clone();
         let body = meta.body.clone();
@@ -1197,7 +1202,7 @@ impl Preprocessor {
                 ), &tokens[i - 1]));
         }
 
-        let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::new();
+        let mut replacement_map: HashMap<&str, Vec<Token>> = HashMap::default();
 
         for (idx, (name, default)) in param_names.iter().enumerate() {
             if Some(idx) == variadic_pos {
@@ -1355,6 +1360,26 @@ impl Preprocessor {
             }
 
             body_i += 1;
+        }
+
+        if deprecated.0 {
+            let warning_msg = if let Some(msg) = deprecated.1 {
+                msg
+            } else {
+                format!("Macro {} is deprecated", macro_name)
+            };
+
+            let warning_str = match escape_string(&warning_msg) {
+                Ok(s) => s,
+                Err(_) => warning_msg.replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"),
+            };
+
+            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), "warn".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
+            result.push(Token("STRING".to_string(), format!("\"{}\"", warning_str), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
         }
 
         if grouping_enabled {

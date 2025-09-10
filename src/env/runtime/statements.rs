@@ -82,7 +82,7 @@ impl Statement {
     pub fn convert_to_hashmap(&self) -> HashMap<Value, Value> {
         match self {
             Statement::Statement { keys, values, loc } => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::default();
                 for (key, value) in keys.iter().zip(values.iter()) {
                     map.insert(key.clone(), value.clone());
                 }
@@ -108,7 +108,7 @@ impl Statement {
                 map
             },
             Statement::Null => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::default();
                 map.insert(Value::String("_loc".to_string()), Value::Map {
                     keys: vec![
                         Value::String("_file".to_string()),

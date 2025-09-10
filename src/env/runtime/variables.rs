@@ -29,7 +29,7 @@ impl Variable {
             is_static,
             is_public,
             is_final,
-            properties: HashMap::new(),
+            properties: HashMap::default(),
         }
     }
 
@@ -41,7 +41,7 @@ impl Variable {
             is_static,
             is_public,
             is_final,
-            properties: HashMap::new(),
+            properties: HashMap::default(),
         }
     }
 
@@ -1601,7 +1601,7 @@ impl Variable {
                                     let result = interpreter.call_function(
                                         func.get_name(),
                                         vec![key.clone(), val.clone()],
-                                        HashMap::new(),
+                                        HashMap::default(),
                                     );
                                     if result.is_truthy() {
                                         Some((key.clone(), val.clone()))
@@ -1643,7 +1643,7 @@ impl Variable {
                                     interpreter.call_function(
                                         func.get_name(),
                                         vec![key.clone(), val.clone()],
-                                        HashMap::new(),
+                                        HashMap::default(),
                                     )
                                 }).collect();
 

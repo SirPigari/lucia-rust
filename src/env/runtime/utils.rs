@@ -30,7 +30,7 @@ use imagnum::math::{
 };
 
 
-static STATIC_STORAGE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static STATIC_STORAGE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::default()));
 
 #[cfg(windows)]
 pub fn supports_color() -> bool {
@@ -452,6 +452,38 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     }
 }
 
+pub fn get_inner_string(s: &str) -> Result<String, String> {
+    let s = s.trim();
+
+    if s.is_empty() {
+        return Err("empty string".into());
+    }
+
+    let mut chars = s.chars();
+    while let Some(c) = chars.as_str().chars().next() {
+        if ['f', 'b', 'r'].contains(&c) {
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    let remaining = chars.as_str();
+
+    if remaining.len() < 2 {
+        return Err("not a quoted string".into());
+    }
+
+    let first_char = remaining.chars().next().unwrap();
+    let last_char = remaining.chars().last().unwrap();
+
+    if !['"', '\''].contains(&first_char) || first_char != last_char {
+        return Err("not a valid quoted string".into());
+    }
+
+    Ok(remaining[1..remaining.len()-1].to_string())
+}
+
 pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
@@ -868,7 +900,7 @@ pub fn sanitize_alias(alias: &str) -> String {
 }
 
 pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
 
     map.insert(
         "exit".to_string(),
@@ -921,6 +953,19 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         FunctionMetadata {
             name: "exec".to_string(),
             parameters: vec![Parameter::positional("code", "str")],
+            return_type: Type::new_simple("any"),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
+        "warn".to_string(),
+        FunctionMetadata {
+            name: "warn".to_string(),
+            parameters: vec![Parameter::positional("message", "str")],
             return_type: Type::new_simple("any"),
             is_public: true,
             is_static: true,
@@ -1485,7 +1530,7 @@ pub fn check_pattern(
     value: &Value,
     pattern: &Value,
 ) -> Result<(bool, HashMap<String, Value>), (String, String)> {
-    let mut variables: HashMap<String, Value> = HashMap::new();
+    let mut variables: HashMap<String, Value> = HashMap::default();
     fn inner(
         value: &Value,
         pat: &Value,
@@ -1618,7 +1663,7 @@ pub fn check_pattern(
     if matched {
         Ok((true, variables))
     } else {
-        Ok((false, HashMap::new()))
+        Ok((false, HashMap::default()))
     }
 }
 

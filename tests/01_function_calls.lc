@@ -18,4 +18,5 @@ styledprint("hello", end="✨")
 
 
 help()
+warn("this is a warning")
 exit()

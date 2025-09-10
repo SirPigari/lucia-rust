@@ -751,7 +751,7 @@ impl Value {
                 if keys.len() != values.len() {
                     return None;
                 }
-                let mut map = HashMap::new();
+                let mut map = HashMap::default();
                 for (key, value) in keys.iter().zip(values.iter()) {
                     if let Value::String(s) = key {
                         map.insert(s.clone(), value.clone());
@@ -768,15 +768,15 @@ impl Value {
         match self {
             Value::Map { keys, values } => {
                 if keys.len() != values.len() {
-                    return HashMap::new();
+                    return HashMap::default();
                 }
-                let mut map = HashMap::new();
+                let mut map = HashMap::default();
                 for (key, value) in keys.iter().zip(values.iter()) {
                     map.insert(key.clone(), value.clone());
                 }
                 map
             }
-            _ => HashMap::new(),
+            _ => HashMap::default(),
         }
     }
     pub fn is_null(&self) -> bool {

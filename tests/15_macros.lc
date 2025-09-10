@@ -73,7 +73,7 @@ g!()
 \, 42)
 
 // deprecated macro example
-// for now doesnt do anything special, just a marker
+// does the same as warn inside the macro
 #macro #deprecated("This macro is deprecated") deprecated_macro():
     print("This macro is deprecated")
 #endmacro

@@ -33,9 +33,8 @@ assert_eq!(sum(2, 3), 5.0)
 
 // precompile
 
-// precompile is not a function nor a macro, its basicly a directive that gets evaluated at preprocessor time
 i: int = #precompile: 1 + 2 #endprecompile
-assert_eq!(i, 3)  // precompile cannot be used in macros
+assert_eq!(i, 3)
 
 #macro #no-group precompile!($expr):
     #precompile: $expr #endprecompile
