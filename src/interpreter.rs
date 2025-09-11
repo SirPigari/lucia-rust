@@ -8202,6 +8202,9 @@ impl Interpreter {
                         }
                         "00__set_cfg__" => {
                             self.stack.pop();
+                            if !self.config.allow_inline_config {
+                                return self.raise("PermissionError", "Modifying configuration at runtime is disabled.");
+                            }
                             if let Some(Value::String(key)) = final_args_no_mods.get("key") {
                                 if let Some(value) = final_args_no_mods.get("value") {
                                     if let Value::Int(num_wrapper) = value {

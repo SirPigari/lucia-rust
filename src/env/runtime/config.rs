@@ -20,6 +20,7 @@ pub struct Config {
     pub cache_format: CacheFormat,
     pub allow_fetch: bool,
     pub allow_unsafe: bool,
+    pub allow_inline_config: bool,
     pub home_dir: String,
     pub stack_size: usize,
     pub version: String,
@@ -52,6 +53,7 @@ impl Default for Config {
             warnings: true,
             allow_fetch: true,
             allow_unsafe: false,
+            allow_inline_config: false,
             home_dir: "lucia/src/env/".to_string(),
             stack_size: 16777216, // 16 MB
             color_scheme: ColorScheme {
@@ -145,6 +147,14 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected a boolean value for 'allow_unsafe'".to_string())
             }
         }
+        "allow_inline_config" => {
+            if let Value::Boolean(val) = value {
+                config.allow_inline_config = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'allow_inline_config'".to_string())
+            }
+        }
         "home_dir" => {
             if let Value::String(val) = value {
                 config.home_dir = val;
@@ -210,6 +220,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "cache_format" => Value::String(config.cache_format.to_string()),
         "allow_fetch" => Value::Boolean(config.allow_fetch),
         "allow_unsafe" => Value::Boolean(config.allow_unsafe),
+        "allow_inline_config" => Value::Boolean(config.allow_inline_config),
         "home_dir" => Value::String(config.home_dir.clone()),
         "stack_size" => Value::Int(Int::from_i64(config.stack_size as i64)),
         "version" => Value::String(config.version.clone()),

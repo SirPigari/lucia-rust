@@ -6,6 +6,7 @@
   "use_lucia_traceback": true,
   "warnings": true,
   "cache_format": "no_cache",
+  "allow_inline_config": true,
   "allow_fetch": true,
   "allow_unsafe": true,
   "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
