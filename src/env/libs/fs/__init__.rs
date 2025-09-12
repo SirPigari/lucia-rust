@@ -4,16 +4,140 @@ use std::io::{Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::env as std_env;
+use std::fs::File;
 
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, fix_path};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::insert_native_fn;
 
+use hound::{WavWriter, WavSpec, SampleFormat};
+use symphonia::core::audio::{SampleBuffer};
+use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::default::get_probe;
+
 // This module provides file system operations and utilities.
 // It includes functions for reading and writing files, checking file existence, and manipulating file paths.
 // Lucia version 2.0.0, module: fs@0.4.0
+
+fn convert_audio_file(input: &str, output: &str) -> Result<(), String> {
+    let file = File::open(input).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let probed = get_probe()
+        .format(
+            &Default::default(),
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut format = probed.format;
+
+    let track = format
+        .default_track()
+        .ok_or_else(|| "no default track".to_string())?;
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| e.to_string())?;
+
+    let spec = WavSpec {
+        channels: track
+            .codec_params
+            .channels
+            .ok_or_else(|| "unknown channel count".to_string())?
+            .count() as u16,
+        sample_rate: track
+            .codec_params
+            .sample_rate
+            .ok_or_else(|| "unknown sample rate".to_string())?,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer =
+        WavWriter::create(Path::new(output), spec).map_err(|e| e.to_string())?;
+    let mut sample_buf: Option<SampleBuffer<i16>> = None;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(_) => break,
+        };
+
+        let decoded = decoder.decode(&packet).map_err(|e| e.to_string())?;
+        let buf = match &mut sample_buf {
+            Some(buf) => {
+                buf.copy_interleaved_ref(decoded);
+                buf
+            }
+            None => {
+                let spec = *decoded.spec();
+                let capacity = decoded.capacity() as u64;
+                let _ = sample_buf.insert(SampleBuffer::<i16>::new(capacity, spec));
+                sample_buf.as_mut().unwrap()
+            }
+        };
+
+        for sample in buf.samples() {
+            writer.write_sample(*sample).map_err(|e| e.to_string())?;
+        }
+    }
+
+    writer.finalize().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn convert_audio_file_handler(args: &HashMap<String, Value>) -> Value {
+    if let (Some(Value::String(input)), Some(Value::String(output))) =
+        (args.get("input"), args.get("output"))
+    {
+        match convert_audio_file(input, output) {
+            Ok(_) => Value::Null,
+            Err(e) => Value::Error("ConversionError", to_static(e), None),
+        }
+    } else {
+        Value::Error("TypeError", "expected 'input' and 'output' as strings", None)
+    }
+}
+
+fn fix_path_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(path)) = args.get("path") {
+        let fixed_path = fix_path(path.to_string());
+        Value::String(fixed_path)
+    } else {
+        Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
+
+fn basename_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(path)) = args.get("path") {
+        if let Some(name) = Path::new(path).file_name() {
+            if let Some(name_str) = name.to_str() {
+                return Value::String(name_str.to_string());
+            }
+        }
+        Value::Error("ValueError", "could not extract basename", None)
+    } else {
+        Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
+
+fn extension_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(path)) = args.get("path") {
+        if let Some(ext) = Path::new(path).extension() {
+            if let Some(ext_str) = ext.to_str() {
+                return Value::String(ext_str.to_string());
+            }
+        }
+        Value::Error("ValueError", "could not extract extension", None)
+    } else {
+        Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
 
 fn write_file_handler(args: &HashMap<String, Value>) -> Value {
     if let (Some(Value::String(path)), Some(Value::String(content))) =
@@ -32,6 +156,17 @@ fn read_file_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::read_to_string(path) {
             Ok(data) => Value::String(data),
+            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+        }
+    } else {
+        Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
+
+fn read_file_to_bytes_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(path)) = args.get("path") {
+        match fs::read(path) {
+            Ok(data) => Value::Bytes(data),
             Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
         }
     } else {
@@ -61,6 +196,15 @@ fn append_file_handler(args: &HashMap<String, Value>) -> Value {
 fn file_exists_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         let exists = Path::new(path).exists();
+        Value::Boolean(exists)
+    } else {
+        Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
+
+fn dir_exists_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(path)) = args.get("path") {
+        let exists = Path::new(path).is_dir();
         Value::Boolean(exists)
     } else {
         Value::Error("TypeError", "expected 'path' as string", None)
@@ -241,6 +385,13 @@ pub fn register() -> HashMap<String, Variable> {
     );
     insert_native_fn!(
         map,
+        "read_file_to_bytes",
+        read_file_to_bytes_handler,
+        vec![Parameter::positional("path", "str")],
+        "bytes"
+    );
+    insert_native_fn!(
+        map,
         "append_file",
         append_file_handler,
         vec![
@@ -253,6 +404,13 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "file_exists",
         file_exists_handler,
+        vec![Parameter::positional("path", "str")],
+        "bool"
+    );
+    insert_native_fn!(
+        map,
+        "dir_exists",
+        dir_exists_handler,
         vec![Parameter::positional("path", "str")],
         "bool"
     );
@@ -320,6 +478,37 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("path", "str"),
             Parameter::positional_optional("unit", "str", "AUTO".into())
         ],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "convert_audio_file",
+        convert_audio_file_handler,
+        vec![
+            Parameter::positional("input", "str"),
+            Parameter::positional("output", "str")
+        ],
+        "void"
+    );
+    insert_native_fn!(
+        map,
+        "basename",
+        basename_handler,
+        vec![Parameter::positional("path", "str")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "extension",
+        extension_handler,
+        vec![Parameter::positional("path", "str")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "fix_path",
+        fix_path_handler,
+        vec![Parameter::positional("path", "str")],
         "str"
     );
 

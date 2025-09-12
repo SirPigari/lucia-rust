@@ -10,12 +10,57 @@ use std::sync::Mutex;
 
 static STORED_ARGS: Lazy<Mutex<Vec<StoredValue>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
+#[derive(Debug)]
 enum StoredValue {
     Int(i64),
-    Float(f64),
     Boolean(u8),
     Ptr(*const std::ffi::c_void),
     Null,
+}
+
+/// Converts a Lucia pointer to a Lucia list, given the element type.
+/// # Safety
+/// The caller must ensure the pointer is valid and points to a contiguous array of elements of the given type.
+pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> Value {
+    use crate::env::runtime::value::Value;
+    let mut result = Vec::new();
+    match elem_type {
+        ValueType::Int => {
+            let int_ptr = ptr as *const i64;
+            for i in 0..len {
+                let val = unsafe { *int_ptr.add(i) };
+                result.push(Value::Int(val.into()));
+            }
+        }
+        ValueType::Float => {
+            let float_ptr = ptr as *const f64;
+            for i in 0..len {
+                let val = unsafe { *float_ptr.add(i) };
+                result.push(Value::Float(val.into()));
+            }
+        }
+        ValueType::Boolean => {
+            let bool_ptr = ptr as *const u8;
+            for i in 0..len {
+                let val = unsafe { *bool_ptr.add(i) } != 0;
+                result.push(Value::Boolean(val));
+            }
+        }
+        ValueType::Ptr => {
+            let ptr_ptr = ptr as *const *const c_void;
+            for i in 0..len {
+                let val = unsafe { *ptr_ptr.add(i) };
+                result.push(Value::Pointer(Arc::new(Value::Int((val as usize as i64).into()))));
+            }
+        }
+        ValueType::Void => {
+            // Void type: treat as nulls
+            for _ in 0..len {
+                result.push(Value::Null);
+            }
+        }
+    }
+    Value::List(result)
 }
 
 unsafe impl Send for StoredValue {}
@@ -106,13 +151,14 @@ impl LuciaFfiFn {
                     }
                 }
                 (Value::Float(f), ValueType::Float) => {
-                    let val = f.to_f64().unwrap_or(0.0);
-                    stored_args.push(StoredValue::Float(val));
-                    if let StoredValue::Float(stored_val) = stored_args.last().unwrap() {
-                        Ok(Arg::new(stored_val))
-                    } else {
-                        unreachable!()
-                    }
+                    let val_f32 = match f.to_f64() {
+                        Ok(v) => v as f32,
+                        Err(_) => f.to_str().parse::<f32>().unwrap_or(0.0),
+                    };
+                    let float_box = Box::new(val_f32);
+                    let float_ptr = &*float_box as *const f32;
+                    stored_args.push(StoredValue::Ptr(float_ptr as *const std::ffi::c_void));
+                    Ok(Arg::new(&*float_box))
                 }
                 (Value::Boolean(b), ValueType::Boolean) => {
                     stored_args.push(StoredValue::Boolean(*b as u8));

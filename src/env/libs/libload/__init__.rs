@@ -22,8 +22,9 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::functions::Function;
+use crate::env::runtime::types::Type;
 
-use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType};
+use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType, get_list};
 
 use crate::{insert_native_fn};
 
@@ -60,6 +61,98 @@ pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
     locked.push(cstring);
 
     Value::Pointer(Arc::new(Value::Int((ptr as usize as i64).into())))
+}
+
+
+fn get_list_native(args: &HashMap<String, Value>) -> Value {
+    let ptr_val = args.get("ptr");
+    let type_val = args.get("type");
+    let len_val = args.get("len");
+    let ptr = match ptr_val {
+        Some(Value::Pointer(arc)) => {
+            if let Value::Int(i) = arc.as_ref() {
+                let raw = i.to_i64().unwrap_or(0) as usize;
+                raw as *const std::ffi::c_void
+            } else {
+                return Value::Error("TypeError", "Pointer must wrap Int", None);
+            }
+        }
+        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+    };
+    let len = match len_val {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected length int argument", None),
+    };
+    match type_val {
+        Some(Value::String(s)) => {
+            let elem_type = match s.as_str() {
+                "int" => ValueType::Int,
+                "float" => ValueType::Float,
+                "bool" => ValueType::Boolean,
+                "ptr" => ValueType::Ptr,
+                "void" => ValueType::Void,
+                _ => return Value::Error("TypeError", "Unknown type string", None),
+            };
+            unsafe { get_list(ptr, elem_type, len) }
+        }
+        Some(Value::Type(t)) => {
+            match t {
+                Type::Struct { name: _, fields, .. } => {
+                    let mut result = Vec::new();
+                    use crate::env::runtime::utils::get_type_from_statement;
+                    let struct_size: usize = fields.iter().map(|(_, field_type, _)| {
+                        let type_name = get_type_from_statement(field_type).unwrap_or_else(|| "any".to_string());
+                        match type_name.as_str() {
+                            "int" => std::mem::size_of::<i64>(),
+                            "float" => std::mem::size_of::<f64>(),
+                            "bool" => std::mem::size_of::<u8>(),
+                            "ptr" => std::mem::size_of::<*const std::ffi::c_void>(),
+                            _ => 0,
+                        }
+                    }).sum();
+                    for i in 0..len {
+                        let struct_ptr = (ptr as usize + i * struct_size) as *const u8;
+                        let mut field_map = HashMap::new();
+                        let mut offset = 0;
+                        for (field_name, field_type, _) in fields {
+                            let type_name = get_type_from_statement(field_type).unwrap_or_else(|| "any".to_string());
+                            let val = match type_name.as_str() {
+                                "int" => {
+                                    let p = unsafe { struct_ptr.add(offset) as *const i64 };
+                                    offset += std::mem::size_of::<i64>();
+                                    Value::Int(unsafe { (*p).into() })
+                                }
+                                "float" => {
+                                    let p = unsafe { struct_ptr.add(offset) as *const f64 };
+                                    offset += std::mem::size_of::<f64>();
+                                    Value::Float(unsafe { (*p).into() })
+                                }
+                                "bool" => {
+                                    let p = unsafe { struct_ptr.add(offset) as *const u8 };
+                                    offset += std::mem::size_of::<u8>();
+                                    Value::Boolean(unsafe { *p != 0 })
+                                }
+                                "ptr" => {
+                                    let p = unsafe { struct_ptr.add(offset) as *const *const std::ffi::c_void };
+                                    offset += std::mem::size_of::<*const std::ffi::c_void>();
+                                    Value::Pointer(Arc::new(Value::Int(unsafe { *p as usize as i64 }.into())))
+                                }
+                                _ => Value::Null,
+                            };
+                            field_map.insert(field_name.clone(), val);
+                        }
+                        result.push(Value::Map {
+                            keys: field_map.keys().cloned().map(Value::String).collect(),
+                            values: field_map.values().cloned().collect(),
+                        });
+                    }
+                    Value::List(result)
+                }
+                _ => Value::Error("TypeError", "Type must be struct for C struct list", None),
+            }
+        }
+        _ => Value::Error("TypeError", "Expected type string or struct type", None),
+    }
 }
 
 fn load_lib(args: &HashMap<String, Value>) -> Value {
@@ -301,6 +394,18 @@ pub fn register() -> HashMap<String, Variable> {
         create_str_ptr,
         vec![Parameter::positional("string", "str")],
         "any"
+    );
+
+    insert_native_fn!(
+        map,
+        "get_list",
+        get_list_native,
+        vec![
+            Parameter::positional("ptr", "any"),
+            Parameter::positional("type", "str"),
+            Parameter::positional("len", "int")
+        ],
+        "list"
     );
 
     map

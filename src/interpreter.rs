@@ -9376,6 +9376,8 @@ impl Interpreter {
                     }
                 } else if let Value::List(list) = &right {
                     Value::Boolean(list.contains(&left))
+                } else if let Value::Map { keys, values: _ } = &right {
+                    Value::Boolean(keys.contains(&left))
                 } else {
                     self.raise("TypeError", "Right operand must be a string or list for 'in' operation");
                     NULL

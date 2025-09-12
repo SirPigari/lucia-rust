@@ -452,6 +452,19 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     }
 }
 
+pub fn get_type_from_statement(stmt: &Statement) -> Option<String> {
+    let map = stmt.convert_to_hashmap();
+    match map.get(&Value::String("type".to_string())) {
+        Some(Value::String(type_str)) if type_str == "TYPE" => {
+            match map.get(&Value::String("value".to_string())) {
+                Some(Value::String(inner_type)) => Some(inner_type.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn get_inner_string(s: &str) -> Result<String, String> {
     let s = s.trim();
 
