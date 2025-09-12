@@ -58,7 +58,7 @@ impl Variable {
                 },
                 vec![],
                 "str",
-                true, true, true,
+                false, true, true,
                 None,
             )
         };
@@ -72,7 +72,7 @@ impl Variable {
                 },
                 vec![],
                 &self.value.type_name(),
-                true, true, true,
+                false, true, true,
                 None,
             )
         };
@@ -86,7 +86,7 @@ impl Variable {
                 },
                 vec![],
                 "bool",
-                true, true, true,
+                false, true, true,
                 None,
             )
         };
@@ -100,7 +100,7 @@ impl Variable {
                 },
                 vec![],
                 "bool",
-                true, true, true,
+                false, true, true,
                 None,
             )
         };
@@ -113,7 +113,7 @@ impl Variable {
                 },
                 vec![],
                 "bool",
-                true, true, true,
+                false, true, true,
                 None,
             )
         };
@@ -188,7 +188,7 @@ impl Variable {
                         },
                         vec![],
                         "bytes",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };  
@@ -209,7 +209,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("suffix", "str")],
                         "bool",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };        
@@ -230,7 +230,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("prefix", "str")],
                         "bool",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -246,7 +246,7 @@ impl Variable {
                         },
                         vec![],
                         "int",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -262,7 +262,7 @@ impl Variable {
                         },
                         vec![],
                         "float",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -283,7 +283,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("delimiter", "str")],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -308,7 +308,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("parts", "list")],
                         "str",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -324,7 +324,7 @@ impl Variable {
                         },
                         vec![],
                         "str",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -341,7 +341,7 @@ impl Variable {
                         },
                         vec![],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -463,7 +463,7 @@ impl Variable {
                         },
                         vec![],
                         "float",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };                
@@ -581,7 +581,7 @@ impl Variable {
                             Parameter::positional_optional("paren_neg", "bool", Value::Boolean(false)),
                         ],
                         "str",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -626,7 +626,7 @@ impl Variable {
                         },
                         vec![],
                         "int",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };                
@@ -761,7 +761,7 @@ impl Variable {
                             Parameter::positional_optional("paren_neg", "bool", Value::Boolean(false)),
                         ],
                         "str",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -785,7 +785,7 @@ impl Variable {
                         },
                         vec![Parameter::positional_optional("precision", "int", Value::Int(0.into()))],
                         "float",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -843,7 +843,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("item", "any")],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -864,7 +864,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("item", "list")],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -897,7 +897,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("ty", "type")],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -926,7 +926,7 @@ impl Variable {
                         },
                         vec![],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -957,7 +957,7 @@ impl Variable {
                         },
                         vec![],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -995,7 +995,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1033,7 +1033,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1129,7 +1129,7 @@ impl Variable {
                         },
                         vec![],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1160,7 +1160,7 @@ impl Variable {
                         },
                         vec![],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1201,7 +1201,7 @@ impl Variable {
                         },
                         vec![],
                         "int",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1239,7 +1239,7 @@ impl Variable {
                         },
                         vec![],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1278,7 +1278,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("ty", "type")],
                         "list",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1299,7 +1299,7 @@ impl Variable {
                         },
                         vec![],
                         "any",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1316,7 +1316,7 @@ impl Variable {
                         },
                         vec![],
                         "bool",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1337,7 +1337,7 @@ impl Variable {
                         },
                         vec![],
                         "any",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1365,7 +1365,7 @@ impl Variable {
                         },
                         vec![],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1395,7 +1395,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1425,7 +1425,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1456,7 +1456,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("n", "int")],
                         "generator",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1578,7 +1578,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("key", "any")],
                         "any",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1620,7 +1620,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "map",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1657,7 +1657,7 @@ impl Variable {
                         },
                         vec![Parameter::positional("f", "function")],
                         "map",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1711,7 +1711,7 @@ impl Variable {
                         },
                         vec![],
                         "any",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1735,7 +1735,7 @@ impl Variable {
                             Parameter::positional("default", "any")
                         ],
                         "any",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };
@@ -1753,7 +1753,7 @@ impl Variable {
                         },
                         vec![],
                         "int",
-                        true, true, true,
+                        false, true, true,
                         None,
                     )
                 };

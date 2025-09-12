@@ -1,7 +1,37 @@
 #ifndef LUCIA_STD_TYPES
 #define LUCIA_STD_TYPES true
 
-// this file is not finished yet
-public final typedef number = int | float
+// aliases
+public mutable typedef number = int | float
+public mutable typedef primitive = int | float | bool | str | void
+public mutable typedef ptr = &any
+
+// character type
+public final typedef Char[c] = str where (len(c) == 1)
+
+// fixed-size types
+public final typedef Int8[i]        = int where (-1 << 7 <= i && i <= (1 << 7) - 1)
+public final typedef Int16[i]       = int where (-1 << 15 <= i && i <= (1 << 15) - 1)
+public final typedef Int32[i]       = int where (-1 << 31 <= i && i <= (1 << 31) - 1)
+public final typedef Int64[i]       = int where (-1 << 63 <= i && i <= (1 << 63) - 1)
+
+public final typedef UInt8[i]       = int where (0 <= i && i <= (1 << 8) - 1)
+public final typedef UInt16[i]      = int where (0 <= i && i <= (1 << 16) - 1)
+public final typedef UInt32[i]      = int where (0 <= i && i <= (1 << 32) - 1)
+public final typedef UInt64[i]      = int where (0 <= i && i <= (1 << 64) - 1)
+
+public final typedef Float32[i]     = float where (i >= 2^-126 && i <= (2 - 2^-23) * 2^127)
+public final typedef Float64 [i]    = float where (i >= 2^-1022 && i <= (2 - 2^-52) * 2^1023)
+public final typedef Float128[i]    = float where (i >= 2^-16382 && i <= (2 - 2^-112) * 2^16383)
+
+public final typedef Byte = UInt8
+
+// impls
+#include "ops.lc"  // operator impls
+
+public final typedef Display = impl to_string[Self] -> str
+public final typedef Clone   = impl clone[Self] -> Self
+
+null
 
 #endif

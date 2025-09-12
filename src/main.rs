@@ -571,6 +571,102 @@ fn load_config(config_path: &Path) -> Result<Config, String> {
     Ok(config)
 }
 
+fn load_config_with_fallback(primary_path: &Path, fallback_path: &Path, env_path: &Path) -> Result<Config, String> {
+    if primary_path.exists() {
+        match load_config(primary_path) {
+            Ok(primary_config) => {
+                if fallback_path.exists() && fallback_path != primary_path {
+                    match load_config(fallback_path) {
+                        Ok(fallback_config) => {
+                            Ok(merge_configs(primary_config, fallback_config))
+                        }
+                        Err(_) => {
+                            Ok(primary_config)
+                        }
+                    }
+                } else {
+                    Ok(primary_config)
+                }
+            }
+            Err(_) => {
+                if fallback_path.exists() && fallback_path != primary_path {
+                    load_config(fallback_path)
+                } else {
+                    let default_config = create_default_config(env_path);
+                    Ok(default_config)
+                }
+            }
+        }
+    } else if fallback_path.exists() {
+        load_config(fallback_path)
+    } else {
+        let default_config = create_default_config(env_path);
+        Ok(default_config)
+    }
+}
+
+fn merge_configs(primary: Config, fallback: Config) -> Config {
+    Config {
+        version: if primary.version.is_empty() { fallback.version } else { primary.version },
+        moded: primary.moded,
+        debug: primary.debug,
+        debug_mode: if primary.debug_mode.is_empty() { fallback.debug_mode } else { primary.debug_mode },
+        supports_color: primary.supports_color,
+        use_lucia_traceback: primary.use_lucia_traceback,
+        warnings: primary.warnings,
+        cache_format: primary.cache_format,
+        allow_fetch: primary.allow_fetch,
+        allow_unsafe: primary.allow_unsafe,
+        allow_inline_config: primary.allow_inline_config,
+        home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
+        stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
+        color_scheme: merge_color_schemes(primary.color_scheme, fallback.color_scheme),
+    }
+}
+
+fn merge_color_schemes(primary: ColorScheme, fallback: ColorScheme) -> ColorScheme {
+    ColorScheme {
+        exception: if primary.exception.is_empty() { fallback.exception } else { primary.exception },
+        warning: if primary.warning.is_empty() { fallback.warning } else { primary.warning },
+        help: if primary.help.is_empty() { fallback.help } else { primary.help },
+        debug: if primary.debug.is_empty() { fallback.debug } else { primary.debug },
+        comment: if primary.comment.is_empty() { fallback.comment } else { primary.comment },
+        input_arrows: if primary.input_arrows.is_empty() { fallback.input_arrows } else { primary.input_arrows },
+        note: if primary.note.is_empty() { fallback.note } else { primary.note },
+        output_text: if primary.output_text.is_empty() { fallback.output_text } else { primary.output_text },
+        info: if primary.info.is_empty() { fallback.info } else { primary.info },
+    }
+}
+
+fn create_default_config(env_path: &Path) -> Config {
+    Config {
+        version: VERSION.to_string(),
+        moded: false,
+        debug: false,
+        debug_mode: "normal".to_string(),
+        supports_color: true,
+        use_lucia_traceback: true,
+        warnings: true,
+        cache_format: CacheFormat::NoCache,
+        allow_fetch: true,
+        allow_unsafe: false,
+        allow_inline_config: true,
+        home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
+        stack_size: 16777216,
+        color_scheme: ColorScheme {
+            exception: "#F44350".to_string(),
+            warning: "#F5F534".to_string(),
+            help: "#21B8DB".to_string(),
+            debug: "#434343".to_string(),
+            comment: "#757575".to_string(),
+            input_arrows: "#136163".to_string(),
+            note: "#1CC58B".to_string(),
+            output_text: "#BCBEC4".to_string(),
+            info: "#9209B3".to_string(),
+        },
+    }
+}
+
 fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
     let default_config = Config {
         version: VERSION.to_string(),
@@ -583,6 +679,7 @@ fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
         cache_format: CacheFormat::NoCache,
         allow_fetch: true,
         allow_unsafe: false,
+        allow_inline_config: true,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
         stack_size: 16777216,
         color_scheme: ColorScheme {
@@ -621,6 +718,55 @@ fn create_libs_file(path: &Path) -> io::Result<()> {
     fs::write(&path, libs_str)
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to write libs file"))?;
     Ok(())
+}
+
+fn load_project_flags(project_env_path: &Path) -> Vec<String> {
+    let flags_path = project_env_path.join("flags.json");
+    
+    if !flags_path.exists() {
+        return vec![];
+    }
+
+    let flags_content = match fs::read_to_string(&flags_path) {
+        Ok(content) => content,
+        Err(_) => {
+            eprintln!("Warning: Failed to read flags.json from project environment");
+            return vec![];
+        }
+    };
+
+    let flags_json: serde_json::Value = match serde_json::from_str(&flags_content) {
+        Ok(json) => json,
+        Err(e) => {
+            eprintln!("Warning: Failed to parse flags.json: {}", e);
+            return vec![];
+        }
+    };
+
+    match flags_json {
+        serde_json::Value::Array(arr) => {
+            arr.into_iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        }
+        serde_json::Value::Object(obj) => {
+            obj.into_iter()
+                .map(|(k, v)| {
+                    if let Some(s) = v.as_str() {
+                        format!("--{}={}", k, s)
+                    } else if v.is_boolean() && v.as_bool().unwrap_or(false) {
+                        format!("--{}", k)
+                    } else {
+                        format!("--{}={}", k, v.to_string().trim_matches('"'))
+                    }
+                })
+                .collect()
+        }
+        _ => {
+            eprintln!("Warning: flags.json must be an array or object");
+            vec![]
+        }
+    }
 }
 
 fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Result<()> {
@@ -679,9 +825,23 @@ fn lucia(
     dump_ast_flag: bool,
     disable_preprocessor: bool,
     argv: Vec<String>,
-    timer_flag: bool
+    timer_flag: bool,
+    command_to_run: Option<String>,
+    project_env_path: Option<PathBuf>
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
+
+    if let Some(code) = command_to_run {
+        let debug_mode_some = if config.debug {
+            Some(config.debug_mode.clone())
+        } else {
+            None
+        };
+        
+        std_env::set_current_dir(&cwd).ok();
+        execute_code_string(code, &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
+        return;
+    }
 
     if !non_flag_args.is_empty() {
         for file_path in non_flag_args {
@@ -694,7 +854,7 @@ fn lucia(
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -704,7 +864,7 @@ fn lucia(
         };
 
         std_env::set_current_dir(&cwd).ok();
-        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag);
+        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
     }
 }
 
@@ -720,7 +880,8 @@ fn execute_file(
     dump_dir: (&str, bool),
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
-    timer_flag: bool
+    timer_flag: bool,
+    project_env_path: Option<&PathBuf>
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
@@ -744,7 +905,7 @@ fn execute_file(
         }
 
         let file_content_load_time = Instant::now();
-        let file_content = match fs::read_to_string(path) {
+        let mut file_content = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(e) => {
                 handle_error(&Error::with_help(
@@ -756,6 +917,12 @@ fn execute_file(
                 exit(1);
             }
         };
+        
+        let include_content = load_include_file(project_env_path);
+        if !include_content.is_empty() {
+            file_content = include_content + &file_content;
+        }
+        
         if timer_flag {
             println!("{}", format!("{}File content load time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), file_content_load_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
         }
@@ -987,6 +1154,160 @@ fn execute_file(
     }
 }
 
+fn load_include_file(project_env_path: Option<&PathBuf>) -> String {
+    if let Some(env_path) = project_env_path {
+        let include_file = env_path.join("include.lc");
+        if include_file.exists() {
+            match fs::read_to_string(&include_file) {
+                Ok(content) => {
+                    eprintln!("{}", &format!("Project environment: Loading include.lc from {:?}", fix_path(include_file.display().to_string())).dimmed());
+                    return "// include.lc\n\n".to_string() + &content + "\n";
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    String::new()
+}
+
+fn execute_code_string(
+    code: String,
+    config: &Config,
+    disable_preprocessor: bool,
+    home_dir_path: PathBuf,
+    config_path: PathBuf,
+    _debug_mode: Option<String>,
+    argv: &Vec<String>,
+    dump_dir: (&str, bool),
+    dump_pp_flag: &bool,
+    dump_ast_flag: &bool,
+    timer_flag: bool,
+    project_env_path: Option<&PathBuf>
+) {
+    let cache_dir = home_dir_path.join(".cache");
+    if !cache_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+            debug_log(&format!("Failed to create cache directory: {}", e), &config);
+        } else if cfg!(windows) {
+            let status = Command::new("attrib")
+                .args(&["+h", cache_dir.to_str().unwrap()])
+                .output();
+            if let Err(e) = status {
+                debug_log(&format!("Failed to hide cache directory: {}", e), &config);
+            }
+        }
+    }
+
+    let include_content = load_include_file(project_env_path);
+    let full_code = include_content.clone() + &code;
+
+    let file_content = full_code.clone();
+    
+    let lexering_time = Instant::now();
+    let raw_tokens = Lexer::new(&full_code, "<-c>").tokenize();
+    if timer_flag {
+        println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+    }
+
+    let processed_tokens = if !disable_preprocessor {
+        let preprocessing_time = Instant::now();
+        let mut preprocessor = Preprocessor::new(
+            home_dir_path.join("libs"),
+            "<-c>",
+        );
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let res = match preprocessor.process(raw_tokens.clone(), &current_dir) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                handle_error(&e, &file_content, &config);
+                exit(1);
+            }
+        };
+        if timer_flag {
+            println!("{}", format!("{}Preprocessing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), preprocessing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+        }
+        res
+    } else {
+        raw_tokens
+    };
+
+    let parsing_time = Instant::now();
+    let tokens: Vec<Token> = processed_tokens.clone();
+    let mut parser = Parser::new(tokens.clone());
+
+    let statements = match parser.parse_safe() {
+        Ok(stmts) => stmts,
+        Err(error) => {
+            handle_error(&error, &file_content, &config);
+            exit(1);
+        }
+    };
+    if timer_flag {
+        println!("{}", format!("{}Parsing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), parsing_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
+    }
+
+    if *dump_pp_flag && !processed_tokens.is_empty() {
+        let p = if dump_dir.1 {
+            dump_dir.0.to_string()
+        } else {
+            ".".to_string()
+        };
+        dump_pp(
+            processed_tokens.iter().collect(),
+            &p,
+            "<-c>",
+            &config,
+        );
+    }
+
+    if *dump_ast_flag && dump_dir.1 {
+        let p = if dump_dir.1 {
+            dump_dir.0.to_string()
+        } else {
+            ".".to_string()
+        };
+        dump_ast(
+            statements.iter().collect(),
+            &p,
+            "<-c>",
+            &config,
+        );
+    }
+
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut interpreter = Interpreter::new(
+        config.clone(),
+        config.supports_color,
+        "<-c>",
+        &current_dir,
+        (
+            home_dir_path.join("libs"),
+            config_path.clone(),
+            !disable_preprocessor,
+        ),
+        argv,
+    );
+
+    let interpreter_time_start = Instant::now();
+    let result = interpreter.interpret(statements, false);
+
+    if timer_flag {
+        println!("{}", format!("{}Interpreter time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), interpreter_time_start.elapsed(), hex_to_ansi("reset", config.supports_color)));
+    }
+
+    match result {
+        Ok(value) => {
+            if !matches!(value, Value::Null) {
+                println!("{}", format_value(&value));
+            }
+        }
+        Err(error) => {
+            handle_error(&error, &file_content, &config);
+            exit(1);
+        }
+    }
+}
+
 fn repl(
     config: Config,
     disable_preprocessor: bool,
@@ -998,7 +1319,8 @@ fn repl(
     dump_dir: (&str, bool),
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
-    timer_flag: bool
+    timer_flag: bool,
+    project_env_path: Option<&PathBuf>
 ) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
@@ -1024,6 +1346,40 @@ fn repl(
         let cache_dir = home_dir_path.join(".cache");
         if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
             interpreter.set_cache(cache);
+        }
+    }
+
+    let include_content = load_include_file(project_env_path);
+    if !include_content.is_empty() {
+        let raw_tokens = Lexer::new(&include_content, "<include.lc>").tokenize();
+
+        let mut preprocessor_for_include = Preprocessor::new(
+            home_dir_path.join("libs"),
+            "<include.lc>",
+        );
+
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let processed_tokens = if !disable_preprocessor {
+            match preprocessor_for_include.process(raw_tokens.clone(), &current_dir) {
+                Ok(toks) => toks,
+                Err(e) => {
+                    handle_error(&e, &include_content, &config);
+                    return;
+                }
+            }
+        } else {
+            raw_tokens
+        };
+
+        let mut parser = Parser::new(processed_tokens);
+        let statements = parser.parse_safe().unwrap_or_else(|error| {
+            handle_error(&error, &include_content, &config);
+            vec![]
+        });
+
+        if let Err(error) = interpreter.interpret(statements, false) {
+            handle_error(&error, &include_content, &config);
+            return;
         }
     }
 
@@ -1409,7 +1765,6 @@ fn bundle(
 
 fn main() {
     let vec_args: Vec<String> = std_env::args().collect();
-    let args: HashSet<String> = vec_args.clone().into_iter().collect();
 
     panic::set_hook(Box::new(|panic_info| {
         const CUSTOM_PANIC_MARKER: u8 = 0x1B;
@@ -1522,6 +1877,9 @@ fn main() {
         ("--argv=<args>", "Pass additional arguments to the interpreter as a JSON array"),
         ("--timer, -t", "Enable timing information"),
         ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
+        ("--bundle, -b", "Bundle the script and its dependencies into a single executable (Windows only)"),
+        ("--no-project-env", "Disable project environment (.lucia/) detection"),
+        ("-c=<code>, --code=<code>", "Execute code directly from command line"),
     ];
 
     let mut activate_flag = false;
@@ -1543,6 +1901,49 @@ fn main() {
     let mut cls_cache_flag = false;
     let mut argv_arg: Option<String> = None;
     let mut timer_flag = false;
+    let mut _no_project_env_flag = false;
+    let mut command_to_run: Option<String> = None;
+
+    let project_env_path = cwd.join(".lucia");
+    let use_project_env = !vec_args.contains(&"--no-project-env".to_string()) && project_env_path.exists() && project_env_path.is_dir();
+    
+    let mut additional_args = Vec::new();
+    if use_project_env {
+        if !vec_args.contains(&"--quiet".to_string()) && !vec_args.contains(&"-q".to_string()) {
+            eprintln!("{}", &format!("Project environment: Loading environment from {:?}", fix_path(project_env_path.display().to_string())).dimmed());
+        }
+        additional_args = load_project_flags(&project_env_path);
+    }
+
+    let mut processed_args = Vec::new();
+    let mut i = 0;
+    while i < vec_args.len() {
+        let arg = &vec_args[i];
+        if arg.starts_with("-c=") {
+            command_to_run = Some(arg[3..].to_string());
+        } else if arg.starts_with("--code=") {
+            command_to_run = Some(arg[7..].to_string());
+        } else {
+            processed_args.push(vec_args[i].clone());
+        }
+        i += 1;
+    }
+
+    let mut all_args = processed_args;
+    all_args.extend(additional_args);
+    let args: HashSet<String> = all_args.into_iter().collect();
+
+    let (primary_config_path, primary_libs_path) = if use_project_env && !vec_args.iter().any(|arg| arg.starts_with("--config=")) {
+        (project_env_path.join("config.json"), project_env_path.join("libs.json"))
+    } else {
+        (config_path.clone(), libs_path.clone())
+    };
+
+    let fallback_config_path = config_path.clone();
+    let fallback_libs_path = libs_path.clone();
+
+    config_path = primary_config_path;
+    libs_path = primary_libs_path;
 
     if args.contains("--bundle") || args.contains("-b") {
         let args: Vec<String> = vec_args.clone();
@@ -1552,7 +1953,6 @@ fn main() {
         let mut std_libs = (true, Vec::new());
         let mut run_flag = false;
         let mut opt_level = "0".to_string();
-        let mut command_to_run: Option<String> = None;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -1579,15 +1979,6 @@ fn main() {
                 "--std-libs" => std_libs.0 = true,
                 "--no-std-libs" | "-ns" => std_libs.0 = false,
                 "--run" | "-r" => run_flag = true,
-                "--cmd" | "-c" => {
-                    if i + 1 < args.len() {
-                        command_to_run = Some(args[i + 1].clone());
-                        i += 1;
-                    } else {
-                        eprintln!("Error: --cmd requires a value.");
-                        exit(1);
-                    }
-                }
                 arg if arg.starts_with("--std-lib=") => {
                     let lib = arg["--std-lib=".len()..].to_string();
                     std_libs.1.push(lib);
@@ -1666,6 +2057,7 @@ fn main() {
             "--allow-unsafe" => allow_unsafe = true,
             "--timer" | "-t" => timer_flag = true,
             "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
+            "--no-project-env" => _no_project_env_flag = true,
             arg if arg.starts_with("--stack-size=") => {
                 if let Ok(size) = arg["--stack-size=".len()..].parse::<usize>() {
                     stack_size = (size, true);
@@ -1800,17 +2192,9 @@ fn main() {
             exit(1);
         }
         config_path = PathBuf::from(config_path_str);
-        libs_path = config_path.parent().unwrap().join("libs");
+        libs_path = config_path.parent().unwrap().join("libs.json");
         if !config_path.exists() {
             eprintln!("Config file does not exist: {}", config_path.display());
-            exit(1);
-        }
-    }
-
-    if !config_path.exists() {
-        eprintln!("Config file not found at {}, creating empty config.", config_path.display());
-        if let Err(e) = std::fs::write(&config_path, "{}") {
-            eprintln!("Failed to create empty config file: {}", e);
             exit(1);
         }
     }
@@ -1829,51 +2213,39 @@ fn main() {
         }))
         .unwrap();
 
-    let mut config = if config_path.exists() {
+    let mut config = if config_arg.is_some() {
         match load_config(&config_path) {
             Ok(config) => config,
-            Err(_) => {
-                eprintln!("Failed to read config file, activating environment...");
+            Err(e) => {
+                eprintln!("Failed to load specified config file: {}", e);
+                exit(1);
+            }
+        }
+    } else {
+        match load_config_with_fallback(&config_path, &fallback_config_path, &enviroment_dir) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to load config: {}", e);
+                eprintln!("Attempting to activate environment...");
                 if let Err(err) = activate_environment(&enviroment_dir, true) {
                     eprintln!("Failed to activate environment: {}", err);
                     exit(1);
                 }
-                match load_config(&config_path) {
+                match load_config_with_fallback(&config_path, &fallback_config_path, &enviroment_dir) {
                     Ok(config) => config,
                     Err(e) => {
-                        eprintln!("Failed to load config file again after activation: {}", e);
-                        eprintln!("Creating new empty config file at {}", config_path.display());
-                        if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
+                        eprintln!("Failed to load config after activation: {}", e);
+                        eprintln!("Creating new config file at {}", fallback_config_path.display());
+                        if let Err(err) = create_config_file(&fallback_config_path, &enviroment_dir) {
                             eprintln!("Failed to create new config file: {}", err);
                             exit(1);
                         }
-                        load_config(&config_path).unwrap_or_else(|e| {
+                        load_config_with_fallback(&config_path, &fallback_config_path, &enviroment_dir).unwrap_or_else(|e| {
                             eprintln!("Failed to load new config file: {}", e);
                             exit(1);
                         })
                     }
                 }
-            }
-        }
-    } else {
-        eprintln!("Config file not found, activating environment...");
-        if let Err(err) = activate_environment(&enviroment_dir, true) {
-            eprintln!("Failed to activate environment: {}", err);
-            exit(1);
-        }
-        match load_config(&config_path) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("Failed to load config file after activation: {}", e);
-                eprintln!("Creating new empty config file at {}", config_path.display());
-                if let Err(err) = create_config_file(&config_path, &enviroment_dir) {
-                    eprintln!("Failed to create new config file: {}", err);
-                    exit(1);
-                }
-                load_config(&config_path).unwrap_or_else(|e| {
-                    eprintln!("Failed to load new config file: {}", e);
-                    exit(1);
-                })
             }
         }
     };
@@ -2100,7 +2472,16 @@ fn main() {
     }
 
     let libs_load_time_start = Instant::now();
-    match load_std_libs(&libs_path.display().to_string(), moded) {
+    
+    let libs_result = if libs_path.exists() {
+        load_std_libs(&libs_path.display().to_string(), moded)
+    } else if fallback_libs_path.exists() && fallback_libs_path != libs_path {
+        load_std_libs(&fallback_libs_path.display().to_string(), moded)
+    } else {
+        load_std_libs(&fallback_libs_path.display().to_string(), moded)
+    };
+    
+    match libs_result {
         Ok((_, (f, n))) => {
             if f {
                 print_colored(
@@ -2199,6 +2580,8 @@ fn main() {
                 disable_preprocessor,
                 argv,
                 timer_flag,
+                command_to_run,
+                if use_project_env { Some(project_env_path) } else { None },
             );
         })
         .unwrap();

@@ -1,0 +1,26 @@
+#ifndef LUCIA_STD_OPS
+#define LUCIA_STD_OPS true
+
+// operator impls
+
+// arithmetic
+public static final typedef Add     = impl op_add[Self, any] -> Self
+public static final typedef Sub     = impl op_sub[Self, any] -> Self
+public static final typedef Mul     = impl op_mul[Self, any] -> Self
+public static final typedef Div     = impl op_div[Self, any] -> Self
+public static final typedef Mod     = impl op_mod[Self, any] -> Self
+public static final typedef Neg     = impl op_neg[Self]      -> Self
+
+// comparison
+public static final typedef Eq      = impl op_eq[Self, any]   -> bool
+public static final typedef Ne      = impl op_ne[Self, any]   -> bool
+public static final typedef Gt      = impl op_gt[Self, any]   -> bool
+public static final typedef Lt      = impl op_lt[Self, any]   -> bool
+public static final typedef Ge      = impl op_ge[Self, any]   -> bool
+public static final typedef Le      = impl op_le[Self, any]   -> bool
+public static final typedef And     = impl op_and[Self, any] -> bool
+public static final typedef Or      = impl op_or[Self, any]   -> bool
+
+null
+
+#endif

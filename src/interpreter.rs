@@ -527,7 +527,7 @@ impl Interpreter {
                 }
             }
             Type::Impl { implementations } => {
-                if let Some((_, props)) = self.get_properties(value) {
+                if let Some((_, props)) = self.get_properties(value, true) {
                     let mut all_matched = true;
                     for (name, ty, mods) in implementations {
                         let mut is_static = false;
@@ -6653,7 +6653,7 @@ impl Interpreter {
         }
     }
 
-    fn get_properties(&mut self, object_value: &Value) -> Option<(String, HashMap<String, Variable>)> {
+    fn get_properties(&mut self, object_value: &Value, auto_init: bool) -> Option<(String, HashMap<String, Variable>)> {
         match object_value {
             Value::Module(o) => {
                 let props = o.get_properties();
@@ -6707,7 +6707,21 @@ impl Interpreter {
                 };
                 return Some((s.clone().name().to_string(), props));
             }
-            _ => None,
+            _ => {
+                if !auto_init {
+                    return None;
+                }
+                let mut tmp_var = Variable::new(
+                    "_".to_string(),
+                    object_value.clone(),
+                    object_value.type_name(),
+                    false,
+                    true,
+                    true,
+                );
+                tmp_var.init_properties(self);
+                return Some((object_value.get_type().display_simple(), tmp_var.properties));
+            }
         }
     }
 
@@ -6822,7 +6836,7 @@ impl Interpreter {
             _ => {}
         }
 
-        if let Some((var_name, props)) = self.get_properties(&object_value) {
+        if let Some((var_name, props)) = self.get_properties(&object_value, false) {
             object_variable.properties = props;
             object_variable.set_name(var_name.clone());
         } else if !object_variable.is_init() {
@@ -8188,6 +8202,9 @@ impl Interpreter {
                         }
                         "00__set_cfg__" => {
                             self.stack.pop();
+                            if !self.config.allow_inline_config {
+                                return self.raise("PermissionError", "Modifying configuration at runtime is disabled.");
+                            }
                             if let Some(Value::String(key)) = final_args_no_mods.get("key") {
                                 if let Some(value) = final_args_no_mods.get("value") {
                                     if let Value::Int(num_wrapper) = value {
@@ -8716,7 +8733,7 @@ impl Interpreter {
                         false,
                         true,
                     );
-                    if let Some((_, props)) = self.get_properties(&left) {
+                    if let Some((_, props)) = self.get_properties(&left, true) {
                         object_variable.properties = props;
                     } else {
                         return self.raise(
@@ -8772,7 +8789,7 @@ impl Interpreter {
                         }
                     }
                 }
-                if let Some((_, props)) = self.get_properties(&left) {
+                if let Some((_, props)) = self.get_properties(&left, true) {
                     for (method_name, var) in props {
                         if let Value::Function(func) = var.value {
                             if !func.is_static() {
