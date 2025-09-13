@@ -22,7 +22,9 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::functions::Function;
-use crate::env::runtime::types::Type;
+use crate::env::runtime::types::{Type, Int};
+use crate::env::runtime::statements::Statement;
+use crate::interpreter::Interpreter;
 
 use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType, get_list};
 
@@ -153,6 +155,62 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
         }
         _ => Value::Error("TypeError", "Expected type string or struct type", None),
     }
+}
+
+struct CallbackData {
+    body: Box<Vec<Statement>>,
+    interp_ptr: *mut Interpreter,
+}
+
+unsafe impl Sync for CallbackData {}
+
+static CALLBACKS: Mutex<Vec<&'static CallbackData>> = Mutex::new(Vec::new());
+
+fn create_callback(args: &HashMap<String, Value>) -> Value {
+    let func;
+    let interp_ptr = match args.get("self") {
+        Some(Value::Function(Function::CustomMethod(m))) => {
+            func = m.get_function();
+            &m.interpreter as *const _ as *mut Interpreter
+        }
+        _ => return Value::Error("TypeError", "Expected interpreter pointer argument", None),
+    };
+
+    let cb: &'static CallbackData = Box::leak(Box::new(CallbackData {
+        body: Box::new(func.body.clone()),
+        interp_ptr,
+    }));
+
+    let mut lock = CALLBACKS.lock().unwrap();
+    lock.push(cb);
+
+    extern "C" fn wrapper() {
+        unsafe {
+            let lock = CALLBACKS.lock().unwrap();
+            let cb = lock.last().unwrap();
+            let interp: &mut Interpreter = &mut *cb.interp_ptr;
+
+            let args: HashMap<String, Value> = HashMap::new();
+            for (k, v) in args.iter() {
+                interp.variables.insert(
+                    k.clone(),
+                    Variable::new(k.to_string(), v.clone(), "any".to_string(), true, false, false),
+                );
+            }
+
+            for stmt in cb.body.iter() {
+                dbg!(&stmt, &interp);
+                let res = interp.evaluate(stmt.clone());
+                dbg!(&res);
+                if interp.err.is_some() {
+                    return;
+                }
+            }
+        }
+    }
+
+    let func_ptr_int: Int = (wrapper as usize as i64).into();
+    Value::Pointer(Arc::new(Value::Int(func_ptr_int)))
 }
 
 
@@ -441,6 +499,13 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("value", "any"),
             Parameter::positional("to", "any")
         ],
+        "any"
+    );
+    insert_native_fn!(
+        map,
+        "create_callback",
+        create_callback,
+        vec![Parameter::positional("self", "function")],
         "any"
     );
 

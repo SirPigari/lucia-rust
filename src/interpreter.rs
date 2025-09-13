@@ -938,6 +938,16 @@ impl Interpreter {
         }
     }
 
+    fn get_interpreter_as_method(&mut self, func: Function) -> Value {
+        let arc_func = match func {
+            Function::Custom(f) => f,
+            _ => {
+                return self.raise("TypeError", "Expected a custom function");
+            }
+        };
+        Value::Function(Function::CustomMethod(Arc::new(UserFunctionMethod::new_from_func_with_interpreter(arc_func, Arc::new(Mutex::new(self.clone()))))))
+    }
+
     pub fn interpret(&mut self, mut statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
         self.is_returning = false;
         self.return_value = NULL;
@@ -7644,7 +7654,7 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "warn", "00__set_cfg__", "00__set_dir__"
+            "exit", "fetch", "exec", "eval", "warn", "as_method", "00__set_cfg__", "00__set_dir__"
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
@@ -8198,6 +8208,39 @@ impl Interpreter {
                                 return NULL;
                             } else {
                                 return self.raise("TypeError", "Expected a string in 'message' argument in warn");
+                            }
+                        }
+                        "as_method" => {
+                            self.stack.pop();
+                            if let Some(func) = named_args.get("function") {
+                                match func {
+                                    Value::Function(f) => {
+                                        if let Function::Custom(_) = f {
+                                            return self.get_interpreter_as_method(f.clone());
+                                        } else {
+                                            return self.raise("TypeError", "Expected a custom function in 'function' argument in as_method");
+                                        }
+                                    }
+                                    _ => {
+                                        return self.raise("TypeError", "Expected a function in 'function' argument in as_method");
+                                    }
+                                }
+                            } else if !pos_args.is_empty() {
+                                let func = &pos_args[0];
+                                match func {
+                                    Value::Function(f) => {
+                                        if let Function::Custom(_) = f {
+                                            return self.get_interpreter_as_method(f.clone());
+                                        } else {
+                                            return self.raise("TypeError", "Expected a custom function in 'function' argument in as_method");
+                                        }
+                                    }
+                                    _ => {
+                                        return self.raise("TypeError", "Expected a function in 'function' argument in as_method");
+                                    }
+                                }
+                            } else {
+                                return self.raise("TypeError", "Missing 'function' argument in as_method");
                             }
                         }
                         "00__set_cfg__" => {

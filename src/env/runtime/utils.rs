@@ -993,6 +993,19 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         },
     );
     map.insert(
+        "as_method".to_string(),
+        FunctionMetadata {
+            name: "as_method".to_string(),
+            parameters: vec![Parameter::positional("func", "function")],
+            return_type: Type::new_simple("any"),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
         "00__set_cfg__".to_string(),
         FunctionMetadata {
             name: "00__set_cfg__".to_string(),

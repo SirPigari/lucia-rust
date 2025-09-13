@@ -218,6 +218,13 @@ impl UserFunctionMethod {
         }
     }
 
+    pub fn get_function(&self) -> Arc<UserFunction> {
+        Arc::new(UserFunction {
+            meta: self.meta.clone(),
+            body: self.body.clone(),
+        })
+    }
+
     pub fn get_name(&self) -> &str {
         &self.meta.name
     }
