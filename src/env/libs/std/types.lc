@@ -26,11 +26,26 @@ public final typedef Float128[i]    = float where (i >= 2^-16382 && i <= (2 - 2^
 
 public final typedef Byte = UInt8
 
-// impls
-#include "ops.lc"  // operator impls
-
 public final typedef Display = impl to_string[Self] -> str
 public final typedef Clone   = impl clone[Self] -> Self
+
+public final typedef Comparable = impl
+    op_eq[Self, Self] -> bool +
+    op_ne[Self, Self] -> bool +
+    op_lt[Self, Self] -> bool +
+    op_gt[Self, Self] -> bool +
+    op_le[Self, Self] -> bool +
+    op_ge[Self, Self] -> bool
+
+
+public typedef enum Option<T> = {
+    Some(T),
+    None,
+}
+public typedef enum Result<T, E> = {
+    Ok(T),
+    Err(E),
+}
 
 null
 

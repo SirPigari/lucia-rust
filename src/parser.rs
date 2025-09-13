@@ -2,7 +2,7 @@ use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_st
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::types::{VALID_TYPES};
+use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::PathElement;
 
@@ -2663,13 +2663,13 @@ impl Parser {
                                                     Value::String("type".to_string()),
                                                     Value::String("type_kind".to_string()),
                                                     Value::String("base".to_string()),
-                                                    Value::String("elements".to_string()),
+                                                    Value::String("generics".to_string()),
                                                     Value::String("variadic".to_string()),
                                                     Value::String("variadic_type".to_string()),
                                                 ],
                                                 values: vec![
                                                     Value::String("TYPE".to_string()),
-                                                    Value::String("indexed".to_string()),
+                                                    Value::String("generics".to_string()),
                                                     Value::String("tuple".to_string()),
                                                     Value::List(elements.into_iter().map(|t| {
                                                         if let Some((_, stmt)) = t {
@@ -4205,6 +4205,46 @@ impl Parser {
                 }
             }
 
+            Some(Token(kind, val, _)) if kind == "NUMBER" => {
+                self.next();
+                match val.parse::<i64>() {
+                    Ok(n) => Some(PathElement::Literal(Value::Int(Int::from_i64(n)))),
+                    Err(_) => {
+                        match val.parse::<f64>() {
+                            Ok(f) => Some(PathElement::Literal(Value::Float(Float::from(f)))),
+                            Err(_) => {
+                                self.raise("SyntaxError", "Invalid number format");
+                                None
+                            }
+                        }
+                    }
+                }
+            }
+
+            Some(Token(kind, val, _)) if kind == "STRING" => {
+                self.next();
+                if val.len() >= 2 && ((val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\''))) {
+                    let unescaped = val[1..val.len()-1].replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\");
+                    Some(PathElement::Literal(Value::String(unescaped)))
+                } else {
+                    self.raise("SyntaxError", "Invalid string format");
+                    None
+                }
+            }
+
+            Some(Token(kind, val, _)) if kind == "BOOLEAN" => {
+                self.next();
+                match val.as_str() {
+                    "true" => Some(PathElement::Literal(Value::Boolean(true))),
+                    "false" => Some(PathElement::Literal(Value::Boolean(false))),
+                    "null" => Some(PathElement::Literal(Value::Null)),
+                    _ => {
+                        self.raise("SyntaxError", "Invalid boolean value");
+                        None
+                    }
+                }
+            }
+
             _ => {
                 self.raise("SyntaxError", "Expected path");
                 None
@@ -4259,13 +4299,13 @@ impl Parser {
                     Value::String("type".to_string()),
                     Value::String("type_kind".to_string()),
                     Value::String("base".to_string()),
-                    Value::String("elements".to_string()),
+                    Value::String("generics".to_string()),
                     Value::String("variadic".to_string()),
                     Value::String("variadic_type".to_string()),
                 ],
                 values: vec![
                     Value::String("TYPE".to_string()),
-                    Value::String("indexed".to_string()),
+                    Value::String("generics".to_string()),
                     Value::String("tuple".to_string()),
                     Value::List(elements.into_iter().map(|t| {
                         if let Some((_, stmt)) = t {
@@ -4435,15 +4475,16 @@ impl Parser {
         }
     }
 
-    fn parse_type(& mut self) -> Statement {
+    fn parse_type(&mut self) -> Statement {
         if self.token_is("IDENTIFIER", "impl") {
             return self.parse_impl();
         }
+
         let (base_str, base_stmt) = match self.parse_single_type() {
             Some(v) => v,
             None => return Statement::Null,
         };
-    
+
         if self.token_is("SEPARATOR", "(") {
             let to_type = Value::Map {
                 keys: vec![
@@ -4457,7 +4498,7 @@ impl Parser {
                     Value::String(base_str.clone()),
                 ],
             };
-    
+
             self.next();
             let value = if self.token_is("SEPARATOR", ")") {
                 get_type_default_as_statement(&base_str)
@@ -4468,13 +4509,13 @@ impl Parser {
                 }
                 v
             };
-    
+
             if !self.token_is("SEPARATOR", ")") {
                 self.raise("SyntaxError", "Expected ')' after type conversion value");
                 return Statement::Null;
             }
             self.next();
-    
+
             return Statement::Statement {
                 keys: vec![
                     Value::String("type".to_string()),
@@ -4489,7 +4530,7 @@ impl Parser {
                 loc: self.get_loc(),
             };
         }
-    
+
         if self.token_is("SEPARATOR", "[") {
             fn is_variadic_type(s: &Statement) -> bool {
                 if let Statement::Statement { keys, values, .. } = s {
@@ -4513,6 +4554,48 @@ impl Parser {
             let inner_loc = self.get_loc();
 
             loop {
+                if self.token_is("SEPARATOR", "]") {
+                    break;
+                }
+
+                if self.token_is("OPERATOR", "...") {
+                    if has_variadic_any || has_variadic_typed.is_some() {
+                        self.raise("SyntaxError", "Multiple variadic markers are not allowed");
+                        return Statement::Null;
+                    }
+                    self.next();
+
+                    has_variadic_any = true;
+                    has_variadic_typed = Some("any".to_string());
+
+                    elements.push(
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("type_kind".to_string()),
+                                Value::String("value".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("TYPE".to_string()),
+                                Value::String("variadic".to_string()),
+                                Value::String("any".to_string()),
+                            ],
+                            loc: self.get_loc(),
+                        }
+                        .convert_to_map(),
+                    );
+
+                    if self.token_is("SEPARATOR", "]") {
+                        break;
+                    }
+                    if self.token_is("SEPARATOR", ",") {
+                        self.next();
+                        continue;
+                    }
+                    self.raise("SyntaxError", "Expected ',' or ']' after variadic");
+                    return Statement::Null;
+                }
+
                 let (_, elem_type) = match self.parse_type() {
                     Statement::Null => return Statement::Null,
                     s => ("".to_string(), s),
@@ -4520,7 +4603,6 @@ impl Parser {
 
                 if self.token_is("SEPARATOR", ";") {
                     self.next();
-
                     let count = if let Some(Token(kind, value, _)) = self.token().cloned() {
                         if kind == "NUMBER" {
                             match parse_usize_radix(&value) {
@@ -4575,7 +4657,9 @@ impl Parser {
 
             self.next();
 
-            if elements.is_empty() && !has_variadic_any && has_variadic_typed.is_none() {
+            if elements.is_empty() && base_str != "function" && base_str != "generator"
+                && !has_variadic_any && has_variadic_typed.is_none()
+            {
                 self.raise("SyntaxError", "Empty type annotation is not allowed");
                 return Statement::Null;
             }
@@ -4623,9 +4707,6 @@ impl Parser {
                     ],
                     loc: inner_loc,
                 };
-            } else if !["map", "tuple", "list"].contains(&base_str.as_str()) {
-                self.raise("SyntaxError", &format!("Type '{}' cannot be indexed", base_str));
-                return Statement::Null;
             }
 
             return Statement::Statement {
@@ -4633,13 +4714,13 @@ impl Parser {
                     Value::String("type".to_string()),
                     Value::String("type_kind".to_string()),
                     Value::String("base".to_string()),
-                    Value::String("elements".to_string()),
+                    Value::String("generics".to_string()),
                     Value::String("variadic".to_string()),
                     Value::String("variadic_type".to_string()),
                 ],
                 values: vec![
                     Value::String("TYPE".to_string()),
-                    Value::String("indexed".to_string()),
+                    Value::String("generics".to_string()),
                     Value::String(base_str.clone()),
                     Value::List(elements),
                     Value::Boolean(has_variadic_any),
@@ -4651,14 +4732,14 @@ impl Parser {
 
         let mut union_types = vec![];
         union_types.push(base_stmt.clone());
-        
+
         while self.token_is("OPERATOR", "|") {
             self.next();
             let next_type = self.parse_type();
             if next_type == Statement::Null {
                 return Statement::Null;
             }
-        
+
             if let Statement::Statement { keys, values, .. } = &next_type {
                 let is_union = keys.iter().zip(values.iter()).any(|(k, v)| {
                     if let Value::String(k_str) = k {
@@ -4670,9 +4751,11 @@ impl Parser {
                     }
                     false
                 });
-        
+
                 if is_union {
-                    if let Some(types_index) = keys.iter().position(|k| k == &Value::String("types".to_string())) {
+                    if let Some(types_index) =
+                        keys.iter().position(|k| k == &Value::String("types".to_string()))
+                    {
                         if let Value::List(nested_types) = &values[types_index] {
                             for t in nested_types {
                                 union_types.push(t.convert_to_statement());
@@ -4682,10 +4765,10 @@ impl Parser {
                     }
                 }
             }
-        
+
             union_types.push(next_type);
         }
-        
+
         if union_types.len() > 1 {
             return Statement::Statement {
                 keys: vec![
@@ -4701,8 +4784,8 @@ impl Parser {
                 loc: self.get_loc(),
             };
         }
-        
-        base_stmt        
+
+        base_stmt
     }
 
     fn parse_variable(&mut self) -> Statement {

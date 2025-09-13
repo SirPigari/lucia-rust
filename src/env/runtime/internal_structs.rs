@@ -13,6 +13,7 @@ pub enum PathElement {
         args: Vec<PathElement>,      // for variants like a::b(x, y)
     },
     Tuple(Vec<PathElement>),         // for (a, b, c)
+    Literal(Value),                  // for literal values like 42, "hello"
 }
 
 impl PathElement {
@@ -29,6 +30,7 @@ impl PathElement {
             PathElement::Tuple(elems) => {
                 Value::Tuple(elems.iter().map(|e| e.to_value()).collect())
             }
+            PathElement::Literal(value) => value.clone(),
         }
     }
 }

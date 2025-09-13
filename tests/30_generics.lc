@@ -1,0 +1,99 @@
+#include <std/macros>
+
+typedef struct Holder<T> { value: T }
+int_holder: Holder[int] = Holder { value = 10 }
+str_holder: Holder[str] = Holder { value = "abc" }
+assert_eq!(int_holder.value, 10)
+assert_eq!(str_holder.value, "abc")
+
+typedef enum Option<T> {
+    Some(T),
+    None,
+}
+opt1: Option[int] = Some(123)
+opt2: Option[int] = None
+opt3: Option[str] = Some("hello")
+assert_eq!(opt1, Some(123))
+assert_eq!(opt2, None)
+assert_eq!(opt3, Some("hello"))
+assert_ne!(opt1, opt2)
+
+// TODO: implement type checking for generics in enums
+// assert_err!(
+//     i: Option[int] = Some("string instead of int")
+// )
+
+typedef enum Response<T, E> {
+    Success(T),
+    Failure(E),
+}
+resp1: Response[int, str] = Success(200)
+resp2: Response[int, str] = Failure("Not found")
+assert_eq!(resp1, Success(200))
+assert_eq!(resp2, Failure("Not found"))
+assert_ne!(resp1, resp2)
+
+typedef enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+nested: Option[Result[int, str]] = Some(Ok(42))
+assert_eq!(nested, Some(Ok(42)))
+
+struct_with_result: Holder[Result[str, int]] = Holder { value = Err(404) }
+assert_eq!(struct_with_result.value, Err(404))
+
+enum_with_struct: Response[Holder[int], str] = Success(Holder { value = 99 })
+assert_eq!(enum_with_struct, Success(Holder { value = 99 }))
+
+assert_ne!(int_holder, str_holder)
+
+resp: Response[str, int] = Success("done")
+mutable matched: bool = false
+mutable value: str = ""
+
+match (resp):
+    Success(v) ->
+        matched = true
+        value = v
+        break
+    end
+    Failure(e) ->
+        throw f"Unexpected error: {e}"
+        break
+    end
+    _ ->
+        throw "Wildcard reached unexpectedly in generic match"
+        break
+    end
+end
+
+assert!(matched, "Success branch did not execute")
+assert_eq!(value, "done")
+
+nested_result: Option[Result[int, str]] = Some(Ok(123))
+mutable nested_val: int = 0
+match (nested_result):
+    Some(Ok(x)) -> nested_val = x,
+    Some(Err(e)) -> throw f"Unexpected error: {e}",
+    None -> throw "No value in nested_result",
+    _ ->
+        throw "Wildcard reached unexpectedly in nested generic match"
+        break
+    end
+end
+assert_eq!(nested_val, 123)
+
+nested_result: Option[Result[int, str]] = Some(Ok(67))
+mutable nested_val: int = 0
+match (nested_result):
+    Some(Ok(69)) -> nested_val = 69,
+    Some(Ok(67)) -> nested_val = 67,
+    Some(Err(e)) -> throw f"Unexpected error: {e}",
+    None -> throw "No value in nested_result",
+    _ ->
+        throw "Wildcard reached unexpectedly in nested generic match"
+        break
+    end
+end
+assert_eq!(nested_val, 67)

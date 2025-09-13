@@ -505,7 +505,7 @@ impl Interpreter {
             Type::Enum { .. } => {
                 match value {
                     Value::Enum(e) => {
-                        if e.ty == *expected {
+                        if type_matches(&e.ty, expected) {
                             status = true;
                         } else {
                             status = false;
@@ -517,7 +517,7 @@ impl Interpreter {
             Type::Struct { .. } => {
                 match value {
                     Value::Struct(s) => {
-                        if s.ty == *expected {
+                        if type_matches(&s.ty, expected) {
                             status = true;
                         } else {
                             status = false;
@@ -1158,6 +1158,7 @@ impl Interpreter {
         false
     }
 
+    #[track_caller]
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         self.current_statement = Some(statement.clone());
 
@@ -1237,6 +1238,7 @@ impl Interpreter {
                 "TUPLE" => self.handle_tuple(statement_map),
                 "MAP" => self.handle_map(statement_map),
                 "ITERABLE" => self.handle_iterable(statement_map),
+                "VALUE" => self.handle_value(statement_map),
     
                 "OPERATION" => self.handle_operation(statement_map),
                 "UNARY_OPERATION" => self.handle_unary_op(statement_map),
@@ -1298,6 +1300,13 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_value(&mut self, statement: HashMap<Value, Value>) -> Value {
+        match statement.get(&Value::String("value".to_string())) {
+            Some(v) => v.clone(),
+            None => self.raise("RuntimeError", "Missing 'value' in value statement"),
+        }
     }
 
     fn handle_struct_methods(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -1458,7 +1467,18 @@ impl Interpreter {
                     .find(|(name, _, _)| name == field)
                     .map(|(_, ty, _)| ty.clone());
 
+                
+                let saved_variables = self.variables.clone();
+                let generics = if let Type::Struct { generics, .. } = &struct_ty {
+                    generics
+                } else {
+                    &vec![]
+                };
+                for generic in generics {
+                    self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), true, false, true));
+                }
                 let expected_type = ty_opt.map(|ty| self.evaluate(ty)).unwrap_or(Value::Null);
+                self.variables = saved_variables;
 
                 if self.err.is_some() {
                     return NULL;
@@ -1962,13 +1982,19 @@ impl Interpreter {
                 if self.err.is_some() {
                     return NULL;
                 }
-                let wheres: Vec<(String, Statement)> = match statement.get(&Value::String("wheres".to_string())) {
+                let wheres: Vec<(String, Value)> = match statement.get(&Value::String("wheres".to_string())) {
                     Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
                         if let Value::String(s) = k {
-                            (s, v.convert_to_statement())
+                            (s, {
+                                let val = self.evaluate(v.convert_to_statement());
+                                if self.err.is_some() {
+                                    return ("".to_string(), NULL);
+                                }
+                                val
+                            })
                         } else {
                             self.raise("RuntimeError", "Expected string keys in 'wheres' map");
-                            ("".to_string(), Statement::Null)
+                            ("".to_string(), NULL)
                         }
                     }).filter(|(k, _)| !k.is_empty()).collect(),
                     _ => vec![],
@@ -2114,13 +2140,19 @@ impl Interpreter {
                         return NULL;
                     }
                 };
-                let wheres: Vec<(String, Statement)> = match statement.get(&Value::String("wheres".to_string())) {
+                let wheres: Vec<(String, Value)> = match statement.get(&Value::String("wheres".to_string())) {
                     Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
                         if let Value::String(s) = k {
-                            (s, v.convert_to_statement())
+                            (s, {
+                                let val = self.evaluate(v.convert_to_statement());
+                                if self.err.is_some() {
+                                    return ("".to_string(), NULL);
+                                }
+                                val
+                            })
                         } else {
                             self.raise("RuntimeError", "Expected string keys in 'wheres' map");
-                            ("".to_string(), Statement::Null)
+                            ("".to_string(), NULL)
                         }
                     }).filter(|(k, _)| !k.is_empty()).collect(),
                     _ => vec![],
@@ -4678,35 +4710,43 @@ impl Interpreter {
                 }
             }
     
-            "indexed" => {
+            "generics" => {
                 let base_val = match statement.get(&Value::String("base".to_string())) {
                     Some(b) => b,
                     None => {
-                        self.raise("RuntimeError", "Missing 'base' in indexed type statement");
+                        self.raise("RuntimeError", "Missing 'base' in generics type statement");
                         return NULL;
                     }
                 };
-                let elements_val = match statement.get(&Value::String("elements".to_string())) {
+                let elements_val = match statement.get(&Value::String("generics".to_string())) {
                     Some(e) => match e {
                         Value::List(l) => l,
                         _ => {
-                            self.raise("RuntimeError", "'elements' in indexed type must be a list");
+                            self.raise("RuntimeError", "'generics' in generics type must be a list");
                             return NULL;
                         }
                     },
                     None => {
-                        self.raise("RuntimeError", "Missing 'elements' in indexed type statement");
+                        self.raise("RuntimeError", "Missing 'generics' in generics type statement");
                         return NULL;
                     }
                 };
 
                 let base = match base_val {
                     Value::String(s) => {
-                        if !self.check_type_validity(s) {
-                            self.raise("TypeError", &format!("Invalid base type '{}'", s));
-                            return NULL;
+                        match self.variables.get(s) {
+                            Some(val) => match &val.value {
+                                Value::Type(t) => t.clone(),
+                                _ => {
+                                    self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
+                                    return NULL;
+                                }
+                            },
+                            None => {
+                                self.raise("TypeError", &format!("Invalid base type '{}'", s));
+                                return NULL;
+                            }
                         }
-                        Type::new_simple(s)
                     }
                     _ => {
                         self.raise("TypeError", "Base type for indexed type must be a string");
@@ -4715,13 +4755,14 @@ impl Interpreter {
                 };
 
                 let mut elements = Vec::new();
+                let mut elements_raw = Vec::new();
                 for el in elements_val {
                     let el_map = el.convert_to_hashmap_value();
                     if self.err.is_some() {
                         return NULL;
                     }
                     match self.handle_type(el_map) {
-                        Value::Type(t) => elements.push(t),
+                        Value::Type(t) => { elements_raw.push(el.convert_to_statement()); elements.push(t) },
                         _ => {
                             self.raise("TypeError", "Indexed type elements must be valid types");
                             return NULL;
@@ -4729,9 +4770,217 @@ impl Interpreter {
                     }
                 }
 
-                Type::Indexed {
-                    base_type: Box::new(base),
-                    elements: elements,
+                match base {
+                    Type::Simple { ref name, .. } if name == "list" || name == "tuple" || name == "map" => {
+                        Type::Indexed {
+                            base_type: Box::new(base),
+                            elements: elements,
+                        }
+                    }
+                    Type::Struct { ref name, fields, methods, generics: s_generics, wheres } => {
+                        let generics_map: HashMap<String, Statement> = s_generics.iter()
+                            .cloned()
+                            .zip(elements_raw.iter().cloned())
+                            .collect();
+
+                        let wheres_keys = wheres.iter().map(|(k, _)| k).collect::<Vec<_>>();
+
+                        let missing_keys: Vec<String> = s_generics.iter()
+                            .filter(|k| !generics_map.contains_key(*k) && !wheres_keys.contains(k))
+                            .cloned()
+                            .collect();
+
+                        let num_extra_values = if elements_raw.len() > s_generics.len() {
+                            elements_raw.len() - s_generics.len()
+                        } else {
+                            0
+                        };
+
+                        if !missing_keys.is_empty() {
+                            if missing_keys.len() == 1 {
+                                self.raise("ValueError", &format!("Missing generic type argument '{}'", missing_keys[0]));
+                            } else {
+                                self.raise("ValueError", &format!("Missing generic type arguments: {}", missing_keys.join(", ")));
+                            }
+                            return NULL;
+                        }
+                        if num_extra_values > 0 {
+                            return self.raise("ValueError", &format!("Expected {} generic type arguments, but got {}, {} extra provided", s_generics.len(), elements_raw.len(), num_extra_values));
+                        }
+
+                        let mut generics_evaluated: HashMap<String, Type> = HashMap::new();
+
+                        for (name, stmt) in generics_map.iter() {
+                            let ty = self.evaluate(stmt.clone());
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            match ty {
+                                Value::Type(t) => {
+                                    generics_evaluated.insert(name.clone(), t);
+                                }
+                                _ => {
+                                    self.raise("TypeError", &format!("Generic type argument '{}' must be a valid type", name));
+                                    return NULL;
+                                }
+                            }
+                        }
+                        for (name, value) in wheres.iter() {
+                            if !generics_evaluated.contains_key(name) {
+                                match value {
+                                    Value::Type(t) => {
+                                        generics_evaluated.insert(name.clone(), t.clone());
+                                    }
+                                    _ => {
+                                        self.raise("TypeError", &format!("Where constraint '{}' must be a valid type", name));
+                                        return NULL;
+                                    }
+                                }
+                            }
+                        }
+                        let mut built_fields = Vec::new();
+                        let mut interp = Interpreter::new(
+                            self.config.clone(),
+                            self.use_colors,
+                            &self.file_path.clone(),
+                            &self.cwd.clone(),
+                            self.preprocessor_info.clone(),
+                            &[]
+                        );
+                        interp.variables.extend(generics_evaluated.clone().into_iter().map(|(k, v)| {
+                            (k.clone(), Variable::new(k, Value::Type(v), "type".to_string(), false, true, true))
+                        }));
+                        for (field_name, field_type, field_mods) in fields.iter() {
+                            let v = match interp.evaluate(field_type.clone()) {
+                                Value::Type(t) => Value::Type(t),
+                                _ => {
+                                    self.raise("TypeError", &format!("Field '{}' in struct '{}' has invalid type", field_name, name));
+                                    return NULL;
+                                }
+                            };
+                            let new_field_type = Statement::Statement {
+                                keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
+                                values: vec![Value::String("VALUE".to_string()), v],
+                                loc: self.get_location_from_current_statement(),
+                            };
+                            built_fields.push((field_name.clone(), new_field_type, field_mods.clone()));
+                        }
+                        drop(interp);
+                        Type::Struct {
+                            name: name.clone(),
+                            fields: built_fields,
+                            methods: methods.clone(),
+                            generics: s_generics.clone(),
+                            wheres: wheres.clone(),
+                        }
+                    }
+                    Type::Enum { ref name, variants, generics: s_generics, wheres } => {
+                        let generics_map: HashMap<String, Statement> = s_generics.iter()
+                            .cloned()
+                            .zip(elements_raw.iter().cloned())
+                            .collect();
+
+                        let wheres_keys = wheres.iter().map(|(k, _)| k).collect::<Vec<_>>();
+
+                        let missing_keys: Vec<String> = s_generics.iter()
+                            .filter(|k| !generics_map.contains_key(*k) && !wheres_keys.contains(k))
+                            .cloned()
+                            .collect();
+
+                        let num_extra_values = if elements_raw.len() > s_generics.len() {
+                            elements_raw.len() - s_generics.len()
+                        } else {
+                            0
+                        };
+
+                        if !missing_keys.is_empty() {
+                            if missing_keys.len() == 1 {
+                                self.raise("ValueError", &format!("Missing generic type argument '{}'", missing_keys[0]));
+                            } else {
+                                self.raise("ValueError", &format!("Missing generic type arguments: {}", missing_keys.join(", ")));
+                            }
+                            return NULL;
+                        }
+                        if num_extra_values > 0 {
+                            return self.raise("ValueError", &format!("Expected {} generic type arguments, but got {}, {} extra provided", s_generics.len(), elements_raw.len(), num_extra_values));
+                        }
+
+                        let mut generics_evaluated: HashMap<String, Type> = HashMap::new();
+
+                        for (name, stmt) in generics_map.iter() {
+                            let ty = self.evaluate(stmt.clone());
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            match ty {
+                                Value::Type(t) => {
+                                    generics_evaluated.insert(name.clone(), t);
+                                }
+                                _ => {
+                                    self.raise("TypeError", &format!("Generic type argument '{}' must be a valid type", name));
+                                    return NULL;
+                                }
+                            }
+                        }
+                        for (name, value) in wheres.iter() {
+                            if !generics_evaluated.contains_key(name) {
+                                match value {
+                                    Value::Type(t) => {
+                                        generics_evaluated.insert(name.clone(), t.clone());
+                                    }
+                                    _ => {
+                                        self.raise("TypeError", &format!("Where constraint '{}' must be a valid type", name));
+                                        return NULL;
+                                    }
+                                }
+                            }
+                        }
+                        let mut built_fields = Vec::new();
+                        let mut interp = Interpreter::new(
+                            self.config.clone(),
+                            self.use_colors,
+                            &self.file_path.clone(),
+                            &self.cwd.clone(),
+                            self.preprocessor_info.clone(),
+                            &[]
+                        );
+                        interp.variables.extend(generics_evaluated.clone().into_iter().map(|(k, v)| {
+                            (k.clone(), Variable::new(k, Value::Type(v), "type".to_string(), false, true, true))
+                        }));
+                        for (variant_name, variant_type, variant_disc) in variants.iter() {
+                            if *variant_type == Statement::Null {
+                                built_fields.push((variant_name.clone(), Statement::Null, variant_disc.clone()));
+                                continue;
+                            }
+                            let v = match interp.evaluate(variant_type.clone()) {
+                                Value::Type(t) => Value::Type(t),
+                                _ => {
+                                    if interp.err.is_some() {
+                                        self.err = interp.err;
+                                        return NULL;
+                                    }
+                                    self.raise("TypeError", &format!("Variant '{}' in enum '{}' has invalid type", variant_name, name));
+                                    return NULL;
+                                }
+                            };
+                            let new_field_type = Statement::Statement {
+                                keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
+                                values: vec![Value::String("VALUE".to_string()), v],
+                                loc: self.get_location_from_current_statement(),
+                            };
+                            built_fields.push((variant_name.clone(), new_field_type, variant_disc.clone()));
+                        }
+                        drop(interp);
+                        Type::Enum {
+                            name: name.clone(),
+                            variants: built_fields,
+                            generics: s_generics.clone(),
+                            wheres: wheres.clone(),
+                        }
+                    }
+                    _ => {
+                        return self.raise("TypeError", &format!("Invalid generic type '{}'", base.display_simple()));
+                    }
                 }
             }
 
@@ -5928,10 +6177,23 @@ impl Interpreter {
             }
             if candidates.len() == 1 {
                 if candidates[0].2 != Statement::Null {
+                    let saved_variables = self.variables.clone();
+                    let generics = match &candidates[0].1 {
+                        Type::Enum { generics, .. } => generics.clone(),
+                        _ => vec![],
+                    };
+                    self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
                     let eval_type = match self.evaluate(candidates[0].2.clone()) {
                         Value::Type(t) => t,
-                        e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string())),
+                        e => {
+                            self.variables = saved_variables;
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string()))
+                        },
                     };
+                    self.variables = saved_variables;
                     if self.err.is_some() {
                         return NULL;
                     }
@@ -6775,7 +7037,7 @@ impl Interpreter {
         match object_value {
             Value::Type(ref t) => {
                 match t {
-                    Type::Enum { name, variants, .. } => {
+                    Type::Enum { name, variants, generics, .. } => {
                         let variant_name = method_name;
                         let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
                             Some(variant) => variant,
@@ -6806,10 +7068,19 @@ impl Interpreter {
                         if self.err.is_some() {
                             return NULL;
                         }
+                        let saved_variables = self.variables.clone();
+                        self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
                         let eval_type = match self.evaluate(variant_ty.clone()) {
                             Value::Type(t) => t,
-                            e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
+                            e => {
+                                self.variables = saved_variables;
+                                if self.err.is_some() {
+                                    return NULL;
+                                }
+                                return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string()))
+                            },
                         };
+                        self.variables = saved_variables;
                         if self.err.is_some() {
                             return NULL;
                         }
@@ -7502,10 +7773,23 @@ impl Interpreter {
                         }
                         let (variant_name, variant_ty, _) = variant;
                         if *variant_ty != Statement::Null {
+                            let saved_variables = self.variables.clone();
+                            let generics = match &t {
+                                Type::Enum { generics, .. } => generics.clone(),
+                                _ => vec![],
+                            };
+                            self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
                             let eval_type = match self.evaluate(variant_ty.clone()) {
                                 Value::Type(t) => t,
-                                e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string())),
+                                e => {
+                                    self.variables = saved_variables;
+                                    if self.err.is_some() {
+                                        return NULL;
+                                    }
+                                    return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string()))
+                                },
                             };
+                            self.variables = saved_variables;
                             if self.err.is_some() {
                                 return NULL;
                             }
@@ -7702,10 +7986,25 @@ impl Interpreter {
                                 );
                             }
                         }
+                        let saved_variables = self.variables.clone();
+                        let generics = match candidates[0].1 {
+                            Type::Enum { ref generics, .. } => generics.clone(),
+                            _ => vec![],
+                        };
+                        self.variables.extend(generics.iter().map(|k| {
+                            (k.clone(), Variable::new(k.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))
+                        }));
                         let eval_type = match self.evaluate(candidates[0].2.clone()) {
                             Value::Type(t) => t,
-                            e => return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string())),
+                            e => {
+                                self.variables = saved_variables;
+                                if self.err.is_some() {
+                                    return NULL;
+                                }
+                                return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string()))
+                            },
                         };
+                        self.variables = saved_variables;
                         if self.err.is_some() {
                             return NULL;
                         }

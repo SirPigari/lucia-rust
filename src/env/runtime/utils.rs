@@ -1562,12 +1562,13 @@ pub fn check_pattern(
     pattern: &Value,
 ) -> Result<(bool, HashMap<String, Value>), (String, String)> {
     let mut variables: HashMap<String, Value> = HashMap::default();
+
     fn inner(
         value: &Value,
         pat: &Value,
         vars: &mut HashMap<String, Value>,
     ) -> Result<bool, (String, String)> {
-        // Wildcard '_' handling
+        // Handle wildcard '_'
         if let Value::Map { values, .. } = pat {
             if let Value::List(p_segments) = &values[0] {
                 if p_segments.len() == 1 {
@@ -1589,73 +1590,67 @@ pub fn check_pattern(
 
             // Tuple match
             (Value::Tuple(c_elems), Value::Tuple(p_elems)) => {
-                if c_elems.len() != p_elems.len() {
-                    return Ok(false);
-                }
+                if c_elems.len() != p_elems.len() { return Ok(false); }
                 for (c, p) in c_elems.iter().zip(p_elems.iter()) {
-                    if !inner(c, p, vars)? {
-                        return Ok(false);
-                    }
+                    if !inner(c, p, vars)? { return Ok(false); }
                 }
                 Ok(true)
             }
 
-            // Enum instance vs PathElement converted to Value
+            // Enum matching
             (Value::Enum(cond_enum), Value::Map { keys: p_keys, values: p_vals }) => {
                 if p_keys.len() != 2 || p_vals.len() != 2 { return Ok(false); }
 
                 let p_segments = match &p_vals[0] { Value::List(l) => l, _ => return Ok(false) };
                 let p_args = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
+                if p_segments.is_empty() { return Ok(false); }
 
-                if p_segments.len() < 1 { return Ok(false); }
                 let pat_variant_name = match &p_segments[p_segments.len() - 1] {
                     Value::String(s) => s,
                     _ => return Ok(false),
                 };
 
-                // check variant name
+                // Check enum variant name
                 let variant_name = match get_variant_name(&cond_enum.ty, cond_enum.variant.0) {
                     Some(name) => name,
                     None => return Ok(false),
                 };
-                if variant_name != *pat_variant_name {
-                    return Ok(false);
-                }
+                if variant_name != *pat_variant_name { return Ok(false); }
 
-                // now match payload
+                // Match payload
                 match &*cond_enum.variant.1 {
                     Value::Tuple(payload_elems) => {
                         if payload_elems.len() != p_args.len() { return Ok(false); }
+
                         for (payload, arg_pat) in payload_elems.iter().zip(p_args.iter()) {
+                            // Only bind variables if pattern explicitly expects a variable
                             if let Value::Map { values, .. } = arg_pat {
                                 if let Value::List(segs) = &values[0] {
                                     if segs.len() == 1 {
                                         if let Value::String(var_name) = &segs[0] {
-                                            vars.insert(var_name.clone(), payload.clone());
-                                            continue;
+                                            // Bind if it's not an enum variant name
+                                            if get_variant_name(&cond_enum.ty, cond_enum.variant.0)
+                                                .as_deref() != Some(var_name)
+                                            {
+                                                if let Some(existing) = vars.get(var_name) {
+                                                    if existing != payload {
+                                                        return Ok(false);
+                                                    }
+                                                } else {
+                                                    vars.insert(var_name.clone(), payload.clone());
+                                                    continue;
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                            if !inner(payload, arg_pat, vars)? {
-                                return Ok(false);
-                            }
+                            if !inner(payload, arg_pat, vars)? { return Ok(false); }
                         }
                         Ok(true)
                     }
                     other_val => {
                         if p_args.len() == 1 {
-                            // pattern expects 1 arg, bind directly
-                            if let Value::Map { values, .. } = &p_args[0] {
-                                if let Value::List(segs) = &values[0] {
-                                    if segs.len() == 1 {
-                                        if let Value::String(var_name) = &segs[0] {
-                                            vars.insert(var_name.clone(), other_val.clone());
-                                            return Ok(true);
-                                        }
-                                    }
-                                }
-                            }
                             inner(other_val, &p_args[0], vars)
                         } else {
                             Ok(false)
@@ -1664,20 +1659,22 @@ pub fn check_pattern(
                 }
             }
 
-            // Single-segment path pattern → bind variable to value
+            // Single-segment path pattern → bind variable
             (val, Value::Map { keys: p_keys, values }) => {
                 if p_keys.len() == 2 && values.len() == 2 {
-                    let p_segments = match &values[0] {
-                        Value::List(l) => l,
-                        _ => return Ok(false),
-                    };
-                    let p_args = match &values[1] {
-                        Value::List(l) => l,
-                        _ => return Ok(false),
-                    };
+                    let p_segments = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
+                    let p_args = match &values[1] { Value::List(l) => l, _ => return Ok(false) };
                     if p_segments.len() == 1 && p_args.is_empty() {
                         if let Value::String(var_name) = &p_segments[0] {
-                            vars.insert(var_name.clone(), val.clone());
+                            if !var_name.starts_with('_') {
+                                if let Some(existing) = vars.get(var_name) {
+                                    if existing != val {
+                                        return Ok(false);
+                                    }
+                                } else {
+                                    vars.insert(var_name.clone(), val.clone());
+                                }
+                            }
                             return Ok(true);
                         }
                     }
@@ -1925,19 +1922,82 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
         Ok((_, inner)) => inner,
         Err(_) => expected.clone(),
     };
+
     use Type::*;
 
-    match inner_expected {
+    match &inner_expected {
         Simple { name, is_reference, .. } if name == "any" => {
-            let actual_ref = match inner_actual {
-                Simple { is_reference, .. } => is_reference,
+            let actual_ref = match &inner_actual {
+                Simple { is_reference, .. } => *is_reference,
                 _ => false,
             };
-            is_reference == actual_ref
+            return *is_reference == actual_ref;
+        }
+        _ => {}
+    }
+
+    if inner_actual == inner_expected {
+        return true;
+    }
+
+    match (&inner_actual, &inner_expected) {
+        (
+            Simple { is_reference: actual_ref, .. },
+            Simple { name, is_reference: expected_ref, .. },
+        ) if name == "any" =>
+        {
+            return actual_ref == expected_ref;
         }
 
-        _ => inner_actual == inner_expected,
+        (
+            Struct {
+                name: name_a,
+                generics: generics_a,
+                methods: methods_a,
+                wheres: wheres_a,
+                ..
+            },
+            Struct {
+                name: name_e,
+                generics: generics_e,
+                methods: methods_e,
+                wheres: wheres_e,
+                ..
+            },
+        ) => {
+            if name_a == name_e
+                && generics_a == generics_e
+                && methods_a == methods_e
+                && wheres_a == wheres_e
+                && !generics_a.is_empty()
+            {
+                return true;
+            }
+        }
+
+        (
+            Enum {
+                name: name_a,
+                generics: generics_a,
+                wheres: wheres_a,
+                ..
+            },
+            Enum {
+                name: name_e,
+                generics: generics_e,
+                wheres: wheres_e,
+                ..
+            },
+        ) => {
+            if name_a == name_e && generics_a == generics_e && wheres_a == wheres_e && !generics_a.is_empty() {
+                return true;
+            }
+        }
+
+        _ => {}
     }
+
+    false
 }
 
 pub const KEYWORDS: &[&str] = &[

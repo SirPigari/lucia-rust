@@ -40,6 +40,28 @@ impl<'a> Lexer<'a> {
         )
     }
 
+    fn is_identifier_start(c: char) -> bool {
+        c.is_alphabetic() || c == '_' || Lexer::is_emoji(c)
+    }
+
+    fn is_identifier_continue(c: char) -> bool {
+        c.is_alphanumeric() || c == '_' || Lexer::is_emoji(c)
+    }
+
+    fn is_emoji(c: char) -> bool {
+        matches!(c as u32,
+            0x1F600..=0x1F64F  // emoticons
+            | 0x1F300..=0x1F5FF // symbols & pictographs
+            | 0x1F680..=0x1F6FF // transport & map
+            | 0x2600..=0x26FF   // misc symbols
+            | 0x2700..=0x27BF   // dingbats
+            | 0x1F900..=0x1F9FF // supplemental symbols & pictographs
+            | 0x1FA70..=0x1FAFF // symbols & pictographs extended-A
+            | 0x200D            // zero width joiner
+            | 0xFE0F            // variation selector-16
+        )
+    }
+
     // 23ms to 147.1µs
     // fuck regex
     pub fn tokenize(&self) -> Vec<Token> {
@@ -355,10 +377,10 @@ impl<'a> Lexer<'a> {
 
             // IDENTIFIER
             if let Some(c) = slice.chars().next() {
-                if c.is_alphabetic() || c == '_' {
+                if Self::is_identifier_start(c) {
                     let mut end = pos + c.len_utf8();
                     for ch in self.code[end..].chars() {
-                        if ch.is_alphanumeric() || ch == '_' {
+                        if Self::is_identifier_continue(ch) {
                             end += ch.len_utf8();
                         } else { break; }
                     }

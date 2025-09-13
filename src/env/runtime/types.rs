@@ -37,14 +37,14 @@ pub enum Type {
         name: String,
         variants: Vec<(String, Statement, usize)>,
         generics: Vec<String>,
-        wheres: Vec<(String, Statement)>,
+        wheres: Vec<(String, Value)>,
     },
     Struct {
         name: String,
         fields: Vec<(String, Statement, Vec<String>)>,
         methods: Vec<(String, Function)>,
         generics: Vec<String>,
-        wheres: Vec<(String, Statement)>,
+        wheres: Vec<(String, Value)>,
     },
     Impl {
         implementations: Vec<(String, Box<Type>, Vec<String>)>,
