@@ -1,5 +1,6 @@
 use std::io::{self, Write, stdout};
 use std::collections::HashMap;
+use std::fs;
 use crate::env::runtime::config::{Config};
 use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
@@ -230,7 +231,11 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
     costs[b.len()]
 }
 
-pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
+pub fn get_line_info(file_path: &str, line_number: usize) -> Option<String> {
+    let source = match fs::read_to_string(file_path) {
+        Ok(content) => content,
+        Err(_) => return None,
+    };
     source.lines().nth(line_number.saturating_sub(1)).map(|s| s.to_string())
 }
 

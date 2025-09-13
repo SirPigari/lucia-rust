@@ -155,6 +155,32 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+
+fn cast(args: &HashMap<String, Value>) -> Value {
+    let val = match args.get("value") {
+        Some(v) => v.clone(),
+        None => return Value::Error("TypeError", "Expected value argument", None),
+    };
+
+    let ptr_as_int = match args.get("to") {
+        Some(Value::Pointer(ptr)) => match &**ptr {
+            Value::Int(i) => match i.to_i64() {
+                Ok(i) => i as usize,
+                Err(_) => return Value::Error("TypeError", "Invalid pointer conversion", None),
+            },
+            _ => return Value::Error("TypeError", "Expected Int pointer", None),
+        },
+        _ => return Value::Error("TypeError", "Expected a pointer", None),
+    };
+
+    let raw_ptr = ptr_as_int as *mut Value;
+
+    unsafe {
+        raw_ptr.write(val.clone());
+        Value::Pointer(Arc::from_raw(raw_ptr))
+    }
+}
+
 fn load_lib(args: &HashMap<String, Value>) -> Value {
     match args.get("path") {
         Some(Value::String(path)) => {
@@ -406,6 +432,16 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("len", "int")
         ],
         "list"
+    );
+    insert_native_fn!(
+        map,
+        "cast",
+        cast,
+        vec![
+            Parameter::positional("value", "any"),
+            Parameter::positional("to", "any")
+        ],
+        "any"
     );
 
     map

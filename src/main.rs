@@ -1,10 +1,10 @@
 use std::env as std_env;
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Write, BufRead, BufReader};
 use std::{thread, panic};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use colored::*;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -96,7 +96,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::libs::load_std_libs;
+use crate::env::runtime::libs::{load_std_libs, check_project_deps};
 use crate::env::runtime::fmt;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
@@ -130,6 +130,9 @@ pub fn handle_error(
     source: &str,
     config: &Config,
 ) {
+    const NEXT_LINES: bool = false;
+    const PREV_LINES: bool = false;
+
     let use_colors = config.supports_color;
     let use_lucia_traceback = config.use_lucia_traceback;
     let debug = config.debug;
@@ -166,16 +169,25 @@ pub fn handle_error(
         } else {
             String::new()
         };
-        let file_name = loc.file.strip_prefix(r"\\?\").unwrap_or(&loc.file);
+        let file_name = fix_path(loc.file.to_string());
         let line_number = loc.line_number;
         let range = loc.range;
         let col = range.0;
         let reset = hex_to_ansi("reset", use_colors);
 
         let current_line = if line_number > 0 {
-            get_line_info(source, line_number).unwrap_or_default()
+            match get_line_info(source, line_number) {
+                Some(line) => line,
+                None => {
+                    if file_name.starts_with('<') && file_name.ends_with('>') {
+                        source.lines().next().unwrap_or_default().to_string()
+                    } else {
+                        loc.line_string.clone()
+                    }
+                }
+            }
         } else {
-            String::new()
+            loc.line_string.clone()
         };
 
         let prev_line = if line_number > 1 {
@@ -195,8 +207,8 @@ pub fn handle_error(
         let mut arrows_under = String::new();
         if line_number > 0 {
             let line_len = current_line.len();
-            let start = range.0.min(line_len);
-            let end = range.1.min(line_len);
+            let start = range.0.saturating_sub(1);
+            let end = range.1;
 
             if start >= line_len || end == 0 || start >= end {
                 arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
@@ -223,14 +235,14 @@ pub fn handle_error(
         ));
 
         if line_number > 0 {
-            if prev_line.is_some() {
-                trace.push_str(&format!("\t{} ...\n", indent));
+            if prev_line.is_some() && prev_line.as_ref().map_or(false, |l| l.len() > 8) && PREV_LINES {
+                trace.push_str(&format!("\t{} | {}\n", line_number - 1, prev_line.as_ref().unwrap()));
             }
 
             trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
             trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
 
-            if next_line.is_some() {
+            if next_line.is_some() && next_line.as_ref().map_or(false, |l| l.len() > 8) && NEXT_LINES {
                 trace.push_str(&format!("\t{} ...\n", indent));
             }
         }
@@ -630,7 +642,6 @@ fn merge_color_schemes(primary: ColorScheme, fallback: ColorScheme) -> ColorSche
         warning: if primary.warning.is_empty() { fallback.warning } else { primary.warning },
         help: if primary.help.is_empty() { fallback.help } else { primary.help },
         debug: if primary.debug.is_empty() { fallback.debug } else { primary.debug },
-        comment: if primary.comment.is_empty() { fallback.comment } else { primary.comment },
         input_arrows: if primary.input_arrows.is_empty() { fallback.input_arrows } else { primary.input_arrows },
         note: if primary.note.is_empty() { fallback.note } else { primary.note },
         output_text: if primary.output_text.is_empty() { fallback.output_text } else { primary.output_text },
@@ -658,7 +669,6 @@ fn create_default_config(env_path: &Path) -> Config {
             warning: "#F5F534".to_string(),
             help: "#21B8DB".to_string(),
             debug: "#434343".to_string(),
-            comment: "#757575".to_string(),
             input_arrows: "#136163".to_string(),
             note: "#1CC58B".to_string(),
             output_text: "#BCBEC4".to_string(),
@@ -687,7 +697,6 @@ fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
             warning: "#F5F534".to_string(),
             help: "#21B8DB".to_string(),
             debug: "#434343".to_string(),
-            comment: "#757575".to_string(),
             input_arrows: "#136163".to_string(),
             note: "#1CC58B".to_string(),
             output_text: "#BCBEC4".to_string(),
@@ -1910,7 +1919,7 @@ fn main() {
     let mut additional_args = Vec::new();
     if use_project_env {
         if !vec_args.contains(&"--quiet".to_string()) && !vec_args.contains(&"-q".to_string()) {
-            eprintln!("{}", &format!("Project environment: Loading environment from {:?}", fix_path(project_env_path.display().to_string())).dimmed());
+            eprintln!("{}", &format!("Project environment: Loading environment from '{}'", fix_path(project_env_path.display().to_string())).dimmed());
         }
         additional_args = load_project_flags(&project_env_path);
     }
@@ -2515,6 +2524,71 @@ fn main() {
                 );
             }
             exit(1);
+        }
+    }
+
+    let deps_file = project_env_path.join("dependencies.json");
+
+    if deps_file.exists() && deps_file.is_file() {
+        let content = match fs::read_to_string(&deps_file) {
+            Ok(c) => c,
+            Err(e) => {
+                handle_error(
+                    &Error::new("IOError", &format!("Failed to read '{}': {}", deps_file.display(), e), to_static(deps_file.display().to_string())),
+                    &deps_file.display().to_string(),
+                    &config,
+                );
+                exit(1);
+            }
+        };
+
+        let parsed: HashMap<String, String> = match serde_json::from_str(&content) {
+            Ok(p) => p,
+            Err(e) => {
+                handle_error(
+                    &Error::new("JSONError", &format!("Failed to parse '{}': {}", deps_file.display(), e), to_static(deps_file.display().to_string())),
+                    &deps_file.display().to_string(),
+                    &config,
+                );
+                exit(1);
+            }
+        };
+
+        eprintln!("{}", &format!("Project environment: Loaded dependencies from '{}'", fix_path(deps_file.display().to_string())).dimmed());
+
+        match check_project_deps(&parsed, &home_dir_path.join("libs"), &config) {
+            Ok(_) => {}
+            Err((err, dep)) => {
+                let (line_range, line_num, line_str) = {
+                    let file = File::open(&deps_file).unwrap_or_else(|_| {
+                        eprintln!("Failed to open {}", deps_file.display());
+                        std::process::exit(1);
+                    });
+                    let reader = BufReader::new(file);
+
+                    let mut found = ((0, 0), 0, String::new());
+                    for (idx, line_res) in reader.lines().enumerate() {
+                        let line = line_res.unwrap_or_else(|_| "".to_string());
+                        if let Some(start) = line.find(&dep) {
+                            let end = start + dep.len() + 1;
+                            found = ((start, end), idx + 1, line.clone());
+                            break;
+                        }
+                    }
+                    found
+                };
+
+
+                let caller = std::panic::Location::caller();
+                let lloc = format!("{}:{}:{}", caller.file(), caller.line(), caller.column());
+                let loc = Location::new(&deps_file.display().to_string(), line_str, line_num, line_range, lloc);
+                handle_error(
+                    &Error::with_location("DependencyError", &err, loc),
+                    &deps_file.display().to_string(),
+                    &config,
+                );
+                exit(1);
+            }
         }
     }
 

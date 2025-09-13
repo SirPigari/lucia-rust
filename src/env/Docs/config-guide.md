@@ -4,35 +4,28 @@ The `config.json` file contains configurable options controlling the behavior an
 
 ---
 
-## Location of `config.json`
-
-The `config.json` file is located in the root directory of your Lucia environment (`src/env/config.json`). You can access and edit this file to adjust the settings to your preferences.
-
----
-
-## Structure of `config.json`
+## Default `config.json` Structure
 
 ```json
 {
+  "version": "2.0.0",
   "moded": false,
   "debug": false,
   "debug_mode": "normal",
   "supports_color": true,
   "use_lucia_traceback": true,
   "warnings": true,
-  "use_preprocessor": true,
   "cache_format": "no_cache",
   "allow_fetch": true,
   "allow_unsafe": false,
+  "allow_inline_config": true,
   "home_dir": "lucia/src/env",
-  "recursion_limit": 9999,
-  "version": "2.0.0",
+  "stack_size": 16777216,
   "color_scheme": {
     "exception": "#F44350",
     "warning": "#F5F534",
     "help": "#21B8DB",
     "debug": "#434343",
-    "comment": "#757575",
     "input_arrows": "#136163",
     "note": "#1CC58B",
     "output_text": "#BCBEC4",
@@ -45,106 +38,87 @@ The `config.json` file is located in the root directory of your Lucia environmen
 
 ## Configuration Options
 
-### 1. `moded`
+### 1. `version`
+- **Type:** `string`  
+- **Description:** Current version of Lucia. Update with new releases. Default: `"2.0.0"`
 
+### 2. `moded`
 - **Type:** `bool`  
-- **Description:** Activates or deactivates mode functionality in Lucia. When set to `true`, the "mode" feature is enabled.  
-- **Note:** If `moded` is `true`, the Lucia runtime won't complain about version mismatches and the config will not be overwritten.
+- **Description:** Activates “mode” functionality. When `true`, Lucia may skip version checks and preserve the config. Default: `false`
 
-### 2. `debug`
-
+### 3. `debug`
 - **Type:** `bool`  
-- **Description:** Enables or disables debugging mode. Set to `true` to turn on debugging.  
-- **Note:** Enabling this slows down the program due to extra print statements.
+- **Description:** Enables debug output. More info slows down execution. Default: `false`
 
-### 3. `debug_mode`
-
+### 4. `debug_mode`
 - **Type:** `string`  
 - **Values:** `"full"`, `"normal"`, `"minimal"`  
-- **Description:** Level of debug information to provide:  
-  - **full:** tokens, AST, and interpreter info  
-  - **normal:** interpreter info only  
-  - **minimal:** tokens and AST only
+- **Description:** Level of debug information:  
+  - `"full"` → tokens, AST, interpreter info  
+  - `"normal"` → interpreter info only  
+  - `"minimal"` → tokens and AST only  
+- **Default:** `"normal"`
 
-### 4. `supports_color`
-
+### 5. `supports_color`
 - **Type:** `bool`  
-- **Description:** Enables ANSI color codes in terminal output.
+- **Description:** Enables colored output in terminals that support ANSI color codes. Default: `true`
 
-### 5. `use_lucia_traceback`
-
+### 6. `use_lucia_traceback`
 - **Type:** `bool`  
-- **Description:** If set to `false`, it prints a minimized version of the error without traceback info instead of the full Lucia traceback.
+- **Description:** Shows full Lucia traceback on errors. Default: `true`
 
-### 6. `warnings`
-
+### 7. `warnings`
 - **Type:** `bool`  
-- **Description:** Enables or disables warnings.  
-- **Note:** May get removed in future.
-
-### 7. `use_preprocessor`
-
-- **Type:** `bool`  
-- **Description:** Enables preprocessor directives like `#include` or `#alias`.
+- **Description:** Enables warnings in the console. Default: `true`
 
 ### 8. `cache_format`
-- **Type:** `string`
-- **Description:** Specifies the format used for storing compilation caches in the `.cache/` directory (or `cache/` in older versions).  
-  Determines how cache data is serialized and optionally compressed. Faster formats reduce build time; slower ones save disk space.
+- **Type:** `string`  
+- **Description:** Format used for storing compilation caches. Default: `"no_cache"`  
 
-| Value            | Description                                                  | Speed        |
-|------------------|--------------------------------------------------------------|--------------|
-| `no_cache`       | Disables caching entirely                                    | N/A          |
-| `bin_le`         | Uncompressed binary (little endian)                          | Fastest      |
-| `bin_be`         | Uncompressed binary (big endian)                             | Fastest      |
-| `zstd_le_fast`   | Zstd-compressed binary (little endian), fast compression     | Fast         |
-| `zstd_be_fast`   | Zstd-compressed binary (big endian), fast compression        | Fast         |
-| `zstd_le_best`   | Zstd-compressed binary (little endian), slow compression     | Slow         |
-| `zstd_be_best`   | Zstd-compressed binary (big endian), slow compression        | Slow         |
-| `json`           | Human-readable JSON, very slow I/O                           | Slowest      |
+| Value            | Description                                                  | Speed        | Size       |
+|------------------|--------------------------------------------------------------|--------------|------------|
+| `no_cache`       | Disables caching entirely                                    | N/A          | None       |
+| `bin_le`         | Uncompressed binary (little endian)                          | Fastest      | Large      |
+| `bin_be`         | Uncompressed binary (big endian)                             | Fastest      | Large      |
+| `zstd_le_fast`   | Zstd-compressed binary (little endian), fast compression     | Fast         | Medium     |
+| `zstd_be_fast`   | Zstd-compressed binary (big endian), fast compression        | Fast         | Medium     |
+| `zstd_le_best`   | Zstd-compressed binary (little endian), slow compression     | Slow         | Small      |
+| `zstd_be_best`   | Zstd-compressed binary (big endian), slow compression        | Slow         | Small      |
+| `json`           | Human-readable JSON, very slow I/O                           | Slowest      | Very Large |
 
-- **Note:** Cache is experimental currently
+- **Note:** Cache is experimental.
 
 ### 9. `allow_fetch`
-
 - **Type:** `bool`  
-- **Description:** Enables the `fetch` function to retrieve external data.
+- **Description:** Enables the `fetch` function to retrieve external data. Default: `true`
 
 ### 10. `allow_unsafe`
-
 - **Type:** `bool`  
-- **Description:** Enables use of unsafe operations within Lucia code, which may be needed for certain low-level features.
+- **Description:** Enables unsafe operations in Lucia code for low-level access. Default: `false`
 
-### 11. `home_dir`
+### 11. `allow_inline_config`
+- **Type:** `bool`  
+- **Description:** Allows configuration directives inline in scripts. Default: `true`
 
+### 12. `home_dir`
 - **Type:** `string`  
-- **Description:** Directory path where the Lucia environment lives. Used to find resources and assets.
+- **Description:** Base directory for Lucia resources. Default: `"lucia/src/env"`
 
-### 12. `recursion_limit`
-
+### 13. `stack_size`
 - **Type:** `int`  
-- **Description:** Maximum allowed recursion depth in Lucia programs. Default is `999`.
-
-### 13. `version`
-
-- **Type:** `string`  
-- **Description:** Current version of Lucia. Should be updated with each new release (currently `"2.0.0"`).
+- **Description:** Maximum stack size for running programs in bytes. Default: `16777216` (16 MB)
 
 ### 14. `color_scheme`
-
 - **Type:** `object`  
-- **Description:** Defines terminal colors for various output elements. Each property specifies a hex color string.
+- **Description:** Defines colors for terminal output. Default values:  
 
-| Property       | Description                      |
-| -------------- | -------------------------------- |
-| `exception`    | Color for exception messages     |
-| `warning`      | Color for warning messages       |
-| `help`         | Color for help messages          |
-| `debug`        | Color for debug output           |
-| `comment`      | Color for comments               |
-| `input_arrows` | Color for input prompt arrows    |
-| `note`         | Color for notes/messages         |
-| `output_text`  | Color for output text            |
-| `info`         | Color for informational messages |
-
-- **Note:** `comment` and `warning` may get removed in future.
+| Property       | Description                      | Default Color |
+| -------------- | -------------------------------- | ------------- |
+| `exception`    | Exception messages               | `#F44350`    |
+| `warning`      | Warning messages                 | `#F5F534`    |
+| `help`         | Help messages                    | `#21B8DB`    |
+| `debug`        | Debug output                     | `#434343`    |
+| `input_arrows` | Input prompt arrows              | `#136163`    |
+| `note`         | Notes or informational messages  | `#1CC58B`    |
+| `output_text`  | Standard program output          | `#BCBEC4`    |
+| `info`         | Info messages                    | `#9209B3`    |

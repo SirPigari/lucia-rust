@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use crate::env::runtime::internal_structs::{LibInfo, LibRegistry};
-use crate::env::runtime::config::Libs;
+use crate::env::runtime::utils::{check_version, fix_path};
+use crate::env::runtime::config::{Libs, Config};
 use std::path::Path;
 use std::fs;
 use std::sync::RwLock;
@@ -144,6 +145,76 @@ pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo
     Ok((parsed, dirty_libs))
 }
 
+pub fn check_project_deps(
+    project_deps: &HashMap<String, String>, // dep_name -> expected_version
+    libs_dir: &Path,
+    config: &Config,
+) -> Result<(), (String, String)> {
+    for (dep_name, expected_version) in project_deps {
+        if let Some(std_lib) = STD_LIBS.get(dep_name.as_str()) {
+            if !check_version(&config.version, &std_lib.expected_lucia_version) {
+                return Err((format!(
+                    "Standard library '{}' requires Lucia version '{}', but current is '{}'.",
+                    dep_name, std_lib.expected_lucia_version, config.version
+                ), dep_name.clone()));
+            }
+
+            if !check_version(&std_lib.version, expected_version) {
+                return Err((format!(
+                    "Standard library '{}' version '{}' does not satisfy required '{}'.",
+                    dep_name, std_lib.version, expected_version
+                ), dep_name.clone()));
+            }
+
+            continue;
+        }
+
+        let dep_path = libs_dir.join(dep_name);
+        if !dep_path.exists() {
+            return Err((format!(
+                "Dependency '{}' listed in manifest not found in '{}'.",
+                dep_name,
+                &fix_path(libs_dir.display().to_string())
+            ), dep_name.clone()));
+        }
+
+        let dep_manifest_path = dep_path.join("manifest.json");
+        let dep_manifest_json = match std::fs::read_to_string(&dep_manifest_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        {
+            Some(json) => json,
+            None => {
+                return Err((format!(
+                    "Failed to read manifest for dependency '{}'.",
+                    dep_name
+                ), dep_name.clone()));
+            }
+        };
+
+        let current_version = match dep_manifest_json
+            .get("version")
+            .and_then(|v| v.as_str())
+        {
+            Some(v) => v,
+            None => {
+                return Err((format!(
+                    "No version field found in manifest for dependency '{}'.",
+                    dep_name
+                ), dep_name.clone()));
+            }
+        };
+
+        if !check_version(current_version, expected_version) {
+            return Err((format!(
+                "Dependency '{}' version '{}' does not satisfy required '{}'.",
+                dep_name, current_version, expected_version
+            ), dep_name.clone()));
+        }
+    }
+
+    Ok(())
+}
 
 // ------- Macros -------
 

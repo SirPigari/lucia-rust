@@ -1080,7 +1080,7 @@ impl Interpreter {
 
 
         if self.config.debug {
-            println!("{}Raised from {}{}", hex_to_ansi(&self.config.color_scheme.debug, self.config.supports_color), loc.lucia_source_loc, hex_to_ansi("reset", self.config.supports_color));
+            println!("{}Warning raised from {}{}", hex_to_ansi(&self.config.color_scheme.debug, self.config.supports_color), loc.lucia_source_loc, hex_to_ansi("reset", self.config.supports_color));
         }
 
         if self.config.warnings {
@@ -3369,7 +3369,7 @@ impl Interpreter {
                     &format!("Module '{}' requires Lucia version '{}', but current version is '{}'", module_name, expected_lucia_version, self.config.version),
                     &format!("Please update Lucia to match the required version: '{}'", expected_lucia_version),
                 );
-            }            
+            }
 
             match module_name.as_str() {
                 "math" => {
@@ -9809,25 +9809,9 @@ impl Interpreter {
                                         );
 
                                         let result_val = self.evaluate(parsed[0].clone());
-
-                                        // if let Some(spec) = format_spec {
-                                        //     if spec == "?" {
-                                        //         result = match escape_string(&format_value(&self.evaluate(parsed[0].clone()))) {
-                                        //             Ok(res) => res,
-                                        //             Err(e) => return self.raise("UnicodeError", &e),
-                                        //         };
-                                        //     } else if spec.len() >= 2 {
-                                        //         let pad_len = spec[1..].parse::<usize>().unwrap_or(0);
-                                        //         match spec.chars().next().unwrap() {
-                                        //             '<' => result = format!("{:<width$}", result, width = pad_len),
-                                        //             '>' => result = format!("{:>width$}", result, width = pad_len),
-                                        //             '^' => result = format!("{:^width$}", result, width = pad_len),
-                                        //             _ => return self.raise("RuntimeError", &format!("Unknown format specifier: {}", spec)),
-                                        //         }
-                                        //     } else {
-                                        //         return self.raise("RuntimeError", &format!("Unknown format specifier: {}", spec));
-                                        //     }
-                                        // }
+                                        if self.err.is_some() {
+                                            return NULL;
+                                        }
                                         let result;
                                         if let Some(spec) = format_spec {
                                             result = match apply_format_spec(&result_val, &spec) {

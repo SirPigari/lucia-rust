@@ -18,11 +18,7 @@ enum StoredValue {
     Null,
 }
 
-/// Converts a Lucia pointer to a Lucia list, given the element type.
-/// # Safety
-/// The caller must ensure the pointer is valid and points to a contiguous array of elements of the given type.
 pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> Value {
-    use crate::env::runtime::value::Value;
     let mut result = Vec::new();
     match elem_type {
         ValueType::Int => {
@@ -54,7 +50,6 @@ pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> 
             }
         }
         ValueType::Void => {
-            // Void type: treat as nulls
             for _ in 0..len {
                 result.push(Value::Null);
             }
