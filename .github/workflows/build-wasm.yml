@@ -1,0 +1,47 @@
+# .github/workflows/build-wasm.yml
+name: Lucia WASM Build
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
+
+jobs:
+  build-wasm:
+    name: Build WASM (Ubuntu) - ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y make
+
+      - name: Install WASM target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build WASM binaries
+        run: make build-wasm

@@ -1,33 +1,62 @@
 use std::collections::HashMap;
-use rand::{Rng, rng};
-use rand::seq::SliceRandom;
 use std::sync::Arc;
+use rand::{Rng, SeedableRng};
+use rand::rngs::SmallRng;
+use rand::prelude::{SliceRandom, IndexedRandom};
+
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::insert_native_fn;
 
-use crate::{insert_native_fn};
 
-// This module provides random number and selection utilities.
-// It includes functions for generating random integers, floats, making random choices,
-// Lucia version 2.0.0, module: random@0.7.42
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(target_arch = "wasm32")]
+use web_sys::{window, Crypto};
+
+fn make_rng() -> SmallRng {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .subsec_nanos();
+
+        let mut seed = [0u8; 32];
+        for (i, b) in seed.iter_mut().enumerate() {
+            *b = ((nanos >> (i % 4 * 8)) & 0xFF) as u8;
+        }
+
+        SmallRng::from_seed(seed)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut seed = [0u8; 32];
+        let crypto: Crypto = window()
+            .unwrap()
+            .crypto()
+            .expect("crypto not available");
+        crypto
+            .get_random_values_with_u8_array(&mut seed)
+            .expect("failed to get random values");
+        SmallRng::from_seed(seed)
+    }
+}
+
 
 fn random_int_handler(args: &HashMap<String, Value>) -> Value {
-    let mut rng = rng();
+    let mut rng = make_rng();
 
     let min = match args.get("min") {
-        Some(Value::Int(i)) => match i.to_i64() {
-            Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid min value".into(), None),
-        },
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0),
         _ => 0,
     };
-
     let max = match args.get("max") {
-        Some(Value::Int(i)) => match i.to_i64() {
-            Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid max value".into(), None),
-        },
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(100),
         _ => 100,
     };
 
@@ -35,47 +64,36 @@ fn random_int_handler(args: &HashMap<String, Value>) -> Value {
         return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
-    let val = rng.random_range(min..=max);
-    Value::Int(crate::env::runtime::types::Int::from_i64(val))
+    Value::Int(Int::from_i64(rng.random_range(min..=max)))
 }
 
 fn random_float_handler(args: &HashMap<String, Value>) -> Value {
-    let mut rng = rng();
+    let mut rng = make_rng();
 
     let min = match args.get("min") {
-        Some(Value::Float(f)) => match f.to_f64() {
-            Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid min float".into(), None),
-        },
+        Some(Value::Float(f)) => f.to_f64().unwrap_or(0.0),
         _ => 0.0,
     };
-
     let max = match args.get("max") {
-        Some(Value::Float(f)) => match f.to_f64() {
-            Ok(v) => v,
-            Err(_) => return Value::Error("ValueError".into(), "Invalid max float".into(), None),
-        },
-        _ => 100.0,
+        Some(Value::Float(f)) => f.to_f64().unwrap_or(1.0),
+        _ => 1.0,
     };
 
     if max < min {
         return Value::Error("ValueError".into(), "max must be >= min".into(), None);
     }
 
-    let val = rng.random_range(min..=max);
-
-    Value::Float(crate::env::runtime::types::Float::from_f64(val))
+    Value::Float(Float::from_f64(rng.random_range(min..=max)))
 }
 
 fn random_choice_handler(args: &HashMap<String, Value>) -> Value {
     match args.get("list") {
         Some(Value::List(list)) if !list.is_empty() => {
-            let mut rng = rng();
-            let idx = rng.random_range(0..list.len());
-            list[idx].clone()
+            let mut rng = make_rng();
+            list.choose(&mut rng).unwrap().clone()
         }
-        Some(_) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
-        None => Value::Error("TypeError".into(), "expected a list".into(), None),
+        Some(Value::List(_)) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
+        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
     }
 }
 
@@ -83,14 +101,15 @@ fn shuffle_handler(args: &HashMap<String, Value>) -> Value {
     match args.get("list") {
         Some(Value::List(list)) => {
             let mut cloned = list.clone();
-            let mut rng = rng();
+            let mut rng = make_rng();
             cloned.shuffle(&mut rng);
             Value::List(cloned)
         }
-        Some(_) | None => Value::Error("TypeError".into(), "expected a list".into(), None),
+        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
     }
 }
 
+// ==== Register Functions ====
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -99,8 +118,8 @@ pub fn register() -> HashMap<String, Variable> {
         "randint",
         random_int_handler,
         vec![
-            Parameter::positional_optional("min", "int", Value::Int(crate::env::runtime::types::Int::from_i64(0))),
-            Parameter::positional_optional("max", "int", Value::Int(crate::env::runtime::types::Int::from_i64(100)))
+            Parameter::positional_optional("min", "int", Value::Int(Int::from_i64(0))),
+            Parameter::positional_optional("max", "int", Value::Int(Int::from_i64(100))),
         ],
         "int"
     );
@@ -110,8 +129,8 @@ pub fn register() -> HashMap<String, Variable> {
         "randfloat",
         random_float_handler,
         vec![
-            Parameter::positional_optional("min", "float", Value::Float(crate::env::runtime::types::Float::from_f64(0.0))),
-            Parameter::positional_optional("max", "float", Value::Float(crate::env::runtime::types::Float::from_f64(1.0)))
+            Parameter::positional_optional("min", "float", Value::Float(Float::from_f64(0.0))),
+            Parameter::positional_optional("max", "float", Value::Float(Float::from_f64(1.0))),
         ],
         "float"
     );
@@ -120,9 +139,7 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "randchoice",
         random_choice_handler,
-        vec![
-            Parameter::positional("list", "list")
-        ],
+        vec![Parameter::positional("list", "list")],
         "any"
     );
 
@@ -130,9 +147,7 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "shuffle",
         shuffle_handler,
-        vec![
-            Parameter::positional("list", "list")
-        ],
+        vec![Parameter::positional("list", "list")],
         "list"
     );
 

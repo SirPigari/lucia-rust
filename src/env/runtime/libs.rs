@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use crate::env::runtime::internal_structs::{LibInfo, LibRegistry};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::utils::{check_version, fix_path};
-use crate::env::runtime::config::{Libs, Config};
+use crate::env::runtime::config::Libs;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::env::runtime::config::Config;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::sync::RwLock;
 
@@ -102,10 +107,23 @@ pub static STD_LIBS: Lazy<LibRegistry> = Lazy::new(|| {
     LibRegistry::new()
 });
 
+#[allow(dead_code)]
 pub static LIBS_JSON: Lazy<RwLock<Libs>> = Lazy::new(|| {
     RwLock::new(Libs::new())
 });
 
+#[cfg(target_arch = "wasm32")]
+pub fn load_std_libs() -> Result<HashMap<String, LibInfo>, String> {
+    let libs: HashMap<String, LibInfo> = _STD_LIBS.iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+
+    STD_LIBS.set_all(libs.clone());
+
+    Ok(libs)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo>, (bool, String)), (String, bool)> {
     let content = fs::read_to_string(Path::new(file))
         .map_err(|e| (format!("Failed to read libs file: {}", e), false))?;
@@ -145,6 +163,7 @@ pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo
     Ok((parsed, dirty_libs))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn check_project_deps(
     project_deps: &HashMap<String, String>, // dep_name -> expected_version
     libs_dir: &Path,

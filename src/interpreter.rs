@@ -29,11 +29,14 @@ use crate::env::runtime::utils::{
     remove_loc_keys,
     type_matches,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
     cursor::{MoveUp, MoveToColumn},
     terminal::{Clear, ClearType},
     ExecutableCommand,
 };
+
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
@@ -51,8 +54,11 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
 use regex::Regex;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest;
+#[cfg(not(target_arch = "wasm32"))]
 use serde_urlencoded;
 use std::io::{stdout, Write};
 use std::sync::Mutex;
@@ -615,6 +621,7 @@ impl Interpreter {
         return (status, err);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn fetch(
         &self,
         url: &str,
@@ -725,6 +732,7 @@ impl Interpreter {
         })
     }
     
+    #[cfg(not(target_arch = "wasm32"))]
     fn fetch_fn(
         &mut self,
         args: &HashMap<String, Value>,
@@ -800,6 +808,99 @@ impl Interpreter {
             Ok(response) => response,
             Err(e) => self.raise("FetchError", &format!("Failed to fetch: {}", e)),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn fetch_fn(&mut self, args: &HashMap<String, Value>) -> Value {
+        use wasm_bindgen_futures::{spawn_local, JsFuture};
+        use web_sys::{Request, RequestInit, RequestMode, Response};
+        use js_sys::{JsString, Promise};
+        use wasm_bindgen::{JsCast, JsValue};
+        use std::sync::mpsc::channel;
+        use serde_wasm_bindgen::to_value;
+
+        if !self.config.allow_fetch {
+            return self.raise("PermissionError", "Fetching is not allowed in this context");
+        }
+
+        let url = match args.get("url") {
+            Some(Value::String(s)) => s.clone(),
+            _ => return self.raise("TypeError", "Expected 'url' to be a string"),
+        };
+
+        let method = match args.get("method") {
+            Some(Value::String(s)) => s.clone(),
+            _ => "GET".to_string(),
+        };
+
+        let headers_map = match args.get("headers") {
+            Some(Value::Map { keys, values }) => {
+                let mut map = HashMap::new();
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    if let (Value::String(k), Value::String(v)) = (k, v) {
+                        map.insert(k.clone(), v.clone());
+                    }
+                }
+                Some(map)
+            }
+            _ => None,
+        };
+
+        let body = if let Some(json_val) = args.get("json") {
+            to_value(json_val).ok().map(|jsv| JsString::from(jsv.as_string().unwrap_or_default()))
+        } else if let Some(Value::Map { keys, values }) = args.get("data") {
+            let mut form = vec![];
+            for (k, v) in keys.iter().zip(values.iter()) {
+                if let (Value::String(k), Value::String(v)) = (k, v) {
+                    form.push(format!("{}={}", k, v));
+                }
+            }
+            Some(JsString::from(form.join("&")))
+        } else {
+            None
+        };
+
+        let opts = RequestInit::new();
+        opts.set_method(&method);
+        opts.set_mode(RequestMode::Cors);
+        if let Some(b) = &body {
+            opts.set_body(&JsValue::from(b));
+        }
+
+        let request = Request::new_with_str_and_init(&url, &opts).unwrap();
+
+        if let Some(headers_map) = headers_map {
+            let headers = request.headers();
+            for (k, v) in headers_map {
+                headers.set(&k, &v).ok();
+            }
+        }
+
+        let (tx, rx) = channel();
+        let window = web_sys::window().unwrap();
+        let fetch_promise: Promise = window.fetch_with_request(&request);
+        let tx_clone = tx.clone();
+
+        spawn_local(async move {
+            let resp_value = wasm_bindgen_futures::JsFuture::from(fetch_promise)
+                .await;
+            match resp_value {
+                Ok(rv) => {
+                    let resp: Response = rv.dyn_into().unwrap();
+                    let text = JsFuture::from(resp.text().unwrap())
+                        .await
+                        .map(|v| v.as_string().unwrap_or_default())
+                        .unwrap_or_else(|_| "Failed to read response".to_string());
+                    tx_clone.send(text).ok();
+                }
+                Err(_) => {
+                    tx_clone.send("Fetch failed".to_string()).ok();
+                }
+            }
+        });
+
+        let result_text = rx.recv().unwrap_or_else(|_| "Fetch failed".to_string());
+        Value::String(result_text)
     }
 
     fn _handle_invalid_type(&mut self, type_: &str, valid_types: Vec<&str>) -> bool {
@@ -3450,6 +3551,15 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(target_arch = "wasm32")]
+                "clib" => {
+                    self.stack.pop();
+                    return self.raise(
+                        "ImportError",
+                        "The 'clib' module is not supported in WebAssembly builds",
+                    );
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 "clib" => {
                     use crate::env::libs::clib::__init__ as clib;
                     let arc_config = Arc::new(self.config.clone());
@@ -3496,6 +3606,15 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(target_arch = "wasm32")]
+                "fs" => {
+                    self.stack.pop();
+                    return self.raise(
+                        "ImportError",
+                        "The 'fs' module is not supported in WebAssembly builds",
+                    );
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 "fs" => {
                     use crate::env::libs::fs::__init__ as fs;
                     let fs_module_props = fs::register();
@@ -3522,6 +3641,15 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(target_arch = "wasm32")]
+                "libload" => {
+                    self.stack.pop();
+                    return self.raise(
+                        "ImportError",
+                        "The 'libload' module is not supported in WebAssembly builds",
+                    );
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 "libload" => {
                     use crate::env::libs::libload::__init__ as libload;
                     let arc_config = Arc::new(self.config.clone());
@@ -3549,6 +3677,13 @@ impl Interpreter {
                 }
             }
         } else {
+            if cfg!(target_arch = "wasm32") {
+                self.stack.pop();
+                return self.raise(
+                    "ImportError",
+                    &format!("Module '{}' not found in WebAssembly build", module_name),
+                );
+            }
             let module_path_opt = statement.get(&Value::String("path".to_string()));
     
             let libs_dir = PathBuf::from(self.config.home_dir.clone()).join("libs");
@@ -8818,6 +8953,8 @@ impl Interpreter {
         }
 
         let mut stdout = stdout();
+        
+        #[cfg(not(target_arch = "wasm32"))]
         debug_log(
             &format!(
                 "<Operation: {} -> ...>",
@@ -8834,6 +8971,7 @@ impl Interpreter {
             return NULL;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if self.config.debug {
             stdout.execute(MoveUp(1)).unwrap();
             stdout.execute(MoveToColumn(0)).unwrap();
@@ -9063,9 +9201,26 @@ impl Interpreter {
                             &format!("Expected return type '{}' for '{}', got '{}'", ret_type.display_simple(), func_name, return_type.display_simple())
                         );
                     }
+                    #[cfg(target_arch = "wasm32")]
+                    let rand: f64 = js_sys::Math::random() * 10f64.powi(24);
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let rand: f64 = {
+                        use rand::{Rng, SeedableRng};
+                        use rand::rngs::SmallRng;
+                        let seed: [u8; 32] = [
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            9, 10, 11, 12, 13, 14, 15, 16,
+                            17, 18, 19, 20, 21, 22, 23, 24,
+                            25, 26, 27, 28, 29, 30, 31, 32
+                        ];
+
+                        let mut rng = SmallRng::from_seed(seed);
+                        rng.random_range(10u128.pow(23)..10u128.pow(24)) as f64
+                    };
                     let struct_temp_name = &format!(
                         "_temp_struct_{}",
-                        rand::Rng::random_range(&mut rand::rng(), 10u128.pow(23)..10u128.pow(24))
+                        rand
                     );
                     let mut object_variable = Variable::new(
                         struct_temp_name.to_string(),

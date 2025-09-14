@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::env::runtime::value::Value;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
@@ -307,9 +309,9 @@ impl<'de> Deserialize<'de> for CacheFormat {
     where
         D: Deserializer<'de>,
     {
-        let s = <&str>::deserialize(deserializer)?;
-        CacheFormat::from_str(s).ok_or_else(|| {
-            serde::de::Error::custom(format!("invalid cache format: {s}"))
+        let s = String::deserialize(deserializer)?;
+        CacheFormat::from_str(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!("invalid cache format: {}", s))
         })
     }
 }

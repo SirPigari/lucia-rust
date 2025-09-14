@@ -92,7 +92,7 @@ match (nested_result):
     Some(Err(e)) -> throw f"Unexpected error: {e}",
     None -> throw "No value in nested_result",
     _ ->
-        throw "Wildcard reached unexpectedly in nested generic match"
+        throw "Wildcard reached unexpectedly in nested literal generic match"
         break
     end
 end

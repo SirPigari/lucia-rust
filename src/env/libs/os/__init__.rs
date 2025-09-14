@@ -6,13 +6,21 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::{insert_native_fn, insert_native_var};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::env::consts;
+#[cfg(not(target_arch = "wasm32"))]
 use sys_info;
 
-// This module provides interfaces with the operating system.
-// It includes functions to retrieve system information such as CPU speed, memory usage, disk info, and load averages.
-// Lucia version 2.0.0, module: os@1.0.0
+#[cfg(target_pointer_width = "64")]
+const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
 
+#[cfg(target_pointer_width = "32")]
+const MAX_PTR: usize = 0xFFFF_FFFF; // max for 32-bit usize
+
+// ==== Helpers ====
+
+#[cfg(not(target_arch = "wasm32"))]
 fn wrap_string_fn<F>(func: F) -> impl Fn(&HashMap<String, Value>) -> Value
 where
     F: Fn() -> Result<String, sys_info::Error> + Send + Sync + 'static,
@@ -23,6 +31,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn wrap_u64_fn<F>(func: F) -> impl Fn(&HashMap<String, Value>) -> Value
 where
     F: Fn() -> Result<u64, sys_info::Error> + Send + Sync + 'static,
@@ -33,6 +42,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn wrap_usize_fn<F>(func: F) -> impl Fn(&HashMap<String, Value>) -> Value
 where
     F: Fn() -> Result<usize, sys_info::Error> + Send + Sync + 'static,
@@ -43,34 +53,22 @@ where
     }
 }
 
-fn cpu_num_usize() -> Result<usize, sys_info::Error> {
-    sys_info::cpu_num().map(|v| v as usize)
-}
-
-fn proc_total_usize() -> Result<usize, sys_info::Error> {
-    sys_info::proc_total().map(|v| v as usize)
-}
-
-fn mem_total_u64() -> Result<u64, sys_info::Error> {
-    sys_info::mem_info().map(|m| m.total)
-}
-
-fn mem_free_u64() -> Result<u64, sys_info::Error> {
-    sys_info::mem_info().map(|m| m.free)
-}
-
+// Unsafe pointer functions are the same for all platforms
 fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
-        return Value::Error("TypeError", "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.", None);
+        return Value::Error(
+            "TypeError",
+            "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.",
+            None,
+        );
     }
 
-    if ptr < 0x1000 || ptr > 0x0000_FFFF_FFFF_FFFF {
+    if ptr < 0x1000 || ptr > MAX_PTR {
         return Value::Error("ValueError", "Pointer value is out of valid range", None);
     }
 
     unsafe {
         let arc = Arc::from_raw(ptr as *const Value);
-
         Value::Pointer(arc)
     }
 }
@@ -84,7 +82,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
         );
     }
 
-    if ptr < 0x1000 || ptr > 0x0000_FFFF_FFFF_FFFF {
+    if ptr < 0x1000 || ptr > MAX_PTR {
         return Value::Error("ValueError", "Pointer value is out of valid range", None);
     }
 
@@ -94,6 +92,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 }
 
+// Panic helper
 fn panic_handler(args: &HashMap<String, Value>) -> Value {
     const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
@@ -103,68 +102,45 @@ fn panic_handler(args: &HashMap<String, Value>) -> Value {
         marked_message.push_str(message);
         panic!("{}", marked_message);
     }
-    Value::Error(
-        "PanicError",
-        "Panic called".into(),
-        None,
-    )
+    Value::Error("PanicError", "Panic called".into(), None)
 }
+
+// ==== Registration ====
 
 pub fn register(config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
-    let string_fns: Vec<(&str, Box<dyn Fn() -> Result<String, sys_info::Error> + Send + Sync>)> = vec![
-        ("os_name", Box::new(sys_info::os_type)),
-        ("os_version", Box::new(sys_info::os_release)),
-        ("hostname", Box::new(sys_info::hostname)),
-        ("os_arch", Box::new(|| Ok(consts::ARCH.to_string()))),
-    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Native OS functions
+        let string_fns: Vec<(&str, Box<dyn Fn() -> Result<String, sys_info::Error> + Send + Sync>)> = vec![
+            ("os_name", Box::new(sys_info::os_type)),
+            ("os_version", Box::new(sys_info::os_release)),
+            ("hostname", Box::new(sys_info::hostname)),
+            ("os_arch", Box::new(|| Ok(consts::ARCH.to_string()))),
+        ];
 
-    for (name, func) in string_fns {
-        insert_native_fn!(
-            map,
-            name,
-            wrap_string_fn(func),
-            vec![],
-            "str"
-        );
-    }
+        for (name, func) in string_fns {
+            insert_native_fn!(map, name, wrap_string_fn(func), vec![], "str");
+        }
 
-    let u64_fns: Vec<(&str, fn() -> Result<u64, sys_info::Error>)> = vec![
-        ("cpu_speed", sys_info::cpu_speed),
-        ("mem_total", mem_total_u64),
-        ("mem_free", mem_free_u64),
-    ];
+        let u64_fns: Vec<(&str, fn() -> Result<u64, sys_info::Error>)> =
+            vec![("cpu_speed", sys_info::cpu_speed), ("mem_total", || Ok(sys_info::mem_info()?.total)), ("mem_free", || Ok(sys_info::mem_info()?.free))];
 
-    for (name, func) in u64_fns {
-        insert_native_fn!(
-            map,
-            name,
-            wrap_u64_fn(func),
-            vec![],
-            "int"
-        );
-    }
+        for (name, func) in u64_fns {
+            insert_native_fn!(map, name, wrap_u64_fn(func), vec![], "int");
+        }
 
-    let usize_fns: Vec<(&str, fn() -> Result<usize, sys_info::Error>)> = vec![
-        ("cpu_num", cpu_num_usize),
-        ("processes", proc_total_usize),
-    ];
+        let usize_fns: Vec<(&str, fn() -> Result<usize, sys_info::Error>)> = vec![
+            ("cpu_num", || Ok(sys_info::cpu_num()? as usize)),
+            ("processes", || Ok(sys_info::proc_total()? as usize)),
+        ];
 
-    for (name, func) in usize_fns {
-        insert_native_fn!(
-            map,
-            name,
-            wrap_usize_fn(func),
-            vec![],
-            "int"
-        );
-    }
+        for (name, func) in usize_fns {
+            insert_native_fn!(map, name, wrap_usize_fn(func), vec![], "int");
+        }
 
-    insert_native_fn!(
-        map,
-        "loadavg",
-        |_: &HashMap<String, Value>| -> Value {
+        insert_native_fn!(map, "loadavg", |_: &HashMap<String, Value>| -> Value {
             match sys_info::loadavg() {
                 Ok(l) => {
                     let mut inner_map = HashMap::new();
@@ -172,104 +148,96 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
                     inner_map.insert("five".to_string(), Value::Float(l.five.into()));
                     inner_map.insert("fifteen".to_string(), Value::Float(l.fifteen.into()));
                     Value::Map { 
-                        keys: inner_map.keys().cloned().map(Value::String).collect::<Vec<_>>(),
-                        values: inner_map.values().cloned().collect::<Vec<_>>(),
-                    }                    
+                        keys: inner_map.keys().cloned().map(Value::String).collect(),
+                        values: inner_map.values().cloned().collect(),
+                    }
                 }
                 Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }
-        },
-        vec![],
-        "map"
-    );
+        }, vec![], "map");
 
-    insert_native_fn!(
-        map,
-        "disk_info",
-        |_: &HashMap<String, Value>| -> Value {
+        insert_native_fn!(map, "disk_info", |_: &HashMap<String, Value>| -> Value {
             match sys_info::disk_info() {
                 Ok(d) => {
                     let mut inner_map = HashMap::new();
                     inner_map.insert("total".to_string(), Value::Int(Int::from_i64(d.total as i64)));
                     inner_map.insert("free".to_string(), Value::Int(Int::from_i64(d.free as i64)));
                     Value::Map { 
-                        keys: inner_map.keys().cloned().map(Value::String).collect::<Vec<_>>(),
-                        values: inner_map.values().cloned().collect::<Vec<_>>(),
-                    }                    
+                        keys: inner_map.keys().cloned().map(Value::String).collect(),
+                        values: inner_map.values().cloned().collect(),
+                    }
                 }
                 Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }
-        },
-        vec![],
-        "map"
-    );
+        }, vec![], "map");
+    }
 
-    let allow_unsafe = match get_from_config(config, "allow_unsafe") {
-        Value::Boolean(b) => b,
-        _ => false,
-    };
+    #[cfg(target_arch = "wasm32")]
+    {
+        use js_sys::Date;
 
-    insert_native_fn!(
-        map,
-        "from_ptr",
-        move |args: &HashMap<String, Value>| -> Value {
-            if let Some(Value::Int(int)) = args.get("ptr") {
-                if let Ok(ptr) = int.to_i64() {
-                    from_ptr(ptr as usize, allow_unsafe)
-                } else {
-                    Value::Error("TypeError", "Invalid 'ptr' integer value", None)
-                }
+        insert_native_fn!(map, "os_name", |_: &HashMap<String, Value>| -> Value {
+            Value::String("WebAssembly".into())
+        }, vec![], "str");
+
+        insert_native_fn!(map, "os_version", |_: &HashMap<String, Value>| -> Value {
+            Value::String("N/A".into())
+        }, vec![], "str");
+
+        insert_native_fn!(map, "hostname", |_: &HashMap<String, Value>| -> Value {
+            Value::String("Browser".into())
+        }, vec![], "str");
+
+        insert_native_fn!(map, "cpu_num", |_: &HashMap<String, Value>| -> Value {
+            Value::Int(Int::from_i64(1)) // No real CPU info in WASM
+        }, vec![], "int");
+
+        insert_native_fn!(map, "mem_total", |_: &HashMap<String, Value>| -> Value {
+            Value::Int(Int::from_i64(0)) // Can't access memory info in browser
+        }, vec![], "int");
+
+        insert_native_fn!(map, "time_now", |_: &HashMap<String, Value>| -> Value {
+            let d = Date::new_0();
+            Value::Float(d.get_time().into())
+        }, vec![], "float");
+    }
+
+    // Unsafe pointer handling
+    let allow_unsafe = matches!(get_from_config(config, "allow_unsafe"), Value::Boolean(true));
+    
+    insert_native_fn!(map, "from_ptr", move |args: &HashMap<String, Value>| -> Value {
+        if let Some(Value::Int(int)) = args.get("ptr") {
+            if let Ok(ptr) = int.to_i64() {
+                from_ptr(ptr as usize, allow_unsafe)
             } else {
-                Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+                Value::Error("TypeError", "Invalid 'ptr' integer value", None)
             }
-        },
-        vec![Parameter::positional("ptr", "int")],
-        "any"
-    );
+        } else {
+            Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+        }
+    }, vec![Parameter::positional("ptr", "int")], "any");
 
-    insert_native_fn!(
-        map,
-        "to_ptr",
-        move |args: &HashMap<String, Value>| -> Value {
-            if let Some(Value::Int(int)) = args.get("ptr") {
-                if let Ok(ptr) = int.to_i64() {
-                    to_ptr(ptr as usize, allow_unsafe)
-                } else {
-                    Value::Error("TypeError", "Invalid 'ptr' integer value", None)
-                }
+    insert_native_fn!(map, "to_ptr", move |args: &HashMap<String, Value>| -> Value {
+        if let Some(Value::Int(int)) = args.get("ptr") {
+            if let Ok(ptr) = int.to_i64() {
+                to_ptr(ptr as usize, allow_unsafe)
             } else {
-                Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+                Value::Error("TypeError", "Invalid 'ptr' integer value", None)
             }
-        },
-        vec![Parameter::positional("ptr", "int")],
-        "any"
-    );
-    insert_native_fn!(
-        map,
-        "panic",
-        panic_handler,
-        vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())],
-        "void"
-    );
+        } else {
+            Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+        }
+    }, vec![Parameter::positional("ptr", "int")], "any");
 
-    insert_native_var!(
-        map,
-        "word_size",
-        Value::Int(Int::from_i64(std::mem::size_of::<usize>() as i64)),
-        "int"
-    );
-    insert_native_var!(
-        map,
-        "pointer_size",
-        Value::Int(Int::from_i64(std::mem::size_of::<*const ()>() as i64)),
-        "int"
-    );
-    insert_native_var!(
-        map,
-        "arch",
-        Value::String(consts::ARCH.to_string()),
-        "str"
-    );
+    insert_native_fn!(map, "panic", panic_handler, vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())], "void");
+
+    // Common vars
+    insert_native_var!(map, "word_size", Value::Int(Int::from_i64(std::mem::size_of::<usize>() as i64)), "int");
+    insert_native_var!(map, "pointer_size", Value::Int(Int::from_i64(std::mem::size_of::<*const ()>() as i64)), "int");
+    #[cfg(not(target_arch = "wasm32"))]
+    insert_native_var!(map, "arch", Value::String(consts::ARCH.to_string()), "str");
+    #[cfg(target_arch = "wasm32")]
+    insert_native_var!(map, "arch", Value::String("wasm32".into()), "str");
 
     map
 }

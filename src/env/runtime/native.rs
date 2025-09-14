@@ -38,6 +38,7 @@ fn print(args: &HashMap<String, Value>) -> Value {
     }
 
     out.push_str(&end);
+
     print!("{}", out);
 
     Value::Null

@@ -46,6 +46,23 @@ else
 	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_EXE)" "$(TARGET)"
 endif
 
+build-wasm:
+ifeq ($(OS),Windows_NT)
+	cd $(LUCIA_DIR) && if exist build.rs rename build.rs _build.rs
+	cd $(LUCIA_DIR) && if exist src\env\runtime\main_wasm.rs copy src\env\runtime\main_wasm.rs src\main_wasm.rs
+	cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm || echo Build failed
+	cd $(LUCIA_DIR) && if exist _build.rs rename _build.rs build.rs
+	cd $(LUCIA_DIR) && if exist src\main_wasm.rs del src\main_wasm.rs
+else
+	cd $(LUCIA_DIR) && [ -f build.rs ] && mv build.rs _build.rs || true
+	cd $(LUCIA_DIR) && [ -f src/env/runtime/main_wasm.rs ] && cp src/env/runtime/main_wasm.rs src/main_wasm.rs || true
+	cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm || true
+	cd $(LUCIA_DIR) && [ -f _build.rs ] && mv _build.rs build.rs || true
+	cd $(LUCIA_DIR) && [ -f src/main_wasm.rs ] && rm src/main_wasm.rs || true
+endif
+
+run-wasm: build-wasm
+	@wasmtime $(LUCIA_DIR)/target/wasm32-unknown-unknown/debug/lucia_wasm.wasm
 
 release:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin lucia

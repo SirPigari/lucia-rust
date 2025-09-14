@@ -1,5 +1,8 @@
-use std::io::{self, Write, stdout};
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{stdout, Write};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use crate::env::runtime::config::{Config};
 use crate::env::runtime::functions::Function;
@@ -10,16 +13,20 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::value::{Value};
 use std::str::FromStr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
+
+#[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
     execute,
     terminal::{Clear, ClearType},
     cursor::MoveTo,
     event,
 };
+
 use imagnum::math::{
     ERR_UNIMPLEMENTED,
     ERR_INVALID_FORMAT,
@@ -75,6 +82,7 @@ pub fn supports_color() -> bool {
 }
 
 #[cfg(unix)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn supports_color() -> bool {
     use std::io::IsTerminal;
     let is_tty = std::io::stdout().is_terminal();
@@ -85,6 +93,7 @@ pub fn supports_color() -> bool {
 }
 
 #[cfg(not(any(unix, windows)))]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn supports_color() -> bool {
     false
 }
@@ -183,6 +192,7 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 }
 
 #[inline(always)]
+#[cfg(not(target_arch = "wasm32"))]
 fn current_stack_pointer() -> usize {
     let x = 0u8;
     &x as *const u8 as usize
@@ -231,6 +241,7 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
     costs[b.len()]
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_line_info(file_path: &str, line_number: usize) -> Option<String> {
     let source = match fs::read_to_string(file_path) {
         Ok(content) => content,
@@ -239,6 +250,18 @@ pub fn get_line_info(file_path: &str, line_number: usize) -> Option<String> {
     source.lines().nth(line_number.saturating_sub(1)).map(|s| s.to_string())
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn get_line_info(source: &str, line_number: usize) -> Option<String> {
+    source.lines().nth(line_number.saturating_sub(1)).map(|s| s.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn clear_terminal() -> Result<(), io::Error> {
+    clear!();
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn clear_terminal() -> Result<(), io::Error> {
     let mut stdout = stdout();
     execute!(
@@ -277,6 +300,7 @@ pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {
     println!("{}", colored_message);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn read_input(prompt: &str) -> String {
     print!("{}", prompt);
     io::stdout().flush().unwrap();
@@ -457,6 +481,7 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_type_from_statement(stmt: &Statement) -> Option<String> {
     let map = stmt.convert_to_hashmap();
     match map.get(&Value::String("type".to_string())) {
@@ -1341,6 +1366,7 @@ pub fn convert_value_to_type(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn ctrl_t_pressed() -> bool {
     if event::poll(Duration::from_millis(0)).unwrap_or(false) {
         if let event::Event::Key(event::KeyEvent { code, modifiers, .. }) = event::read().unwrap() {

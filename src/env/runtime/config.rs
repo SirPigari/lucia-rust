@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Serialize, Deserialize};
 use std::fs::File;
 use std::io::Read;
@@ -24,6 +26,7 @@ pub struct Config {
     pub home_dir: String,
     pub stack_size: usize,
     pub version: String,
+    pub type_checker: TypeCheckerConfig,
     pub color_scheme: ColorScheme,
 }
 
@@ -39,10 +42,66 @@ pub struct ColorScheme {
     pub info: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct TypeCheckerConfig {
+    pub enabled: bool,
+    pub strict: bool,
+    pub run_unchecked: bool,
+    pub nested_functions: bool,
+    pub nested_loops: bool,
+    pub warn_on_any: bool,
+    pub warnings: bool,
+    pub treat_warnings_as_errors: bool,
+    pub max_errors: Option<i32>,
+    pub ignore_warnings: Vec<String>,
+    pub ignore_errors: Vec<String>,
+    pub ignore_modules: Vec<String>,
+    pub pointer_types: bool,
+    pub experimental_constant_folding: bool,
+    pub check_imports: bool,
+    pub allow_dynamic_casts: bool,
+    pub log_level: String,
+    pub verbose: bool,
+    pub track_value_origins: bool,
+    pub fail_fast: bool,
+    pub max_nested_depth: Option<i32>,
+    pub try_to_auto_fix: bool,
+}
+
+impl Default for TypeCheckerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            strict: true,
+            run_unchecked: false,
+            nested_functions: true,
+            nested_loops: true,
+            warn_on_any: false,
+            warnings: true,
+            treat_warnings_as_errors: false,
+            max_errors: None,
+            ignore_warnings: vec![],
+            ignore_errors: vec![],
+            ignore_modules: vec![],
+            pointer_types: true,
+            experimental_constant_folding: false,
+            check_imports: true,
+            allow_dynamic_casts: false,
+            log_level: "error".to_string(),
+            verbose: false,
+            track_value_origins: true,
+            fail_fast: true,
+            max_nested_depth: None,
+            try_to_auto_fix: false,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            version: env!("VERSION").to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             moded: false,
             debug: false,
             debug_mode: "normal".to_string(),
@@ -55,6 +114,7 @@ impl Default for Config {
             allow_inline_config: false,
             home_dir: "lucia/src/env/".to_string(),
             stack_size: 16777216, // 16 MB
+            type_checker: TypeCheckerConfig::default(),
             color_scheme: ColorScheme {
                 exception: "#F44350".to_string(),
                 warning: "#F5F534".to_string(),
@@ -181,9 +241,21 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected a string value for 'version'".to_string())
             }
         }
+        "type_checker" => {
+            if let Value::Map { keys, values } = value {
+                if keys.len() == 21 && values.len() == 21 {
+                    config.type_checker = parse_type_checker(&Value::Map { keys, values })?;
+                    Ok(())
+                } else {
+                    Err("Expected a map with 21 type checker entries".to_string())
+                }
+            } else {
+                Err("Expected a map for 'type_checker'".to_string())
+            }
+        }
         "color_scheme" => {
             if let Value::Map { keys, values } = value {
-                if keys.len() == 9 && values.len() == 9 {
+                if keys.len() == 8 && values.len() == 8 {
                     config.color_scheme = ColorScheme {
                         exception: values[0].to_string(),
                         warning: values[1].to_string(),
@@ -221,6 +293,65 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "home_dir" => Value::String(config.home_dir.clone()),
         "stack_size" => Value::Int(Int::from_i64(config.stack_size as i64)),
         "version" => Value::String(config.version.clone()),
+        "type_checker" => {
+            let tc = &config.type_checker;
+            Value::Map {
+                keys: vec![
+                    Value::String("enabled".to_string()),
+                    Value::String("strict".to_string()),
+                    Value::String("run_unchecked".to_string()),
+                    Value::String("nested_functions".to_string()),
+                    Value::String("nested_loops".to_string()),
+                    Value::String("warn_on_any".to_string()),
+                    Value::String("warnings".to_string()),
+                    Value::String("treat_warnings_as_errors".to_string()),
+                    Value::String("max_errors".to_string()),
+                    Value::String("ignore_warnings".to_string()),
+                    Value::String("ignore_errors".to_string()),
+                    Value::String("ignore_modules".to_string()),
+                    Value::String("pointer_types".to_string()),
+                    Value::String("experimental_constant_folding".to_string()),
+                    Value::String("check_imports".to_string()),
+                    Value::String("allow_dynamic_casts".to_string()),
+                    Value::String("log_level".to_string()),
+                    Value::String("verbose".to_string()),
+                    Value::String("track_value_origins".to_string()),
+                    Value::String("fail_fast".to_string()),
+                    Value::String("max_nested_depth".to_string()),
+                    Value::String("try_to_auto_fix".to_string()),
+                ],
+                values: vec![
+                    Value::Boolean(tc.enabled),
+                    Value::Boolean(tc.strict),
+                    Value::Boolean(tc.run_unchecked),
+                    Value::Boolean(tc.nested_functions),
+                    Value::Boolean(tc.nested_loops),
+                    Value::Boolean(tc.warn_on_any),
+                    Value::Boolean(tc.warnings),
+                    Value::Boolean(tc.treat_warnings_as_errors),
+                    match tc.max_errors {
+                        Some(v) => Value::Int(Int::from_i64(v as i64)),
+                        None => Value::Null,
+                    },
+                    Value::List(tc.ignore_warnings.iter().map(|s| Value::String(s.clone())).collect()),
+                    Value::List(tc.ignore_errors.iter().map(|s| Value::String(s.clone())).collect()),
+                    Value::List(tc.ignore_modules.iter().map(|s| Value::String(s.clone())).collect()),
+                    Value::Boolean(tc.pointer_types),
+                    Value::Boolean(tc.experimental_constant_folding),
+                    Value::Boolean(tc.check_imports),
+                    Value::Boolean(tc.allow_dynamic_casts),
+                    Value::String(tc.log_level.clone()),
+                    Value::Boolean(tc.verbose),
+                    Value::Boolean(tc.track_value_origins),
+                    Value::Boolean(tc.fail_fast),
+                    match tc.max_nested_depth {
+                        Some(v) => Value::Int(Int::from_i64(v as i64)),
+                        None => Value::Null,
+                    },
+                    Value::Boolean(tc.try_to_auto_fix),
+                ],
+            }
+        }
         "color_scheme" => {
             let color_scheme = &config.color_scheme;
             Value::Map {
@@ -294,6 +425,139 @@ pub fn get_version() -> String {
             eprintln!("Error loading config: {}", e);
             "Unknown version".to_string()
         }
+    }
+}
+
+fn parse_type_checker(value: &Value) -> Result<TypeCheckerConfig, String> {
+    let map = if let Value::Map { keys, values } = value {
+        if keys.len() != values.len() {
+            return Err("Mismatched keys and values in type_checker map".to_string());
+        }
+
+        let mut temp = HashMap::new();
+        for (k, v) in keys.iter().zip(values.iter()) {
+            if let Value::String(s) = k {
+                temp.insert(s.clone(), v.clone());
+            } else {
+                return Err("Expected string keys in type_checker map".to_string());
+            }
+        }
+        temp
+    } else {
+        return Err("Expected a map for 'type_checker'".to_string());
+    };
+
+    let config = TypeCheckerConfig {
+        enabled: match map.get("enabled") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        strict: match map.get("strict") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        run_unchecked: match map.get("run_unchecked") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        nested_functions: match map.get("nested_functions") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        nested_loops: match map.get("nested_loops") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        warn_on_any: match map.get("warn_on_any") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        warnings: match map.get("warnings") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        treat_warnings_as_errors: match map.get("treat_warnings_as_errors") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        max_errors: match map.get("max_errors") {
+            Some(Value::Int(v)) => {
+                let i = v.to_i64().or_else(|_| Err("max_errors out of i64 range".to_string()))?;
+                if i < i32::MIN as i64 || i > i32::MAX as i64 {
+                    return Err("max_errors out of i32 range".to_string());
+                }
+                Some(i as i32)
+            }
+            Some(Value::Null) | None => None,
+            _ => return Err("Expected int or null for max_errors".to_string()),
+        },
+        ignore_warnings: parse_string_list(map.get("ignore_warnings"))?,
+        ignore_errors: parse_string_list(map.get("ignore_errors"))?,
+        ignore_modules: parse_string_list(map.get("ignore_modules"))?,
+        pointer_types: match map.get("pointer_types") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        experimental_constant_folding: match map.get("experimental_constant_folding") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        check_imports: match map.get("check_imports") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        allow_dynamic_casts: match map.get("allow_dynamic_casts") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        log_level: match map.get("log_level") {
+            Some(Value::String(s)) => s.clone(),
+            _ => "error".to_string(),
+        },
+        verbose: match map.get("verbose") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+        track_value_origins: match map.get("track_value_origins") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        fail_fast: match map.get("fail_fast") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        },
+        max_nested_depth: match map.get("max_nested_depth") {
+            Some(Value::Int(v)) => {
+                let i = v.to_i64().or_else(|_| Err("max_nested_depth out of i64 range".to_string()))?;
+                if i < i32::MIN as i64 || i > i32::MAX as i64 {
+                    return Err("max_nested_depth out of i32 range".to_string());
+                }
+                Some(i as i32)
+            }
+            Some(Value::Null) | None => None,
+            _ => return Err("Expected int or null for max_nested_depth".to_string()),
+        },
+        try_to_auto_fix: match map.get("try_to_auto_fix") {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        },
+    };
+
+    Ok(config)
+}
+
+fn parse_string_list(value: Option<&Value>) -> Result<Vec<String>, String> {
+    match value {
+        Some(Value::List(vs)) => {
+            vs.iter()
+                .map(|v| match v {
+                    Value::String(s) => Ok(s.clone()),
+                    _ => Err("Expected string in list".to_string()),
+                })
+                .collect()
+        }
+        None => Ok(vec![]),
+        _ => Err("Expected list of strings".to_string()),
     }
 }
 

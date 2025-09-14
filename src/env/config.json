@@ -12,6 +12,12 @@
   "home_dir": "C:\\Users\\Ja\\Desktop\\projects\\lucia-rust\\src\\env",
   "stack_size": 16777216,
   "version": "2.0.0",
+  "type_checker": {
+    "enabled": false,
+    "strict": false,
+    "max_errors": 100,
+    "max_nested_depth": null
+  },
   "color_scheme": {
     "exception": "#F44350",
     "warning": "#F5F534",

@@ -34,6 +34,7 @@ mod env {
         pub mod precompile;
         pub mod cache;
         pub mod fmt;
+        pub mod static_checker;
     }
     pub mod libs {
         pub mod math {
@@ -88,7 +89,7 @@ mod lexer;
 mod parser;
 mod interpreter;
 
-use crate::env::runtime::config::{Config, ColorScheme, Libs};
+use crate::env::runtime::config::{Config, ColorScheme, TypeCheckerConfig, Libs};
 use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -97,6 +98,7 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::libs::{load_std_libs, check_project_deps};
+use crate::env::runtime::static_checker::Checker;
 use crate::env::runtime::fmt;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
 use crate::parser::Parser;
@@ -632,6 +634,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
         allow_inline_config: primary.allow_inline_config,
         home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
         stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
+        type_checker: merge_type_checker_configs(primary.type_checker, fallback.type_checker),
         color_scheme: merge_color_schemes(primary.color_scheme, fallback.color_scheme),
     }
 }
@@ -646,6 +649,33 @@ fn merge_color_schemes(primary: ColorScheme, fallback: ColorScheme) -> ColorSche
         note: if primary.note.is_empty() { fallback.note } else { primary.note },
         output_text: if primary.output_text.is_empty() { fallback.output_text } else { primary.output_text },
         info: if primary.info.is_empty() { fallback.info } else { primary.info },
+    }
+}
+
+fn merge_type_checker_configs(primary: TypeCheckerConfig, fallback: TypeCheckerConfig) -> TypeCheckerConfig {
+    TypeCheckerConfig {
+        enabled: primary.enabled,
+        strict: primary.strict,
+        run_unchecked: primary.run_unchecked,
+        nested_functions: primary.nested_functions,
+        nested_loops: primary.nested_loops,
+        warn_on_any: primary.warn_on_any,
+        warnings: primary.warnings,
+        treat_warnings_as_errors: primary.treat_warnings_as_errors,
+        max_errors: primary.max_errors.or(fallback.max_errors),
+        ignore_warnings: if primary.ignore_warnings.is_empty() { fallback.ignore_warnings } else { primary.ignore_warnings },
+        ignore_errors: if primary.ignore_errors.is_empty() { fallback.ignore_errors } else { primary.ignore_errors },
+        ignore_modules: if primary.ignore_modules.is_empty() { fallback.ignore_modules } else { primary.ignore_modules },
+        pointer_types: primary.pointer_types,
+        experimental_constant_folding: primary.experimental_constant_folding,
+        check_imports: primary.check_imports,
+        allow_dynamic_casts: primary.allow_dynamic_casts,
+        log_level: if primary.log_level.is_empty() { fallback.log_level } else { primary.log_level },
+        verbose: primary.verbose,
+        track_value_origins: primary.track_value_origins,
+        fail_fast: primary.fail_fast,
+        max_nested_depth: primary.max_nested_depth.or(fallback.max_nested_depth),
+        try_to_auto_fix: primary.try_to_auto_fix || fallback.try_to_auto_fix,
     }
 }
 
@@ -664,6 +694,7 @@ fn create_default_config(env_path: &Path) -> Config {
         allow_inline_config: true,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
         stack_size: 16777216,
+        type_checker: TypeCheckerConfig::default(),
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),
             warning: "#F5F534".to_string(),
@@ -678,31 +709,7 @@ fn create_default_config(env_path: &Path) -> Config {
 }
 
 fn create_config_file(path: &Path, env_path: &Path) -> io::Result<()> {
-    let default_config = Config {
-        version: VERSION.to_string(),
-        moded: false,
-        debug: false,
-        debug_mode: "normal".to_string(),
-        supports_color: true,
-        use_lucia_traceback: true,
-        warnings: true,
-        cache_format: CacheFormat::NoCache,
-        allow_fetch: true,
-        allow_unsafe: false,
-        allow_inline_config: true,
-        home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
-        stack_size: 16777216,
-        color_scheme: ColorScheme {
-            exception: "#F44350".to_string(),
-            warning: "#F5F534".to_string(),
-            help: "#21B8DB".to_string(),
-            debug: "#434343".to_string(),
-            input_arrows: "#136163".to_string(),
-            note: "#1CC58B".to_string(),
-            output_text: "#BCBEC4".to_string(),
-            info: "#9209B3".to_string(),
-        },
-    };
+    let default_config = create_default_config(env_path);
 
     let config_str = serde_json::to_string_pretty(&default_config)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
@@ -836,7 +843,8 @@ fn lucia(
     argv: Vec<String>,
     timer_flag: bool,
     command_to_run: Option<String>,
-    project_env_path: Option<PathBuf>
+    project_env_path: Option<PathBuf>,
+    static_check_args: (bool, bool, bool)
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
 
@@ -848,7 +856,7 @@ fn lucia(
         };
         
         std_env::set_current_dir(&cwd).ok();
-        execute_code_string(code, &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
+    execute_code_string(code, &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
         return;
     }
 
@@ -863,7 +871,7 @@ fn lucia(
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -873,7 +881,7 @@ fn lucia(
         };
 
         std_env::set_current_dir(&cwd).ok();
-        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref());
+    repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
     }
 }
 
@@ -890,7 +898,8 @@ fn execute_file(
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
     timer_flag: bool,
-    project_env_path: Option<&PathBuf>
+    project_env_path: Option<&PathBuf>,
+    static_check_args: (bool, bool, bool)
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
@@ -1104,6 +1113,34 @@ fn execute_file(
             );
         }
 
+        // Static checker logic
+        let (static_check_flag, run_flag, static_check_flag_force_run) = static_check_args;
+        let mut can_run = true;
+        if static_check_flag {
+            let static_check_time = Instant::now();
+            let mut checker = Checker::new(config.clone(), file_path.clone());
+            let errors = checker.check(statements.clone());
+            if !errors.is_empty() {
+                for err in &errors {
+                    handle_error(err, &file_content, &config);
+                }
+                if !static_check_flag_force_run {
+                    if !run_flag {
+                        can_run = false;
+                    }
+                    if !errors.is_empty() {
+                        can_run = false;
+                    }
+                }
+            }
+            if timer_flag {
+                println!("{}Static check time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), static_check_time.elapsed(), hex_to_ansi("reset", config.supports_color));
+            }
+        }
+        if !can_run {
+            return;
+        }
+
         let parent_dir = if file_path.is_empty() {
             std_env::current_dir()
                 .and_then(|p| p.canonicalize())
@@ -1191,7 +1228,8 @@ fn execute_code_string(
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
     timer_flag: bool,
-    project_env_path: Option<&PathBuf>
+    project_env_path: Option<&PathBuf>,
+    static_check_args: (bool, bool, bool)
 ) {
     let cache_dir = home_dir_path.join(".cache");
     if !cache_dir.exists() {
@@ -1283,6 +1321,34 @@ fn execute_code_string(
         );
     }
 
+    // Static checker logic
+    let (static_check_flag, run_flag, static_check_flag_force_run) = static_check_args;
+    let mut can_run = true;
+    if static_check_flag {
+        let static_check_time = Instant::now();
+        let mut checker = Checker::new(config.clone(), "<-c>".to_string());
+        let errors = checker.check(statements.clone());
+        if !errors.is_empty() {
+            for err in &errors {
+                handle_error(err, &file_content, &config);
+            }
+            if !static_check_flag_force_run {
+                if !run_flag {
+                    can_run = false;
+                }
+                if !errors.is_empty() {
+                    can_run = false;
+                }
+            }
+        }
+        if timer_flag {
+            println!("{}Static check time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), static_check_time.elapsed(), hex_to_ansi("reset", config.supports_color));
+        }
+    }
+    if !can_run {
+        return;
+    }
+
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut interpreter = Interpreter::new(
         config.clone(),
@@ -1329,7 +1395,8 @@ fn repl(
     dump_pp_flag: &bool,
     dump_ast_flag: &bool,
     timer_flag: bool,
-    project_env_path: Option<&PathBuf>
+    project_env_path: Option<&PathBuf>,
+    static_check_args: (bool, bool, bool)
 ) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
@@ -1396,6 +1463,12 @@ fn repl(
         home_dir_path.join("libs"),
         "<stdin>",
     );
+
+    let mut static_checker = if static_check_args.0 {
+        Some(Checker::new(config.clone(), "<stdin>".to_string()))
+    } else {
+        None
+    };
 
     let print_start_debug = matches!(debug_mode.as_deref(), Some("full" | "minimal"));
     let print_intime_debug = matches!(debug_mode.as_deref(), Some("full" | "normal"));
@@ -1623,6 +1696,31 @@ fn repl(
                 ),
                 &config,
             );
+        }
+
+        let mut can_run = true;
+        if let Some(checker) = static_checker.as_mut() {
+            let static_check_time = Instant::now();
+            let errors = checker.check(statements.clone());
+            if !errors.is_empty() {
+                if print_intime_debug {
+                    debug_log("Error while static checking:", &config);
+                }
+                for err in &errors {
+                    handle_error(err, &input, &config);
+                }
+                let (_, run_flag, static_check_flag_force_run) = static_check_args;
+                if static_check_flag_force_run {
+                } else if !run_flag || !errors.is_empty() {
+                    can_run = false;
+                }
+            }
+            if timer_flag {
+                println!("{}Static check time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), static_check_time.elapsed(), hex_to_ansi("reset", config.supports_color));
+            }
+        }
+        if !can_run {
+            continue;
         }
 
         let creating_interpreter_time = Instant::now();
@@ -1889,6 +1987,11 @@ fn main() {
         ("--bundle, -b", "Bundle the script and its dependencies into a single executable (Windows only)"),
         ("--no-project-env", "Disable project environment (.lucia/) detection"),
         ("-c=<code>, --code=<code>", "Execute code directly from command line"),
+        ("--check, -u", "Perform static code analysis without executing"),
+        ("--check --run, -w", "Perform static code analysis and run if no issues are found"),
+        ("-wf", "Perform static code analysis and always run, even if issues are found"),
+        ("-wa", "Perform static code analysis and run, try to fix issues automatically"),
+        ("<file>", "The source file to execute"),
     ];
 
     let mut activate_flag = false;
@@ -1911,6 +2014,10 @@ fn main() {
     let mut argv_arg: Option<String> = None;
     let mut timer_flag = false;
     let mut _no_project_env_flag = false;
+    let mut static_check_flag = false;
+    let mut static_check_flag_force_run = false;
+    let mut static_check_flag_auto_fix = false;
+    let mut run_flag = false;
     let mut command_to_run: Option<String> = None;
 
     let project_env_path = cwd.join(".lucia");
@@ -1960,7 +2067,6 @@ fn main() {
         let mut output_path = String::new();
         let mut files = Vec::new();
         let mut std_libs = (true, Vec::new());
-        let mut run_flag = false;
         let mut opt_level = "0".to_string();
         let mut i = 1;
         while i < args.len() {
@@ -2051,6 +2157,11 @@ fn main() {
 
     for arg in &args {
         match arg.as_str() {
+            "--check" | "-u" => static_check_flag = true,
+            "-wf" => { static_check_flag = true; static_check_flag_force_run = true; }
+            "-wa" => { static_check_flag = true; static_check_flag_auto_fix = true; }
+            "-w" => { static_check_flag = true; static_check_flag_auto_fix = true; }
+            "--run" | "-r" => run_flag = true,
             "--activate" | "-a" => activate_flag = true,
             "--no-color" => no_color_flag = true,
             "--color" => no_color_flag = false,
@@ -2348,6 +2459,13 @@ fn main() {
     if cache.1 {
         config.cache_format = cache.0;
     }
+
+    if static_check_flag_auto_fix {
+        config.type_checker.try_to_auto_fix = true;
+    }
+    static_check_flag_force_run |= config.type_checker.run_unchecked;
+    static_check_flag |= config.type_checker.enabled;
+    let static_check_args = (static_check_flag, run_flag, static_check_flag_force_run);
 
     if cls_cache_flag {
         config.cache_format = CacheFormat::NoCache;
@@ -2656,6 +2774,7 @@ fn main() {
                 timer_flag,
                 command_to_run,
                 if use_project_env { Some(project_env_path) } else { None },
+                static_check_args,
             );
         })
         .unwrap();

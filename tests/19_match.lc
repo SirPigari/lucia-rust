@@ -55,6 +55,7 @@ mutable hit6: bool = false
 match (a):
     (val) if (val == "Hello, World!") ->
         hit5 = true
+        // continue to next match
         continue
     end
 
