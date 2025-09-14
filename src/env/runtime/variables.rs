@@ -1661,6 +1661,38 @@ impl Variable {
                         None,
                     )
                 };
+                let keys = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "keys",
+                        move |_args| {
+                            if let Value::Map { keys, .. } = &val_clone {
+                                return Value::List(keys.clone());
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let values = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "values",
+                        move |_args| {
+                            if let Value::Map { values, .. } = &val_clone {
+                                return Value::List(values.clone());
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "get".to_string(),
@@ -1689,6 +1721,28 @@ impl Variable {
                     Variable::new(
                         "map".to_string(),
                         map,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "keys".to_string(),
+                    Variable::new(
+                        "keys".to_string(),
+                        keys,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "values".to_string(),
+                    Variable::new(
+                        "values".to_string(),
+                        values,
                         "function".to_string(),
                         false,
                         true,

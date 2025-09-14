@@ -5,7 +5,10 @@ use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::to_static;
-use std::time::{Instant, SystemTime, Duration, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
 use crate::{insert_native_fn};
 use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, Duration as ChronoDuration};
@@ -195,8 +198,15 @@ fn sleep(args: &HashMap<String, Value>) -> Value {
                                 None,
                             );
                         }
-                        let duration = Duration::from_millis(duration_ms as u64);
-                        thread::sleep(duration);
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            sleep!(duration_ms);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            let duration = Duration::from_millis(duration_ms as u64);
+                            thread::sleep(duration);
+                        }
                         Value::Null
                     }
                     Err(_) => Value::Error(

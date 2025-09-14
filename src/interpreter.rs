@@ -1261,6 +1261,19 @@ impl Interpreter {
 
     #[track_caller]
     pub fn evaluate(&mut self, statement: Statement) -> Value {
+        #[cfg(target_arch = "wasm32")]
+        if is_sleeping!() {
+            use wasm_bindgen_futures::spawn_local;
+            use gloo_timers::future::TimeoutFuture;
+            while is_sleeping!() {
+                spawn_local(async move {
+                    TimeoutFuture::new(100).await;
+                });
+                return Value::Null;
+            }
+            return Value::Null;
+        }
+
         self.current_statement = Some(statement.clone());
 
         if self.check_stop_flag() {
@@ -3297,12 +3310,19 @@ impl Interpreter {
     }
 
     pub fn handle_type_conversion(&mut self, statement: HashMap<Value, Value>) -> Value {
+        if self.err.is_some() {
+            return NULL;
+        }
+        
         let value_opt = match statement.get(&Value::String("value".to_string())) {
             Some(v) => v,
             None => return self.raise("RuntimeError", "Missing 'value' in type conversion statement"),
         };
 
         let value = self.evaluate(value_opt.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let target_type_opt = match statement.get(&Value::String("to".to_string())) {
             Some(Value::Map { keys, values }) => {
@@ -3315,6 +3335,9 @@ impl Interpreter {
         };
 
         let binding = self.evaluate(target_type_opt.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
         let (target_type, target_type_type) = match &binding {
             Value::Type(tt) => match get_inner_type(tt) {
                 Ok((t, _)) => (t, tt),

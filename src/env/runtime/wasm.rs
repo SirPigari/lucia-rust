@@ -2,26 +2,31 @@ use wasm_bindgen::prelude::*;
 use std::path::PathBuf;
 
 use web_sys::{console};
-use serde_wasm_bindgen::{from_value, to_value};
 use once_cell::unsync::OnceCell;
+use serde_wasm_bindgen::{from_value, to_value};
+use std::cell::RefCell;
 use js_sys::Function;
-
 
 thread_local! {
     static IS_PANIC_HOOK_SET: OnceCell<bool> = OnceCell::new();
+    static IS_SLEEPING: RefCell<bool> = RefCell::new(false);
 
-    static PRINT_CALLBACK: OnceCell<Function> = OnceCell::new();
-    static CLEAR_CALLBACK: OnceCell<Function> = OnceCell::new();
+    static PRINT_CALLBACK: RefCell<Option<Function>> = RefCell::new(None);
+    static CLEAR_CALLBACK: RefCell<Option<Function>> = RefCell::new(None);
 }
 
 #[wasm_bindgen]
 pub fn set_print_callback(cb: Function) {
-    PRINT_CALLBACK.with(|cell| { let _ = cell.set(cb); });
+    PRINT_CALLBACK.with(|cell| {
+        *cell.borrow_mut() = Some(cb);
+    });
 }
 
 #[wasm_bindgen]
 pub fn set_clear_callback(cb: Function) {
-    CLEAR_CALLBACK.with(|cell| { let _ = cell.set(cb); });
+    CLEAR_CALLBACK.with(|cell| {
+        *cell.borrow_mut() = Some(cb);
+    });
 }
 
 #[macro_export]
@@ -30,7 +35,7 @@ macro_rules! println {
         use wasm_bindgen::JsValue;
         let s = format!($($arg)*);
         $crate::PRINT_CALLBACK.with(|cb_cell| {
-            if let Some(cb) = cb_cell.get() {
+            if let Some(cb) = &*cb_cell.borrow() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&s));
             } else {
                 web_sys::console::log_1(&s.into());
@@ -45,7 +50,7 @@ macro_rules! eprintln {
         use wasm_bindgen::JsValue;
         let s = format!($($arg)*);
         $crate::PRINT_CALLBACK.with(|cb_cell| {
-            if let Some(cb) = cb_cell.get() {
+            if let Some(cb) = &*cb_cell.borrow() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&s));
             } else {
                 web_sys::console::error_1(&s.into());
@@ -60,7 +65,7 @@ macro_rules! print {
         use wasm_bindgen::JsValue;
         let s = format!($($arg)*);
         $crate::PRINT_CALLBACK.with(|cb_cell| {
-            if let Some(cb) = cb_cell.get() {
+            if let Some(cb) = &*cb_cell.borrow() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&s));
             } else {
                 web_sys::console::log_1(&s.into());
@@ -73,12 +78,38 @@ macro_rules! print {
 macro_rules! clear {
     () => {{
         $crate::CLEAR_CALLBACK.with(|cb_cell| {
-            if let Some(cb) = cb_cell.get() {
+            if let Some(cb) = &*cb_cell.borrow() {
                 let _ = cb.call0(&wasm_bindgen::JsValue::NULL);
             } else {
                 web_sys::console::clear();
             }
         });
+    }};
+}
+
+#[macro_export]
+macro_rules! sleep {
+    ($ms:expr) => {{
+        use $crate::IS_SLEEPING;
+        use gloo_timers::future::TimeoutFuture;
+        use wasm_bindgen_futures::spawn_local;
+
+        let ms = $ms.try_into().unwrap_or(0);
+
+        IS_SLEEPING.with(|cell| *cell.borrow_mut() = true);
+        let fut = async move {
+            TimeoutFuture::new(ms).await;
+            IS_SLEEPING.with(|cell| *cell.borrow_mut() = false);
+        };
+        spawn_local(fut);
+    }};
+}
+
+#[macro_export]
+macro_rules! is_sleeping {
+    () => {{
+        use $crate::IS_SLEEPING;
+        IS_SLEEPING.with(|cell| *cell.borrow())
     }};
 }
 
