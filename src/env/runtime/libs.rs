@@ -278,7 +278,7 @@ macro_rules! insert_native_fn_state {
             true,
             true,
             true,
-            Some($state),
+            Some($state.to_string()),
         );
 
         let func = Function::Native(Arc::new(native_fn));

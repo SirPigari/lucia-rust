@@ -20,7 +20,7 @@ use crate::env::runtime::utils::{
 use crate::env::runtime::variables::Variable;
 use sha2::{Sha256, Digest};
 
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn, insert_native_var, insert_native_fn_state};
 
 // This module provides various collection utilities.
 // It includes functions for working with lists, sets, and maps.
@@ -225,7 +225,6 @@ fn replace_accented_handler(args: &HashMap<String, Value>) -> Value {
 
 fn range_handler(args: &HashMap<String, Value>) -> Value {
     let (a, b) = if let Some(Value::Null) = args.get("b") {
-        // `a` is actually the end, default start to 0
         let end = if let Some(Value::Int(i)) = args.get("a") {
             i.to_i64().unwrap_or(0)
         } else {
@@ -380,7 +379,7 @@ pub fn register() -> HashMap<String, Variable> {
         vec![Parameter::positional("input", "str")],
         "str"
     );
-    insert_native_fn!(
+    insert_native_fn_state!(
         map,
         "range",
         range_handler,
@@ -389,7 +388,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional_pt("b", Type::new_simple("int").set_maybe_type(true), Value::Null),
             Parameter::positional_optional("step", "int", Value::Int(Int::from_i64(1)))
         ],
-        "list"
+        "list",
+        "deprecated: 'range' was added to builins in v2.0.0, use 'range' from there instead."
     );
 
     insert_native_var!(

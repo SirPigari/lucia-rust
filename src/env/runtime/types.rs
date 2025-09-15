@@ -214,6 +214,10 @@ impl Type {
             is_maybe_type: false,
         }
     }
+
+    pub fn new_union(types: Vec<Type>) -> Self {
+        Type::Union(types)
+    }
 }
 
 impl PartialEq for Type {

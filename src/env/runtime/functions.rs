@@ -119,6 +119,34 @@ impl NativeFunction {
             },
         }
     }
+
+    pub fn new_pt<F>(
+        name: &str,
+        func: F,
+        parameters: Vec<Parameter>,
+        return_type: &Type,
+        is_public: bool,
+        is_static: bool,
+        is_final: bool,
+        state: Option<String>,
+    ) -> Self
+    where
+        F: NativeCallable + 'static,
+    {
+        Self {
+            func: Arc::new(func),
+            meta: FunctionMetadata {
+                name: name.to_string(),
+                parameters,
+                return_type: return_type.clone(),
+                is_public,
+                is_static,
+                is_final,
+                is_native: true,
+                state,
+            },
+        }
+    }
 }
 
 

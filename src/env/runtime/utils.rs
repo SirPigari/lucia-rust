@@ -1394,6 +1394,11 @@ pub fn parse_type(type_str: &str) -> Type {
     if VALID_TYPES.contains(&type_str) {
         return Type::new_simple(type_str);
     }
+    if type_str.contains('|') {
+        let parts: Vec<&str> = type_str.split('|').map(|s| s.trim()).collect();
+        let types: Vec<Type> = parts.iter().map(|&part| parse_type(part)).collect();
+        return Type::new_union(types);
+    }
     let result = interpret(type_str);
     if result.is_err() {
         return Type::new_simple("any");

@@ -534,7 +534,12 @@ impl Value {
         match self {
             Value::List(items) => Box::new(items.clone().into_iter()),
 
-            Value::Map { keys, .. } => Box::new(keys.clone().into_iter()),
+            Value::Map { keys, values } => Box::new(
+                keys.clone()
+                    .into_iter()
+                    .zip(values.clone().into_iter())
+                    .map(|(k, v)| Value::Tuple(vec![k, v])),
+            ),
 
             Value::String(s) => Box::new(s.chars().map(|c| Value::String(c.to_string()))),
 

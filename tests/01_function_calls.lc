@@ -1,7 +1,9 @@
+#include <std/macros>
+
 // test functions
 
 print("hello!")
-print(len("this is 26 characters long"))
+assert_eq!(len("this is 26 characters long"), 26)
 
 // styled prints
 styledprint("hello", bold=true)
@@ -16,6 +18,10 @@ styledprint("hello", bg_color="blue")
 // ik end may be highlighted here but it is allowed
 styledprint("hello", end="✨")
 
+assert_eq!(type_of(123), int)
+assert_eq!(range(5).collect(), ([0, 1, 2, 3, 4]))
+assert_eq!(range(2, 5, as=list), ([2, 3, 4]))
+assert_eq!(range(2, 10, 2, as=tuple), (2, 4, 6, 8))
 
 help()
 warn("this is a warning")

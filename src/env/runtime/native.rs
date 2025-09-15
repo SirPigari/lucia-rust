@@ -1,13 +1,14 @@
-use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self};
+use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::types::{Int, Float};
+use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
 use serde_json::json;
 use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
-
+use once_cell::sync::Lazy;
 
 // -------------------------------
 // Function Implementations
@@ -395,6 +396,159 @@ fn array(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "Expected 'size' parameter of type int", None)
 }
 
+fn range(args: &HashMap<String, Value>) -> Value {
+    let (as_gen, use_tuple) = if let Some(Value::Type(as_type)) = args.get("as") {
+        let (_, inner) = match get_inner_type(as_type) {
+            Ok(t) => t,
+            Err(e) => return Value::Error("TypeError", to_static(e), None),
+        };
+        match inner {
+            Type::Simple { name, .. } => match name.as_str() {
+                "generator" => (true, false),
+                "tuple" => (false, true),
+                "list" => (false, false),
+                _ => {
+                    return Value::Error(
+                        "TypeError",
+                        to_static(format!("unsupported type '{}' for 'as'", name)),
+                        None,
+                    );
+                }
+            },
+            _ => {
+                return Value::Error(
+                    "TypeError",
+                    "unsupported complex type for 'as'",
+                    None,
+                )
+            }
+        }
+    } else {
+        (false, false)
+    };
+
+    let (start, end) = match (args.get("a"), args.get("b")) {
+        (Some(a), Some(Value::Null)) | (Some(a), None) => (Value::Int(Int::from(0)), a.clone()),
+        (Some(a), Some(b)) => (a.clone(), b.clone()),
+        _ => return Value::Error("TypeError", "expected at least 'a'", None),
+    };
+
+    let step_val = match args.get("step") {
+        Some(Value::Null) | None => Value::Int(Int::from(1)),
+        Some(v) => v.clone(),
+    };
+
+    let zero_step = match &step_val {
+        Value::Int(i) => *i == Int::from(0),
+        _ => true,
+    };
+    if zero_step {
+        return Value::Error("ValueError", "step cannot be zero", None);
+    }
+
+    if as_gen {
+        let start_val = match start {
+            Value::Int(i) => i.clone(),
+            _ => return Value::Error("TypeError", "generator only supports integers", None),
+        };
+        let end_val = match end {
+            Value::Int(i) => i.clone(),
+            _ => return Value::Error("TypeError", "generator only supports integers", None),
+        };
+        let step = match step_val {
+            Value::Int(s) if s > Int::from(0) => match s.to_usize() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("ValueError", "step too large", None),
+            },
+            _ => return Value::Error("TypeError", "generator step must be positive integer", None),
+        };
+
+        let start_val = Value::Int(start_val);
+        let step_val = Value::Int(Int::from(step));
+        let range_iter = RangeValueIter::new(&start_val, &Value::Int((&end_val - &Int::from(1)).unwrap_or(end_val)), &step_val);
+
+        let generator = Generator::new_anonymous(
+            GeneratorType::Native(NativeGenerator {
+                iter: Box::new(range_iter),
+                iteration: 0,
+            }),
+            false,
+        );
+
+        Value::Generator(generator)
+    } else {
+        let zero_step = match &step_val {
+            Value::Int(i) => *i == Int::from(0),
+            Value::Float(f) => *f == Float::from(0.0),
+            _ => false,
+        };
+        if zero_step {
+            return Value::Error("ValueError", "step cannot be zero", None);
+        }
+
+        let mut elements = Vec::new();
+        let mut current = start.clone();
+
+        let continue_loop = |c: &Value, e: &Value, s: &Value| -> bool {
+            match (c, e, s) {
+                (Value::Int(c), Value::Int(e), Value::Int(s)) => if *s > Int::from(0) { c < e } else { c > e },
+                (Value::Float(c), Value::Float(e), Value::Float(s)) => if *s > Float::from(0.0) { c < e } else { c > e },
+                (Value::Int(c), Value::Int(e), Value::Float(s)) => {
+                    let c_f = Float::from(c.to_i64().unwrap_or(0) as f64);
+                    let e_f = Float::from(e.to_i64().unwrap_or(0) as f64);
+                    if *s > Float::from(0.0) { c_f < e_f } else { c_f > e_f }
+                }
+                (Value::Float(c), Value::Int(e), Value::Float(s)) => {
+                    let e_f = Float::from(e.to_i64().unwrap_or(0) as f64);
+                    if *s > Float::from(0.0) { c < &e_f } else { c > &e_f }
+                }
+                (Value::Float(c), Value::Int(e), Value::Int(s)) => {
+                    let e_f = Float::from(e.to_i64().unwrap_or(0) as f64);
+                    let s_f = Float::from(s.to_i64().unwrap_or(0) as f64);
+                    if s_f > Float::from(0.0) { c < &e_f } else { c > &e_f }
+                }
+                _ => false,
+            }
+        };
+
+        while continue_loop(&current, &end, &step_val) {
+            elements.push(current.clone());
+
+            current = match (&current, &step_val) {
+                (Value::Int(c), Value::Int(s)) => match c + s {
+                    Ok(r) => Value::Int(r),
+                    Err(_) => return Value::Error("OverflowError", "integer overflow", None),
+                },
+                (Value::Float(c), Value::Float(s)) => match c + s {
+                    Ok(r) => Value::Float(r),
+                    Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                },
+                (Value::Int(c), Value::Float(s)) => {
+                    let c_f = Float::from(c.to_i64().unwrap_or(0) as f64);
+                    match &c_f + s {
+                        Ok(r) => Value::Float(r),
+                        Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                    }
+                }
+                (Value::Float(c), Value::Int(s)) => {
+                    let s_f = Float::from(s.to_i64().unwrap_or(0) as f64);
+                    match c + &s_f {
+                        Ok(r) => Value::Float(r),
+                        Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                    }
+                }
+                _ => return Value::Error("TypeError", "unsupported numeric types", None),
+            };
+        }
+
+        if use_tuple {
+            Value::Tuple(elements)
+        } else {
+            Value::List(elements)
+        }
+    }
+}
+
 fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
     Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
@@ -640,6 +794,25 @@ pub fn array_fn() -> Function {
             Parameter::positional_optional("initial_value", "any", Value::Null),
         ],
         "list",
+        true, true, true,
+        None,
+    )))
+}
+
+pub static INT_OR_FLOAT: Lazy<Type> = Lazy::new(|| parse_type("int | float"));
+pub static LIST_OR_GEN: Lazy<Type> = Lazy::new(|| parse_type("list | tuple | generator"));
+
+pub fn range_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new_pt(
+        "range",
+        range,
+        vec![
+            Parameter::positional_optional_pt("a", &INT_OR_FLOAT, Value::Null),
+            Parameter::positional_optional_pt("b", &INT_OR_FLOAT, Value::Null),
+            Parameter::positional_optional_pt("step", &INT_OR_FLOAT, Value::Int(1.into())),
+            Parameter::keyword_optional("as", "type", Value::Type(Type::new_simple("generator"))),
+        ],
+        &LIST_OR_GEN,
         true, true, true,
         None,
     )))

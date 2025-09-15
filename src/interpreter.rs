@@ -187,6 +187,7 @@ impl Interpreter {
         insert_builtin("char", Value::Function(native::char_fn()));
         insert_builtin("styledstr", Value::Function(native::styledstr_fn()));
         insert_builtin("array", Value::Function(native::array_fn()));
+        insert_builtin("range", Value::Function(native::range_fn()));
         this.variables.insert(
             "00__placeholder__".to_owned(),
             Variable::new("__placeholder__".to_owned(), Value::Function(native::placeholder_fn()), "function".to_owned(), true, false, true),
@@ -1265,13 +1266,7 @@ impl Interpreter {
         if is_sleeping!() {
             use wasm_bindgen_futures::spawn_local;
             use gloo_timers::future::TimeoutFuture;
-            while is_sleeping!() {
-                spawn_local(async move {
-                    TimeoutFuture::new(100).await;
-                });
-                return Value::Null;
-            }
-            return Value::Null;
+            while is_sleeping!() {}
         }
 
         self.current_statement = Some(statement.clone());
@@ -3298,7 +3293,7 @@ impl Interpreter {
                 } else if let Value::String(s) = value {
                     Value::Tuple(s.chars().map(|c| Value::String(c.to_string())).collect())
                 } else {
-                    self.raise("TypeError", &format!("Cannot convert '{}' to tuple", value.type_name()));
+                    self.raise("TypeError", &format!("Cannot convert '{}' to tuple", value.get_type().display_simple()));
                     NULL
                 }
             },
@@ -6475,20 +6470,17 @@ impl Interpreter {
                 return NULL;
             }
 
-            // Destructure if item is a list or tuple, else single assignment if only one var name
             if variable_names.len() == 1 {
-                // Single variable assignment
                 self.variables.insert(
                     variable_names[0].clone(),
                     Variable::new(variable_names[0].clone(), item.clone(), item.type_name(), false, true, true),
                 );
             } else {
-                // Multiple variables: check item is list or tuple and match lengths
                 let values_to_assign = match item {
                     Value::List(inner) => inner,
                     Value::Tuple(inner) => inner,
-                    _ => {
-                        return self.raise("TypeError", &format!("Cannot destructure non-list/tuple value into multiple variables"));
+                    t => {
+                        return self.raise("TypeError", &format!("Cannot destructure non-list/tuple ({}) value into multiple variables", t.get_type().display_simple()));
                     }
                 };
 
@@ -7346,6 +7338,15 @@ impl Interpreter {
                                 check_ansi("\x1b[24m", &self.use_colors)
                             ),
                         );
+                    } else if let Some(alt_info) = state.strip_prefix("deprecated: ") {
+                        self.warn(&format!(
+                            "Warning: Function '{}' is deprecated.",
+                            method_name
+                        ));
+                        self.warn(&format!(
+                            "{}",
+                            alt_info
+                        ));
                     } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
                         let mut parts = alt_info.splitn(2, ',').map(str::trim);
                         let version = parts.next().unwrap_or("unknown");
@@ -7384,6 +7385,15 @@ impl Interpreter {
                                 check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
                             ),
                         );
+                    } else if let Some(alt_info) = state.strip_prefix("experimental: ") {
+                        self.warn(&format!(
+                            "Warning: Method '{}' is experimental.",
+                            method_name
+                        ));
+                        self.warn(&format!(
+                            "{}",
+                            alt_info
+                        ));
                     }
                 }
 
@@ -8241,6 +8251,15 @@ impl Interpreter {
                                     check_ansi("\x1b[24m", &self.use_colors)
                                 ),
                             );
+                        } else if let Some(alt_info) = state.strip_prefix("deprecated: ") {
+                            self.warn(&format!(
+                                "Warning: Function '{}' is deprecated.",
+                                function_name
+                            ));
+                            self.warn(&format!(
+                                "{}",
+                                alt_info
+                            ));
                         } else if let Some(alt_info) = state.strip_prefix("removed_in_with_alt: ") {
                             let mut parts = alt_info.splitn(2, ',').map(str::trim);
                             let version = parts.next().unwrap_or("unknown");
