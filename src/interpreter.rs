@@ -1264,9 +1264,11 @@ impl Interpreter {
     pub fn evaluate(&mut self, statement: Statement) -> Value {
         #[cfg(target_arch = "wasm32")]
         if is_sleeping!() {
-            use wasm_bindgen_futures::spawn_local;
             use gloo_timers::future::TimeoutFuture;
-            while is_sleeping!() {}
+            use wasm_bindgen_futures::spawn_local;
+            spawn_local(async move {
+                TimeoutFuture::new(100).await;
+            });
         }
 
         self.current_statement = Some(statement.clone());
