@@ -30,11 +30,16 @@ endif
 
 all: deps build run
 
-deps:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 else
 	@which cargo >/dev/null || curl https://sh.rustup.rs -sSf | sh -s -- -y
-	@sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev
+
+	@for pkg in base-devel pkgconf openssl; do \
+		if ! pacman -Qi $$pkg >/dev/null 2>&1; then \
+			echo "Installing $$pkg..."; \
+			sudo pacman -Syu --noconfirm $$pkg; \
+		fi \
+	done
 endif
 
 build:
@@ -72,7 +77,6 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 else
 	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_EXE)" "$(TARGET)"
 endif
-
 
 run: $(TARGET)
 	@$(MKDIR)

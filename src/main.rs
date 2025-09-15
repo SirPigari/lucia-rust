@@ -1871,7 +1871,7 @@ fn bundle(
 }
 
 fn main() {
-    let vec_args: Vec<String> = std_env::args().collect();
+    let vec_args: Vec<String> = std_env::args().filter(|s| s != "lucia").collect();
 
     panic::set_hook(Box::new(|panic_info| {
         const CUSTOM_PANIC_MARKER: u8 = 0x1B;
