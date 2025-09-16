@@ -237,10 +237,20 @@ impl Statement {
             _ => "any".to_string(),
         }
     }
+    pub fn get_name(&self) -> String {
+        let map = self.convert_to_hashmap();
+        match map.get(&Value::String("name".to_string())) {
+            Some(Value::String(s)) => s.clone(),
+            _ => "".to_string(),
+        }
+    }
     pub fn is_empty(&self) -> bool {
         match self {
             Statement::Statement { keys, values, .. } => keys.is_empty() && values.is_empty(),
             Statement::Null => true,
         }
+    }
+    pub fn from_hashmap_values(values: &HashMap<Value, Value>) -> Statement {
+        Statement::convert_from_hashmap(values)
     }
 }

@@ -1353,6 +1353,7 @@ impl Interpreter {
     
                 "OPERATION" => self.handle_operation(statement_map),
                 "UNARY_OPERATION" => self.handle_unary_op(statement_map),
+                "PIPELINE" => self.handle_pipeline(statement_map),
     
                 "CALL" => self.handle_call(statement_map),
                 "METHOD_CALL" => self.handle_method_call(statement_map),
@@ -1411,6 +1412,93 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_pipeline(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let initial_value = match statement.get(&Value::String("initial_value".to_string())) {
+            Some(v) => v.clone(),
+            None => return self.raise("RuntimeError", "Missing 'initial_value' in pipeline statement"),
+        };
+        let arguments = match statement.get(&Value::String("arguments".to_string())) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'arguments' in pipeline statement"),
+        };
+
+        let mut current_val = self.evaluate(initial_value.convert_to_statement());
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        for step_val in arguments.iter().map(|v| v.convert_to_statement()) {
+            if self.err.is_some() {
+                return NULL;
+            }
+
+            let step_type = step_val.get_type();
+            if step_type.as_str() == "CALL" || step_type.as_str() == "METHOD_CALL" {
+                let mut arg_map: HashMap<Value, Value> = step_val.convert_to_hashmap();
+
+                let pos_key = if step_type.as_str() == "CALL" { "pos_arguments" } else { "pos_args" };
+                let named_key = if step_type.as_str() == "CALL" { "named_arguments" } else { "named_args" };
+
+                let val_wrapped = Statement::Statement {
+                    keys: vec!["type".into(), "value".into()],
+                    values: vec!["VALUE".into(), current_val.clone()],
+                    loc: self.get_location_from_current_statement(),
+                };
+
+                arg_map.entry(Value::String(pos_key.to_string()))
+                    .and_modify(|v| {
+                        if let Value::List(args) = v {
+                            let mut replaced_any = false;
+                            for a in args.iter_mut() {
+                                let stmt = a.convert_to_statement();
+                                if stmt.get_type() == "VARIABLE" && stmt.get_name() == "_" {
+                                    *a = val_wrapped.convert_to_map();
+                                    replaced_any = true;
+                                }
+                            }
+                            if !replaced_any {
+                                args.insert(0, val_wrapped.convert_to_map());
+                            }
+                        } else {
+                            *v = Value::List(vec![val_wrapped.convert_to_map()]);
+                        }
+                    })
+                    .or_insert_with(|| {
+                        Value::List(vec![val_wrapped.convert_to_map()])
+                    });
+
+                arg_map.entry(Value::String(named_key.to_string()))
+                    .and_modify(|v| {
+                        if let Value::Map { keys: _, values } = v {
+                            for val_idx in 0..values.len() {
+                                let stmt = values[val_idx].convert_to_statement();
+                                if stmt.get_type() == "VARIABLE" && stmt.get_name() == "_" {
+                                    values[val_idx] = val_wrapped.convert_to_map();
+                                }
+                            }
+                        } else {
+                            *v = Value::Map { keys: vec![], values: vec![] };
+                        }
+                    })
+                    .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
+
+                let new_statement = Statement::from_hashmap_values(&arg_map);
+                current_val = self.evaluate(new_statement);
+            } else {
+                self.variables.insert(
+                    "_".to_string(),
+                    Variable::new("_".to_string(), current_val.clone(), "any".to_string(), true, false, false)
+                );
+                current_val = self.evaluate(step_val);
+            }
+            if self.err.is_some() {
+                return NULL;
+            }
+        }
+
+        current_val
     }
 
     fn handle_value(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -7494,7 +7582,7 @@ impl Interpreter {
                                                 check_ansi("\x1b[4m", &self.use_colors),
                                                 param_name,
                                                 param_type.display_simple(),
-                                                format_value(&positional[pos_index]).to_string(),
+                                                format_value(&positional[pos_index - 1]).to_string(),
                                                 check_ansi("\x1b[24m", &self.use_colors)
                                             ),
                                         );
@@ -7519,7 +7607,7 @@ impl Interpreter {
                                                 check_ansi("\x1b[4m", &self.use_colors),
                                                 param_name,
                                                 param_type.display_simple(),
-                                                format_value(&positional[pos_index]).to_string(),
+                                                format_value(&positional[pos_index - 1]).to_string(),
                                                 check_ansi("\x1b[24m", &self.use_colors)
                                             ),
                                         );
@@ -7621,7 +7709,7 @@ impl Interpreter {
                         expect_one_of.push_str(" Expected one of: ");
                         
                         for (i, param) in metadata.parameters.iter().enumerate() {
-                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty.display()));
+                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty.display_simple()));
                             if i != params_count - 1 {
                                 expect_one_of.push_str(", ");
                             }
@@ -8385,7 +8473,7 @@ impl Interpreter {
                                                 check_ansi("\x1b[4m", &self.use_colors),
                                                 param_name,
                                                 param_type.display_simple(),
-                                                format_value(&positional[pos_index]).to_string(),
+                                                format_value(&positional[pos_index - 1]).to_string(),
                                                 check_ansi("\x1b[24m", &self.use_colors)
                                             ),
                                         );
@@ -8410,7 +8498,7 @@ impl Interpreter {
                                                 check_ansi("\x1b[4m", &self.use_colors),
                                                 param_name,
                                                 param_type.display_simple(),
-                                                format_value(&positional[pos_index]).to_string(),
+                                                format_value(&positional[pos_index - 1]).to_string(),
                                                 check_ansi("\x1b[24m", &self.use_colors)
                                             ),
                                         );
@@ -8515,7 +8603,7 @@ impl Interpreter {
                         expect_one_of.push_str(" Expected one of: ");
                         
                         for (i, param) in metadata.parameters.iter().enumerate() {
-                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty.display()));
+                            expect_one_of.push_str(&format!("{} ({})", param.name, param.ty.display_simple()));
                             if i != params_count - 1 {
                                 expect_one_of.push_str(", ");
                             }

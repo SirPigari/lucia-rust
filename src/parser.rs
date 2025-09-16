@@ -1352,7 +1352,34 @@ impl Parser {
                     };
                 }
 
-                
+                ("OPERATOR", "|>") => {
+                    let mut next_exprs: Vec<Statement> = vec![];
+                    while self.token_is("OPERATOR", "|>") {
+                        self.next();
+                        let next_expr = self.parse_primary();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        next_exprs.push(next_expr);
+                    }
+                    if self.err.is_some() {
+                        return Statement::Null;
+                    }
+                    expr = Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("initial_value".to_string()),
+                            Value::String("arguments".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("PIPELINE".to_string()),
+                            expr.convert_to_map(),
+                            Value::List(next_exprs.iter().map(|e| e.convert_to_map()).collect::<Vec<Value>>()),
+                        ],
+                        loc: self.get_loc(),
+                    };
+                }
+     
                 ("OPERATOR", val) if ["+=", "-=", "*=", "/=", "%=", "^="].contains(&val) => {
                     let operator = match val {
                         "+=" => "+",
@@ -1418,7 +1445,7 @@ impl Parser {
                 None => break,
             };
 
-            if ["=", "=>", "as", "++", "--", "|", "-li", "->"].contains(&op_str) {
+            if ["=", "=>", "as", "++", "--", "|", "-li", "->", "|>"].contains(&op_str) {
                 break;
             }
 

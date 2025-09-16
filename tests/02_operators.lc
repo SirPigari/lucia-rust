@@ -67,3 +67,18 @@ assert_eq!(7!!, 105)
 
 // nested abs
 assert_eq!(|-|-5| |, 5)
+
+// pipeline
+fun add(a: int, b: int) -> int:
+    return a + b
+end
+
+fun is_10(n: int) -> bool:
+    return n == 10
+end
+
+result: int = 5 |> add(3, _) |> add(_, _)
+assert_eq!(result, 16)
+
+result2: bool = add(1, 2) |> add(3) |> add(4, _) |> is_10()
+assert_eq!(result2, true)

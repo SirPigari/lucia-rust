@@ -19,7 +19,7 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 else
 	CARGO_ENV := cargo
 	MKDIR := mkdir -p $(TARGET_DIR)
-	MOVE := mv -f
+	MOVE := - mv -f
 	RUN := ./$(TARGET_EXE)
 	RUN_FULL := $(TARGET_DIR)/$(TARGET_EXE)
 	TEST_LOOP := for f in src/env/Docs/examples/tests/*.lc; do

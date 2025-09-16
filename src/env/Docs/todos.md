@@ -17,13 +17,13 @@ _Total TODOs found: 6_
 ### [`src/env/libs/std/macros.lc:85:36`](../../../src/env/libs/std/macros.lc#L85) _(added by **SirPigari** on **2025-07-22**)_
 - Fix apollo time in time module (src/env/libs/time/__init__.rs)
 
-### [`src/interpreter.rs:7293:1`](../../../src/interpreter.rs#L7293) _(added by **SirPigari** on **2025-07-21**)_
+### [`src/interpreter.rs:7381:1`](../../../src/interpreter.rs#L7381) _(added by **SirPigari** on **2025-07-21**)_
 - Refactor this method to pass mutable reference of Variable to the method
 
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
 
-### [`src/interpreter.rs:5512:1`](../../../src/interpreter.rs#L5512) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:5600:1`](../../../src/interpreter.rs#L5600) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
 
 ---
