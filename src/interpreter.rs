@@ -111,7 +111,7 @@ impl Interpreter {
             cache: Cache {
                 operations: HashMap::new(),
                 constants: HashMap::new(),
-                iterables: HashMap::new(),
+                iterables: HashMap::new()
             },
             internal_storage: InternalStorage {
                 lambda_counter: 0,
@@ -3438,6 +3438,16 @@ impl Interpreter {
             return NULL;
         }
 
+        match target_type_type {
+            Type::Struct { .. } => {
+                return self.raise("NotImplemented", "Conversion to struct types is not implemented yet");
+            }
+            Type::Enum { .. } => {
+                return self.raise("NotImplemented", "Conversion to enum types is not implemented yet");
+            }
+            _ => {}
+        }
+
         if target_type.starts_with("&") {
             let new_type = target_type.trim_start_matches('&').to_string();
             if !VALID_TYPES.contains(&new_type.as_str()) {
@@ -4499,14 +4509,25 @@ impl Interpreter {
             Some(self.use_colors.clone())
         );
 
+        let function = if name.starts_with("<") && name.ends_with(">") {
+            let interpreter = Arc::new(Mutex::new(self.clone()));
+            Value::Function(Function::CustomMethod(Arc::new(UserFunctionMethod {
+                meta: metadata.clone(),
+                body: body_formatted,
+                interpreter,
+            })))
+        } else {
+            create_function(
+                metadata.clone(),
+                body_formatted,
+            )
+        };
+
         self.variables.insert(
             name.to_string(),
             Variable::new(
                 name.to_string(),
-                create_function(
-                    metadata.clone(),
-                    body_formatted,
-                ),
+                function,
                 "function".to_string(),
                 is_static,
                 is_public,
@@ -8196,7 +8217,7 @@ impl Interpreter {
         named_args: HashMap<String, Value>,
     ) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "warn", "as_method", "00__set_cfg__", "00__set_dir__"
+            "exit", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
         ];
         let special_functions_meta = special_function_meta();
         let is_special_function = special_functions.contains(&function_name);
@@ -8807,6 +8828,26 @@ impl Interpreter {
                                 }
                             } else {
                                 return self.raise("TypeError", "Missing 'function' argument in as_method");
+                            }
+                        }
+                        "module" => {
+                            self.stack.pop();
+                            if let Some(Value::String(module_name)) = final_args_no_mods.get("path") {
+                                let module_path = PathBuf::from(module_name);   
+                                let properties = self.get_properties_from_file(&module_path);
+                                let module = Value::Module(Module {
+                                    name: module_name.clone(),
+                                    properties,
+                                    parameters: Vec::new(),
+                                    is_public: false,
+                                    is_static: false,
+                                    is_final: false,
+                                    state: None,
+                                    path: PathBuf::from(module_path.clone())
+                                });
+                                return module;
+                            } else {
+                                return self.raise("TypeError", "Expected a string in 'path' argument in module");
                             }
                         }
                         "00__set_cfg__" => {

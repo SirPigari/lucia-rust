@@ -576,7 +576,7 @@ impl Value {
             Value::Type(_) => Type::new_simple("type"),
             Value::Function(f) => f.get_type(),
             Value::Generator(_) => Type::new_simple("generator"),
-            Value::Module(..) => Type::new_simple("object"),
+            Value::Module(..) => Type::new_simple("module"),
             Value::Enum(e) => e.get_type(),
             Value::Struct(s) => s.get_type(),
             Value::Pointer(arc) => {

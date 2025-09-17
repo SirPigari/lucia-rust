@@ -1031,6 +1031,19 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
         },
     );
     map.insert(
+        "module".to_string(),
+        FunctionMetadata {
+            name: "module".to_string(),
+            parameters: vec![Parameter::positional("path", "str")],
+            return_type: Type::new_simple("module"),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+        },
+    );
+    map.insert(
         "00__set_cfg__".to_string(),
         FunctionMetadata {
             name: "00__set_cfg__".to_string(),
@@ -2038,7 +2051,7 @@ pub const KEYWORDS: &[&str] = &[
     "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",
     "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
     "type", "typedef", "where", "enum", "struct", "true", "false", "null", "void", "any", "int",
-    "float", "bool", "str", "map", "list", "function", "bytes", "tuple",
+    "float", "bool", "str", "map", "list", "function", "bytes", "tuple", "module", 
     "auto", "generator", "impl"
 ];
 

@@ -305,6 +305,13 @@ fn size_bits_handler(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn cwd_handler(_: &HashMap<String, Value>) -> Value {
+    match std_env::current_dir() {
+        Ok(path) => Value::String(fix_path(path.display().to_string())),
+        Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+    }
+}
+
 fn size_formatted_handler(args: &HashMap<String, Value>) -> Value {
     let path_val = args.get("path");
     let unit_val = args.get("unit");
@@ -509,6 +516,13 @@ pub fn register() -> HashMap<String, Variable> {
         "fix_path",
         fix_path_handler,
         vec![Parameter::positional("path", "str")],
+        "str"
+    );
+    insert_native_fn!(
+        map,
+        "cwd",
+        cwd_handler,
+        vec![],
         "str"
     );
 
