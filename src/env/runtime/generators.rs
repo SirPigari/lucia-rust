@@ -11,6 +11,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 fn add(a: &Value, b: &Value) -> Option<Value> {
     match (a, b) {
@@ -732,6 +733,31 @@ impl MapIter {
     }
 }
 
+#[derive(Clone)]
+pub struct SortIter {
+    pub generator: Box<Generator>,
+    pub sort_func: Function,
+    pub reversed: bool,
+    pub interpreter: Arc<Mutex<Interpreter>>,
+    pub sort_key: String,
+    pub sorted_items: Option<VecDeque<Value>>,
+    pub done: bool,
+}
+
+impl SortIter {
+    pub fn new(generator: &Generator, sort_func: Function, reversed: bool, interpreter: &Interpreter) -> Self {
+        Self {
+            generator: Box::new(generator.clone()),
+            sort_func,
+            reversed,
+            sort_key: format!("__sort_key_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()),
+            interpreter: Arc::new(Mutex::new(interpreter.clone())),
+            sorted_items: None,
+            done: false,
+        }
+    }
+}
+
 impl Iterator for RangeValueIter {
     type Item = Value;
 
@@ -926,6 +952,75 @@ impl Iterator for MapIter {
     }
 }
 
+impl Iterator for SortIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let mut interpreter = self.interpreter.lock().unwrap();
+
+        if self.sorted_items.is_none() {
+            let mut items: Vec<Value> = Vec::new();
+            while let Some(val) = self.generator.next() {
+                items.push(val);
+            }
+
+            if items.is_empty() {
+                self.done = true;
+                return None;
+            }
+
+            interpreter.variables.entry(self.sort_key.clone())
+                .or_insert_with(|| Variable::new(
+                    self.sort_key.clone(),
+                    Value::Function(self.sort_func.clone()),
+                    "any".to_string(),
+                    false,
+                    true,
+                    true,
+                ));
+
+            let mut keyed_items: Vec<(Value, Value)> = Vec::with_capacity(items.len());
+            for item in items {
+                let key = interpreter.call_function(&self.sort_key, vec![item.clone()], HashMap::new());
+
+                if interpreter.err.is_some() {
+                    self.done = true;
+                    return Some(Value::Error(
+                        "SortError",
+                        "Error during sort function evaluation",
+                        interpreter.err.clone(),
+                    ));
+                }
+
+                keyed_items.push((key, item));
+            }
+
+            keyed_items.sort_by(|a, b| {
+                match cmp(&a.0, &b.0) {
+                    Some(ordering) => if self.reversed { ordering.reverse() } else { ordering },
+                    None => std::cmp::Ordering::Equal,
+                }
+            });
+
+            self.sorted_items = Some(VecDeque::from(
+                keyed_items.into_iter().map(|(_, item)| item).collect::<Vec<_>>()
+            ));
+        }
+
+        match self.sorted_items.as_mut().and_then(|deque| deque.pop_front()) {
+            Some(val) => Some(val),
+            None => {
+                self.done = true;
+                None
+            }
+        }
+    }
+}
+
 impl GeneratorIterator for RangeValueIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
@@ -1013,6 +1108,20 @@ impl GeneratorIterator for FilterIter {
 }
 
 impl GeneratorIterator for MapIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        self.done
+    }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+}
+
+impl GeneratorIterator for SortIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
     }

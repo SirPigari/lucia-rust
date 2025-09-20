@@ -17,11 +17,15 @@ Name "${APPNAME} ${VERSION}"
 OutFile "LuciaInstaller.exe"
 InstallDir "$PROGRAMFILES\${APPNAME}"
 RequestExecutionLevel admin
+Icon "..\installer.ico"
+SetOverwrite on
+
+BrandingText "Installation Wizard by SirPigari"
+
 ShowInstDetails show
 !define MUI_ABORTWARNING
-
-SetOverwrite on
-Icon "..\installer.ico"
+!define MUI_ICON "..\installer.ico"
+!define MUI_UNICON "..\uninstaller.ico"
 
 ; -----------------------------
 ; Vars (all)
@@ -139,7 +143,7 @@ Function OptionsPage
     Pop $SQL_Check
     ${NSD_SetState} $SQL_Check $SQL_Enabled
 
-    ${NSD_CreateCheckbox} 260 150 220 18 "img"
+    ${NSD_CreateCheckbox} 260 150 220 18 "image"
     Pop $Img_Check
     ${NSD_SetState} $Img_Check $Img_Enabled
 
@@ -399,7 +403,7 @@ Function ConfirmPage
         ${EndIf}
 
         ${If} $Img_Enabled == ${BST_CHECKED}
-            StrCpy $ConfirmText "$ConfirmText  - img$\r$\n"
+            StrCpy $ConfirmText "$ConfirmText  - image$\r$\n"
         ${EndIf}
     ${Else}
         StrCpy $ConfirmText "$ConfirmText- Additional Libraries: None$\r$\n"
@@ -657,7 +661,7 @@ Section "Install"
             Call InstallLibrary
         ${EndIf}
         ${If} $Img_Enabled == ${BST_CHECKED}
-            Push "img"
+            Push "image"
             Call InstallLibrary
         ${EndIf}
 

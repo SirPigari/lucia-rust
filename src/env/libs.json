@@ -65,6 +65,11 @@
             "description": "Dynamic library loading and function invocation.",
             "version": "1.0.0",
             "expected_lucia_version": "^2.0.0"
+        },
+        "elevator": {
+            "description": "Random stuff from markofwitch.",
+            "version": "42.0.0",
+            "expected_lucia_version": "^2.0.0"
         }
     },
     "global": {},

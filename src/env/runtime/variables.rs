@@ -1,7 +1,8 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static};
+use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type};
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, SortIter};
+ use crate::env::runtime::precompile::interpret;
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
@@ -1075,6 +1076,17 @@ impl Variable {
                     "into_gen".to_string(),
                     Variable::new(
                         "into_gen".to_string(),
+                        into_gen.clone(),
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "iter".to_string(),
+                    Variable::new(
+                        "iter".to_string(),
                         into_gen,
                         "function".to_string(),
                         false,
@@ -1461,6 +1473,57 @@ impl Variable {
                     )
                 };
 
+                let sort = {
+                    let val_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    let func_type = parse_type("function[any] -> any | null");
+
+                    make_native_method(
+                        "sort",
+                        move |args| {
+                            let generator = match &val_clone {
+                                Value::Generator(g) => g,
+                                _ => return Value::Null,
+                            };
+
+                            if generator.is_infinite() {
+                                return Value::Error("TypeError", "Cannot sort an infinite generator", None);
+                            }
+
+                            let reversed = matches!(args.get("reverse"), Some(Value::Boolean(true)));
+
+                            let func = match args.get("key") {
+                                Some(Value::Function(f)) => f.clone(),
+                                Some(Value::Null) | None => {
+                                    match interpret("k => k") {
+                                        Ok(Value::Function(f)) => f,
+                                        _ => return Value::Error("TypeError", "Failed to create identity function", None),
+                                    }
+                                }
+                                _ => return Value::Error("TypeError", "Expected 'key' to be a function", None),
+                            };
+
+                            let sort_iter = SortIter::new(generator, func, reversed, &interpreter_clone);
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(sort_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(generator)
+                        },
+                        vec![
+                            Parameter::positional_optional_pt("key", &func_type, Value::Null),
+                            Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
+                        ],
+                        "generator",
+                        false, true, true,
+                        None,
+                    )
+                };
+
                 self.properties.insert(
                     "collect".to_string(),
                     Variable::new(
@@ -1554,6 +1617,17 @@ impl Variable {
                     Variable::new(
                         "take".to_string(),
                         take,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "sort".to_string(),
+                    Variable::new(
+                        "sort".to_string(),
+                        sort,
                         "function".to_string(),
                         false,
                         true,
@@ -1693,6 +1767,24 @@ impl Variable {
                         None,
                     )
                 };
+                let zip = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "zip",
+                        move |_args| {
+                            let (keys, values) = if let Value::Map { keys, values } = &val_clone {
+                                (keys.clone(), values.clone())
+                            } else {
+                                return Value::Error("TypeError", "Expected a map", None);
+                            };
+                            Value::List(keys.into_iter().zip(values).map(|(k, v)| Value::Tuple(vec![k, v])).collect())
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "get".to_string(),
@@ -1743,6 +1835,17 @@ impl Variable {
                     Variable::new(
                         "values".to_string(),
                         values,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "zip".to_string(),
+                    Variable::new(
+                        "zip".to_string(),
+                        zip,
                         "function".to_string(),
                         false,
                         true,

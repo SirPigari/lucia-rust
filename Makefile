@@ -10,6 +10,7 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	CARGO_ENV := cargo
 	MKDIR := if not exist "$(subst /,\,$(TARGET_DIR))" mkdir "$(subst /,\,$(TARGET_DIR))"
 	MOVE := move /Y
+	RM := del /F /Q
 	RUN := $(TARGET_EXE)
 	RUN_FULL := $(subst /,\,$(TARGET_DIR))\$(TARGET_EXE)
 	SHELL := cmd
@@ -20,6 +21,7 @@ else
 	CARGO_ENV := cargo
 	MKDIR := mkdir -p $(TARGET_DIR)
 	MOVE := - mv -f
+	RM := rm -f
 	RUN := ./$(TARGET_EXE)
 	RUN_FULL := $(TARGET_DIR)/$(TARGET_EXE)
 	TEST_LOOP := for f in src/env/Docs/examples/tests/*.lc; do
@@ -178,6 +180,16 @@ endif
 
 %:
 	@:
+
+installer:
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(RM) "$(LUCIA_DIR)\src\env\assets\installer\LuciaInstaller.exe"
+	@cd $(LUCIA_DIR) && cd src\env\assets\installer && "C:\Program Files (x86)\NSIS\makensis.exe" LuciaInstaller.nsi
+else
+	@rm "$(LUCIA_DIR)/src/env/assets/installer/LuciaInstaller.exe"
+	@$(RM) $(LUCIA_DIR) && cd src/env/assets/installer && makensis LuciaInstaller.nsi
+endif
 
 build-test: build-tests
 build-tests:

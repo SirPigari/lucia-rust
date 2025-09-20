@@ -37,6 +37,7 @@ typedef enum Result<T, E> {
     Ok(T),
     Err(E),
 }
+
 nested: Option[Result[int, str]] = Some(Ok(42))
 assert_eq!(nested, Some(Ok(42)))
 
@@ -97,3 +98,10 @@ match (nested_result):
     end
 end
 assert_eq!(nested_val, 67)
+
+typedef Clone = impl fun[Self] -> Self
+typedef struct Pair<T, U> { first: T, second: U } where (T: Clone, U: Clone)
+p1: Pair[int, str] = Pair { first = 1, second = "one" }
+p2: Pair[int, str] = Pair { first = 1, second = "one" }
+
+assert_eq!(p1, p2)

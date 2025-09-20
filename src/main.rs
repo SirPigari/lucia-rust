@@ -79,6 +79,9 @@ mod env {
             pub mod __init__;
             pub mod ffi;
         }
+        pub mod elevator {
+            pub mod __init__;
+        }
     }
     pub mod bundler {
         pub mod bundle;

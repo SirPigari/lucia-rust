@@ -3786,6 +3786,22 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(target_arch = "wasm32")]
+                "elevator" => {
+                    self.stack.pop();
+                    return self.raise(
+                        "ImportError",
+                        "The 'elevator' module is not supported in WebAssembly builds",
+                    );
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                "elevator" => {
+                    use crate::env::libs::elevator::__init__ as elevator;
+                    let elevator_module_props = elevator::register(&self.config);
+                    for (name, var) in elevator_module_props {
+                        properties.insert(name, var);
+                    }
+                }
                 _ => {
                     self.stack.pop();
                     return self.raise(
@@ -4071,16 +4087,25 @@ impl Interpreter {
                                 
                                 if actual_value != expected_value {
                                     self.stack.pop();
+                                    let help = if self.config.allow_inline_config {
+                                        format!(
+                                            "Use #config {} = {} to set the expected value.",
+                                            key,
+                                            format_value(&expected_value)
+                                        )
+                                    } else {
+                                        format!(
+                                            "You would use #config {} = {} to set the expected value, however, inline configuration is disabled.",
+                                            key,
+                                            format_value(&expected_value)
+                                        )
+                                    };
                                     return self.raise_with_help("ImportError", &format!(
                                         "Config key '{}' value mismatch. Expected: {}, Found: {}",
                                         key,
                                         format_value(&expected_value),
                                         format_value(&actual_value)
-                                    ), &format!(
-                                        "Use #config {} = {} to set the expected value.",
-                                        key,
-                                        format_value(&expected_value)
-                                    ));
+                                    ), &help);
                                 }
                             }
                         }                            

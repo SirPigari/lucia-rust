@@ -12,6 +12,8 @@ use std::path::Path;
 use std::fs;
 use std::sync::RwLock;
 
+use crate::VERSION;
+
 // This module defines the standard libraries available in the runtime environment.
 // Each library is represented by a name and a description, along with its version.
 // The libraries are stored in a static HashMap for easy access.
@@ -19,85 +21,93 @@ use std::sync::RwLock;
 // Lucia Version 2.0.0
 // This file is part of the Lucia programming language runtime.
 
+static EXPECTED_VERSION: Lazy<String> = Lazy::new(|| format!("^{}", VERSION));
+
 pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     let mut m = HashMap::new();
 
     m.insert("math", LibInfo::new(
         "Provides mathematical functions and constants.",
         "1.0.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("os", LibInfo::new(
         "Interfaces with the operating system.",
         "1.0.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("time", LibInfo::new(
         "Handles time and date functionality.",
         "0.3.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("json", LibInfo::new(
         "JSON parsing and serialization.",
         "1.0.82",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("config", LibInfo::new(
         "Lucia configuration management.",
         "0.2.6",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("regex", LibInfo::new(
         "Regular expressions for pattern matching.",
         "0.9.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("collections", LibInfo::new(
         "Collection of utilities.",
         "1.0.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("random", LibInfo::new(
         "Random number generation utilities.",
         "0.7.42",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("fs", LibInfo::new(
         "File system operations and utilities.",
         "0.4.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("clib", LibInfo::new(
         "C standard library bindings for Lucia.",
         "0.1.69",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("lasm", LibInfo::new(
         "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
         "1.0.3",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("nest", LibInfo::new(
         "HTTP client and server utilities.",
         "1.1.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m.insert("libload", LibInfo::new(
         "Dynamic library loading and function invocation.",
         "1.0.0",
-        "^2.0.0",
+        &EXPECTED_VERSION,
+    ));
+
+    m.insert("elevator", LibInfo::new(
+        "Random stuff from markofwitch.",
+        "42.0.0",
+        &EXPECTED_VERSION,
     ));
 
     m
