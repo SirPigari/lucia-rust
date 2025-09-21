@@ -9017,6 +9017,14 @@ impl Interpreter {
     }
     
     fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let operator = match statement.get(&Value::String("operator".to_string())) {
+            Some(Value::String(s)) => s.clone(),
+            _ => {
+                self.raise("TypeError", "Expected a string for operator");
+                return NULL;
+            }
+        };
+
         let left = match statement.get(&Value::String("left".to_string())) {
             Some(val_left) => self.evaluate(val_left.convert_to_statement()),
             None => {
@@ -9029,18 +9037,37 @@ impl Interpreter {
             return NULL;
         }
 
+        // Short-circuit for '&&' and '||'
+        if operator == "&&" || operator == "and" || operator == "||" || operator == "or" {
+            let mut left_test = if let Value::Boolean(b) = &left {
+                Value::Int(if *b { 1.into() } else { 0.into() })
+            } else {
+                left.clone()
+            };
+
+            if let Value::Pointer(lp) = &left_test {
+                let l_val = unsafe {
+                    let raw = Arc::as_ptr(lp);
+                    let arc = Arc::from_raw(raw);
+                    let val = (*arc).clone();
+                    std::mem::forget(arc);
+                    val
+                };
+                left_test = l_val;
+            }
+
+            if (operator == "&&" || operator == "and") && !left_test.is_truthy() {
+                return Value::Boolean(false);
+            }
+            if (operator == "||" || operator == "or") && left_test.is_truthy() {
+                return Value::Boolean(true);
+            }
+        }
+
         let right = match statement.get(&Value::String("right".to_string())) {
             Some(val_right) => self.evaluate(val_right.convert_to_statement()),
             None => {
                 self.raise("KeyError", "Missing 'right' key in the statement.");
-                return NULL;
-            }
-        };
-
-        let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(s)) => s.clone(),
-            _ => {
-                self.raise("TypeError", "Expected a string for operator");
                 return NULL;
             }
         };

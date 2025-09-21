@@ -9,7 +9,7 @@
   "allow_fetch": true,
   "allow_unsafe": true,
   "allow_inline_config": true,
-  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
+  "home_dir": "/home/markofwitch/Projects/lucia/src/env",
   "stack_size": 16777216,
   "version": "2.0.0",
   "type_checker": {

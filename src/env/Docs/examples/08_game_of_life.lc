@@ -9,16 +9,46 @@ import collections  // for clear_terminal
 // code inspired by https://github.com/mwharrisjr/Game-of-Life/
 // Game originally created by John Conway in 1970
 
-// doesnt work rn due to a bug in the nested index access
-// will fix later
-
+// glider
+// small spaceship
 final glider: list = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
-    [0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+]
+
+// block
+// still life
+final block: list = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+]
+
+
+// beacon
+// period 2 oscillator
+final beacon: list = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -26,7 +56,8 @@ final glider: list = [
 ]
 
 fun createInitialGrid(rows: int, cols: int) -> list:
-    use: ?list = glider
+    // set use to null to get a random grid, or to one of the predefined patterns
+    use: ?list = null
     if (use && len(use) == rows && len(use[0]) == cols):
         return use
     end
@@ -83,32 +114,21 @@ fun createNextGrid(rows: int, cols: int, grid: list) -> list:
         for (col in [0..cols - 1]):
             liveNeighbors: int = getLiveNeighbors(row, col, rows, cols, grid)
 
-            if (grid[row][col] == 1):
-                // live cell
-                if (liveNeighbors == 2 || liveNeighbors == 3):
-                    temp = nextGrid[row]
-                    temp[col] = 1
-                    nextGrid[row] = temp
-                    // nextGrid[row][col] = 1
-                else:
-                    temp = nextGrid[row]
-                    temp[col] = 0
-                    nextGrid[row] = temp
-                    // nextGrid[row][col] = 0
-                end
+            if (liveNeighbors < 2 || liveNeighbors > 3):
+                temp = nextGrid[row]
+                temp[col] = 0
+                nextGrid[row] = temp
+                // nextGrid[row][col] = 0
+            else if (liveNeighbors == 3 && grid[row][col] == 0):
+                temp = nextGrid[row]
+                temp[col] = 1
+                nextGrid[row] = temp
+                // nextGrid[row][col] = 1
             else:
-                // dead cell
-                if (liveNeighbors == 3):
-                    temp = nextGrid[row]
-                    temp[col] = 1
-                    nextGrid[row] = temp
-                    // nextGrid[row][col] = 1
-                else:
-                    temp = nextGrid[row]
-                    temp[col] = 0
-                    nextGrid[row] = temp
-                    // nextGrid[row][col] = 0
-                end
+                temp = nextGrid[row]
+                temp[col] = grid[row][col]
+                nextGrid[row] = temp
+                // nextGrid[row][col] = grid[row][col]
             end
         end
     end
@@ -164,7 +184,7 @@ fun runGame() -> void:
         end
         printGrid(rows, cols, currentGeneration, generation)
         nextGeneration = createNextGrid(rows, cols, currentGeneration)
-        time.sleep(200)
+        time.sleep(100)
         (currentGeneration, nextGeneration) = (nextGeneration, currentGeneration)
     end
 
