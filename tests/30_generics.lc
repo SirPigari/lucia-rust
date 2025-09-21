@@ -27,8 +27,10 @@ typedef enum Response<T, E> {
     Success(T),
     Failure(E),
 }
+
 resp1: Response[int, str] = Success(200)
 resp2: Response[int, str] = Failure("Not found")
+
 assert_eq!(resp1, Success(200))
 assert_eq!(resp2, Failure("Not found"))
 assert_ne!(resp1, resp2)

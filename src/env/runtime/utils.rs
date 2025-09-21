@@ -2055,6 +2055,11 @@ pub const KEYWORDS: &[&str] = &[
     "auto", "generator", "impl"
 ];
 
+pub const RESERVED_KEYWORDS: &[&str] = &[
+    "fun", "gen", "return", "export", "throw", "try", "if", "for", "while", "import",
+    "forget", "match", "defer", "true", "false", "null", "typedef", "type"
+];
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

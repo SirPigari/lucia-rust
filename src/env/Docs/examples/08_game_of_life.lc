@@ -12,7 +12,24 @@ import collections  // for clear_terminal
 // doesnt work rn due to a bug in the nested index access
 // will fix later
 
+final glider: list = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+]
+
 fun createInitialGrid(rows: int, cols: int) -> list:
+    use: ?list = glider
+    if (use && len(use) == rows && len(use[0]) == cols):
+        return use
+    end
     grid: list = []
     for (row in [0..rows - 1]):
         rowList: list = []
@@ -56,20 +73,47 @@ fun getLiveNeighbors(row: int, col: int, rows: int, cols: int, grid: list) -> in
     return lifeSum
 end
 
-fun createNextGrid(rows: int, cols: int, grid: list, nextGrid: list) -> void:
+// nested index access bug here
+// using temp variables as a workaround
+fun createNextGrid(rows: int, cols: int, grid: list) -> list:
+    mutable temp: list = []
+    nextGrid := array(rows, array(cols, 0))
+
     for (row in [0..rows - 1]):
         for (col in [0..cols - 1]):
             liveNeighbors: int = getLiveNeighbors(row, col, rows, cols, grid)
-            if (liveNeighbors < 2 || liveNeighbors > 3):
-                nextGrid[row][col] = 0
-            else if (liveNeighbors == 3 && grid[row][col] == 0):
-                nextGrid[row][col] = 1
+
+            if (grid[row][col] == 1):
+                // live cell
+                if (liveNeighbors == 2 || liveNeighbors == 3):
+                    temp = nextGrid[row]
+                    temp[col] = 1
+                    nextGrid[row] = temp
+                    // nextGrid[row][col] = 1
+                else:
+                    temp = nextGrid[row]
+                    temp[col] = 0
+                    nextGrid[row] = temp
+                    // nextGrid[row][col] = 0
+                end
             else:
-                nextGrid[row][col] = grid[row][col]
+                // dead cell
+                if (liveNeighbors == 3):
+                    temp = nextGrid[row]
+                    temp[col] = 1
+                    nextGrid[row] = temp
+                    // nextGrid[row][col] = 1
+                else:
+                    temp = nextGrid[row]
+                    temp[col] = 0
+                    nextGrid[row] = temp
+                    // nextGrid[row][col] = 0
+                end
             end
         end
     end
-    null
+
+    return nextGrid
 end
 
 fun gridChanging(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
@@ -110,14 +154,16 @@ fun runGame() -> void:
     generations: int = 5000
 
     currentGeneration: list = createInitialGrid(rows, cols)
-    nextGeneration: list = createInitialGrid(rows, cols)
+    nextGeneration: ?list = null
 
-    for (gen in [1..generations]):
-        if (!gridChanging(rows, cols, currentGeneration, nextGeneration)):
-            break
+    for (generation in [1..generations]):
+        if nextGeneration isnt void:
+            if (!gridChanging(rows, cols, currentGeneration, nextGeneration)):
+                break
+            end
         end
-        printGrid(rows, cols, currentGeneration, gen)
-        createNextGrid(rows, cols, currentGeneration, nextGeneration)
+        printGrid(rows, cols, currentGeneration, generation)
+        nextGeneration = createNextGrid(rows, cols, currentGeneration)
         time.sleep(200)
         (currentGeneration, nextGeneration) = (nextGeneration, currentGeneration)
     end

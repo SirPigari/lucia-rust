@@ -5,6 +5,7 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::PathElement;
+use crate::env::runtime::utils::RESERVED_KEYWORDS;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -1822,7 +1823,12 @@ impl Parser {
                         loop {
                             if let Some(tok) = self.token() {
                                 if tok.0 == "IDENTIFIER" {
-                                    vars.push(tok.1.clone());
+                                    let name = tok.1.clone();
+                                    if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                                        self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", name));
+                                        return Statement::Null;
+                                    }
+                                    vars.push(name);
                                     self.next();
                                 } else {
                                     self.raise("SyntaxError", "Expected identifier in tuple unpacking");
@@ -1846,12 +1852,19 @@ impl Parser {
                         }
                         Value::List(vars.into_iter().map(Value::String).collect())
                     } else {
-                        let t = self.token().cloned().map(|tok| Value::String(tok.1)).unwrap_or_else(|| {
+                        let t = self.token().cloned().unwrap_or_else(|| {
                             self.raise("SyntaxError", "Expected identifier after 'for'");
-                            return Value::Null;
+                            return Token("".to_string(), "".to_string(), None);
                         });
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        if RESERVED_KEYWORDS.contains(&t.1.as_str()) {
+                            self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", t.1));
+                            return Statement::Null;
+                        }
                         self.next();
-                        t
+                        Value::String(t.1)
                     };
 
                     if self.err.is_some() {
@@ -2373,11 +2386,11 @@ impl Parser {
                             self.next();
                             let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1 } else { "".to_string() }).unwrap_or_default();
                             self.next();
+                            let is_function = x == "fun";
                             if name.is_empty() {
-                                self.raise("SyntaxError", "Function or generator declaration cannot have a name when using modifiers");
+                                self.raise("SyntaxError", &format!("Expected {} name after '{}'", if is_function { "function" } else { "generator" }, x));
                                 return Statement::Null;
                             }
-                            let is_function = x == "fun";
                             self.check_for("SEPARATOR", "(");
                             self.next();
                             let mut pos_args = vec![];
@@ -4821,6 +4834,10 @@ impl Parser {
 
         if token.0 == "IDENTIFIER" {
             let name = token.1.clone();
+            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", name));
+                return Statement::Null;
+            }
             self.next();
             if self.token_is("SEPARATOR", ":") {
                 self.next();
@@ -5292,6 +5309,10 @@ impl Parser {
             if let Some(Token(t_type, t_val, _)) = &next_token {
                 if t_type == "OPERATOR" && t_val == "=" {
                     let name = current_token.1;
+                    if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                        self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a named argument", name));
+                        return (vec![], vec![]);
+                    }
                     self.next();
                     self.next();
                     let value = self.parse_expression();
