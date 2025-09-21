@@ -63,6 +63,7 @@ use serde_urlencoded;
 use std::io::{stdout, Write};
 use std::sync::Mutex;
 use std::panic::Location as PanicLocation;
+use rustc_hash::FxHashMap;
 use super::VERSION;
 
 use crate::lexer::Lexer;
@@ -81,7 +82,7 @@ pub struct Interpreter {
     stack: Stack,
     use_colors: bool,
     pub current_statement: Option<Statement>,
-    pub variables: HashMap<String, Variable>,
+    pub variables: FxHashMap<String, Variable>,
     file_path: String,
     cwd: PathBuf,
     preprocessor_info: (PathBuf, PathBuf, bool),
@@ -104,14 +105,14 @@ impl Interpreter {
             stack: Stack::new(),
             use_colors,
             current_statement: None,
-            variables: HashMap::new(),
+            variables: FxHashMap::default(),
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
             preprocessor_info,
             cache: Cache {
-                operations: HashMap::new(),
-                constants: HashMap::new(),
-                iterables: HashMap::new()
+                operations: FxHashMap::default(),
+                constants: FxHashMap::default(),
+                iterables: FxHashMap::default()
             },
             internal_storage: InternalStorage {
                 lambda_counter: 0,
@@ -2481,7 +2482,7 @@ impl Interpreter {
                             }
                         };
 
-                        let mut variables: HashMap<String, Variable> = HashMap::from_iter(variables.into_iter().map(|(k, v)| {
+                        let mut variables: FxHashMap<String, Variable> = FxHashMap::from_iter(variables.into_iter().map(|(k, v)| {
                             (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
                         }));
                         let mut merged = self.variables.clone();

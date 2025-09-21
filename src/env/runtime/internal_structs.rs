@@ -7,6 +7,7 @@ use bincode::{Encode, Decode};
 use std::sync::RwLock;
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathElement {
@@ -318,9 +319,9 @@ impl<'de> Deserialize<'de> for CacheFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Cache {
-    pub operations: HashMap<String, Value>,
-    pub constants: HashMap<String, Value>,
-    pub iterables: HashMap<Value, Value>,
+    pub operations: FxHashMap<String, Value>,
+    pub constants: FxHashMap<String, Value>,
+    pub iterables: FxHashMap<Value, Value>,
 }
 
 #[derive(Debug, Clone)]
