@@ -1,1 +1,5 @@
-print("hello world")
+fun hello() -> void:
+    print("Hello, World!")
+end
+
+hello()

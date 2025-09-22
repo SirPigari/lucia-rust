@@ -23,6 +23,7 @@ pub struct Config {
     pub allow_fetch: bool,
     pub allow_unsafe: bool,
     pub allow_inline_config: bool,
+    pub type_strict: bool,
     pub home_dir: String,
     pub stack_size: usize,
     pub version: String,
@@ -112,6 +113,7 @@ impl Default for Config {
             allow_fetch: true,
             allow_unsafe: false,
             allow_inline_config: false,
+            type_strict: true,
             home_dir: "lucia/src/env/".to_string(),
             stack_size: 16777216, // 16 MB
             type_checker: TypeCheckerConfig::default(),
@@ -233,6 +235,14 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected an integer value for 'stack_size'".to_string())
             }
         }
+        "type_strict" => {
+            if let Value::Boolean(val) = value {
+                config.type_strict = val;
+                Ok(())
+            } else {
+                Err("Expected a boolean value for 'type_strict'".to_string())
+            }
+        }
         "version" => {
             if let Value::String(val) = value {
                 config.version = val;
@@ -293,6 +303,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "home_dir" => Value::String(config.home_dir.clone()),
         "stack_size" => Value::Int(Int::from_i64(config.stack_size as i64)),
         "version" => Value::String(config.version.clone()),
+        "type_strict" => Value::Boolean(config.type_strict),
         "type_checker" => {
             let tc = &config.type_checker;
             Value::Map {

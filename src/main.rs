@@ -49,9 +49,6 @@ mod env {
         pub mod json {
             pub mod __init__;
         }
-        pub mod config {
-            pub mod __init__;
-        }
         pub mod clib {
             pub mod __init__;
         }
@@ -635,6 +632,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
         allow_fetch: primary.allow_fetch,
         allow_unsafe: primary.allow_unsafe,
         allow_inline_config: primary.allow_inline_config,
+        type_strict: primary.type_strict,
         home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
         stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
         type_checker: merge_type_checker_configs(primary.type_checker, fallback.type_checker),
@@ -696,6 +694,7 @@ fn create_default_config(env_path: &Path) -> Config {
         allow_unsafe: false,
         allow_inline_config: true,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
+        type_strict: true,
         stack_size: 16777216,
         type_checker: TypeCheckerConfig::default(),
         color_scheme: ColorScheme {

@@ -21,11 +21,6 @@
             "version": "1.0.82",
             "expected_lucia_version": "^2.0.0"
         },
-        "config": {
-            "description": "Lucia configuration management.",
-            "version": "0.2.6",
-            "expected_lucia_version": "^2.0.0"
-        },
         "regex": {
             "description": "Regular expressions for pattern matching.",
             "version": "0.9.0",

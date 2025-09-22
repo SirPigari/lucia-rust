@@ -773,6 +773,26 @@ impl Preprocessor {
                             return Err(create_err("#config requires a key and a value or reset key", &tokens[i]));
                         }
 
+                        if tokens[i].1 == "." {
+                            i += 1;
+                            let key = if i < tokens.len() && tokens[i].0 == "IDENTIFIER" {
+                                tokens[i].1.clone()
+                            } else {
+                                return Err(create_err("Expected IDENTIFIER after '#config.'", &tokens[i]));
+                            };
+                            i += 1;
+                            let loc = last_normal_token_location.clone();
+
+                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
+                            result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            // 0x6767 = 26471
+                            result.push(Token("NUMBER".to_string(), "26471".to_string(), loc.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            continue;
+                        }
+
                         let key = tokens[i].1.clone();
                         i += 1;
 

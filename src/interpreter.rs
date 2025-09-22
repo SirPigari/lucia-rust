@@ -510,10 +510,13 @@ impl Interpreter {
                     }
                 }
             }
-            Type::Enum { .. } => {
+            Type::Enum { generics, .. } => {
                 match value {
                     Value::Enum(e) => {
                         if type_matches(&e.ty, expected) {
+                            if self.config.type_strict && generics.len() > 0 {
+                                self.warn("TypeWarning: Strict type checking for Enums with generics is not implemented yet.");
+                            }
                             status = true;
                         } else {
                             status = false;
@@ -3659,14 +3662,6 @@ impl Interpreter {
                     use crate::env::libs::json::__init__ as json;
                     let json_module_props = json::register();
                     for (name, var) in json_module_props {
-                        properties.insert(name, var);
-                    }
-                }
-                "config" => {
-                    use crate::env::libs::config::__init__ as config;
-                    let arc_config = Arc::new(self.config.clone());
-                    let config_module_props = config::register(arc_config);
-                    for (name, var) in config_module_props {
                         properties.insert(name, var);
                     }
                 }
@@ -8885,20 +8880,38 @@ impl Interpreter {
                                 if let Some(value) = final_args_no_mods.get("value") {
                                     if let Value::Int(num_wrapper) = value {
                                         if let Ok(num) = num_wrapper.to_i64() {
-                                            if num == 26985 {
+                                            if num == 0x6969 {
                                                 let default_val = get_from_config(&self.og_cfg.clone(), key);
-                                                let _ = set_in_config(&mut self.config, key, default_val.clone());                                                
+                                                match set_in_config(&mut self.config, key, default_val.clone()) {
+                                                    Ok(_) => {}
+                                                    Err(err) => {
+                                                        return self.raise("KeyError", &err);
+                                                    }
+                                                }
                                                 debug_log(
                                                     &format!("<Reset config: {} to default>", key),
                                                     &self.config,
                                                     Some(self.use_colors.clone()),
                                                 );
                                                 return NULL;
+                                            } else if num == 0x6767 {
+                                                let val = get_from_config(&self.config.clone(), key);
+                                                debug_log(
+                                                    &format!("<Get config: {} = {}>", key, format_value(&val)),
+                                                    &self.config,
+                                                    Some(self.use_colors.clone()),
+                                                );
+                                                return val;
                                             }
                                         }
-                                    }                                    
+                                    }
 
-                                    let _ = set_in_config(&mut self.config, key, value.clone());
+                                    match set_in_config(&mut self.config, key, value.clone()) {
+                                        Ok(_) => {}
+                                        Err(err) => {
+                                            return self.raise("KeyError", &err);
+                                        }
+                                    }
                                     debug_log(
                                         &format!("<Set config: {} = {}>", key, format_value(value)),
                                         &self.config,

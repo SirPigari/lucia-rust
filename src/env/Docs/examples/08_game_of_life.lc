@@ -55,6 +55,21 @@ final beacon: list = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 ]
 
+// custom
+// empty grid do whatever you want
+final custom: list = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+]
+
 fun createInitialGrid(rows: int, cols: int) -> list:
     // set use to null to get a random grid, or to one of the predefined patterns
     use: ?list = null
@@ -66,6 +81,7 @@ fun createInitialGrid(rows: int, cols: int) -> list:
         rowList: list = []
         for (col in [0..cols - 1]):
             if (random.randint(0, 7) == 0):
+                // append doesnt take a mutable ref so it returns a new list
                 rowList = rowList.append(1)
             else:
                 rowList = rowList.append(0)
@@ -108,6 +124,7 @@ end
 // using temp variables as a workaround
 fun createNextGrid(rows: int, cols: int, grid: list) -> list:
     mutable temp: list = []
+    // no list references so this is the RIGHT way
     nextGrid := array(rows, array(cols, 0))
 
     for (row in [0..rows - 1]):
@@ -167,8 +184,9 @@ end
 
 fun runGame() -> void:
     collections.clear_terminal()
+    print("Conway's Game of Life in Lucia\n")
+    print("@ - live cell\n. - dead cell\n")
     rows: int = getIntegerValue("Enter the number of rows (10-60): ", 10, 60)
-    collections.clear_terminal()
     cols: int = getIntegerValue("Enter the number of cols (10-118): ", 10, 118)
 
     generations: int = 5000
@@ -184,6 +202,7 @@ fun runGame() -> void:
         end
         printGrid(rows, cols, currentGeneration, generation)
         nextGeneration = createNextGrid(rows, cols, currentGeneration)
+        // sleep is in MILLISECONDS for clarity because milliseconds are superior to seconds
         time.sleep(100)
         (currentGeneration, nextGeneration) = (nextGeneration, currentGeneration)
     end

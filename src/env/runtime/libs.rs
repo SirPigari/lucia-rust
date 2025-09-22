@@ -50,12 +50,6 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         &EXPECTED_VERSION,
     ));
 
-    m.insert("config", LibInfo::new(
-        "Lucia configuration management.",
-        "0.2.6",
-        &EXPECTED_VERSION,
-    ));
-
     m.insert("regex", LibInfo::new(
         "Regular expressions for pattern matching.",
         "0.9.0",

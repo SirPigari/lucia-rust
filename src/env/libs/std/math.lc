@@ -1,6 +1,8 @@
 #ifndef LUCIA_STD_MATH
 #define LUCIA_STD_MATH true
 
+private mutable import (sin, cos, tan, sqrt, log, pow) from math
+
 // approximate limit of f as x -> a
 private mutable fun lim(f: function[float | int] -> float, a: float, delta: float = 1e-7, tolerance: float = 1e-5) -> float:
     left_x := a - delta

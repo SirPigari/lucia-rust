@@ -148,9 +148,6 @@ mod env {
         pub mod json {
             pub mod __init__;
         }
-        pub mod config {
-            pub mod __init__;
-        }
         pub mod regex {
             pub mod __init__;
             pub mod regex_engine;

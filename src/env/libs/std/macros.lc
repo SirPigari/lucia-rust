@@ -79,7 +79,7 @@
 #endmacro
 
 #macro dbglog($value):
-    styledprint($value, fg_color=_config.color_scheme["debug"])
+    styledprint($value, fg_color=#config.color_scheme["debug"])
 #endmacro
 
 // TODO: Fix apollo time in time module (src/env/libs/time/__init__.rs)
