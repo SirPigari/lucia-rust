@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix, is_valid_token};
+use crate::env::runtime::utils::{hex_to_ansi, unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix, is_valid_token, supports_color, to_static};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
@@ -1446,7 +1446,7 @@ impl Parser {
                 None => break,
             };
 
-            if ["=", "=>", "as", "++", "--", "|", "-li", "->", "|>"].contains(&op_str) {
+            if ["=", "=>", "as", "++", "--", "|", "-li", "->", "|>", ":="].contains(&op_str) {
                 break;
             }
 
@@ -2385,12 +2385,16 @@ impl Parser {
                         x if ["fun", "gen"].contains(&x) => {
                             self.next();
                             let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1 } else { "".to_string() }).unwrap_or_default();
-                            self.next();
                             let is_function = x == "fun";
+                            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                                self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a {} name", name, if is_function { "function" } else { "generator" }));
+                                return Statement::Null;
+                            }
                             if name.is_empty() {
                                 self.raise("SyntaxError", &format!("Expected {} name after '{}'", if is_function { "function" } else { "generator" }, x));
                                 return Statement::Null;
                             }
+                            self.next();
                             self.check_for("SEPARATOR", "(");
                             self.next();
                             let mut pos_args = vec![];
@@ -2572,6 +2576,10 @@ impl Parser {
                                 return Statement::Null;
                             }
                             let name = type_token.1.clone();
+                            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                                self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a type name", name));
+                                return Statement::Null;
+                            }
                             let name_loc = type_token.2.clone();
                             self.next();
 
@@ -3210,6 +3218,8 @@ impl Parser {
                                     ],
                                     loc: self.get_loc(),
                                 };
+                            } else if self.token_is("OPERATOR", ":=") {
+                                return self.raise_with_help("SyntaxError", "':=' cannot be used in variable declaration with modifiers.", &format!("Use '{}{}{}: {} ={} ...' instead.", if modifiers.is_empty() { "" } else { to_static(format!("{} ", modifiers.join(" "))) }, name, hex_to_ansi("#1CC58B", supports_color()), "auto", hex_to_ansi("#21B8DB", supports_color())));
                             } else {
                                 return Statement::Statement {
                                     keys: vec![
@@ -3522,6 +3532,8 @@ impl Parser {
                 "IDENTIFIER" if token.1 == "scope" => {
                     self.next();
 
+                    let mut is_local = false;
+
                     let name_opt = match self.token() {
                         Some(token) if token.0 == "IDENTIFIER" => {
                             let name = token.1.clone();
@@ -3542,6 +3554,10 @@ impl Parser {
                                     self.next();
                                 }
                                 Some(tok) if tok.0 == "SEPARATOR" && tok.1 == "," => {
+                                    self.next();
+                                }
+                                Some(tok) if tok.0 == "OPERATOR" && tok.1 == "*" => {
+                                    is_local = true;
                                     self.next();
                                 }
                                 Some(tok) if tok.0 == "SEPARATOR" && tok.1 == ")" => break,
@@ -3620,6 +3636,11 @@ impl Parser {
                     let locals = locals_opt.unwrap();
                     keys.push(Value::String("locals".to_string()));
                     values.push(Value::List(locals.into_iter().map(Value::String).collect()));
+
+                    if is_local {
+                        keys.push(Value::String("is_local".to_string()));
+                        values.push(Value::Boolean(true));
+                    }
 
                     Statement::Statement {
                         keys,

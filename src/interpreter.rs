@@ -143,31 +143,56 @@ impl Interpreter {
             ),
         );
 
-        let dir = Path::new(file_path).parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or(".").to_owned();
-        std::env::set_current_dir(&dir).ok();
-
-        this.variables.insert(
-            "__dir__".to_owned(),
-            Variable::new(
+        if file_path.starts_with("<") && file_path.ends_with(">") {
+            this.variables.insert(
                 "__dir__".to_owned(),
-                Value::String(dir),
-                "str".to_owned(),
-                true,
-                false,
-                true,
-            ),
-        );
-        this.variables.insert(
-            "__file__".to_owned(),
-            Variable::new(
+                Variable::new(
+                    "__dir__".to_owned(),
+                    Value::String(fix_path(cwd.canonicalize().unwrap_or(".".into()).display().to_string())),
+                    "str".to_owned(),
+                    true,
+                    false,
+                    true,
+                ),
+            );
+            this.variables.insert(
                 "__file__".to_owned(),
-                Value::String(file_path.to_owned()),
-                "str".to_owned(),
-                true,
-                false,
-                true,
-            ),
-        );
+                Variable::new(
+                    "__file__".to_owned(),
+                    Value::String(file_path.to_owned()),
+                    "str".to_owned(),
+                    true,
+                    false,
+                    true,
+                ),
+            );
+        } else {
+            let dir = fix_path(Path::new(file_path).parent().unwrap_or_else(|| Path::new(".")).canonicalize().unwrap_or(".".into()).display().to_string());
+            std::env::set_current_dir(&dir).ok();
+
+            this.variables.insert(
+                "__dir__".to_owned(),
+                Variable::new(
+                    "__dir__".to_owned(),
+                    Value::String(dir),
+                    "str".to_owned(),
+                    true,
+                    false,
+                    true,
+                ),
+            );
+            this.variables.insert(
+                "__file__".to_owned(),
+                Variable::new(
+                    "__file__".to_owned(),
+                    Value::String(file_path.to_owned()),
+                    "str".to_owned(),
+                    true,
+                    false,
+                    true,
+                ),
+            );
+        }
     
         let mut insert_builtin = |name: &str, val: Value| {
             this.variables.insert(
@@ -324,7 +349,16 @@ impl Interpreter {
                             err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
                         }
                     }
-                } 
+                } else if *expected_ref == true {
+                    match value_type {
+                        Type::Simple { name: _, is_reference: value_type_ref, .. } => {
+                            if value_type_ref != *expected_ref {
+                                status = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             Type::Indexed { base_type: base, elements } => {
                 if value_type != **base {
@@ -2660,6 +2694,11 @@ impl Interpreter {
             }
         };
 
+        let is_local = match statement.get(&Value::String("is_local".to_string())) {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        };
+
         let stmts: Vec<Statement> = body.iter()
             .filter_map(|v| {
                 match v {
@@ -2672,6 +2711,24 @@ impl Interpreter {
                 }
             })
             .collect();
+
+        if is_local {
+            let mut result = NULL;
+            for stmt in stmts.iter() {
+                result = self.evaluate(stmt.clone());
+                if self.err.is_some() {
+                    return NULL;
+                }
+                match self.state {
+                    State::Break => {
+                        self.state = State::Normal;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            return result;
+        }
 
         let new_file_path = if statement.get(&Value::String("name".to_string())).is_some() {
             self.file_path.clone() + &format!("+scope.{}", name)
@@ -2727,7 +2784,7 @@ impl Interpreter {
             return NULL;
         }
 
-        let _ = scope_interpreter.interpret(stmts, true);
+        let res = scope_interpreter.interpret(stmts, true);
 
         if let Some(err) = scope_interpreter.err {
             self.stack.pop();
@@ -2749,7 +2806,10 @@ impl Interpreter {
         if scope_interpreter.is_returning {
             return scope_interpreter.return_value.clone();
         }
-        NULL
+        match res {
+            Ok(v) => v,
+            Err(_) => NULL,
+        }
     }
 
     fn handle_defer(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -8515,7 +8575,7 @@ impl Interpreter {
                                                 check_ansi("\x1b[4m", &self.use_colors),
                                                 param_name,
                                                 param_type.display_simple(),
-                                                format_value(&positional[pos_index - 1]).to_string(),
+                                                format_value(&positional[pos_index.saturating_sub(1)]).to_string(),
                                                 check_ansi("\x1b[24m", &self.use_colors)
                                             ),
                                         );

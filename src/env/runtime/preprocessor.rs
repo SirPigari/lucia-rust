@@ -124,6 +124,7 @@ struct MacroMetadata {
     mangling_enabled: bool, // true if mangling is enabled
     inherit_location: bool, // true if macro should inherit location from the call site
     contextual: bool,       // true if macro is contextual (add $line, $file, etc.)
+    is_unsafe: bool,        // true if macro is unsafe
     deprecated: (bool, Option<String>), // (is_deprecated, reason)
     raw: bool, // true if macro is raw (no processing)
 }
@@ -209,6 +210,7 @@ impl Preprocessor {
                             mangling_enabled: true,
                             inherit_location: true,
                             contextual: false,
+                            is_unsafe: false,
                             deprecated: (false, None),
                             raw: false,
                         };
@@ -227,6 +229,9 @@ impl Preprocessor {
                                 }
                                 "mangle" => {
                                     macro_metadata.mangling_enabled = true;
+                                }
+                                "unsafe" => {
+                                    macro_metadata.is_unsafe = true;
                                 }
                                 "no" => {
                                     i += 1;
@@ -333,6 +338,10 @@ impl Preprocessor {
                                 }
                             }
                             i += 1;
+                        }
+
+                        if !macro_metadata.grouping_enabled && macro_metadata.is_unsafe {
+                            return Err(create_err("Macro cannot be both 'no-group' and 'unsafe'", &tokens[i - 1]));
                         }
 
                         let name_token = &tokens[i];
@@ -1135,6 +1144,7 @@ impl Preprocessor {
         })?;
 
         let grouping_enabled = meta.grouping_enabled;
+        let is_unsafe = meta.is_unsafe;
         let mangling_enabled = meta.mangling_enabled;
         let raw = meta.raw;
         let inherit_location = meta.inherit_location;
@@ -1406,6 +1416,31 @@ impl Preprocessor {
             result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
         }
 
+        let unsafe_macro_output = format!("__unsafe_macro_output_{}", call_loc.as_ref().map(|loc| (loc.line_number * loc.range.0 / loc.range.1)).unwrap_or(0));
+
+        if is_unsafe {
+            result.push(Token("IDENTIFIER".to_string(), "scope".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
+            result.push(Token("OPERATOR".to_string(), "*".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ":".to_string(), call_loc.clone()));
+            
+            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
+            result.push(Token("STRING".to_string(), "\"allow_unsafe\"".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
+            result.push(Token("BOOLEAN".to_string(), "true".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            
+            result.push(Token("IDENTIFIER".to_string(), "final".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), unsafe_macro_output.to_owned(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ":".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), "auto".to_string(), call_loc.clone()));
+            result.push(Token("OPERATOR".to_string(), "=".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+        }
+
         if mangling_enabled {
             self.mangle_context.enter_scope();
             let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), &current_dir, depth)?;
@@ -1414,6 +1449,19 @@ impl Preprocessor {
         } else {
             let recursively_expanded = self.expand_tokens_with_macros(&expanded_tokens, skipping, call_loc.clone(), &current_dir, depth)?;
             result.extend(recursively_expanded);
+        }
+
+        if is_unsafe {
+            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), "end".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
+            result.push(Token("STRING".to_string(), "\"allow_unsafe\"".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
+            result.push(Token("NUMBER".to_string(), "26985".to_string(), call_loc.clone()));
+            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            result.push(Token("IDENTIFIER".to_string(), unsafe_macro_output, call_loc.clone()));
         }
 
         if grouping_enabled {

@@ -8,15 +8,16 @@ assert_eq!(i, 100)
 #define HELLO "world"
 
 #alias add sum
-// macros dont support aliasing or defined values
-sum_output: float = add(2, 3)
-assert_eq!(sum_output, 5.0)
+// // macros dont support aliasing or defined values
+// sum_output: float = add(2, 3)
+// assert_eq!(sum_output, 5.0)
+// they do now
+assert_eq!(add(2, 3), 5.0)
 #unalias add
 
 // aliasing 1 to 2
 #alias 1 2
-i: int = 1
-assert_eq!(i, 2)
+assert_eq!(1, 2)
 #unalias 1
 
 #ifdef PI
