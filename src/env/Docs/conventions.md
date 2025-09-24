@@ -5,6 +5,13 @@
 Lucia has a set of `conventions`, which are like rules but you don't have to follow them.  
 They exist just for you and the people reading your code to faster understand your code.  
 
+## Whitespace
+
+Lucia uses `4` space indentation, not `2`.
+Spaces are preferred more than `TAB`
+
+After each `:` used for a `code block` should be a newline.
+
 ## Names
 
 ### Variable names
@@ -38,6 +45,30 @@ Example:
 is_alphabetical: bool
 ```
 
+### Constants (finals)
+
+Constants should be in [SCREAMING_SNAKE_CASE](https://en.wikipedia.org/?title=SCREAMING_SNAKE_CASE&redirect=no)  
+
+Example:  
+
+```lucia
+final VERSION: str = "2.0.0"
+final APPLICATION_NAME: str = "Lucia"
+```
+
+### Modules
+
+Modules should be in [snake_case](https://en.wikipedia.org/wiki/Snake_case) 
+
+Example:  
+
+```lucia
+// standard modules
+import math
+// custom module
+import text_utils  // text_utils.lc or text_utils/__init__.lc
+```
+
 ### Type names
 
 Type names should be in [PascalCase (UpperCamelCase)](https://en.wikipedia.org/wiki/Camel_case)  
@@ -53,6 +84,13 @@ typedef struct Point = {
 }
 ```
 
+All types should be in [PascalCase (UpperCamelCase)](https://en.wikipedia.org/wiki/Camel_case), except standard types or pure aliases to std types.
+
+```lucia
+// std/types.lc
+typedef ptr = &any
+```
+
 ### Function/Generator/Macro names
 
 Function/Generator/Macro names should be in [snake_case](https://en.wikipedia.org/wiki/Snake_case) too  
@@ -66,6 +104,7 @@ and functions that do single actions should be named by this table:
 | getter (bool) | `is_`         |
 | getter (data) | `get_`        |
 | setter (data) | `set_`        |
+| conversion    | `to_`, `as_`  |
 
 And other reasonable prefixes.
 
@@ -76,6 +115,16 @@ Example:
 fun print_data(data: list) -> void:
     print(data)
 end
+```
+
+### Methods
+
+Methods should be also in [snake_case](https://en.wikipedia.org/wiki/Snake_case), although in the early versions of Lucia [PascalCase](https://en.wikipedia.org/wiki/Camel_case) was used  
+
+Example:
+
+```lucia
+10.to_string()
 ```
 
 ## Ifs
@@ -135,3 +184,57 @@ There are 4 macro bracket types
 `{}` are used to signal to user that they can put a large code chunk into it, so it doesn't take a expression, but statements
 
 `<>` are used for foreign code, like sql
+
+`()` Are preferred.  
+
+Examples:  
+
+```lucia
+#macro log!($x):
+    print(f"[LOG] $x$")
+#endmacro
+```
+
+```lucia
+#macro vec![$els...]:
+    Vec.from([$els])
+#endmacro
+```
+
+```lucia
+#macro execute!{$code}:
+    $code
+#endmacro
+```
+
+```lucia
+#macro sql!<$code>:
+    sql.exec($code)
+#endmacro
+```
+
+## Chaining
+
+Lucia allows you to chain methods, pipes and operators  
+
+### Method chaining
+
+A line shouldn't be longer than 100 characters
+
+You should rewrite code like:  
+
+```lucia
+a := items.into_gen().map((x) => x + 1).filter((x) => (x % 2 == 0)).collect_into(float)
+```
+
+into  
+
+```lucia
+a := items
+    .into_gen()
+    .map((x) => x + 1)
+    .filter((x) => (x % 2 == 0))
+    .collect_into(float)
+```
+
+Very similar to rust.
