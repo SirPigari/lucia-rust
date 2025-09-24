@@ -6,25 +6,52 @@ use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static};
+use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta};
 use crate::env::runtime::types::{Type, VALID_TYPES};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::internal_structs::State;
+use crate::env::runtime::functions::FunctionMetadata;
+use crate::env::runtime::modules::Module;
+use crate::env::runtime::native;
 use std::panic::Location as PanicLocation;
 use std::collections::{HashSet, HashMap};
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ValueType {
+    Float,
+    Int,
+    String,
+    Boolean,
+    Null,
+    Map {
+        keys: Vec<ValueType>,
+    },
+    Tuple(Vec<ValueType>),
+    List(Vec<ValueType>),
+    Bytes(usize),
+    Type(Type),
+    Function(FunctionMetadata),
+    Generator(FunctionMetadata),
+    Module(Module),
+    Enum(String, String), // name, variant
+    Struct(String), // name
+    Pointer(Box<ValueType>),
+    Error(String, String, Option<Error>), // type, msg, ref_err
+    Any,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
+    pub value_type: ValueType,
     pub type_: Type,
     pub is_mutable: bool,
     pub is_static: bool,
     pub is_public: bool,
-    pub is_native: bool,
 }
 
 impl Variable {
-    pub fn new(type_: Type, is_mutable: bool, is_static: bool, is_public: bool, is_native: bool) -> Self {
-        Self { type_, is_mutable, is_static, is_public, is_native }
+    pub fn new(value_type: ValueType, type_: Type, is_mutable: bool, is_static: bool, is_public: bool) -> Self {
+        Self { value_type, type_, is_mutable, is_static, is_public }
     }
 }
 
@@ -95,40 +122,40 @@ impl Checker {
             code_state: State::Normal,
             file_path,
             current_statement: None,
+
+            in_loop: false,
+            in_function: false,
+            in_generator: false,
+            in_struct: false,
+            in_catch: false,
+            in_try: false,
+            in_defer: false,
+            in_match: false,
+            in_scope: false,
         };
-        let builtins = vec![
-            "_",
-            "_err",
-            "__dir__",
-            "__file__",
-            "argv",
-            "print",
-            "styledprint",
-            "input",
-            "len",
-            "help",
-            "type_of",
-            "size_of",
-            "sum",
-            "ord",
-            "char",
-            "styledstr",
-            "array",
-            "exit",
-            "fetch",
-            "exec",
-            "eval",
-            "warn",
-            "as_method",
-            "00__set_cfg__",
-            "00__set_dir__",
-            "00__placeholder__",
-        ];
-        for var in builtins {
-            this.state.defined_vars.insert(var.to_string(), Variable::new(Value::Null, Type::new_simple("any"), false, true, true, true)); // built-in vars are immutable and public and native
+        let mut builtins: HashMap<String, Variable> = HashMap::new();
+        builtins.insert("_".to_string(), Variable::new(ValueType::Any, Type::new_simple("any"), false, true, true));
+        builtins.insert("_err".to_string(), Variable::new(ValueType::Tuple(vec![ValueType::String, ValueType::String, ValueType::String]), Type::new_simple("any"), false, true, true)); // (type, msg, ref_err)
+        builtins.insert("__dir__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true));
+        builtins.insert("__file__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true));
+        builtins.insert("argv".to_string(), Variable::new(ValueType::List(vec![ValueType::String; 100]), Type::new_simple("any"), false, true, true)); // up to 100 args
+        builtins.insert("print".to_string(), Variable::new(ValueType::Function(native::print_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("styledprint".to_string(), Variable::new(ValueType::Function(native::styled_print_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("input".to_string(), Variable::new(ValueType::Function(native::input_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("len".to_string(), Variable::new(ValueType::Function(native::len_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("help".to_string(), Variable::new(ValueType::Function(native::help_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("type_of".to_string(), Variable::new(ValueType::Function(native::type_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("size_of".to_string(), Variable::new(ValueType::Function(native::size_of_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("sum".to_string(), Variable::new(ValueType::Function(native::sum_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("ord".to_string(), Variable::new(ValueType::Function(native::ord_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("char".to_string(), Variable::new(ValueType::Function(native::char_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.insert("styledstr".to_string(), Variable::new(ValueType::Function(native::styledstr_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
+        builtins.extend(special_function_meta().into_iter().map(|(k, v)| (k.to_string(), Variable::new(ValueType::Function(v), Type::new_simple("any"), false, true, true))));
+        for (var, val) in builtins {
+            this.state.defined_vars.insert(var.to_string(), val); // built-in vars are immutable and public and native
         }
         for t in VALID_TYPES.iter() {
-            this.state.defined_vars.insert(t.to_string(), Variable::new(Value::Type(Type::new_simple(t)), Type::new_simple("any"), false, true, true, true)); // built-in types are immutable and public and native
+            this.state.defined_vars.insert(t.to_string(), Variable::new(ValueType::Type(Type::new_simple(t)), Type::new_simple("any"), false, true, true)); // built-in types are immutable and public and native
         }
         this
     }
@@ -370,5 +397,18 @@ impl Checker {
     }
 
     fn check_variable_declaration(&mut self, statement_map: HashMap<Value, Value>) {
+        let name = match statement_map.get(&Value::String("name".into())) {
+            Some(Value::String(n)) => n.clone(),
+            _ => return self.raise(ErrorTypes::SyntaxError, "Variable declaration missing 'name' or 'name' is not a string"),
+        };
+        
+        let modifiers = match statement_map.get(&Value::String("modifiers".to_string())) {
+            Some(Value::List(mods)) => mods,
+            _ => &vec![],
+        };
+
+        let is_public = modifiers.iter().any(|m| m == &Value::String("public".to_string()));
+        let is_final = modifiers.iter().any(|m| m == &Value::String("final".to_string()));
+        let is_static = modifiers.iter().any(|m| m == &Value::String("static".to_string()));
     }
 }
