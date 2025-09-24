@@ -15,7 +15,6 @@ use std::collections::{HashSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
-    pub value: Value,
     pub type_: Type,
     pub is_mutable: bool,
     pub is_static: bool,
@@ -24,8 +23,8 @@ pub struct Variable {
 }
 
 impl Variable {
-    pub fn new(value: Value, type_: Type, is_mutable: bool, is_static: bool, is_public: bool, is_native: bool) -> Self {
-        Self { value, type_, is_mutable, is_static, is_public, is_native }
+    pub fn new(type_: Type, is_mutable: bool, is_static: bool, is_public: bool, is_native: bool) -> Self {
+        Self { type_, is_mutable, is_static, is_public, is_native }
     }
 }
 
@@ -65,6 +64,17 @@ pub struct Checker {
     pub code_state: State,
     file_path: String,
     current_statement: Option<Statement>,
+
+    // cannot be as an enum because we need to be in multiple states at once
+    pub in_loop: bool,
+    pub in_function: bool,
+    pub in_generator: bool,
+    pub in_struct: bool,
+    pub in_try: bool,
+    pub in_catch: bool,
+    pub in_defer: bool,
+    pub in_match: bool,
+    pub in_scope: bool,
 }
 
 impl Checker {
