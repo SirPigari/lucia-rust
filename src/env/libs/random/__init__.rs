@@ -4,7 +4,7 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::SmallRng;
 use rand::prelude::{SliceRandom, IndexedRandom};
 
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;

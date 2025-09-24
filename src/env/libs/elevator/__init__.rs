@@ -4,7 +4,7 @@ use std::time::{Duration};
 use std::{thread, io::{Write}};
 use once_cell::sync::OnceCell;
 
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::env as std_env;
 use std::fs::File;
 
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::utils::{to_static, fix_path};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;

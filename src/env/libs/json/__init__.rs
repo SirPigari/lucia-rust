@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::sync::Arc;
 
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::value::Value;

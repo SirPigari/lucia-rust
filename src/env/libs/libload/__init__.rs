@@ -15,7 +15,7 @@ unsafe extern "system" {
     fn GetProcAddress(hModule: *mut u8, lpProcName: *const i8) -> *mut u8;
 }
 
-use crate::env::runtime::functions::{NativeFunction, Parameter};
+use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;

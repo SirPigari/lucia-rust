@@ -63,11 +63,16 @@ impl std::default::Default for FunctionMetadata {
 
 pub trait Callable: Send + Sync {
     fn call(&self, args: &HashMap<String, Value>) -> Value;
+    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value;
     fn metadata(&self) -> &FunctionMetadata;
 }
 
 pub trait NativeCallable: Send + Sync {
     fn call(&self, _args: &HashMap<String, Value>) -> Value;
+}
+
+pub trait SharedNativeCallable: Send + Sync {
+    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value;
 }
 
 impl<F> NativeCallable for F
@@ -79,10 +84,100 @@ where
     }
 }
 
+impl<F> SharedNativeCallable for F
+where
+    F: Fn(&HashMap<String, Value>, &Interpreter) -> Value + Send + Sync + 'static,
+{
+    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+        (self)(_args, _interpreter)
+    }
+}
+
 #[derive(Clone)]
 pub struct NativeFunction {
     pub func: Arc<dyn NativeCallable>,
     pub meta: FunctionMetadata,
+}
+
+#[derive(Clone)]
+pub struct SharedNativeFunction {
+    pub func: Arc<dyn SharedNativeCallable>,
+    pub meta: FunctionMetadata,
+}
+
+impl SharedNativeFunction {
+    pub fn new<F>(
+        name: &str,
+        func: F,
+        parameters: Vec<Parameter>,
+        return_type: &str,
+        is_public: bool,
+        is_static: bool,
+        is_final: bool,
+        state: Option<String>,
+    ) -> Self
+    where
+        F: SharedNativeCallable + 'static,
+    {
+        Self {
+            func: Arc::new(func),
+            meta: FunctionMetadata {
+                name: name.to_string(),
+                parameters,
+                return_type: Type::new_simple(return_type),
+                is_public,
+                is_static,
+                is_final,
+                is_native: true,
+                state,
+            },
+        }
+    }
+
+    pub fn new_pt<F>(
+        name: &str,
+        func: F,
+        parameters: Vec<Parameter>,
+        return_type: &Type,
+        is_public: bool,
+        is_static: bool,
+        is_final: bool,
+        state: Option<String>,
+    ) -> Self
+    where
+        F: SharedNativeCallable + 'static,
+    {
+        Self {
+            func: Arc::new(func),
+            meta: FunctionMetadata {
+                name: name.to_string(),
+                parameters,
+                return_type: return_type.clone(),
+                is_public,
+                is_static,
+                is_final,
+                is_native: true,
+                state,
+            },
+        }
+    }
+    pub fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+}
+
+impl Callable for SharedNativeFunction {
+    fn call(&self, _args: &HashMap<String, Value>) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
+
+    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value {
+        self.func.call(args, interpreter)
+    }
+
+    fn metadata(&self) -> &FunctionMetadata {
+        &self.meta
+    }
 }
 
 impl NativeFunction {
@@ -155,6 +250,10 @@ impl Callable for NativeFunction {
         self.func.call(args)
     }
 
+    fn call_shared(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
+
     fn metadata(&self) -> &FunctionMetadata {
         &self.meta
     }
@@ -174,6 +273,10 @@ impl UserFunction {
 
 impl Callable for UserFunction {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
+
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
@@ -197,6 +300,10 @@ impl NativeMethod {
 impl Callable for NativeMethod {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
         self.func.call(_args)
+    }
+
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
     fn metadata(&self) -> &FunctionMetadata {
@@ -267,6 +374,10 @@ impl Callable for UserFunctionMethod {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
+
     fn metadata(&self) -> &FunctionMetadata {
         &self.meta
     }
@@ -277,6 +388,7 @@ impl Callable for UserFunctionMethod {
 pub enum Function {
     Native(Arc<NativeFunction>),
     Custom(Arc<UserFunction>),
+    SharedNative(Arc<SharedNativeFunction>),
     NativeMethod(Arc<NativeMethod>),
     CustomMethod(Arc<UserFunctionMethod>),
 }
@@ -342,6 +454,17 @@ impl Function {
             Function::Custom(f) => f.call(args),
             Function::NativeMethod(f) => f.call(args),
             Function::CustomMethod(f) => f.call(args),
+            Function::SharedNative(f) => f.call(args),
+        }
+    }
+
+    pub fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value {
+        match self {
+            Function::Native(f) => f.call_shared(args, interpreter),
+            Function::Custom(f) => f.call_shared(args, interpreter),
+            Function::NativeMethod(f) => f.call_shared(args, interpreter),
+            Function::CustomMethod(f) => f.call_shared(args, interpreter),
+            Function::SharedNative(f) => f.call_shared(args, interpreter),
         }
     }
 
@@ -349,6 +472,7 @@ impl Function {
         match self {
             Function::Native(_) => vec![],
             Function::Custom(f) => f.body.clone(),
+            Function::SharedNative(_) => vec![],
             Function::NativeMethod(_) => vec![],
             Function::CustomMethod(f) => f.body.clone(),
         }
@@ -367,6 +491,7 @@ impl Function {
             Function::Custom(arc) => Arc::as_ptr(arc) as *const (),
             Function::NativeMethod(arc) => Arc::as_ptr(arc) as *const (),
             Function::CustomMethod(arc) => Arc::as_ptr(arc) as *const (),
+            Function::SharedNative(arc) => Arc::as_ptr(arc) as *const (),
         }
     }
     
@@ -376,6 +501,7 @@ impl Function {
             Function::Custom(f) => f.metadata(),
             Function::NativeMethod(f) => f.metadata(),
             Function::CustomMethod(f) => f.metadata(),
+            Function::SharedNative(f) => f.metadata(),
         }
     }
 
@@ -385,6 +511,7 @@ impl Function {
             Function::Custom(f) => &mut Arc::make_mut(f).meta,
             Function::NativeMethod(f) => &mut Arc::make_mut(f).meta,
             Function::CustomMethod(f) => &mut Arc::make_mut(f).meta,
+            Function::SharedNative(f) => &mut Arc::make_mut(f).meta,
         }
     }
 
@@ -394,6 +521,7 @@ impl Function {
             Function::Custom(f) => f.get_size(),
             Function::NativeMethod(f) => f.get_size(),
             Function::CustomMethod(f) => f.get_size(),
+            Function::SharedNative(f) => f.get_size(),
         }
     }
 
@@ -423,6 +551,17 @@ impl Function {
             Function::Custom(_) => false,
             Function::NativeMethod(_) => true,
             Function::CustomMethod(_) => false,
+            Function::SharedNative(_) => true,
+        }
+    }
+
+    pub fn is_natively_callable(&self) -> bool {
+        match self {
+            Function::Native(_) => true,
+            Function::Custom(_) => false,
+            Function::NativeMethod(_) => true,
+            Function::CustomMethod(_) => false,
+            Function::SharedNative(_) => false,
         }
     }
 

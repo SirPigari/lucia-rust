@@ -28,7 +28,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::to_static;
-use crate::env::runtime::functions::{Function, NativeFunction};
+use crate::env::runtime::functions::Function;
 use crate::{insert_native_fn};
 
 const MAX_ALLOC_SIZE: usize = 1 << 30; // 1 GB

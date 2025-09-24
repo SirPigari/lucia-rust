@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;

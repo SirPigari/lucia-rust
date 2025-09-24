@@ -244,7 +244,7 @@ pub fn check_project_deps(
 #[macro_export]
 macro_rules! insert_native_fn {
     ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr) => {{
-        let native_fn = NativeFunction::new(
+        let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
             $params,
@@ -272,9 +272,39 @@ macro_rules! insert_native_fn {
 }
 
 #[macro_export]
+macro_rules! insert_native_shared_fn {
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr) => {{
+        let native_fn = crate::env::runtime::functions::SharedNativeFunction::new(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            true,
+            true,
+            None,
+        );
+
+        let func = Function::SharedNative(Arc::new(native_fn));
+
+        $map.insert(
+            $name.to_string(),
+            Variable::new(
+                $name.to_string(),
+                Value::Function(func),
+                "function".to_string(),
+                true,
+                true,
+                true,
+            ),
+        );
+    }};
+}
+
+#[macro_export]
 macro_rules! insert_native_fn_state {
     ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr) => {{
-        let native_fn = NativeFunction::new(
+        let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
             $params,

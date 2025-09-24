@@ -7924,7 +7924,7 @@ impl Interpreter {
                     };
                 } else if !is_module {
                     self.stack.push((method_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
-                    if !metadata.is_native {
+                    if !func.is_native() {
                         let argv_vec = self.variables.get("argv").map(|var| {
                             match var.get_value() {
                                 Value::List(vals) => vals.iter().filter_map(|v| {
@@ -7970,10 +7970,14 @@ impl Interpreter {
                         self.variables.insert(variable_name.to_string(), object_variable.clone());
                         self.stack = new_interpreter.stack;
                     } else {
-                        result = func.call(&final_args);
+                        if func.is_natively_callable() {
+                            result = func.call(&final_args);
+                        } else {
+                            result = func.call_shared(&final_args, &self);
+                        }
                     }
                 } else {
-                    if !metadata.is_native {
+                    if !func.is_native() {
                         let module = match object_value {
                             Value::Module(obj) => obj,
                             _ => {
@@ -8047,7 +8051,11 @@ impl Interpreter {
                         };
                         self.stack = new_interpreter.stack;
                     } else {
-                        result = func.call(&final_args);
+                        if func.is_natively_callable() {
+                            result = func.call(&final_args);
+                        } else {
+                            result = func.call_shared(&final_args, &self);
+                        }
                     }
                 }
                 self.stack.pop();
@@ -9008,8 +9016,8 @@ impl Interpreter {
                         }
                     }
                 }
-            
-                if !metadata.is_native {
+
+                if !func.is_native() {
                     let argv_vec = self.variables.get("argv").map(|var| {
                         match var.get_value() {
                             Value::List(vals) => vals.iter().filter_map(|v| {
@@ -9045,7 +9053,11 @@ impl Interpreter {
                     result = new_interpreter.return_value.clone();
                     self.stack = new_interpreter.stack;
                 } else {
-                    result = func.call(&final_args_no_mods);
+                    if func.is_natively_callable() {
+                        result = func.call(&final_args_no_mods);
+                    } else {
+                        result = func.call_shared(&final_args_no_mods, &self);
+                    }
                 }
                 self.stack.pop();
                 debug_log(
@@ -9088,7 +9100,54 @@ impl Interpreter {
             }
         }
     }
-    
+
+    // for public api
+    pub fn call_fn(
+        &mut self,
+        function: Value,
+        positional: Vec<Value>,
+        named: HashMap<String, Value>,
+    ) -> Value {
+        if self.err.is_some() {
+            return NULL;
+        }
+        #[cfg(target_arch = "wasm32")]
+        let rand: f64 = js_sys::Math::random() * 10f64.powi(24);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let rand: f64 = {
+            use rand::{Rng, SeedableRng};
+            use rand::rngs::SmallRng;
+            let seed: [u8; 32] = [
+                1, 2, 3, 4, 5, 6, 7, 8,
+                9, 10, 11, 12, 13, 14, 15, 16,
+                17, 18, 19, 20, 21, 22, 23, 24,
+                25, 26, 27, 28, 29, 30, 31, 32
+            ];
+
+            let mut rng = SmallRng::from_seed(seed);
+            rng.random_range(10u128.pow(23)..10u128.pow(24)) as f64
+        };
+        let func_temp_name = &format!(
+            "_temp_func_{}",
+            rand
+        );
+        self.variables.insert(
+            func_temp_name.to_string(),
+            Variable::new(
+                func_temp_name.to_string(),
+                function,
+                "any".to_string(),
+                true,
+                false,
+                true,
+            ),
+        );
+        let result = self.call_function(func_temp_name, positional, named);
+        self.variables.remove(func_temp_name);
+        result
+    }
+
     fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
         let operator = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s.clone(),

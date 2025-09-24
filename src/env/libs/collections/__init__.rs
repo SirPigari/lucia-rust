@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::io::{self, Write};
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{
