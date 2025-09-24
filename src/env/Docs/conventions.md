@@ -5,7 +5,7 @@
 Lucia has a set of **conventions**, which are like rules but you don't have to follow them.  
 They exist just for you and the people reading your code to faster understand your code.  
 
-This file assumes that you read and understood the [language syntax rules and specifications](./language-syntax.md).  
+This file assumes that you read and understood the [language syntax rules and specifications](./language-syntax.md) and understand [lym](https://github.com/SirPigari/lym).  
 If you don't please go read it first.  
 
 To refer to this file use the identifier `LC2C` (Lucia 2.0.0 Convention)
@@ -23,6 +23,71 @@ There should always be a blank line before a function/generator/type/macro defin
 No trailing spaces
 
 And always a newline at the end of a file  
+
+### Operators
+
+There should always be a space between operators.  
+
+Example:
+
+```lucia
+// good
+a := 1 + 1
+// bad
+a := 1+1
+```
+
+### The `=` sign
+
+You should always put spaces around `=` and `:=`.
+
+Example:
+
+```lucia
+a := 10
+a: int = 10
+
+fun example(a = 10): end
+fun example(a: int = 10): end
+
+typedef int_alias = int
+```
+
+If you want you can align it so there is more spaces but never none. Always at least one.
+
+### Parenthesis
+
+You should always put a space before the parens in `for` loops, `while` loops, `if` statements, `import` statements, `scope` statements and `forget` statements, `catch` part of the `try` statement.  
+
+Possibly more but i didn't think of any.
+
+Example:
+
+```lucia
+// V -- here
+for (i in [0..10]):
+    print(i)
+end
+
+  // V -- here
+while (true): end
+
+/*
+  V -- here */
+if (x > 10): end
+
+   // V -- here
+import (sin, cos) from math
+
+  // V -- here
+scope (a, b): end
+
+   // V -- here
+forget (a, b)
+
+       // V -- here
+try: catch (e): end
+```
 
 ## Names
 
@@ -189,7 +254,20 @@ Use only necessary macro modifiers, don't spam them
 #endmacro
 ```
 
-In this case is really needed only `#unsafe`, because group and mangle are defaulty on and contextual is not used here.  
+In this case is really needed only `#unsafe`, because group and mangle are defaultly on and contextual is not used here.  
+
+### Macro definition and names
+
+Macros use the [snake_case](https://en.wikipedia.org/wiki/Snake_case) for names.
+
+And the `!` is not required, but preferred.
+
+```lucia
+        // V -- here
+#macro name!():
+    /* body */
+#endmacro
+```
 
 ### Macro bracket types
 
@@ -490,3 +568,39 @@ typedef struct Point = {
     y: int
 }
 ```
+
+## Constants
+
+A constant is a [SCREAMING_SNAKE_CASE](https://en.wikipedia.org/?title=SCREAMING_SNAKE_CASE&redirect=no) variable marked as `final` at the top of a file.  
+
+Constants, as said before, should always go in the top of a file.  
+
+If your constant has a magic number explain it with a doc comment or a normal comment.  
+
+Hard-coded paths are also not preferred unless you cd to the directory with it beforehand.  
+
+## Lucia Project structure
+
+Lucia uses `.lucia` dir for lucia configurations.
+
+Structure:
+
+```txt
+project/
+    .lucia/
+        config.json         // overwrites the default one
+        libs.json           // overwrites the default one
+        dependencies.json   // dependencies for the project
+        flags.json          // flags for the lucia executable to use on run
+        include.lc          // gets included on top of the main file
+    main.lc         // main entry point (.lc or .lucia)
+    src/
+        ...other files
+    tests/
+        ...testing files
+    README.md       // readme
+    LICENSE         // license
+```
+
+If you're making a package use `manifest.json` in root and `__init__.lc` for entry point.  
+This may change in the future as it's different from the standard convention  
