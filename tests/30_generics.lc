@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 typedef struct Holder<T> { value: T }
 int_holder: Holder[int] = Holder { value = 10 }

@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 #config allow_unsafe = true
 
 // this is not an example its a test file its not meant to learn from

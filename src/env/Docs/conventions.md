@@ -2,15 +2,27 @@
 
 ## Conventions in Lucia
 
-Lucia has a set of `conventions`, which are like rules but you don't have to follow them.  
+Lucia has a set of **conventions**, which are like rules but you don't have to follow them.  
 They exist just for you and the people reading your code to faster understand your code.  
+
+This file assumes that you read and understood the [language syntax rules and specifications](./language-syntax.md).  
+If you don't please go read it first.  
+
+To refer to this file use the identifier `LC2C` (Lucia 2.0.0 Convention)
 
 ## Whitespace
 
 Lucia uses `4` space indentation, not `2`.
 Spaces are preferred more than `TAB`
 
-After each `:` used for a `code block` should be a newline.
+After each `:` used for a `code block` should be a newline.  
+Max line length is 100 characters
+
+There should always be a blank line before a function/generator/type/macro definition and between logical blocks (if, while, for, ...)  
+
+No trailing spaces
+
+And always a newline at the end of a file  
 
 ## Names
 
@@ -80,7 +92,7 @@ typedef IntAlias = int
 // instead of intAlias or int_alias or anything else
 typedef struct Point = {
     x: int,
-    y: int,
+    y: int
 }
 ```
 
@@ -125,6 +137,19 @@ Example:
 
 ```lucia
 10.to_string()
+```
+
+### Generic names
+
+Generics should be named with single uppercase letter.
+
+Example:
+
+```lucia
+typedef enum Option<T> = {
+    Some(T)
+    None
+}
 ```
 
 ## Ifs
@@ -216,6 +241,8 @@ Examples:
 ## Chaining
 
 Lucia allows you to chain methods, pipes and operators  
+You should always use 4 space indentation for chaining
+Always put `.` or `|>` or operator at the next line not at the end of previous line
 
 ### Method chaining
 
@@ -238,3 +265,228 @@ a := items
 ```
 
 Very similar to rust.
+
+### Pipe chaining
+
+You should rewrite code like:  
+
+```lucia
+a := 10 |> add(_, 20) |> multiply(50) |> sum(_, ~items) |> sub(10, _) |> print_and_ret()
+```
+
+into  
+
+```lucia
+a := 10
+    |> add(_, 20)
+    |> multiply(50)
+    |> sum(_, ~items)
+    |> sub(10, _)
+    |> print_and_ret()
+```
+
+### Operator chaining
+
+Well basically the same.
+Just put on a new line if char count above 100.
+
+## File structure
+
+At the very top of a file there should be:
+
+1. Imports (`import module_name`)
+2. Includes (`#include "module"`)
+3. [File comment](#file-comment)
+4. Constants (finals)
+
+Example:  
+
+```lucia
+import math
+import os
+#include <std/assert>
+
+// Dev - This file does things
+// This file is for doing stuff with other stuff
+// stuff_module@0.1.69
+
+final VERSION: str = "0.1.69"
+```
+
+Imports/includes don't need to be sorted, but if you want then alphabetically is preferred.
+Imports and includes should **always** be on top of the file, never inline.  
+
+Each thing is optional and you can leave out anything you want.
+
+### File comment
+
+File comment is a comment that says what the file is supposed to do and the package it is in.
+
+Structure:  
+
+```lucia
+// my_file.lc - small description
+// Longer description if needed
+// AuthorName package_name@version
+```
+
+### Section headers
+
+Section headers are used to section a file into multiple sections
+
+Structure:
+
+```lucia
+// ========================
+// Section name
+// ========================
+```
+
+Note that the amount of `=` is dependent on the length of the section name
+
+### Comments
+
+Comments are used to say stuff for others people reading your horrible code.  
+The Lucia interpreter ignores ALL comments.  
+
+Comment types:  
+
+- `//` normal single line comments
+- `///` documentation comments
+- `/* */` multiline comments
+- `<# #>` inline comments
+
+Examples:  
+
+```lucia
+// this is a comment
+print("hello world")
+```
+
+```lucia
+/// this function does stuff
+/// @param a: int - how many times to do a thing
+fun thingy_maker(a: int):
+    /* code */
+end
+```
+
+```lucia
+/*
+This is a multiline comment
+This is second line of a multiline comment
+*/
+```
+
+```lucia
+a := 10 <# 10 is the base number #> + 20
+```
+
+Doc comments are for:
+
+- Function
+- Generators
+- Macros
+- Types
+- Constants
+- Modules
+- Public variables
+- Struct method implementations (`for`)
+- Generics
+
+Doc comment tags are:
+
+- `@param` - @param name: T - desc
+- `@return` - @return T - desc
+- `@generic` - @generic name - desc
+- `@example` - @example desc - newline code newline
+- `@see` - @see reference
+- `@deprecated` - @deprecated reason
+- `@since` - @since version
+- `@author` - @author name
+- `@version` - @version version
+- `@throws` - @throws ExceptionType - desc
+- `@note` - @note desc
+- `@warning` - @warning desc
+- `@bug` - @bug desc
+- `@todo` - @todo desc
+- `@link` - @link URL desc
+- `@license` - @license license_name
+
+### File extension
+
+File extension `.lc` is preferred (instead of `.lucia`).
+
+## Error handling
+
+Function that may fail should be marked with `?` after the parameters  
+
+Example:  
+
+```lucia
+fun may_fail()? -> int
+    /* 
+    code that may result in a exception being thrown
+    and not being captured by the function itself
+    */
+end
+```
+
+This does not change how the function works, its only for the static analysis to give you a warning if not handled properly.  
+
+### `??` operator
+
+Don't use this operator for handling errors because it is **deprecated** and is not clear. Use `? or` instead
+
+```lucia
+// bad
+a := may_fail() ?? 10
+// good
+a := may_fail()? or 10
+```
+
+## Strings
+
+For strings use `"` and not `'`. Although Python prefers `'`, Lucia prefers `"`.
+
+There are also no `"""`, but when you try to execute it works because it gets parsed as `"" " string " ""`. Essentially creating 3 strings.
+
+### F-strings
+
+Always use f-strings. There is no reason to concat a string using `+`.
+Keep them simple and not nested too deep.
+
+## Testing
+
+For tests use `std/assert` macros.  
+Test function should start with `test_`  
+
+```lucia
+#include <std/assert>
+
+fun test_addition() -> void:
+    assert_eq!(1 + 3, 4)
+end
+```
+
+## Nesting
+
+Never nest too deep.  
+Max nested depth should be `3`  
+If you don't know how to *not* nest something, i really recommend you watching [Why You Shouldn't Nest Your Code](https://www.youtube.com/watch?v=CFRhGnuXG-4)
+
+## Structs/Enums
+
+In structs/enums you should always put the `=` after the name.  
+There should never be a trailing comma after the fields of struct or enum.  
+In fact there should **never** be a trailing comma.  
+
+Example:  
+
+```lucia
+                  // V -- this one
+typedef struct Point = {
+    x: int,
+    y: int
+}
+```

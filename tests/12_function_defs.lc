@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 public static final fun voidFunction() -> void:
     print("This is a void function")

@@ -2,57 +2,8 @@
 // This file contains macros for the Lucia programming language's standard library.
 #ifndef LUCIA_STD_MACROS
 #define LUCIA_STD_MACROS
-#include "_import.lc"
-
-// macro definitions can have a additional '!' after the name but its optional
-// i added it because i was forgeting if it was there or not
-//           V - here could be a '!'
-#macro assert($cond, $msg=("Assertion failed")):
-    if (!$cond):
-        throw $msg from "AssertionError"
-    end
-#endmacro
-
-// in macro f-strings you can use the $arg$ for the value of the arg
-// gets replaced by {arg_value} in the string
-// also the string MUST be f-string, otherwise it will not work
-#macro assert_eq($a, $b, $msg=(f"Values are not equal, expected: $b$, got: $a$")):
-    if (($a) != ($b)):
-        throw $msg from "AssertionError"
-    end
-#endmacro
-
-#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $b$, got: $a$ (within $epsilon$)")):
-    if ((|($a) - ($b)|) > $epsilon):
-        throw $msg from "AssertionError"
-    end
-#endmacro
-
-
-#macro assert_ne($a, $b, $msg=(f"Values are equal but should not be, expected: $b$, got: $a$")):
-    if (($a) == ($b)):
-        throw $msg from "AssertionError"
-    end
-#endmacro
-
-#macro assert_err($expr, $msg=("Expected an error but got success")):
-    // smallest assert err macro i could come up with
-    // you could argue that the before ones were more readable, but this is the smallest
-    //               | --------------------- wrapping into a group
-    //               V                      V -- using '? or' to check if error, on error return the error tuple
-    result: ?tuple = \ ($expr) return null \? or _err
-    // if result is null (which can be only if it doesnt fail) then throw the error
-    if (result.is_null()) then throw $msg from "AssertionError"
-    // forget and return the error tuple
-    forget result
-#endmacro
-
-#macro assert_type($value, $type_, $msg=(f"Type mismatch")):
-    // innit?
-    if ($value isn't $type_):
-        throw $msg from "TypeError"
-    end
-#endmacro
+#include "./_import.lc"
+#include "./assert.lc"
 
 #macro unreachable($msg=("Entered unreachable code")):
     throw $msg from "UnreachableError"

@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 // since fibonacci is already as a pattern reg
 gen tribonacci(n: int) -> int:

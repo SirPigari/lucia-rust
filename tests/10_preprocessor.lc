@@ -1,5 +1,5 @@
 #include "04_variables.lc"
-#include <std/macros>
+#include <std/assert>
 
 // 'i' is defined in the included file "04_variables.lc"
 assert_eq!(i, 100)

@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 // initial declarations and defaults
 public i: int = 10

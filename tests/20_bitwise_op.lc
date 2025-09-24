@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 // bit shifts
 assert_eq!(8 lshift 2, 32)

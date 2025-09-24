@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 a: int = 10
 b: int = 20

@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 // variables
 x: int = 7

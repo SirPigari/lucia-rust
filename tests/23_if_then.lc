@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 import random
 
 state: bool = true

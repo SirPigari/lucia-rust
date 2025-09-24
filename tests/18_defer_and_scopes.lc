@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 output: list[str] = ["first"]
 
 output = output.extend(

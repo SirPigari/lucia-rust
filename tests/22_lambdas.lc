@@ -1,4 +1,4 @@
-#include <std/macros>
+#include <std/assert>
 
 m: function = x => x * 2
 assert_eq!(m(5), 10)
