@@ -6475,14 +6475,14 @@ impl Interpreter {
             if let Some(err) = err {
                 return self.raise_with_ref("TypeError", &format!("Variable '{}' declared with type '{}', but got {} with invalid element types", name, declared_type.display_simple(), value.get_type().display_simple()), err);
             }
-            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display_simple(), value.type_name()));
+            return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display_simple(), value.get_type().display_simple()));
         }
     
         let variable = Variable::new_pt(name.to_string(), value.clone(), declared_type, is_static, is_public, is_final);
         self.variables.insert(name.to_string(), variable);
 
         debug_log(
-            &format!("<Declared variable '{}': {} = {}>", name, value.type_name(), format_value(&value)),
+            &format!("<Declared variable '{}': {} = {}>", name, value.get_type().display_simple(), format_value(&value)),
             &self.config, Some(self.use_colors),
         );
     
@@ -6566,7 +6566,7 @@ impl Interpreter {
                 let candidate = lib_dir.with_extension(ext);
                 if candidate.exists() {
                     return self.raise_with_help(
-                        "ImportError",
+                        "NameError",
                         &format!("Variable '{}' is not defined.", name),
                         &format!(
                             "Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.",

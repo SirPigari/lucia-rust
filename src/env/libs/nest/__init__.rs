@@ -20,7 +20,6 @@ static SERVER_STRUCT_TYPE: Lazy<Type> = Lazy::new(|| Type::Struct {
         ("addr".to_string(), Statement::make_value(Value::Type(Type::new_simple("str"))), vec![])
     ],
     methods: vec![
-
     ],
     generics: Vec::new(),
     wheres: Vec::new(),

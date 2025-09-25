@@ -6,13 +6,14 @@ use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta};
+use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, CAN_BE_UNINITIALIZED, check_ansi, find_closest_match};
 use crate::env::runtime::types::{Type, VALID_TYPES};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::internal_structs::State;
 use crate::env::runtime::functions::FunctionMetadata;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
+use std::path::PathBuf;
 use std::panic::Location as PanicLocation;
 use std::collections::{HashSet, HashMap};
 
@@ -40,6 +41,49 @@ pub enum ValueType {
     Any,
 }
 
+impl ValueType {
+    pub fn type_name(&self) -> String {
+        self.get_type().display_simple()
+    }
+    pub fn get_type(&self) -> Type {
+        match self {
+            ValueType::Float => Type::new_simple("float"),
+            ValueType::Int => Type::new_simple("int"),
+            ValueType::String => Type::new_simple("str"),
+            ValueType::Boolean => Type::new_simple("bool"),
+            ValueType::Null => Type::new_simple("void"),
+            ValueType::Map { .. } => Type::new_simple("map"),
+            ValueType::List(_) => Type::new_simple("list"),
+            ValueType::Tuple(_) => Type::new_simple("tuple"),
+            ValueType::Bytes(_) => Type::new_simple("bytes"),
+            ValueType::Type(_) => Type::new_simple("type"),
+            ValueType::Function(_) => Type::new_simple("function"),
+            ValueType::Generator(_) => Type::new_simple("generator"),
+            ValueType::Module(..) => Type::new_simple("module"),
+            ValueType::Enum(name, variant) => Type::Enum {
+                name: name.to_string(),
+                variants: vec![],
+                generics: vec![],
+                wheres: vec![],
+            },
+            ValueType::Struct(name) => Type::Struct {
+                name: name.to_string(),
+                fields: vec![],
+                methods: vec![],
+                generics: vec![],
+                wheres: vec![],
+            },
+            ValueType::Pointer(arc) => {
+                let mut t = arc.get_type();
+                t.set_reference(true);
+                t
+            }
+            ValueType::Error(..) => Type::new_simple("error"),
+            ValueType::Any => Type::new_simple("any"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     pub value_type: ValueType,
@@ -47,11 +91,16 @@ pub struct Variable {
     pub is_mutable: bool,
     pub is_static: bool,
     pub is_public: bool,
+    pub is_builtin: bool,
+    pub loc: Option<Location>,
 }
 
 impl Variable {
-    pub fn new(value_type: ValueType, type_: Type, is_mutable: bool, is_static: bool, is_public: bool) -> Self {
-        Self { value_type, type_, is_mutable, is_static, is_public }
+    pub fn new(value_type: ValueType, type_: Type, is_mutable: bool, is_static: bool, is_public: bool, is_builtin: bool, loc: Option<Location>) -> Self {
+        Self { value_type, type_, is_mutable, is_static, is_public, is_builtin, loc }
+    }
+    pub fn type_name(&self) -> String {
+        self.type_.display_simple()
     }
 }
 
@@ -69,6 +118,7 @@ pub enum ErrorTypes {
     RuntimeError,
     UndefinedVariable,
     TypeMismatch,
+    TypeError,
     SyntaxError,
 }
 
@@ -78,6 +128,8 @@ pub enum WarningTypes {
     UnusedFunction,
     UnusedValue,
     UnreachableCode,
+    OverwrittenVariable,
+    AlreadyDefined,
 }
 
 #[derive(Debug, Clone)]
@@ -134,28 +186,28 @@ impl Checker {
             in_scope: false,
         };
         let mut builtins: HashMap<String, Variable> = HashMap::new();
-        builtins.insert("_".to_string(), Variable::new(ValueType::Any, Type::new_simple("any"), false, true, true));
-        builtins.insert("_err".to_string(), Variable::new(ValueType::Tuple(vec![ValueType::String, ValueType::String, ValueType::String]), Type::new_simple("any"), false, true, true)); // (type, msg, ref_err)
-        builtins.insert("__dir__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true));
-        builtins.insert("__file__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true));
-        builtins.insert("argv".to_string(), Variable::new(ValueType::List(vec![ValueType::String; 100]), Type::new_simple("any"), false, true, true)); // up to 100 args
-        builtins.insert("print".to_string(), Variable::new(ValueType::Function(native::print_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("styledprint".to_string(), Variable::new(ValueType::Function(native::styled_print_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("input".to_string(), Variable::new(ValueType::Function(native::input_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("len".to_string(), Variable::new(ValueType::Function(native::len_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("help".to_string(), Variable::new(ValueType::Function(native::help_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("type_of".to_string(), Variable::new(ValueType::Function(native::type_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("size_of".to_string(), Variable::new(ValueType::Function(native::size_of_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("sum".to_string(), Variable::new(ValueType::Function(native::sum_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("ord".to_string(), Variable::new(ValueType::Function(native::ord_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("char".to_string(), Variable::new(ValueType::Function(native::char_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.insert("styledstr".to_string(), Variable::new(ValueType::Function(native::styledstr_fn().metadata().clone()), Type::new_simple("any"), false, true, true));
-        builtins.extend(special_function_meta().into_iter().map(|(k, v)| (k.to_string(), Variable::new(ValueType::Function(v), Type::new_simple("any"), false, true, true))));
+        builtins.insert("_".to_string(), Variable::new(ValueType::Any, Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("_err".to_string(), Variable::new(ValueType::Tuple(vec![ValueType::String, ValueType::String, ValueType::String]), Type::new_simple("any"), false, true, true, true, None)); // (type, msg, ref_err)
+        builtins.insert("__dir__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("__file__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("argv".to_string(), Variable::new(ValueType::List(vec![ValueType::String; 100]), Type::new_simple("any"), false, true, true, true, None)); // up to 100 args
+        builtins.insert("print".to_string(), Variable::new(ValueType::Function(native::print_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("styledprint".to_string(), Variable::new(ValueType::Function(native::styled_print_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("input".to_string(), Variable::new(ValueType::Function(native::input_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("len".to_string(), Variable::new(ValueType::Function(native::len_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("help".to_string(), Variable::new(ValueType::Function(native::help_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("type_of".to_string(), Variable::new(ValueType::Function(native::type_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("size_of".to_string(), Variable::new(ValueType::Function(native::size_of_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("sum".to_string(), Variable::new(ValueType::Function(native::sum_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("ord".to_string(), Variable::new(ValueType::Function(native::ord_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("char".to_string(), Variable::new(ValueType::Function(native::char_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("styledstr".to_string(), Variable::new(ValueType::Function(native::styledstr_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
+        builtins.extend(special_function_meta().into_iter().map(|(k, v)| (k.to_string(), Variable::new(ValueType::Function(v), Type::new_simple("any"), false, true, true, true, None))));
         for (var, val) in builtins {
-            this.state.defined_vars.insert(var.to_string(), val); // built-in vars are immutable and public and native
+            this.state.defined_vars.insert(var.to_string(), val);
         }
         for t in VALID_TYPES.iter() {
-            this.state.defined_vars.insert(t.to_string(), Variable::new(ValueType::Type(Type::new_simple(t)), Type::new_simple("any"), false, true, true)); // built-in types are immutable and public and native
+            this.state.defined_vars.insert(t.to_string(), Variable::new(ValueType::Type(Type::new_simple(t)), Type::new_simple("any"), false, true, true, true, None));
         }
         this
     }
@@ -165,6 +217,7 @@ impl Checker {
             ErrorTypes::NotImplemented => ("NotImplementedError", vec!["not_implemented_error", "not_implemented"]),
             ErrorTypes::UndefinedVariable => ("UndefinedVariable", vec!["undefined_variable"]),
             ErrorTypes::TypeMismatch => ("TypeMismatch", vec!["type_mismatch"]),
+            ErrorTypes::TypeError => ("TypeError", vec!["type_error"]),
             ErrorTypes::RuntimeError => ("RuntimeError", vec!["runtime_error"]),
             ErrorTypes::SyntaxError => ("SyntaxError", vec!["syntax_error"]),
         };
@@ -181,6 +234,8 @@ impl Checker {
             WarningTypes::UnusedFunction => ("UnusedFunctionWarning", vec!["unused_function_warning", "unused_function"]),
             WarningTypes::UnusedValue => ("UnusedValueWarning", vec!["unused_value_warning", "unused_value"]),
             WarningTypes::UnreachableCode => ("UnreachableCodeWarning", vec!["unreachable_code_warning", "unreachable_code"]),
+            WarningTypes::OverwrittenVariable => ("OverwrittenVariableWarning", vec!["overwritten_variable_warning", "overwritten_variable"]),
+            WarningTypes::AlreadyDefined => ("AlreadyDefinedWarning", vec!["already_defined_warning", "already_defined"]),
         };
         if self.config.type_checker.ignore_warnings.iter().any(|e| internal_defs.contains(&e.as_str())) {
             (false, res)
@@ -200,6 +255,16 @@ impl Checker {
         }
     }
 
+    fn get_location_from_statement(&self, statement: &Statement) -> Option<Location> {
+        match statement {
+            Statement::Statement { loc, .. } => match loc {
+                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
     fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
         match &self.current_statement {
             Some(Statement::Statement { loc, .. }) => match loc {
@@ -211,7 +276,7 @@ impl Checker {
     }
 
     #[track_caller]
-    pub fn raise(&mut self, error_type: ErrorTypes, msg: &str) {
+    pub fn raise(&mut self, error_type: ErrorTypes, msg: &str) -> ValueType {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
@@ -223,7 +288,7 @@ impl Checker {
 
         let (should_raise, error_type) = self.check_err_type(error_type);
         if !should_raise {
-            return;
+            return ValueType::Null;
         }
 
         self.errors.push(Error {
@@ -233,10 +298,54 @@ impl Checker {
             loc: Some(loc),
             ref_err: None,
         });
+        ValueType::Null
+    }
+
+    fn compare_type(&mut self, value: &ValueType, expected: &Type) -> (bool, Option<Error>) {
+        let mut err: Option<Error> = None;
+        let mut status: bool = true;
+        fn make_err(err_type: &str, err_msg: &str, loc: Option<Location>) -> Error {
+            loc.map(|l| Error::with_location(err_type, err_msg, l))
+                .unwrap_or_else(|| Error::new_anonymous(err_type, err_msg))
+        }
+
+        let value_type = value.get_type();
+
+        match expected {
+            Type::Simple { name: expected_type, is_reference: expected_ref, is_maybe_type: null_allowed } => {
+                if expected_type != "any" {
+                    match value_type {
+                        Type::Simple { name: value_type_name, is_reference: value_type_ref, .. } => {
+                            if !((*null_allowed && value_type_name == "void") || (value_type_name == *expected_type && value_type_ref == *expected_ref)) {
+                                status = false;
+                            }
+                        }
+                        _ => {
+                            err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
+                        }
+                    }
+                } else if *expected_ref == true {
+                    match value_type {
+                        Type::Simple { name: _, is_reference: value_type_ref, .. } => {
+                            if value_type_ref != *expected_ref {
+                                status = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {
+                status = false;
+                err = Some(make_err("TypeError", &format!("Unsupported type check for '{}'", expected.display()), self.get_location_from_current_statement()));
+            }
+        }
+
+        return (status, err);
     }
 
     #[track_caller]
-    pub fn warn(&mut self, warning_type: WarningTypes, warning_str: &str) {
+    pub fn warn(&mut self, warning_type: WarningTypes, warning_str: &str) -> ValueType {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: fix_path(self.file_path.clone()),
@@ -249,7 +358,7 @@ impl Checker {
 
         let (should_warn, warning_type) = self.check_warn_type(warning_type);
         if !should_warn {
-            return;
+            return ValueType::Null;
         }
 
         if self.config.debug {
@@ -259,10 +368,39 @@ impl Checker {
         if self.config.warnings {
             eprintln!("{}[{}] {}: {}{}", hex_to_ansi(&self.config.color_scheme.warning, self.config.supports_color), loc_str, warning_type, warning_str, hex_to_ansi("reset", self.config.supports_color));
         }
+        ValueType::Null
     }
 
     #[track_caller]
-    pub fn raise_with_help(&mut self, error_type: ErrorTypes, msg: &str, help: &str) {
+    pub fn warn_with_loc(&mut self, warning_type: WarningTypes, warning_str: &str, loc: Option<Location>) -> ValueType {
+        let rust_loc = PanicLocation::caller();
+        let loc = loc.unwrap_or_else(|| Location {
+            file: fix_path(self.file_path.clone()),
+            line_string: "".to_string(),
+            line_number: 0,
+            range: (0, 0),
+            lucia_source_loc: "".to_string(),
+        }).set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()));
+
+        let loc_str = format!("{}:{}:{}", fix_path(loc.file), loc.line_number, loc.range.0);
+
+        let (should_warn, warning_type) = self.check_warn_type(warning_type);
+        if !should_warn {
+            return ValueType::Null;
+        }
+
+        if self.config.debug {
+            println!("{}Warning raised from {}{}", hex_to_ansi(&self.config.color_scheme.debug, self.config.supports_color), loc.lucia_source_loc, hex_to_ansi("reset", self.config.supports_color));
+        }
+
+        if self.config.warnings {
+            eprintln!("{}[{}] {}: {}{}", hex_to_ansi(&self.config.color_scheme.warning, self.config.supports_color), loc_str, warning_type, warning_str, hex_to_ansi("reset", self.config.supports_color));
+        }
+        ValueType::Null
+    }
+
+    #[track_caller]
+    pub fn raise_with_help(&mut self, error_type: ErrorTypes, msg: &str, help: &str) -> ValueType {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
@@ -274,7 +412,7 @@ impl Checker {
 
         let (should_raise, error_type) = self.check_err_type(error_type);
         if !should_raise {
-            return;
+            return ValueType::Null;
         }
 
         self.errors.push(Error {
@@ -284,10 +422,11 @@ impl Checker {
             loc: Some(loc),
             ref_err: None,
         });
+        ValueType::Null
     }
 
     #[track_caller]
-    pub fn raise_with_ref(&mut self, error_type: ErrorTypes, msg: &str, ref_err: Error) {
+    pub fn raise_with_ref(&mut self, error_type: ErrorTypes, msg: &str, ref_err: Error) -> ValueType {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
@@ -299,7 +438,7 @@ impl Checker {
 
         let (should_raise, error_type) = self.check_err_type(error_type);
         if !should_raise {
-            return;
+            return ValueType::Null;
         }
 
         self.errors.push(Error {
@@ -309,19 +448,99 @@ impl Checker {
             loc: Some(loc),
             ref_err: Some(Box::new(ref_err)),
         });
+        ValueType::Null
     }
 
-    pub fn check(&mut self, _statements: Vec<Statement>) -> Vec<Error> {
-        self.raise(ErrorTypes::NotImplemented, "Static checking is not yet implemented");
-        return self.errors.clone();
+    pub fn check(&mut self, statements: Vec<Statement>, in_repl: bool) -> Vec<Error> {
+        for statement in statements {
+            self.check_statement(statement);
+        }
+        if !in_repl {
+            for (var, val) in &self.state.defined_vars.clone() {
+                if !self.state.used_vars.contains(var)
+                    && !self.state.loop_vars.contains(var)
+                    && !CAN_BE_UNINITIALIZED.contains(&var.as_str())
+                    && !var.starts_with('_')
+                {
+                    let builtin = val.is_builtin;
+                    let loc = val.loc.clone();
+                    match &val.value_type {
+                        ValueType::Function(_) if !builtin => {
+                            self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Function '{}' is defined but never used", var), loc);
+                        }
+                        ValueType::Generator(_) if !builtin => {
+                            self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Generator '{}' is defined but never used", var), loc);
+                        }
+                        ValueType::Type(_) if !builtin => {
+                            self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Type '{}' is defined but never used", var), loc);
+                        }
+                        ValueType::Module(_) if !builtin => {
+                            self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Module '{}' is imported but never used", var), loc);
+                        }
+                        _ if !builtin => {
+                            self.warn_with_loc(WarningTypes::UnusedVariable, &format!("Variable '{}' is defined but never used", var), loc);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.errors.clone()
+    }
+
+    pub fn check_type(&mut self, statement_map: HashMap<Value, Value>) -> ValueType {
+        let type_kind = match statement_map.get(&Value::String("type_kind".into())) {
+            Some(Value::String(t)) => t.clone(),
+            _ => return self.raise(ErrorTypes::RuntimeError, "Type statement missing 'type_kind' or 'type_kind' is not a string")
+        };
+
+        match type_kind.as_str() {
+            "simple" => {
+                let mut value = match statement_map.get(&Value::String("value".into())) {
+                    Some(Value::String(v)) => v.clone(),
+                    _ => return self.raise(ErrorTypes::RuntimeError, "Type 'simple' missing 'value' or 'value' is not a string")
+                };
+                let mut is_ref = false;
+                let mut is_maybe = false;
+                while value.starts_with('&') || value.starts_with('?') {
+                    if value.starts_with('&') {
+                        is_ref = true;
+                    } else if value.starts_with('?') {
+                        is_maybe = true;
+                    }
+                    value = (&value[1..]).to_string();
+                }
+                match self.state.defined_vars.get(&value) {
+                    Some(val) => match &val.value_type {
+                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(is_ref).set_maybe_type(is_maybe).unmut()),
+                        _ => {
+                            self.raise_with_help(ErrorTypes::TypeError, &format!("'{}' is a variable name, not a type", value), "If you meant to assign a value, use ':=' instead of ':'");
+                            return ValueType::Null;
+                        }
+                    },
+                    None => {
+                        self.raise(
+                            ErrorTypes::TypeError,
+                            &format!(
+                                "Invalid type '{}'. Valid types are: {}, ...",
+                                value,
+                                VALID_TYPES[0..5].join(", ")
+                            ),
+                        );
+                        return ValueType::Null;
+                    }
+                }
+            },
+            _ => self.raise(ErrorTypes::NotImplemented, &format!("Type kind '{}' is not implemented in static checker", type_kind)),
+        }
     }
 
     #[track_caller]
-    pub fn check_statement(&mut self, statement: Statement) {
+    pub fn check_statement(&mut self, statement: Statement) -> ValueType {
         self.current_statement = Some(statement.clone());
 
         if statement.is_empty() {
-            return;
+            return ValueType::Null;
         }
     
         let Statement::Statement { keys, values, .. } = &statement else {
@@ -329,7 +548,7 @@ impl Checker {
         };
     
         if self.code_state == State::Break || self.code_state == State::Continue {
-            return;
+            return ValueType::Null;
         }
     
         let statement_map: HashMap<Value, Value> = keys.iter().cloned().zip(values.iter().cloned()).collect();
@@ -358,13 +577,13 @@ impl Checker {
                 // "EXPORT" => self.check_export(statement_map),
 
                 "VARIABLE_DECLARATION" => self.check_variable_declaration(statement_map),
-                // "VARIABLE" => self.check_variable(statement_map),
+                "VARIABLE" => self.check_variable(statement_map),
                 // "ASSIGNMENT" => self.check_assignment(statement_map),
                 // "UNPACK_ASSIGN" => self.check_unpack_assignment(statement_map),
     
-                // "NUMBER" => self.check_number(statement_map),
-                // "STRING" => self.check_string(statement_map),
-                // "BOOLEAN" => self.check_boolean(statement_map),
+                "NUMBER" => self.check_number(statement_map),
+                "STRING" => ValueType::String,
+                "BOOLEAN" => self.check_boolean(statement_map),
     
                 // "TUPLE" => self.check_tuple(statement_map),
                 // "MAP" => self.check_map(statement_map),
@@ -379,7 +598,7 @@ impl Checker {
                 // "PROPERTY_ACCESS" => self.check_property_access(statement_map),
                 // "INDEX_ACCESS" => self.check_index_access(statement_map),
     
-                // "TYPE" => self.check_type(statement_map),
+                "TYPE" => self.check_type(statement_map),
                 // "TYPE_CONVERT" => self.check_type_conversion(statement_map),
                 // "TYPE_DECLARATION" => self.check_type_declaration(statement_map),
 
@@ -388,7 +607,7 @@ impl Checker {
 
                 // "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.check_pointer(statement_map),
 
-                _ => {}, //self.raise(ErrorTypes::NotImplemented, &format!("Unsupported statement type: {}", t)),
+                _ => ValueType::Null, //self.raise(ErrorTypes::NotImplemented, &format!("Unsupported statement type: {}", t)),
             },
             _ => self.raise(ErrorTypes::SyntaxError, "Missing or invalid 'type' in statement map"),
         };
@@ -396,10 +615,40 @@ impl Checker {
         result
     }
 
-    fn check_variable_declaration(&mut self, statement_map: HashMap<Value, Value>) {
+    fn check_number(&mut self, map: HashMap<Value, Value>) -> ValueType {
+        let s = match map.get(&Value::String("value".to_string())) {
+            Some(Value::String(s)) if !s.is_empty() => s.replace('_', ""),
+            Some(Value::String(_)) => return self.raise(ErrorTypes::RuntimeError, "Empty string provided for number"),
+            _ => return self.raise(ErrorTypes::RuntimeError, "Missing 'value' in number statement"),
+        };
+
+        if s.is_empty() {
+            return self.raise(ErrorTypes::RuntimeError, "Empty string provided for number");
+        }
+
+        if s.contains('.') || s.to_ascii_lowercase().contains('e') {
+            return ValueType::Float;
+        } else {
+            return ValueType::Int;
+        }
+    }
+
+    fn check_boolean(&mut self, map: HashMap<Value, Value>) -> ValueType {
+        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
+            match s.as_str() {
+                "true" | "false" => ValueType::Boolean,
+                "null" => ValueType::Null,
+                _ => self.raise(ErrorTypes::RuntimeError, &format!("Invalid boolean format: {}, expected: true, false or null.", s).as_str()),
+            }
+        } else {
+            self.raise(ErrorTypes::RuntimeError, "Missing 'value' in boolean statement")
+        }
+    }
+
+    fn check_variable_declaration(&mut self, statement_map: HashMap<Value, Value>) -> ValueType {
         let name = match statement_map.get(&Value::String("name".into())) {
             Some(Value::String(n)) => n.clone(),
-            _ => return self.raise(ErrorTypes::SyntaxError, "Variable declaration missing 'name' or 'name' is not a string"),
+            _ => return self.raise(ErrorTypes::RuntimeError, "Variable declaration missing 'name' or 'name' is not a string"),
         };
         
         let modifiers = match statement_map.get(&Value::String("modifiers".to_string())) {
@@ -410,5 +659,110 @@ impl Checker {
         let is_public = modifiers.iter().any(|m| m == &Value::String("public".to_string()));
         let is_final = modifiers.iter().any(|m| m == &Value::String("final".to_string()));
         let is_static = modifiers.iter().any(|m| m == &Value::String("static".to_string()));
+
+        let is_default = match statement_map.get(&Value::String("is_default".into())) {
+            Some(Value::Boolean(b)) => *b,
+            _ => false,
+        };
+
+        let mut declared_type = match statement_map.get(&Value::String("var_type".into())) {
+            Some(Value::Map { keys, values }) => match self.check_statement(Value::Map { keys: keys.clone(), values: values.clone() }.convert_to_statement()) {
+                ValueType::Type(t) => t.clone(),
+                ValueType::Null => return ValueType::Null,
+                t => {self.raise(ErrorTypes::TypeError, &format!("Expected a type for variable type, got {}", t.type_name())); Type::new_simple("any")},
+            },
+            _ => return self.raise(ErrorTypes::RuntimeError, "Variable declaration 'var_type' is not a map"),
+        };
+
+        if is_default {
+            match declared_type {
+                Type::Simple { ref name, is_maybe_type, ..} if CAN_BE_UNINITIALIZED.contains(&name.as_str()) || is_maybe_type => {},
+                _ => {
+                    self.raise_with_help(ErrorTypes::TypeError, &format!("Cannot declare variable '{}' as default because its type '{}' cannot be uninitialized", name, declared_type.display_simple()), "Only variables of type 'any', 'map', 'list', 'tuple', 'void', or maybe types can be declared as default");
+                    return ValueType::Null;
+                }
+            }
+        }
+
+        if self.state.defined_vars.contains_key(&name) {
+            if !self.state.used_vars.contains(&name) {
+                self.warn(WarningTypes::OverwrittenVariable, &format!("Value of '{}' was overwritten before use.", name));
+            } else {
+                self.warn(WarningTypes::AlreadyDefined, &format!("Variable '{}' is already defined in this scope", name));
+            }
+        };
+
+        let var_value = match statement_map.get(&Value::String("value".into())) {
+            Some(Value::Map { keys, values }) => self.check_statement(Value::Map { keys: keys.clone(), values: values.clone() }.convert_to_statement()),
+            _ => {
+                return self.raise(ErrorTypes::RuntimeError, "Variable declaration missing 'value'");
+            },
+        };
+
+        if declared_type == Type::new_simple("auto") {
+            declared_type = var_value.get_type();
+        }
+
+        let (is_valid, err) = self.compare_type(&var_value, &declared_type);
+        if !is_valid {
+            if let Some(err) = err {
+                self.raise_with_ref(ErrorTypes::TypeError, &format!("Variable '{}' declared with type '{}', but got {} with invalid element types", name, declared_type.display_simple(), var_value.type_name()), err);
+            } else {
+                self.raise(ErrorTypes::TypeError, &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display_simple(), var_value.type_name()));
+            }
+        }
+
+        let variable = Variable::new(var_value.clone(), declared_type, is_static, is_public, is_final, false, self.get_location_from_statement(&Statement::from_hashmap_values(&statement_map)));
+        self.state.defined_vars.insert(name.to_string(), variable);
+
+        ValueType::Null
+    }
+
+    fn check_variable(&mut self, statement: HashMap<Value, Value>) -> ValueType {
+        let name = match statement.get(&Value::String("name".to_string())) {
+            Some(Value::String(s)) => s,
+            _ => return self.raise(ErrorTypes::RuntimeError, "Expected a string for variable name"),
+        };
+
+        if let Some(var) = self.state.defined_vars.get(name) {
+            self.state.used_vars.insert(name.to_string());
+            return var.value_type.clone();
+        } else {
+            let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&name);
+            let extensions = ["lc", "lucia", "rs", ""];
+            for ext in extensions.iter() {
+                let candidate = lib_dir.with_extension(ext);
+                if candidate.exists() {
+                    return self.raise_with_help(
+                        ErrorTypes::UndefinedVariable,
+                        &format!("Variable '{}' is not defined.", name),
+                        &format!(
+                            "Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.",
+                            name,
+                            check_ansi("\x1b[4m", &self.config.supports_color),
+                            name,
+                            candidate.display(),
+                            check_ansi("\x1b[24m", &self.config.supports_color),
+                        ),
+                    );
+                }
+            }
+
+            let available_names: Vec<String> = self.state.defined_vars.keys().cloned().collect();
+            if let Some(closest) = find_closest_match(name, &available_names) {
+                return self.raise_with_help(
+                    ErrorTypes::UndefinedVariable,
+                    &format!("Variable '{}' is not defined.", name),
+                    &format!(
+                        "Did you mean '{}{}{}'?",
+                        check_ansi("\x1b[4m", &self.config.supports_color),
+                        closest,
+                        check_ansi("\x1b[24m", &self.config.supports_color),
+                    ),
+                );
+            } else {
+                return self.raise(ErrorTypes::UndefinedVariable, &format!("Variable '{}' is not defined.", name));
+            }
+        }
     }
 }

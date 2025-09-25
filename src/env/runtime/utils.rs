@@ -2060,6 +2060,10 @@ pub const RESERVED_KEYWORDS: &[&str] = &[
     "forget", "match", "defer", "true", "false", "null", "typedef", "type"
 ];
 
+pub const CAN_BE_UNINITIALIZED: &[&str] = &[
+    "int", "float", "bool", "str", "map", "list", "function", "bytes", "tuple", "any", "void"
+];
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

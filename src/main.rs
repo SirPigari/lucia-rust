@@ -1121,7 +1121,7 @@ fn execute_file(
         if static_check_flag {
             let static_check_time = Instant::now();
             let mut checker = Checker::new(config.clone(), file_path.clone());
-            let errors = checker.check(statements.clone());
+            let errors = checker.check(statements.clone(), false);
             if !errors.is_empty() {
                 for err in &errors {
                     handle_error(err, &file_content, &config);
@@ -1329,7 +1329,7 @@ fn execute_code_string(
     if static_check_flag {
         let static_check_time = Instant::now();
         let mut checker = Checker::new(config.clone(), "<-c>".to_string());
-        let errors = checker.check(statements.clone());
+        let errors = checker.check(statements.clone(), true);
         if !errors.is_empty() {
             for err in &errors {
                 handle_error(err, &file_content, &config);
@@ -1703,7 +1703,7 @@ fn repl(
         let mut can_run = true;
         if let Some(checker) = static_checker.as_mut() {
             let static_check_time = Instant::now();
-            let errors = checker.check(statements.clone());
+            let errors = checker.check(statements.clone(), true);
             if !errors.is_empty() {
                 if print_intime_debug {
                     debug_log("Error while static checking:", &config);
