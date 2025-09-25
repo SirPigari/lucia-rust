@@ -199,9 +199,7 @@ fn create_callback(args: &HashMap<String, Value>) -> Value {
             }
 
             for stmt in cb.body.iter() {
-                dbg!(&stmt, &interp);
-                let res = interp.evaluate(stmt.clone());
-                dbg!(&res);
+                let _res = interp.evaluate(stmt.clone());
                 if interp.err.is_some() {
                     return;
                 }

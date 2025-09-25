@@ -1,6 +1,6 @@
 # Versioning
 
-Lucia follows **Semantic Versioning** (https://semver.org/).
+Lucia follows [**Semantic Versioning**](https://semver.org/).
 
 ## Current Version
 
@@ -35,9 +35,11 @@ MAJOR.MINOR.PATCH
 
 - Before a release, all tests must pass.
 - Update the version number in `Cargo.toml` under `[package]`:
+  
   ```toml
   version = "2.0.0"
   ```
+
 - Update version references in documentation and markdown files.
 - Tag the release in git with the version number (e.g., `v2.0.0`).
 - Update changelog and docs to reflect the changes.

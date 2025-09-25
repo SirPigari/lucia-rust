@@ -7,9 +7,11 @@ Lucia is a expressive scripting programming language written in Rust. Contributi
 ## Requirements for Contributions
 
 - All changes **must pass all tests**:
+  
   ```bash
   make test
   ```
+
 - Code **must work cross-platform** (Windows, Linux, macOS).
 - Changes **must pass the GitHub workflow tests** before merging.
 
@@ -50,10 +52,12 @@ README.md
 ## Adding New Features or Tests
 
 - Every new feature **must include tests** added to the `tests` directory.
-- Tests should use 
+- Tests should use  
+  
   ```lucia
-  #include <std/macros>
+  #include <std/assert>
   ```
+
   for assertion macros.
 - Test files must follow the numbering scheme starting from `01` and incrementing by one (`01`, `02`, ..., `99`).
 - Keep test names unique and descriptive, following the numbering sequence.
@@ -64,9 +68,11 @@ README.md
 2. Create a branch for your feature or fix.
 3. Implement your changes and tests.
 4. Run all tests:
+
    ```bash
    make test
    ```
+
 5. Ensure your changes pass on all platforms you can test.
 6. Push your branch and open a pull request with a clear description.
 

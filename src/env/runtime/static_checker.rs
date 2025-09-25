@@ -6,7 +6,7 @@ use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, CAN_BE_UNINITIALIZED, check_ansi, find_closest_match};
+use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, CAN_BE_UNINITIALIZED, check_ansi, find_closest_match, unescape_string};
 use crate::env::runtime::types::{Type, VALID_TYPES};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::internal_structs::State;
@@ -19,10 +19,10 @@ use std::collections::{HashSet, HashMap};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValueType {
-    Float,
-    Int,
-    String,
-    Boolean,
+    Float(Option<f64>),
+    Int(Option<i64>),
+    String(Option<usize>),
+    Boolean(bool),
     Null,
     Map {
         keys: Vec<ValueType>,
@@ -33,7 +33,7 @@ pub enum ValueType {
     Type(Type),
     Function(FunctionMetadata),
     Generator(FunctionMetadata),
-    Module(Module),
+    Module(String, PathBuf),
     Enum(String, String), // name, variant
     Struct(String), // name
     Pointer(Box<ValueType>),
@@ -47,10 +47,10 @@ impl ValueType {
     }
     pub fn get_type(&self) -> Type {
         match self {
-            ValueType::Float => Type::new_simple("float"),
-            ValueType::Int => Type::new_simple("int"),
-            ValueType::String => Type::new_simple("str"),
-            ValueType::Boolean => Type::new_simple("bool"),
+            ValueType::Float(_) => Type::new_simple("float"),
+            ValueType::Int(_) => Type::new_simple("int"),
+            ValueType::String(_) => Type::new_simple("str"),
+            ValueType::Boolean(_) => Type::new_simple("bool"),
             ValueType::Null => Type::new_simple("void"),
             ValueType::Map { .. } => Type::new_simple("map"),
             ValueType::List(_) => Type::new_simple("list"),
@@ -80,6 +80,50 @@ impl ValueType {
             }
             ValueType::Error(..) => Type::new_simple("error"),
             ValueType::Any => Type::new_simple("any"),
+        }
+    }
+     pub fn to_string(&self) -> String {
+        match self {
+            ValueType::Float(f) => {
+                match f {
+                    Some(f) => f.to_string(),
+                    None => "'float'".to_string(),
+                }
+            }
+            ValueType::Int(i) => {
+                match i {
+                    Some(i) => i.to_string(),
+                    None => "'int'".to_string(),
+                }
+            }
+            ValueType::String(_) => "'str'".to_string(),
+            ValueType::Boolean(b) => b.to_string(),
+            ValueType::Null => "null".to_string(),
+            ValueType::Map { .. } => "'map'".to_string(),
+            ValueType::Tuple(items) => {
+                let items: Vec<String> = items.iter().map(|item| item.to_string()).collect();
+                format!("({})", items.join(", "))
+            }
+            ValueType::List(v) => {
+                let items: Vec<String> = v.iter().map(|item| item.to_string()).collect();
+                format!("[{}]", items.join(", "))
+            }
+            ValueType::Bytes(_) => "'bytes'".to_string(),
+            ValueType::Pointer(ptr) => {
+                let raw_ptr = ptr.as_ref() as *const _ as *const ();
+                let addr = raw_ptr as usize;
+                format!("<pointer to 0x{:X}>", addr)
+            }
+            ValueType::Type(t) => (*t).display_simple(),
+            ValueType::Function(func) => "'function'".to_string(),
+            ValueType::Generator(generator) => "'generator'".to_string(),
+            ValueType::Module(name, path) => {
+                format!("<module '{}' from '{}'>", name, fix_path(path.display().to_string()))
+            }
+            ValueType::Enum(name, variant) => format!("{}.{}", name, variant),
+            ValueType::Struct(name) => name.to_string(),
+            ValueType::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
+            ValueType::Any => "'any'".to_string(),
         }
     }
 }
@@ -120,6 +164,7 @@ pub enum ErrorTypes {
     TypeMismatch,
     TypeError,
     SyntaxError,
+    UnicodeError,
 }
 
 #[derive(Debug, Clone)]
@@ -187,10 +232,10 @@ impl Checker {
         };
         let mut builtins: HashMap<String, Variable> = HashMap::new();
         builtins.insert("_".to_string(), Variable::new(ValueType::Any, Type::new_simple("any"), false, true, true, true, None));
-        builtins.insert("_err".to_string(), Variable::new(ValueType::Tuple(vec![ValueType::String, ValueType::String, ValueType::String]), Type::new_simple("any"), false, true, true, true, None)); // (type, msg, ref_err)
-        builtins.insert("__dir__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true, true, None));
-        builtins.insert("__file__".to_string(), Variable::new(ValueType::String, Type::new_simple("any"), false, true, true, true, None));
-        builtins.insert("argv".to_string(), Variable::new(ValueType::List(vec![ValueType::String; 100]), Type::new_simple("any"), false, true, true, true, None)); // up to 100 args
+        builtins.insert("_err".to_string(), Variable::new(ValueType::Tuple(vec![ValueType::String(None), ValueType::String(None), ValueType::String(None)]), Type::new_simple("any"), false, true, true, true, None)); // (type, msg, ref_err)
+        builtins.insert("__dir__".to_string(), Variable::new(ValueType::String(None), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("__file__".to_string(), Variable::new(ValueType::String(None), Type::new_simple("any"), false, true, true, true, None));
+        builtins.insert("argv".to_string(), Variable::new(ValueType::List(vec![ValueType::String(None); 100]), Type::new_simple("any"), false, true, true, true, None)); // up to 100 args
         builtins.insert("print".to_string(), Variable::new(ValueType::Function(native::print_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
         builtins.insert("styledprint".to_string(), Variable::new(ValueType::Function(native::styled_print_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
         builtins.insert("input".to_string(), Variable::new(ValueType::Function(native::input_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
@@ -215,11 +260,12 @@ impl Checker {
     fn check_err_type(&self, error_type: ErrorTypes) -> (bool, &str) {
         let (res, internal_defs) = match error_type {
             ErrorTypes::NotImplemented => ("NotImplementedError", vec!["not_implemented_error", "not_implemented"]),
-            ErrorTypes::UndefinedVariable => ("UndefinedVariable", vec!["undefined_variable"]),
-            ErrorTypes::TypeMismatch => ("TypeMismatch", vec!["type_mismatch"]),
+            ErrorTypes::UndefinedVariable => ("UndefinedVariable", vec!["undefined_variable", "undefined_var", "undefined_variable_error", "undefined_var_error"]),
+            ErrorTypes::TypeMismatch => ("TypeMismatch", vec!["type_mismatch", "type_mismatch_error"]),
             ErrorTypes::TypeError => ("TypeError", vec!["type_error"]),
             ErrorTypes::RuntimeError => ("RuntimeError", vec!["runtime_error"]),
             ErrorTypes::SyntaxError => ("SyntaxError", vec!["syntax_error"]),
+            ErrorTypes::UnicodeError => ("UnicodeError", vec!["unicode_error"]),
         };
         if self.config.type_checker.ignore_errors.iter().any(|e| internal_defs.contains(&e.as_str())) {
             (false, res)
@@ -474,7 +520,7 @@ impl Checker {
                         ValueType::Type(_) if !builtin => {
                             self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Type '{}' is defined but never used", var), loc);
                         }
-                        ValueType::Module(_) if !builtin => {
+                        ValueType::Module(..) if !builtin => {
                             self.warn_with_loc(WarningTypes::UnusedFunction, &format!("Module '{}' is imported but never used", var), loc);
                         }
                         _ if !builtin => {
@@ -531,7 +577,50 @@ impl Checker {
                     }
                 }
             },
-            _ => self.raise(ErrorTypes::NotImplemented, &format!("Type kind '{}' is not implemented in static checker", type_kind)),
+            "union" => {
+                let types_val = match statement_map.get(&Value::String("types".to_string())) {
+                    Some(t) => t,
+                    None => {
+                        self.raise(ErrorTypes::RuntimeError, "Missing 'types' in union type statement");
+                        return ValueType::Null;
+                    }
+                };
+
+                let types_list = match types_val {
+                    Value::List(l) => l,
+                    _ => {
+                        self.raise(ErrorTypes::RuntimeError, "'types' in union must be a list");
+                        return ValueType::Null;
+                    }
+                };
+
+                let mut types: Vec<Type> = Vec::new();
+
+                for t in types_list {
+                    let ty = self.check_type(t.convert_to_hashmap_value());
+                    if let ValueType::Type(t) = ty {
+                        types.push(t);
+                    } else {
+                        self.raise(ErrorTypes::TypeError, "Union type must be a valid type");
+                        return ValueType::Null;
+                    }
+                }
+
+                ValueType::Type(Type::Union(types))
+            }
+            "function" => {
+                ValueType::Type(Type::new_simple("function"))
+            }
+            "generator" => {
+                ValueType::Type(Type::new_simple("generator"))
+            }
+            "generics" => {
+                ValueType::Type(Type::new_simple("any"))
+            }
+            "impl" => {
+                ValueType::Type(Type::new_simple("any"))
+            }
+            _ => self.raise(ErrorTypes::RuntimeError, "Invalid 'type_kind' for type statement"),
         }
     }
 
@@ -551,7 +640,7 @@ impl Checker {
             return ValueType::Null;
         }
     
-        let statement_map: HashMap<Value, Value> = keys.iter().cloned().zip(values.iter().cloned()).collect();
+        let statement_map: HashMap<Value, Value> = statement.convert_to_hashmap();
     
         static KEY_TYPE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("type".into()));
 
@@ -582,7 +671,7 @@ impl Checker {
                 // "UNPACK_ASSIGN" => self.check_unpack_assignment(statement_map),
     
                 "NUMBER" => self.check_number(statement_map),
-                "STRING" => ValueType::String,
+                "STRING" => self.check_string(statement_map),
                 "BOOLEAN" => self.check_boolean(statement_map),
     
                 // "TUPLE" => self.check_tuple(statement_map),
@@ -627,21 +716,77 @@ impl Checker {
         }
 
         if s.contains('.') || s.to_ascii_lowercase().contains('e') {
-            return ValueType::Float;
+            if let Some(f) = s.parse::<f64>().ok() {
+                return ValueType::Float(Some(f));
+            }
+            return ValueType::Float(None);
         } else {
-            return ValueType::Int;
+            if let Some(i) = s.parse::<i64>().ok() {
+                return ValueType::Int(Some(i));
+            }
+            return ValueType::Int(None);
         }
     }
 
     fn check_boolean(&mut self, map: HashMap<Value, Value>) -> ValueType {
         if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
             match s.as_str() {
-                "true" | "false" => ValueType::Boolean,
+                "true" => ValueType::Boolean(true),
+                "false" => ValueType::Boolean(false),
                 "null" => ValueType::Null,
                 _ => self.raise(ErrorTypes::RuntimeError, &format!("Invalid boolean format: {}, expected: true, false or null.", s).as_str()),
             }
         } else {
             self.raise(ErrorTypes::RuntimeError, "Missing 'value' in boolean statement")
+        }
+    }
+
+    fn check_string(&mut self, map: HashMap<Value, Value>) -> ValueType {
+        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
+            let mut modified_string = s.clone();
+            let mut is_raw = false;
+            let mut is_bytes = false;
+
+            if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
+                for mod_value in mods {
+                    if let Value::String(modifier) = mod_value {
+                        match modifier.as_str() {
+                            "f" => {
+                                return ValueType::String(None);
+                            }
+                            "r" => is_raw = true,
+                            "b" => is_bytes = true,
+                            _ => return self.raise(ErrorTypes::RuntimeError, &format!("Unknown string modifier: {}", modifier)),
+                        }
+                    } else {
+                        self.raise(ErrorTypes::TypeError, "Expected a string for string modifier");
+                        return ValueType::Null;
+                    }
+                }
+            }
+
+            if is_raw {
+                if modified_string.len() >= 2 {
+                    let first = modified_string.chars().next().unwrap();
+                    let last = modified_string.chars().last().unwrap();
+                    if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+                        modified_string = modified_string[1..modified_string.len() - 1].to_string();
+                    }
+                }
+            } else {
+                modified_string = match unescape_string(&modified_string) {
+                    Ok(unescaped) => unescaped,
+                    Err(e) => return self.raise(ErrorTypes::UnicodeError, &e),
+                };
+            }
+
+            if is_bytes {
+                ValueType::Bytes(modified_string.len())
+            } else {
+                ValueType::String(Some(modified_string.len()))
+            }
+        } else {
+            self.raise(ErrorTypes::RuntimeError, "Missing 'value' in string statement")
         }
     }
 
@@ -728,6 +873,57 @@ impl Checker {
             self.state.used_vars.insert(name.to_string());
             return var.value_type.clone();
         } else {
+            let mut candidates: Vec<(String, Type, Statement)> = vec![];
+            let mut seen = std::collections::HashSet::new();
+
+            for (k, v) in &self.state.defined_vars {
+                if k == "_" { continue; }
+                if let ValueType::Type(t) = &v.value_type {
+                    if let Type::Enum { name: enum_name, variants, .. } = t {
+                        for variant in variants {
+                            if variant.0 == *name && variant.1 == Statement::Null {
+                                if seen.insert((enum_name.clone(), variant.0.clone())) {
+                                    candidates.push((variant.0.clone(), t.clone(), variant.1.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if candidates.len() == 1 {
+                if candidates[0].2 != Statement::Null {
+                    let saved_variables = self.state.defined_vars.clone();
+                    let generics = match &candidates[0].1 {
+                        Type::Enum { generics, .. } => generics.clone(),
+                        _ => vec![],
+                    };
+                    self.state.defined_vars.extend(generics.into_iter().map(|g| (g, Variable::new(ValueType::Type(Type::new_simple("any")), Type::new_simple("type"), false, true, true, true, None))));
+                    let eval_type = match self.check_statement(candidates[0].2.clone()) {
+                        ValueType::Type(t) => t,
+                        e => {
+                            self.state.defined_vars = saved_variables;
+                            return self.raise(ErrorTypes::TypeError, &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string()))
+                        },
+                    };
+                    self.state.defined_vars = saved_variables;
+                    return self.raise_with_help(
+                        ErrorTypes::SyntaxError,
+                        &format!("Missing argument for '{}.{}' of type '{}'", candidates[0].1.display_simple(), candidates[0].0.clone(), eval_type.display_simple()),
+                        &format!("Did you mean to use '{}.{}({})'", candidates[0].1.display_simple(), candidates[0].0.clone(), eval_type.display()),
+                    );
+                }
+                let enum_name = match &candidates[0].1 {
+                    Type::Enum { name, .. } => name.clone(),
+                    _ => "".to_string(),
+                };
+                return ValueType::Enum(enum_name, candidates[0].0.clone());
+            } else if candidates.len() > 1 {
+                let variant_list = candidates.iter()
+                    .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return self.raise_with_help(ErrorTypes::UndefinedVariable, &format!("Variable '{}' is not defined.", name), &format!("However, it matches multiple enum variants: {}. Did you mean to use one of these?", variant_list));
+            }
             let lib_dir = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&name);
             let extensions = ["lc", "lucia", "rs", ""];
             for ext in extensions.iter() {
