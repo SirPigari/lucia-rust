@@ -4201,7 +4201,7 @@ impl Parser {
     }
 
     pub fn parse_path(&mut self) -> Option<PathElement> {
-        match self.token().cloned() {
+        let mut left = match self.token().cloned() {
             Some(Token(kind, val, _)) if kind == "IDENTIFIER" => {
                 let mut segments: Vec<String> = vec![val.clone()];
                 self.next();
@@ -4238,10 +4238,10 @@ impl Parser {
                     }
                     self.next();
 
-                    return Some(PathElement::Path { segments, args });
+                    PathElement::Path { segments, args }
+                } else {
+                    PathElement::Path { segments, args: vec![] }
                 }
-
-                Some(PathElement::Path { segments, args: vec![] })
             }
 
             Some(Token(kind, val, _)) if kind == "SEPARATOR" && val == "(" => {
@@ -4260,58 +4260,78 @@ impl Parser {
                 }
                 self.next();
                 if elems.len() == 1 {
-                    Some(elems[0].clone())
+                    elems.remove(0)
                 } else {
-                    Some(PathElement::Tuple(elems))
+                    PathElement::Tuple(elems)
                 }
             }
 
             Some(Token(kind, val, _)) if kind == "NUMBER" => {
                 self.next();
                 match val.parse::<i64>() {
-                    Ok(n) => Some(PathElement::Literal(Value::Int(Int::from_i64(n)))),
-                    Err(_) => {
-                        match val.parse::<f64>() {
-                            Ok(f) => Some(PathElement::Literal(Value::Float(Float::from(f)))),
-                            Err(_) => {
-                                self.raise("SyntaxError", "Invalid number format");
-                                None
-                            }
+                    Ok(n) => PathElement::Literal(Value::Int(Int::from_i64(n))),
+                    Err(_) => match val.parse::<f64>() {
+                        Ok(f) => PathElement::Literal(Value::Float(Float::from(f))),
+                        Err(_) => {
+                            self.raise("SyntaxError", "Invalid number format");
+                            return None;
                         }
-                    }
+                    },
                 }
             }
 
             Some(Token(kind, val, _)) if kind == "STRING" => {
                 self.next();
-                if val.len() >= 2 && ((val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\''))) {
-                    let unescaped = val[1..val.len()-1].replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace("\\\"", "\"").replace("\\'", "'").replace("\\\\", "\\");
-                    Some(PathElement::Literal(Value::String(unescaped)))
+                if val.len() >= 2
+                    && ((val.starts_with('"') && val.ends_with('"'))
+                        || (val.starts_with('\'') && val.ends_with('\'')))
+                {
+                    let unescaped = val[1..val.len() - 1]
+                        .replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace("\\r", "\r")
+                        .replace("\\\"", "\"")
+                        .replace("\\'", "'")
+                        .replace("\\\\", "\\");
+                    PathElement::Literal(Value::String(unescaped))
                 } else {
                     self.raise("SyntaxError", "Invalid string format");
-                    None
+                    return None;
                 }
             }
 
             Some(Token(kind, val, _)) if kind == "BOOLEAN" => {
                 self.next();
                 match val.as_str() {
-                    "true" => Some(PathElement::Literal(Value::Boolean(true))),
-                    "false" => Some(PathElement::Literal(Value::Boolean(false))),
-                    "null" => Some(PathElement::Literal(Value::Null)),
+                    "true" => PathElement::Literal(Value::Boolean(true)),
+                    "false" => PathElement::Literal(Value::Boolean(false)),
+                    "null" => PathElement::Literal(Value::Null),
                     _ => {
                         self.raise("SyntaxError", "Invalid boolean value");
-                        None
+                        return None;
                     }
                 }
             }
 
             _ => {
                 self.raise("SyntaxError", "Expected path");
-                None
+                return None;
             }
+        };
+
+        if self.token_is("OPERATOR", "|") {
+            let mut union_elems = vec![left];
+            while self.token_is("OPERATOR", "|") {
+                self.next();
+                let rhs = self.parse_path()?;
+                union_elems.push(rhs);
+            }
+            left = PathElement::Union(union_elems);
         }
+
+        Some(left)
     }
+
 
     fn parse_single_type(&mut self) -> Option<(String, Statement)> {
         let mut is_ptr = false;

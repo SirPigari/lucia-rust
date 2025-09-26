@@ -28,6 +28,7 @@ use crate::env::runtime::utils::{
     apply_format_spec,
     remove_loc_keys,
     type_matches,
+    generate_name_variants,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -3917,19 +3918,28 @@ impl Interpreter {
                 },
             };
     
-            let candidate_dir = base_module_path.join(&module_name);
             let mut resolved_module_path: Option<PathBuf> = None;
+            let module_variants = generate_name_variants(&module_name);
     
-            if candidate_dir.exists() && candidate_dir.is_dir() {
-                resolved_module_path = Some(candidate_dir);
-            } else {
-                let extensions = [".lc", ".lucia", ".rs", ""];
-                for ext in extensions.iter() {
-                    let candidate_file = base_module_path.join(format!("{}{}", module_name, ext));
-                    if candidate_file.exists() && candidate_file.is_file() {
-                        resolved_module_path = Some(candidate_file);
-                        break;
+            for variant in module_variants {
+                let candidate_dir = base_module_path.join(&variant);
+
+                if candidate_dir.exists() && candidate_dir.is_dir() {
+                    resolved_module_path = Some(candidate_dir);
+                    break;
+                } else {
+                    let extensions = [".lc", ".lucia", ".rs", ""];
+                    for ext in extensions.iter() {
+                        let candidate_file = base_module_path.join(format!("{}{}", variant, ext));
+                        if candidate_file.exists() && candidate_file.is_file() {
+                            resolved_module_path = Some(candidate_file);
+                            break;
+                        }
                     }
+                }
+
+                if resolved_module_path.is_some() {
+                    break;
                 }
             }
     
@@ -7973,7 +7983,7 @@ impl Interpreter {
                         if func.is_natively_callable() {
                             result = func.call(&final_args);
                         } else {
-                            result = func.call_shared(&final_args, &self);
+                            result = func.call_shared(&final_args, self);
                         }
                     }
                 } else {
@@ -8054,7 +8064,7 @@ impl Interpreter {
                         if func.is_natively_callable() {
                             result = func.call(&final_args);
                         } else {
-                            result = func.call_shared(&final_args, &self);
+                            result = func.call_shared(&final_args, self);
                         }
                     }
                 }
@@ -9056,7 +9066,7 @@ impl Interpreter {
                     if func.is_natively_callable() {
                         result = func.call(&final_args_no_mods);
                     } else {
-                        result = func.call_shared(&final_args_no_mods, &self);
+                        result = func.call_shared(&final_args_no_mods, self);
                     }
                 }
                 self.stack.pop();

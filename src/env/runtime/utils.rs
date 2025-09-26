@@ -1611,7 +1611,21 @@ pub fn check_pattern(
         value: &Value,
         pat: &Value,
         vars: &mut HashMap<String, Value>,
-    ) -> Result<bool, (String, String)> {
+    ) -> Result<bool, (String, String)> {    
+        // Union pattern
+        if let Value::List(pats) = pat {
+            if !pats.is_empty() {
+                for subpat in pats {
+                    let mut local_vars = vars.clone();
+                    if inner(value, subpat, &mut local_vars)? {
+                        *vars = local_vars;
+                        return Ok(true);
+                    }
+                }
+                return Ok(false);
+            }
+        }
+
         // Handle wildcard '_'
         if let Value::Map { values, .. } = pat {
             if let Value::List(p_segments) = &values[0] {
@@ -1654,25 +1668,21 @@ pub fn check_pattern(
                     _ => return Ok(false),
                 };
 
-                // Check enum variant name
                 let variant_name = match get_variant_name(&cond_enum.ty, cond_enum.variant.0) {
                     Some(name) => name,
                     None => return Ok(false),
                 };
                 if variant_name != *pat_variant_name { return Ok(false); }
 
-                // Match payload
                 match &*cond_enum.variant.1 {
                     Value::Tuple(payload_elems) => {
                         if payload_elems.len() != p_args.len() { return Ok(false); }
 
                         for (payload, arg_pat) in payload_elems.iter().zip(p_args.iter()) {
-                            // Only bind variables if pattern explicitly expects a variable
                             if let Value::Map { values, .. } = arg_pat {
                                 if let Value::List(segs) = &values[0] {
                                     if segs.len() == 1 {
                                         if let Value::String(var_name) = &segs[0] {
-                                            // Bind if it's not an enum variant name
                                             if get_variant_name(&cond_enum.ty, cond_enum.variant.0)
                                                 .as_deref() != Some(var_name)
                                             {
@@ -1703,7 +1713,7 @@ pub fn check_pattern(
                 }
             }
 
-            // Single-segment path pattern → bind variable
+            // Single-segment path pattern -> bind variable
             (val, Value::Map { keys: p_keys, values }) => {
                 if p_keys.len() == 2 && values.len() == 2 {
                     let p_segments = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
@@ -2042,6 +2052,25 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
     }
 
     false
+}
+
+pub fn generate_name_variants(name: &str) -> Vec<String> {
+    let mut variants = vec![name.to_string()];
+    
+    if name.contains('_') {
+        let mut queue = vec![name.to_string()];
+        while let Some(curr) = queue.pop() {
+            let next = curr.replacen('_', "-", 1);
+            if !variants.contains(&next) {
+                variants.push(next.clone());
+                if next.contains('_') {
+                    queue.push(next);
+                }
+            }
+        }
+    }
+
+    variants
 }
 
 pub const KEYWORDS: &[&str] = &[

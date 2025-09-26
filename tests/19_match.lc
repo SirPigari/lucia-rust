@@ -136,3 +136,28 @@ match (a):
 end
 
 assert!(hit_12, "Wildcard branch (_) did not execute")
+
+// union match test
+mutable hit_13: bool = false
+mutable hit_14: bool = false
+
+a = "Goodbye"
+
+match (a):
+    "Hello" | "Goodbye" ->
+        hit_13 = true
+        continue
+    end
+
+    "Nope" | "Goodbye" ->
+        hit_14 = true
+        break
+    end
+
+    _ ->
+        throw "Union match test reached unexpected wildcard"
+    end
+end
+
+assert!(hit_13, "hit_13 branch (first union continue) did not execute")
+assert!(hit_14, "hit_14 branch (second union after continue) did not execute")

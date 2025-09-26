@@ -4,6 +4,7 @@ use std::path::Path;
 use std::ffi::CString;
 use std::sync::Mutex;
 use once_cell::sync::OnceCell;
+use std::ffi::c_void;
 
 #[cfg(unix)]
 use libc::{dlsym, RTLD_DEFAULT};
@@ -28,7 +29,7 @@ use crate::interpreter::Interpreter;
 
 use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType, get_list};
 
-use crate::{insert_native_fn};
+use crate::{insert_native_fn, insert_native_shared_fn};
 
 static STRINGS: OnceCell<Mutex<Vec<CString>>> = OnceCell::new();
 
@@ -166,18 +167,14 @@ unsafe impl Sync for CallbackData {}
 
 static CALLBACKS: Mutex<Vec<&'static CallbackData>> = Mutex::new(Vec::new());
 
-fn create_callback(args: &HashMap<String, Value>) -> Value {
-    let func;
-    let interp_ptr = match args.get("self") {
-        Some(Value::Function(Function::CustomMethod(m))) => {
-            func = m.get_function();
-            &m.interpreter as *const _ as *mut Interpreter
-        }
-        _ => return Value::Error("TypeError", "Expected interpreter pointer argument", None),
+fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) -> Value {
+    let func = match args.get("f") {
+        Some(Value::Function(f)) => f.clone(),
+        _ => return Value::Error("TypeError", "Expected function argument", None),
     };
 
     let cb: &'static CallbackData = Box::leak(Box::new(CallbackData {
-        body: Box::new(func.body.clone()),
+        body: Box::new(func.get_body()),
         interp_ptr,
     }));
 
@@ -410,6 +407,62 @@ fn call_fn(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn create_struct(args: &HashMap<String, Value>) -> Value {
+    let values: Vec<&Value> = match args.get("fields") {
+        Some(Value::List(l)) => l.iter().collect(),
+        _ => return Value::Error("TypeError", "Expected fields: list", None),
+    };
+
+    let types: Vec<&str> = match args.get("types") {
+        Some(Value::List(l)) => l.iter().filter_map(|v| {
+            if let Value::String(s) = v { Some(s.as_str()) } else { None }
+        }).collect(),
+        None => vec!["int"; values.len()],
+        _ => return Value::Error("TypeError", "Expected types: list of str", None),
+    };
+
+    if types.len() != values.len() {
+        return Value::Error("ValueError", "Types length must match values length", None);
+    }
+
+    let mut bytes_vec: Vec<u8> = Vec::new();
+
+    for (val, ty) in values.iter().zip(types.iter()) {
+        match *ty {
+            "byte" => if let Value::Int(i) = val {
+                bytes_vec.push(i.to_i64().unwrap_or(0) as u8);
+            },
+            "bool" => if let Value::Boolean(b) = val {
+                bytes_vec.push(if *b { 1 } else { 0 });
+            },
+            "int" => if let Value::Int(i) = val {
+                bytes_vec.extend(&i.to_i64().unwrap_or(0).to_le_bytes());
+            },
+            "float" => if let Value::Float(f) = val {
+                bytes_vec.extend(&f.to_f64().unwrap_or(0.0).to_le_bytes());
+            },
+            "ptr" => if let Value::Pointer(p) = val {
+                let addr = match &**p {
+                    Value::Int(i) => i.to_i64().unwrap_or(0) as usize,
+                    _ => 0usize,
+                };
+                bytes_vec.extend(&addr.to_le_bytes());
+            },
+            "str" => if let Value::String(s) = val {
+                bytes_vec.extend(&(s.as_ptr() as usize).to_le_bytes());
+            },
+            _ => {},
+        }
+    }
+
+    let hex_string: String = bytes_vec.iter().rev().map(|b| format!("{:02X}", b)).collect();
+
+    match Int::from_hex(&hex_string) {
+        Ok(num) => Value::Int(num),
+        Err(_) => Value::Error("ValueError", "Failed to convert hex to Int", None),
+    }
+}
+
 pub fn init_libload(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
         return Err(Error::with_help(
@@ -421,6 +474,119 @@ pub fn init_libload(config: Arc<Config>, file_path: String) -> Result<(), Error>
     }
     Ok(())
 }
+
+fn malloc_fn(args: &HashMap<String, Value>) -> Value {
+    let size = match args.get("size") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected 'size': Int", None),
+    };
+
+    let ptr = unsafe { libc::malloc(size) as *mut u8 };
+    if ptr.is_null() {
+        return Value::Error("MemoryError", "Failed to allocate memory", None);
+    }
+
+    Value::Pointer(Arc::new(Value::Int((ptr as usize as i64).into())))
+}
+
+fn write_byte_fn(args: &HashMap<String, Value>) -> Value {
+    let base = match args.get("base") {
+        Some(Value::Pointer(p)) => {
+            if let Value::Int(i) = &**p { i.to_i64().unwrap_or(0) as *mut u8 } else { return Value::Int(0.into()); }
+        }
+        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+    };
+
+    let offset = match args.get("offset") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+    };
+
+    let value = match args.get("value") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as u8,
+        _ => return Value::Error("TypeError", "Expected 'value': Int", None),
+    };
+
+    unsafe { base.add(offset).write(value) };
+
+    Value::Int(0.into())
+}
+
+fn write_i64_fn(args: &HashMap<String, Value>) -> Value {
+    let base = match args.get("base") {
+        Some(Value::Pointer(p)) => {
+            if let Value::Int(i) = &**p { i.to_i64().unwrap_or(0) as *mut i64 } else { return Value::Int(0.into()); }
+        }
+        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+    };
+
+    let offset = match args.get("offset") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+    };
+
+    let value = match args.get("value") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0),
+        _ => return Value::Error("TypeError", "Expected 'value': Int", None),
+    };
+
+    unsafe { (base as *mut u8).add(offset).cast::<i64>().write(value) };
+
+    Value::Int(0.into())
+}
+
+fn write_f64_fn(args: &HashMap<String, Value>) -> Value {
+    let base = match args.get("base") {
+        Some(Value::Pointer(p)) => {
+            if let Value::Int(i) = &**p {
+                i.to_i64().unwrap_or(0) as *mut f64
+            } else { return Value::Int(0.into()); }
+        }
+        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+    };
+
+    let offset = match args.get("offset") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+    };
+
+    let value = match args.get("value") {
+        Some(Value::Float(f)) => f.to_f64().unwrap_or(0.0),
+        _ => return Value::Error("TypeError", "Expected 'value': Float", None),
+    };
+
+    unsafe { (base as *mut u8).add(offset).cast::<f64>().write(value) };
+
+    Value::Int(0.into())
+}
+
+pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
+    let base = match args.get("base") {
+        Some(Value::Pointer(p)) => match &**p {
+            Value::Int(addr) => addr.to_i64().unwrap_or(0) as *mut u8,
+            _ => return Value::Error("TypeError", "'base' Pointer must contain Int", None),
+        },
+        _ => return Value::Error("TypeError", "Expected 'base' as Pointer", None),
+    };
+
+    let offset = match args.get("offset") {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected 'offset' as Int", None),
+    };
+
+    let value = match args.get("ptr") {
+        Some(Value::Pointer(p)) => match &**p {
+            Value::Int(addr) => addr.to_i64().unwrap_or(0) as *const c_void,
+            _ => std::ptr::null(),
+        },
+        _ => std::ptr::null(),
+    };
+
+    unsafe { (base.add(offset) as *mut *const c_void).write(value) };
+
+    Value::Int(0.into())
+}
+
 
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
@@ -499,12 +665,75 @@ pub fn register() -> HashMap<String, Variable> {
         ],
         "any"
     );
-    insert_native_fn!(
+    insert_native_shared_fn!(
         map,
         "create_callback",
         create_callback,
-        vec![Parameter::positional("self", "function")],
+        vec![Parameter::positional("f", "function")],
         "any"
+    );
+    insert_native_fn!(
+        map,
+        "create_struct",
+        create_struct,
+        vec![
+            Parameter::positional("fields", "list"),
+            Parameter::positional_optional("types", "list", Value::Null),
+            Parameter::positional_optional("packed", "bool", Value::Boolean(false)),
+        ],
+        "any"
+    );
+
+    insert_native_fn!(
+        map,
+        "malloc",
+        malloc_fn,
+        vec![Parameter::positional("size", "int")],
+        "any"
+    );
+    insert_native_fn!(
+        map,
+        "write_byte",
+        write_byte_fn,
+        vec![
+            Parameter::positional("base", "any"),
+            Parameter::positional("offset", "int"),
+            Parameter::positional("value", "int"),
+        ],
+        "int"
+    );
+    insert_native_fn!(
+        map,
+        "write_i64",
+        write_i64_fn,
+        vec![
+            Parameter::positional("base", "any"),
+            Parameter::positional("offset", "int"),
+            Parameter::positional("value", "int"),
+        ],
+        "int"
+    );
+    insert_native_fn!(
+        map,
+        "write_f64",
+        write_f64_fn,
+        vec![
+            Parameter::positional("base", "any"),
+            Parameter::positional("offset", "int"),
+            Parameter::positional("value", "float"),
+        ],
+        "int"
+    );
+    insert_native_fn!(
+        map,
+        "write_ptr",
+        write_ptr_fn,
+        vec![
+            Parameter::positional("base", "any"),
+            Parameter::positional("offset", "int"),
+            Parameter::positional("ptr", "any"),
+        ],
+        "int"
     );
 
     map

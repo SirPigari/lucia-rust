@@ -63,7 +63,7 @@ impl std::default::Default for FunctionMetadata {
 
 pub trait Callable: Send + Sync {
     fn call(&self, args: &HashMap<String, Value>) -> Value;
-    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value;
+    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value;
     fn metadata(&self) -> &FunctionMetadata;
 }
 
@@ -72,7 +72,7 @@ pub trait NativeCallable: Send + Sync {
 }
 
 pub trait SharedNativeCallable: Send + Sync {
-    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value;
+    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value;
 }
 
 impl<F> NativeCallable for F
@@ -86,9 +86,9 @@ where
 
 impl<F> SharedNativeCallable for F
 where
-    F: Fn(&HashMap<String, Value>, &Interpreter) -> Value + Send + Sync + 'static,
+    F: Fn(&HashMap<String, Value>, &mut Interpreter) -> Value + Send + Sync + 'static,
 {
-    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+    fn call(&self, _args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
         (self)(_args, _interpreter)
     }
 }
@@ -171,7 +171,7 @@ impl Callable for SharedNativeFunction {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value {
+    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
         self.func.call(args, interpreter)
     }
 
@@ -250,7 +250,7 @@ impl Callable for NativeFunction {
         self.func.call(args)
     }
 
-    fn call_shared(&self, _args: &HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+    fn call_shared(&self, _args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
@@ -276,7 +276,7 @@ impl Callable for UserFunction {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
@@ -302,7 +302,7 @@ impl Callable for NativeMethod {
         self.func.call(_args)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
@@ -374,7 +374,7 @@ impl Callable for UserFunctionMethod {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &Interpreter) -> Value {
+    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
@@ -458,7 +458,7 @@ impl Function {
         }
     }
 
-    pub fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &Interpreter) -> Value {
+    pub fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
         match self {
             Function::Native(f) => f.call_shared(args, interpreter),
             Function::Custom(f) => f.call_shared(args, interpreter),

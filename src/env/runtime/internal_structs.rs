@@ -17,6 +17,7 @@ pub enum PathElement {
     },
     Tuple(Vec<PathElement>),         // for (a, b, c)
     Literal(Value),                  // for literal values like 42, "hello"
+    Union(Vec<PathElement>),         // for union types like a | b | c
 }
 
 impl PathElement {
@@ -30,10 +31,9 @@ impl PathElement {
                     values: vec![Value::List(seg_values), Value::List(arg_values)],
                 }
             }
-            PathElement::Tuple(elems) => {
-                Value::Tuple(elems.iter().map(|e| e.to_value()).collect())
-            }
+            PathElement::Tuple(elems) => Value::Tuple(elems.iter().map(|e| e.to_value()).collect()),
             PathElement::Literal(value) => value.clone(),
+            PathElement::Union(elems) => Value::List(elems.iter().map(|e| e.to_value()).collect()),
         }
     }
 }
