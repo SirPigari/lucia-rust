@@ -149,7 +149,7 @@ impl Interpreter {
                 "__dir__".to_owned(),
                 Variable::new(
                     "__dir__".to_owned(),
-                    Value::String(fix_path(cwd.canonicalize().unwrap_or(".".into()).display().to_string())),
+                    Value::String(format!("{}/", fix_path(cwd.canonicalize().unwrap_or(".".into()).display().to_string()))),
                     "str".to_owned(),
                     true,
                     false,
@@ -168,8 +168,12 @@ impl Interpreter {
                 ),
             );
         } else {
-            let dir = fix_path(Path::new(file_path).parent().unwrap_or_else(|| Path::new(".")).canonicalize().unwrap_or(".".into()).display().to_string());
+            let mut dir = fix_path(Path::new(file_path).parent().unwrap_or_else(|| Path::new(".")).canonicalize().unwrap_or(".".into()).display().to_string());
             std::env::set_current_dir(&dir).ok();
+
+            if !dir.ends_with('/') {
+                dir.push('/');
+            }
 
             this.variables.insert(
                 "__dir__".to_owned(),
