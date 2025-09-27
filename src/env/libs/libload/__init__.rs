@@ -23,7 +23,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::functions::Function;
-use crate::env::runtime::types::{Type, Int};
+use crate::env::runtime::types::{Type, Int, Float};
 use crate::env::runtime::statements::Statement;
 use crate::interpreter::Interpreter;
 
@@ -425,6 +425,11 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
         return Value::Error("ValueError", "Types length must match values length", None);
     }
 
+    let is_ptr = match args.get("is_ptr") {
+        Some(Value::Boolean(b)) => *b,
+        _ => false,
+    };
+
     let mut bytes_vec: Vec<u8> = Vec::new();
 
     for (val, ty) in values.iter().zip(types.iter()) {
@@ -455,6 +460,12 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
         }
     }
 
+    if is_ptr {
+        let boxed = bytes_vec.into_boxed_slice();
+        let raw_ptr = Box::into_raw(boxed) as *mut u8;
+        return Value::Pointer(Arc::new(Value::Int(Int::from(raw_ptr as usize))));
+    }
+
     let hex_string: String = bytes_vec.iter().rev().map(|b| format!("{:02X}", b)).collect();
 
     match Int::from_hex(&hex_string) {
@@ -462,6 +473,116 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
         Err(_) => Value::Error("ValueError", "Failed to convert hex to Int", None),
     }
 }
+
+fn parse_struct(args: &HashMap<String, Value>) -> Value {
+    let struct_val = match args.get("struct") {
+        Some(v) => v,
+        None => return Value::Error("TypeError", "Expected struct", None),
+    };
+
+    let types: Vec<&str> = match args.get("types_of_the_fields") {
+        Some(Value::List(l)) => l.iter().filter_map(|v| {
+            if let Value::String(s) = v { Some(s.as_str()) } else { None }
+        }).collect(),
+        _ => return Value::Error("TypeError", "Expected types_of_the_fields: list of str", None),
+    };
+
+    let is_ptr = match args.get("is_ptr") {
+        Some(Value::Boolean(b)) => *b,
+        _ => false,
+    };
+
+    let packed = match args.get("packed") {
+        Some(Value::Boolean(b)) => *b,
+        _ => true,
+    };
+
+    let bytes: Vec<u8> = if is_ptr {
+        if let Value::Pointer(p) = struct_val {
+            let addr = match &**p {
+                Value::Int(i) => i.to_i64().unwrap_or(0) as *const u8,
+                _ => return Value::Error("TypeError", "Expected pointer to struct bytes", None),
+            };
+            let total_len: usize = types.iter().map(|ty| match *ty {
+                "byte" | "bool" => 1,
+                "int" => std::mem::size_of::<i64>(),
+                "float" => std::mem::size_of::<f64>(),
+                "ptr" | "str" => std::mem::size_of::<usize>(),
+                _ => 0,
+            }).sum();
+
+            unsafe { std::slice::from_raw_parts(addr, total_len).to_vec() }
+        } else {
+            return Value::Error("TypeError", "Expected struct as pointer", None);
+        }
+    } else if let Value::Int(i) = struct_val {
+        let hex = match i.to_str_radix(16) {
+            Ok(s) => {
+                if s.len() % 2 == 0 { s } else { format!("0{}", s) }
+            }
+            Err(_) => return Value::Error("ValueError", "Failed to convert Int to hex string", None),
+        };
+
+        (0..hex.len())
+            .step_by(2)
+            .filter_map(|j| u8::from_str_radix(&hex[j..j+2], 16).ok())
+            .rev()
+            .collect()
+    } else {
+        return Value::Error("TypeError", "Expected struct as int or ptr", None);
+    };
+
+    let mut offset = 0;
+    let mut fields: Vec<Value> = Vec::new();
+
+    for ty in types {
+        let (size, align) = match ty {
+            "byte" | "bool" => (1, 1),
+            "int" => (8, 8),
+            "float" => (8, 8),
+            "ptr" | "str" => (std::mem::size_of::<usize>(), std::mem::size_of::<usize>()),
+            _ => (0, 1),
+        };
+
+        if !packed && align > 1 {
+            let padding = (align - (offset % align)) % align;
+            offset += padding;
+        }
+
+        match ty {
+            "byte" => {
+                fields.push(Value::Int(Int::from(bytes[offset] as i64)));
+            }
+            "bool" => {
+                fields.push(Value::Boolean(bytes[offset] != 0));
+            }
+            "int" => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[offset..offset+8]);
+                fields.push(Value::Int(Int::from(i64::from_le_bytes(buf))));
+            }
+            "float" => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[offset..offset+8]);
+                fields.push(Value::Float(Float::from(f64::from_le_bytes(buf))));
+            }
+            "ptr" | "str" => {
+                let mut buf = [0u8; std::mem::size_of::<usize>()];
+                buf.copy_from_slice(&bytes[offset..offset+std::mem::size_of::<usize>()]);
+                fields.push(Value::Pointer(
+                    Arc::new(Value::Int(Int::from(usize::from_le_bytes(buf))))
+                ));
+            }
+            _ => {}
+        }
+
+        offset += size;
+    }
+
+    Value::List(fields)
+}
+
+// libload.parse_struct(libload.create_struct([240, 240, 240, 255], ["byte", "byte", "byte", "byte"]), ["byte", "byte", "byte", "byte"])
 
 pub fn init_libload(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
@@ -680,8 +801,21 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("fields", "list"),
             Parameter::positional_optional("types", "list", Value::Null),
             Parameter::positional_optional("packed", "bool", Value::Boolean(false)),
+            Parameter::positional_optional("is_ptr", "bool", Value::Boolean(false)),
         ],
         "any"
+    );
+    insert_native_fn!(
+        map,
+        "parse_struct",
+        parse_struct,
+        vec![
+            Parameter::positional("struct", "any"),
+            Parameter::positional("types_of_the_fields", "list"),
+            Parameter::positional_optional("packed", "bool", Value::Boolean(false)),
+            Parameter::positional_optional("is_ptr", "bool", Value::Boolean(false)),
+        ],
+        "list"
     );
 
     insert_native_fn!(
