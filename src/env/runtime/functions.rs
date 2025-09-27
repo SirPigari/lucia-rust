@@ -5,11 +5,13 @@ use std::hash::{Hash, Hasher};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::Type;
+use crate::env::runtime::variables::Variable;
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
 use std::sync::Mutex;
 use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer};
+use rustc_hash::FxHashMap;
 use bincode::{
     enc::{Encode, Encoder},
     de::{BorrowDecode, Decode, Decoder},
@@ -388,6 +390,7 @@ impl Callable for UserFunctionMethod {
 pub enum Function {
     Native(Arc<NativeFunction>),
     Custom(Arc<UserFunction>),
+    Lambda(Arc<UserFunction>, FxHashMap<String, Variable>),
     SharedNative(Arc<SharedNativeFunction>),
     NativeMethod(Arc<NativeMethod>),
     CustomMethod(Arc<UserFunctionMethod>),
@@ -452,6 +455,7 @@ impl Function {
         match self {
             Function::Native(f) => f.call(args),
             Function::Custom(f) => f.call(args),
+            Function::Lambda(f, _) => f.call(args),
             Function::NativeMethod(f) => f.call(args),
             Function::CustomMethod(f) => f.call(args),
             Function::SharedNative(f) => f.call(args),
@@ -462,6 +466,7 @@ impl Function {
         match self {
             Function::Native(f) => f.call_shared(args, interpreter),
             Function::Custom(f) => f.call_shared(args, interpreter),
+            Function::Lambda(f, _) => f.call_shared(args, interpreter),
             Function::NativeMethod(f) => f.call_shared(args, interpreter),
             Function::CustomMethod(f) => f.call_shared(args, interpreter),
             Function::SharedNative(f) => f.call_shared(args, interpreter),
@@ -472,6 +477,7 @@ impl Function {
         match self {
             Function::Native(_) => vec![],
             Function::Custom(f) => f.body.clone(),
+            Function::Lambda(f, _) => f.body.clone(),
             Function::SharedNative(_) => vec![],
             Function::NativeMethod(_) => vec![],
             Function::CustomMethod(f) => f.body.clone(),
@@ -489,6 +495,7 @@ impl Function {
         match self {
             Function::Native(arc) => Arc::as_ptr(arc) as *const (),
             Function::Custom(arc) => Arc::as_ptr(arc) as *const (),
+            Function::Lambda(arc, _) => Arc::as_ptr(arc) as *const (),
             Function::NativeMethod(arc) => Arc::as_ptr(arc) as *const (),
             Function::CustomMethod(arc) => Arc::as_ptr(arc) as *const (),
             Function::SharedNative(arc) => Arc::as_ptr(arc) as *const (),
@@ -499,6 +506,7 @@ impl Function {
         match self {
             Function::Native(f) => f.metadata(),
             Function::Custom(f) => f.metadata(),
+            Function::Lambda(f, _) => f.metadata(),
             Function::NativeMethod(f) => f.metadata(),
             Function::CustomMethod(f) => f.metadata(),
             Function::SharedNative(f) => f.metadata(),
@@ -509,6 +517,7 @@ impl Function {
         match self {
             Function::Native(f) => &mut Arc::make_mut(f).meta,
             Function::Custom(f) => &mut Arc::make_mut(f).meta,
+            Function::Lambda(f, _) => &mut Arc::make_mut(f).meta,
             Function::NativeMethod(f) => &mut Arc::make_mut(f).meta,
             Function::CustomMethod(f) => &mut Arc::make_mut(f).meta,
             Function::SharedNative(f) => &mut Arc::make_mut(f).meta,
@@ -519,6 +528,7 @@ impl Function {
         match self {
             Function::Native(f) => f.get_size(),
             Function::Custom(f) => f.get_size(),
+            Function::Lambda(f, _) => f.get_size(),
             Function::NativeMethod(f) => f.get_size(),
             Function::CustomMethod(f) => f.get_size(),
             Function::SharedNative(f) => f.get_size(),
@@ -549,6 +559,7 @@ impl Function {
         match self {
             Function::Native(_) => true,
             Function::Custom(_) => false,
+            Function::Lambda(_, _) => false,
             Function::NativeMethod(_) => true,
             Function::CustomMethod(_) => false,
             Function::SharedNative(_) => true,
@@ -559,6 +570,7 @@ impl Function {
         match self {
             Function::Native(_) => true,
             Function::Custom(_) => false,
+            Function::Lambda(_, _) => false,
             Function::NativeMethod(_) => true,
             Function::CustomMethod(_) => false,
             Function::SharedNative(_) => false,

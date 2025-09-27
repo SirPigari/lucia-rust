@@ -142,6 +142,30 @@ fn pow(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn sign(args: &HashMap<String, Value>) -> Value {
+    match args.get("x") {
+        Some(Value::Int(i)) => {
+            if i.is_zero() {
+                Value::Int(Int::from(0))
+            } else if i > &Int::from(0) {
+                Value::Int(Int::from(1))
+            } else {
+                Value::Int(Int::from(-1))
+            }
+        },
+        Some(Value::Float(f)) => {
+            if f.is_zero() {
+                Value::Int(Int::from(0))
+            } else if f > &Float::from_f64(0.0) {
+                Value::Int(Int::from(1))
+            } else {
+                Value::Int(Int::from(-1))
+            }
+        },
+        _ => Value::Error("TypeError", "expected int or float", None),
+    }
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -198,6 +222,13 @@ pub fn register() -> HashMap<String, Variable> {
         pow,
         vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_pt("y", &int_float_type)],
         "any"
+    );
+    insert_native_fn!(
+        map,
+        "sign",
+        sign,
+        vec![Parameter::positional_pt("x", &int_float_type)],
+        "int"
     );
 
     macro_rules! insert_irrational {

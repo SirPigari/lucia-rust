@@ -46,7 +46,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
-use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod};
+use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
@@ -70,7 +70,7 @@ use super::VERSION;
 use crate::lexer::Lexer;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::Parser;
-use crate::env::runtime::tokens::{Location};
+use crate::env::runtime::tokens::{Token, Location};
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {
@@ -3620,6 +3620,14 @@ impl Interpreter {
             },
         };
 
+        let import_all = match statement.get(&Value::String("import_all".to_string())) {
+            Some(Value::Boolean(b)) => *b,
+            _ => {
+                self.raise("RuntimeError", "Missing or invalid 'import_all' in import statement");
+                return NULL;
+            },
+        };
+
         let valid_alias_re = Regex::new(r"^[a-zA-Z_]\w*$").unwrap();
         if !valid_alias_re.is_match(alias) {
             return self.raise_with_help(
@@ -4254,7 +4262,28 @@ impl Interpreter {
     
         let order = ["object", "function", "constant", "variable"];
 
-        if !named_imports.is_empty() {
+        if import_all {
+            for (name, var) in properties.iter() {
+                self.variables.insert(
+                    name.clone(),
+                    Variable::new(name.clone(), var.value.clone(), var.type_name().to_string(), var.is_final(), var.is_public(), var.is_static()),
+                );
+            }
+            if self.config.debug {
+                for &category in &order {
+                    if let Some(names) = categorized.get(category) {
+                        for name in names {
+                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                        }
+                    }
+                }
+            }
+            if self.err.is_some() {
+                self.stack.pop();
+                return NULL;
+            }
+            Value::Null
+        } else if !named_imports.is_empty() {
             let mut names: HashMap<String, String> = HashMap::new();
             for named_import in named_imports {
                 let named_import_hashmap = named_import.convert_to_hashmap().unwrap_or_else(|| {
@@ -4474,7 +4503,12 @@ impl Interpreter {
                         let type_val = &values[pos];
                         match self.evaluate(type_val.convert_to_statement()) {
                             Value::Type(t) => t,
-                            _ => return self.raise("RuntimeError", "Invalid 'type' in function parameter"),
+                            _ => {
+                                if self.err.is_some() {
+                                    return NULL;
+                                }
+                                return self.raise("RuntimeError", "Invalid 'type' in function parameter");
+                            },
                         }
                     }
                     None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
@@ -4605,12 +4639,10 @@ impl Interpreter {
         );
 
         let function = if name.starts_with("<") && name.ends_with(">") {
-            let interpreter = Arc::new(Mutex::new(self.clone()));
-            Value::Function(Function::CustomMethod(Arc::new(UserFunctionMethod {
+            Value::Function(Function::Lambda(Arc::new(UserFunction {
                 meta: metadata.clone(),
                 body: body_formatted,
-                interpreter,
-            })))
+            }), self.variables.clone()))
         } else {
             create_function(
                 metadata.clone(),
@@ -7878,7 +7910,30 @@ impl Interpreter {
                     })
                     .collect::<HashMap<String, Variable<>>>();
             
-                if let Function::CustomMethod(func) = func {
+                if let Function::Lambda(_, closure_vars) = func {
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        self.use_colors.clone(),
+                        &self.file_path.clone(),
+                        &self.cwd.clone(),
+                        self.preprocessor_info.clone(),
+                        &vec![],
+                    );
+                    let mut merged_variables = self.variables.clone();
+                    merged_variables.extend(closure_vars.clone());
+                    merged_variables.extend(final_args_variables);
+                    new_interpreter.variables = merged_variables;
+                    new_interpreter.stack = self.stack.clone();
+                    let body = func.get_body();
+                    let _ = new_interpreter.interpret(body, true);
+                    if new_interpreter.err.is_some() {
+                        self.stack.pop();
+                        self.err = new_interpreter.err.clone();
+                        return NULL;
+                    }
+                    result = new_interpreter.return_value.clone();
+                    self.stack = new_interpreter.stack;
+                } else if let Function::CustomMethod(func) = func {
                     let module_file_path = match &object_value {
                         Value::Module(obj) => obj.path().clone(),
                         _ => {
@@ -9031,7 +9086,82 @@ impl Interpreter {
                     }
                 }
 
-                if !func.is_native() {
+                if self.err.is_some() {
+                    self.stack.pop();
+                    return NULL;
+                }
+
+                if let Function::Lambda(_, ref closure_vars) = func {
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        self.use_colors.clone(),
+                        &self.file_path.clone(),
+                        &self.cwd.clone(),
+                        self.preprocessor_info.clone(),
+                        &vec![],
+                    );
+                    let mut merged_variables = self.variables.clone();
+                    merged_variables.extend(closure_vars.clone());
+                    merged_variables.extend(final_args_variables);
+                    new_interpreter.variables = merged_variables;
+                    new_interpreter.stack = self.stack.clone();
+                    let body = func.get_body();
+                    let _ = new_interpreter.interpret(body, true);
+                    if new_interpreter.err.is_some() {
+                        self.stack.pop();
+                        self.err = new_interpreter.err.clone();
+                        return NULL;
+                    }
+                    result = new_interpreter.return_value.clone();
+                    self.stack = new_interpreter.stack;
+                } else if let Function::CustomMethod(func) = func {
+                    let interpreter_arc = func.get_interpreter();
+                    let mut interpreter = interpreter_arc.lock().unwrap();
+
+                    result = interpreter.call_function(
+                        func.get_name(),
+                        positional,
+                        named_map,
+                    );
+
+                    if interpreter.err.is_some() {
+                        self.stack.pop();
+                        self.raise_with_ref(
+                            "RuntimeError",
+                            "Error in module method call",
+                            interpreter.err.clone().unwrap(),
+                        );
+                        return NULL;
+                    }
+
+                    if let Value::Error(err_type, err_msg, referr) = &result {
+                        if let Some(rerr) = referr {
+                            let err = Error::with_ref(
+                                err_type,
+                                err_msg,
+                                rerr.clone(),
+                                &self.file_path,
+                            );
+                            self.raise_with_ref(
+                                "RuntimeError",
+                                "Error in method call",
+                                err,
+                            );
+                        }
+                        let err = Error::new(
+                            err_type,
+                            err_msg,
+                            &self.file_path,
+                        );
+                        self.raise_with_ref(
+                            "RuntimeError",
+                            "Error in method call",
+                            err,
+                        );
+                        self.stack.pop();
+                        return NULL;
+                    };
+                } else if !func.is_native() {
                     let argv_vec = self.variables.get("argv").map(|var| {
                         match var.get_value() {
                             Value::List(vals) => vals.iter().filter_map(|v| {
@@ -10649,7 +10779,12 @@ impl Interpreter {
                                             Some(self.use_colors),
                                         );
 
-                                        let parsed = match Parser::new(tokens.clone()).parse_safe() {
+                                        let tokens_no_loc: Vec<Token> = tokens
+                                            .iter()
+                                            .map(|tk| Token(tk.0.clone(), tk.1.clone(), None))
+                                            .collect();
+
+                                        let parsed = match Parser::new(tokens_no_loc).parse_safe() {
                                             Ok(parsed) => parsed,
                                             Err(error) => {
                                                 return self.raise(

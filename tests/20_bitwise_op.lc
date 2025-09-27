@@ -21,6 +21,10 @@ assert_eq!(5 bor 3, 7)
 assert_eq!(12 bor 10, 14)
 assert_eq!(255 bor 0, 255)
 
+assert_eq!(6 | 1, 7)
+assert_eq!(9 | 4, 13)
+assert_eq!(128 | 127, 255)
+
 // xor (booleans + others)
 assert_eq!(true xor false, true)
 assert_eq!(true xor true, false)

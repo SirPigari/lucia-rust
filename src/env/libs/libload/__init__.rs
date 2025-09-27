@@ -708,6 +708,29 @@ pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
     Value::Int(0.into())
 }
 
+pub fn unload_lib(args: &HashMap<String, Value>) -> Value {
+    let lib_val = args.get("lib");
+
+    match lib_val {
+        Some(Value::Pointer(lib_ptr_arc)) => {
+            let raw_ptr = if let Value::Int(ptr_int) = &**lib_ptr_arc {
+                match ptr_int.to_i64() {
+                    Ok(i) => i as usize as *mut LuciaLib,
+                    Err(_) => return libload_error("Invalid library pointer conversion"),
+                }
+            } else {
+                return libload_error("Invalid library pointer type");
+            };
+
+            unsafe {
+                drop(Box::from_raw(raw_ptr));
+            }
+
+            Value::Null
+        }
+        _ => libload_error("Expected (lib: ptr)"),
+    }
+}
 
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
@@ -868,6 +891,13 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("ptr", "any"),
         ],
         "int"
+    );
+    insert_native_fn!(
+        map,
+        "unload_lib",
+        unload_lib,
+        vec![Parameter::positional("lib", "any")],
+        "void"
     );
 
     map

@@ -166,66 +166,62 @@ pub fn handle_error(
             }
         };
 
-        let lucia_source_loc = if debug && (loc.lucia_source_loc != "<unknown>") && !loc.lucia_source_loc.is_empty() {
-            format!("Raised from {}\n", loc.lucia_source_loc.clone())
+        // Optional debug info
+        let lucia_source_loc = if debug && loc.lucia_source_loc != "<unknown>" && !loc.lucia_source_loc.is_empty() {
+            format!("Raised from {}\n", loc.lucia_source_loc)
         } else {
             String::new()
         };
+
         let file_name = fix_path(loc.file.to_string());
         let line_number = loc.line_number;
         let range = loc.range;
         let col = range.0;
         let reset = hex_to_ansi("reset", use_colors);
 
+        // Get the source lines safely
         let current_line = if line_number > 0 {
-            match get_line_info(source, line_number) {
-                Some(line) => line,
-                None => {
-                    if file_name.starts_with('<') && file_name.ends_with('>') {
-                        source.lines().next().unwrap_or_default().to_string()
-                    } else {
-                        loc.line_string.clone()
-                    }
+            get_line_info(source, line_number).unwrap_or_else(|| {
+                if file_name.starts_with('<') && file_name.ends_with('>') {
+                    source.lines().next().unwrap_or_default().to_string()
+                } else {
+                    loc.line_string.clone()
                 }
-            }
+            })
         } else {
             loc.line_string.clone()
         };
 
-        let prev_line = if line_number > 1 {
-            get_line_info(source, line_number - 1)
-        } else {
-            None
-        };
-
-        let next_line = if line_number > 0 {
-            get_line_info(source, line_number + 1)
-        } else {
-            None
-        };
+        let prev_line = if line_number > 1 { get_line_info(source, line_number - 1) } else { None };
+        let next_line = if line_number > 0 { get_line_info(source, line_number + 1) } else { None };
 
         let indent = " ".repeat(line_number.to_string().len());
 
+        // Build arrows under the error, safely using char indices
         let mut arrows_under = String::new();
         if line_number > 0 {
-            let line_len = current_line.len();
-            let start = range.0.saturating_sub(1);
-            let end = range.1;
+            let chars: Vec<char> = current_line.chars().collect();
+            let line_len = chars.len();
+            let start = range.0.saturating_sub(1).min(line_len);
+            let end = range.1.min(line_len);
 
             if start >= line_len || end == 0 || start >= end {
                 arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
             } else {
                 arrows_under = "~".repeat(line_len);
-                let len = end.saturating_sub(start);
-                arrows_under.replace_range(start..end, &"^".repeat(len.max(1)));
+                arrows_under = arrows_under.chars()
+                    .enumerate()
+                    .map(|(i, c)| if i >= start && i < end { '^' } else { c })
+                    .collect();
             }
         }
 
+        // Compose trace
         trace.push_str(&format!(
             "{}{}{}",
             hex_to_ansi(&config.color_scheme.debug, use_colors),
             lucia_source_loc,
-            hex_to_ansi("reset", use_colors),
+            reset,
         ));
 
         trace.push_str(&format!(
@@ -237,22 +233,23 @@ pub fn handle_error(
         ));
 
         if line_number > 0 {
-            if prev_line.is_some() && prev_line.as_ref().map_or(false, |l| l.len() > 8) && PREV_LINES {
-                trace.push_str(&format!("\t{} | {}\n", line_number - 1, prev_line.as_ref().unwrap()));
+            if let Some(prev) = prev_line.as_ref() {
+                if prev.len() > 8 && PREV_LINES {
+                    trace.push_str(&format!("\t{} | {}\n", line_number - 1, prev));
+                }
             }
 
             trace.push_str(&format!("\t{} | {}\n", line_number, current_line));
             trace.push_str(&format!("\t{} | {}\n", indent, arrows_under));
 
-            if next_line.is_some() && next_line.as_ref().map_or(false, |l| l.len() > 8) && NEXT_LINES {
-                trace.push_str(&format!("\t{} ...\n", indent));
+            if let Some(next) = next_line.as_ref() {
+                if next.len() > 8 && NEXT_LINES {
+                    trace.push_str(&format!("\t{} ...\n", indent));
+                }
             }
         }
 
-        trace.push_str(&format!(
-            "\t{} | {}: {}",
-            indent, err.error_type, err.msg
-        ));
+        trace.push_str(&format!("\t{} | {}: {}", indent, err.error_type, err.msg));
 
         if let Some(help) = &err.help {
             if !help.is_empty() {
@@ -330,7 +327,9 @@ pub fn handle_error(
             if same_loc {
                 trace.push_str(&print_single_error(err));
 
-                let indent = " ".repeat(err.loc.as_ref().map_or(0, |l| l.line_number.to_string().len()));
+                let indent_len = err.loc.as_ref().map_or(0, |l| l.line_number.to_string().len());
+                let indent = " ".repeat(indent_len);
+
                 trace.push_str(&format!(
                     "\n\t{}^-- caused by:\n\t{} | {}: {}",
                     hex_to_ansi(&config.color_scheme.exception, use_colors),
@@ -341,11 +340,7 @@ pub fn handle_error(
 
                 if let Some(help) = &inner.help {
                     if !help.is_empty() {
-                        trace.push_str(&format!(
-                            "\n\t{}   (Help: {})",
-                            indent,
-                            help
-                        ));
+                        trace.push_str(&format!("\n\t{}   (Help: {})", indent, help));
                     }
                 }
 
@@ -355,12 +350,14 @@ pub fn handle_error(
         }
 
         trace.push_str(&print_single_error(err));
+
         if let Some(ref inner) = err.ref_err {
             trace.push_str(&format!(
                 "\n\t{}^-- caused by:\n",
                 hex_to_ansi(&config.color_scheme.exception, use_colors)
             ));
             trace.push_str(&hex_to_ansi("reset", use_colors));
+
             current_error = Some(inner);
         } else {
             current_error = None;
@@ -589,7 +586,7 @@ fn load_config_with_fallback(primary_path: &Path, fallback_path: &Path, env_path
     if primary_path.exists() {
         match load_config(primary_path) {
             Ok(primary_config) => {
-                if fallback_path.exists() && fallback_path != primary_path {
+                if fallback_path.exists() && (fallback_path != primary_path) {
                     match load_config(fallback_path) {
                         Ok(fallback_config) => {
                             Ok(merge_configs(primary_config, fallback_config))
@@ -603,7 +600,7 @@ fn load_config_with_fallback(primary_path: &Path, fallback_path: &Path, env_path
                 }
             }
             Err(_) => {
-                if fallback_path.exists() && fallback_path != primary_path {
+                if fallback_path.exists() && (fallback_path != primary_path) {
                     load_config(fallback_path)
                 } else {
                     let default_config = create_default_config(env_path);
@@ -2371,7 +2368,6 @@ fn main() {
             }
         }
     };
-
     
     if !supports_color() {
         config.supports_color = false;

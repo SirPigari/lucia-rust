@@ -12,6 +12,7 @@ pub struct Parser {
     pos: usize,
     statements: Vec<Statement>,
     err: Option<Error>,
+    ignore_pipe_count: usize,
 }
 
 impl Parser {
@@ -21,6 +22,7 @@ impl Parser {
             pos: 0,
             statements: vec![],
             err: None,
+            ignore_pipe_count: 0,
         }
     }
 
@@ -1446,7 +1448,7 @@ impl Parser {
                 None => break,
             };
 
-            if ["=", "=>", "as", "++", "--", "|", "-li", "->", "|>", ":="].contains(&op_str) {
+            if ["=", "=>", "as", "++", "--", "-li", "->", "|>", ":="].contains(&op_str) {
                 break;
             }
 
@@ -1463,8 +1465,25 @@ impl Parser {
                 break;
             }
 
+
             if tok_type != "OPERATOR" {
                 break;
+            }
+
+            if op_str == "|" {
+                if self.ignore_pipe_count > 0 {
+                    break;
+                }
+                if self.pos == 0 {
+                    break;
+                }
+                if let Some(prev_tok) = self.tokens.get(self.pos - 1) {
+                    if prev_tok.0 == "SEPARATOR" {
+                        if ["\\", "(", "[", "{"].contains(&prev_tok.1.as_str()) {
+                            break;
+                        }
+                    }
+                }
             }
 
             let prec = get_precedence(op_str);
@@ -1553,9 +1572,16 @@ impl Parser {
                         if self.token_is("SEPARATOR", "\\") {
                             break;
                         }
+                        let before_pos = self.pos;
                         let expr = self.parse_expression();
                         if matches!(expr, Statement::Null) {
-                            break;
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            if self.pos == before_pos {
+                                break;
+                            }
+                            continue;
                         }
                         exprs.push(expr);
                         if self.err.is_some() {
@@ -1591,7 +1617,9 @@ impl Parser {
 
                 "OPERATOR" if token.1 == "|" => {
                     self.next();
+                    self.ignore_pipe_count = self.ignore_pipe_count.saturating_add(1);
                     let expr = self.parse_expression();
+                    if self.ignore_pipe_count > 0 { self.ignore_pipe_count -= 1; }
                     if self.err.is_some() { return Statement::Null; }
                     self.check_for("OPERATOR", "|");
                     self.next();
@@ -1620,7 +1648,11 @@ impl Parser {
                         self.raise_with_loc("SyntaxError", "Unexpected end of input after unary operator", loc);
                         return Statement::Null;
                     }
-                    let operand = self.parse_expression();
+                    let operand = if ["!"].contains(&operator.as_str()) {
+                        self.parse_primary()
+                    } else {
+                        self.parse_expression()
+                    };
                     if self.err.is_some() { return Statement::Null; }
                     Statement::Statement {
                         keys: vec![
@@ -2760,22 +2792,6 @@ impl Parser {
                                 }
                                 self.next();
 
-                                // check consistency of discriminant usage
-                                // let all_have = variants.iter().all(|v| {
-                                //     if let Value::Map { keys, .. } = v {
-                                //         keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
-                                //     } else { false }
-                                // });
-                                // let none_have = variants.iter().all(|v| {
-                                //     if let Value::Map { keys, .. } = v {
-                                //         !keys.iter().any(|k| matches!(k, Value::String(s) if s == "discriminant"))
-                                //     } else { true }
-                                // });
-                                // if !all_have && !none_have {
-                                //     self.raise("SyntaxError", "All enum variants must either have discriminants or none");
-                                //     return Statement::Null;
-                                // }
-
                                 body = Value::List(variants);
                             } else if kind == "struct" {
                                 if !self.token_is("SEPARATOR", "{") {
@@ -2888,7 +2904,6 @@ impl Parser {
                                 self.next();
                             }
 
-                            // wrap the vec in a Value::List
                             let conditions = Value::List(conditions);
 
 
@@ -2962,6 +2977,7 @@ impl Parser {
 
                             let mut named_imports = vec![];
                             let mut is_named_import = false;
+                            let mut import_all = false;
 
                             if self.token_is("SEPARATOR", "(") {
                                 is_named_import = true;
@@ -2972,6 +2988,11 @@ impl Parser {
                                         self.raise("SyntaxError", "Expected identifier in named import");
                                         DEFAULT_TOKEN.clone()
                                     });
+                                    if ident.0 == "OPERATOR" && ident.1 == "*" {
+                                        import_all = true;
+                                        self.next();
+                                        break;
+                                    }
                                     if ident.0 != "IDENTIFIER" {
                                         self.raise("SyntaxError", "Expected identifier in named import");
                                         return Statement::Null;
@@ -3147,6 +3168,7 @@ impl Parser {
                                     Value::String("alias".to_string()),
                                     Value::String("named".to_string()),
                                     Value::String("modifiers".to_string()),
+                                    Value::String("import_all".to_string()),
                                 ],
                                 values: vec![
                                     Value::String("IMPORT".to_string()),
@@ -3172,6 +3194,7 @@ impl Parser {
                                         Value::Null
                                     },
                                     Value::List(modifiers.into_iter().map(Value::String).collect()),
+                                    Value::Boolean(import_all),
                                 ],
                                 loc: self.get_loc(),
                             }
@@ -4331,7 +4354,6 @@ impl Parser {
 
         Some(left)
     }
-
 
     fn parse_single_type(&mut self) -> Option<(String, Statement)> {
         let mut is_ptr = false;

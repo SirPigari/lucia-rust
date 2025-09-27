@@ -26,6 +26,16 @@ static EXPECTED_VERSION: Lazy<String> = Lazy::new(|| format!("^{}", VERSION));
 pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     let mut m = HashMap::new();
 
+    m.insert("std", LibInfo::new(
+        "Standard library for Lucia.",
+        "2.0.0",
+        &EXPECTED_VERSION,
+    ));
+    m.insert("request", LibInfo::new(
+        "This module provides HTTP request functionality.",
+        "0.11.14",
+        &EXPECTED_VERSION,
+    ));
     m.insert("math", LibInfo::new(
         "Provides mathematical functions and constants.",
         "1.0.0",
