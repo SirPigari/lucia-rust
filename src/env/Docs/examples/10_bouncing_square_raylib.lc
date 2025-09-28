@@ -1,0 +1,58 @@
+#config allow_unsafe = true
+#config debug = false
+import (*) from raylib_lucia
+import math
+
+// Bouncing Square with Raylib in Lucia
+// made by Markofwitch 2025, the developer of Lucia
+// NOTE: This example requires the `raylib_lucia` module, do 'lym install raylib_lucia' to install it
+
+SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN)
+InitWindow(800, 600, "Bouncing Square")
+SetTargetFPS(60)
+
+mutable x: int = 0
+mutable y: int = 300
+mutable velX: int = 6
+mutable velY: int = 4
+mutable accel: float = 0.3
+final size: int = 50
+
+mutable color: tuple[int, int, int, int] = (255, 0, 0, 255)
+mutable counter: int = 0
+
+while !WindowShouldClose():
+    BeginDrawing()
+    ClearBackground((135, 206, 235, 255)) // sky blue
+
+    DrawFPS(10, 10)
+
+    text := "Bounces: " + counter.to_string()
+    textWidth := MeasureText(text, 20)
+    DrawText(text, (800 - textWidth) / 2, 40, 20, (255, 255, 255, 255))
+
+    DrawRectangle(x, y, size, size, color)
+
+    x += velX
+    y += velY
+
+    // bounce horizontally
+    if x <= 0 || x + size >= 800:
+        velX *= -1
+        velX += (math.sign(velX) * accel) as int
+        color = (GetRandomValue(50,255), GetRandomValue(50,255), GetRandomValue(50,255), 255)
+        counter += 1
+    end
+
+    // bounce vertically
+    if y <= 0 || y + size >= 600:
+        velY *= -1
+        velY += (math.sign(velY) * accel) as int
+        color = (GetRandomValue(50,255), GetRandomValue(50,255), GetRandomValue(50,255), 255)
+        counter += 1
+    end
+
+    EndDrawing()
+end
+
+CloseWindow()

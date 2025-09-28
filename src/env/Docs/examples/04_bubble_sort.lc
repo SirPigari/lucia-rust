@@ -1,8 +1,8 @@
 fun bubbleSort(arr: list) -> list:
     n: int = len(arr)
 
-    for (i in [0...n - 2]):
-        for (j in [0...n - i - 2]):
+    for (i in [0..n - 2]):
+        for (j in [0..n - i - 2]):
             aj: int = arr[j]
             aj1: int = arr[j + 1]
 
