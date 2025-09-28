@@ -21,6 +21,7 @@ assert_eq!(5 bor 3, 7)
 assert_eq!(12 bor 10, 14)
 assert_eq!(255 bor 0, 255)
 
+// bitwise or (using | symbol, only available outside of absolute expressions '|x|')
 assert_eq!(6 | 1, 7)
 assert_eq!(9 | 4, 13)
 assert_eq!(128 | 127, 255)

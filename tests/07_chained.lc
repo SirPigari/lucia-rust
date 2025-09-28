@@ -14,7 +14,8 @@ assert_eq!(divided_int, 18518518518518518518518518518518518518518.5)
 z_int: int = z.to_float().to_int()
 x_half: float = x / 2
 pow_result: float = z_int ^ x_half  // pow operator
-assert_approx_eq!(pow_result, (30096915.22952864))
+assert_approx_eq!(pow_result, 30096915.22952864)
+print(pow_result, z_int, x_half)
 
 long_chained: int = (x + y * z - 1000 / 2 ^ 3) as int
 assert_eq!(long_chained, 5636)

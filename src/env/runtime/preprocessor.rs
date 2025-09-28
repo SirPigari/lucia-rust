@@ -926,7 +926,7 @@ impl Preprocessor {
                 } else if !skipping
                     && i + 3 < tokens.len()
                     && matches!(tokens[i], Token(ref a, _, _) if a == "NUMBER")
-                    && matches!(tokens[i + 1], Token(ref a, _, _) if a == "OPERATOR")
+                    && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && ["+", "-", "*"].contains(&b.as_str()))
                     && matches!(tokens[i + 2], Token(ref a, _, _) if a == "NUMBER")
                     && matches!(tokens[i + 3], Token(ref a, _, _) if a != "OPERATOR")
                     && (i == 0 || matches!(tokens[i - 1], Token(ref a, _, _) if a != "OPERATOR"))

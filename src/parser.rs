@@ -2431,6 +2431,7 @@ impl Parser {
                             self.next();
                             let mut pos_args = vec![];
                             let mut named_args = vec![];
+                            let mut may_fail = false;
 
                             while let Some(mut current_tok) = self.token().cloned() {
                                 let mut param_modifiers = vec![];
@@ -2510,6 +2511,7 @@ impl Parser {
                             self.next();
 
                             if is_function && self.token_is("OPERATOR", "?") {
+                                may_fail = true;
                                 self.next();
                             }
 
@@ -2574,6 +2576,7 @@ impl Parser {
                                     Value::String("named_args".to_string()),
                                     Value::String("body".to_string()),
                                     Value::String("return_type".to_string()),
+                                    Value::String("may_fail".to_string()),
                                 ],
                                 values: vec![
                                     if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
@@ -2586,6 +2589,7 @@ impl Parser {
                                     },
                                     Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                     return_type.convert_to_map(),
+                                    Value::Boolean(may_fail),
                                 ],
                                 loc: self.get_loc(),
                             };

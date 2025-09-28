@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use crate::env::runtime::internal_structs::{LibInfo, CacheFormat};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Config {
     pub moded: bool,
     pub debug: bool,
@@ -32,6 +33,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct ColorScheme {
     pub exception: String,
     pub warning: String,
@@ -117,16 +119,22 @@ impl Default for Config {
             home_dir: "lucia/src/env/".to_string(),
             stack_size: 16777216, // 16 MB
             type_checker: TypeCheckerConfig::default(),
-            color_scheme: ColorScheme {
-                exception: "#F44350".to_string(),
-                warning: "#F5F534".to_string(),
-                help: "#21B8DB".to_string(),
-                debug: "#434343".to_string(),
-                input_arrows: "#136163".to_string(),
-                note: "#1CC58B".to_string(),
-                output_text: "#BCBEC4".to_string(),
-                info: "#9209B3".to_string(),
-            },
+            color_scheme: ColorScheme::default(),
+        }
+    }
+}
+
+impl Default for ColorScheme {
+    fn default() -> Self {
+        Self {
+            exception: "#F44350".to_string(),
+            warning: "#F5F534".to_string(),
+            help: "#21B8DB".to_string(),
+            debug: "#434343".to_string(),
+            input_arrows: "#136163".to_string(),
+            note: "#1CC58B".to_string(),
+            output_text: "#BCBEC4".to_string(),
+            info: "#9209B3".to_string(),
         }
     }
 }

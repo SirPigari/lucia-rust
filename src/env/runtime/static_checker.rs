@@ -400,12 +400,24 @@ impl Checker {
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
         });
-        let loc_str = format!("{}:{}:{}", fix_path(loc.file), loc.line_number, loc.range.0);
-
         let (should_warn, warning_type) = self.check_warn_type(warning_type);
         if !should_warn {
             return ValueType::Null;
         }
+
+        if self.config.type_checker.treat_warnings_as_errors {
+            self.errors.push(Error {
+                error_type: warning_type.to_string(),
+                msg: warning_str.to_string(),
+                help: None,
+                loc: Some(loc),
+                ref_err: None,
+            });
+            return ValueType::Null;
+        }
+        
+        let loc_str = format!("{}:{}:{}", fix_path(loc.file), loc.line_number, loc.range.0);
+
 
         if self.config.debug {
             println!("{}Warning raised from {}{}", hex_to_ansi(&self.config.color_scheme.debug, self.config.supports_color), loc.lucia_source_loc, hex_to_ansi("reset", self.config.supports_color));
