@@ -90,8 +90,10 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
         Some(Value::String(s)) => {
             let elem_type = match s.as_str() {
                 "int" => ValueType::Int,
-                "float" => ValueType::Float,
+                "float" | "float64" => ValueType::Float64,
+                "float32" => ValueType::Float32,
                 "bool" => ValueType::Boolean,
+                "byte" => ValueType::Byte,
                 "ptr" => ValueType::Ptr,
                 "void" => ValueType::Void,
                 _ => return Value::Error("TypeError", "Unknown type string", None),
@@ -275,9 +277,11 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
 
             let parse_ty = |s: &str| match s {
                 "int" => Some(ValueType::Int),
-                "float" => Some(ValueType::Float),
+                "float" | "float64" => Some(ValueType::Float64),
+                "float32" => Some(ValueType::Float32),
                 "bool" => Some(ValueType::Boolean),
                 "void" => Some(ValueType::Void),
+                "byte" => Some(ValueType::Byte),
                 "any" | "str" | "ptr" => Some(ValueType::Ptr),
                 "" => Some(ValueType::Ptr),
                 _ => None,
@@ -324,7 +328,8 @@ pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
         (Some(Value::String(name)), Some(Value::List(arg_tys)), Some(Value::String(ret_ty))) => {
             let parse_basic_ty = |s: &str| match s {
                 "int" => Some(ValueType::Int),
-                "float" => Some(ValueType::Float),
+                "float" | "float64" => Some(ValueType::Float64),
+                "float32" => Some(ValueType::Float32),
                 "bool" => Some(ValueType::Boolean),
                 "void" => Some(ValueType::Void),
                 "any" | "str" | "ptr" => Some(ValueType::Ptr),

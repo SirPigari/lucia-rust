@@ -3683,7 +3683,7 @@ impl Interpreter {
             StackType::Import
         ));
     
-        if self.variables.contains_key(alias) && named_imports.is_empty() {
+        if self.variables.contains_key(alias) && named_imports.is_empty() && !import_all {
             self.stack.pop();
             if let Some(var) = self.variables.get(alias) {
                 return var.value.clone();

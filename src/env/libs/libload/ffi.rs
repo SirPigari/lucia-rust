@@ -15,6 +15,9 @@ enum StoredValue {
     Int(i64),
     Boolean(u8),
     Ptr(*const std::ffi::c_void),
+    ByteVec(Vec<u8>),
+    Float64(f64),
+    Float32(f32),
     Null,
 }
 
@@ -28,11 +31,18 @@ pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> 
                 result.push(Value::Int(val.into()));
             }
         }
-        ValueType::Float => {
+        ValueType::Float64 => {
             let float_ptr = ptr as *const f64;
             for i in 0..len {
                 let val = unsafe { *float_ptr.add(i) };
                 result.push(Value::Float(val.into()));
+            }
+        }
+        ValueType::Float32 => {
+            let float_ptr = ptr as *const f32;
+            for i in 0..len {
+                let val = unsafe { *float_ptr.add(i) };
+                result.push(Value::Float((val as f64).into()));
             }
         }
         ValueType::Boolean => {
@@ -54,6 +64,13 @@ pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> 
                 result.push(Value::Null);
             }
         }
+        ValueType::Byte => {
+            let byte_ptr = ptr as *const u8;
+            for i in 0..len {
+                let val = unsafe { *byte_ptr.add(i) };
+                result.push(Value::Int((val as i64).into()));
+            }
+        }
     }
     Value::List(result)
 }
@@ -64,7 +81,9 @@ unsafe impl Sync for StoredValue {}
 #[derive(Clone, Debug)]
 pub enum ValueType {
     Int,
-    Float,
+    Float32,
+    Float64,
+    Byte,
     Boolean,
     Ptr,
     Void,
@@ -115,16 +134,20 @@ impl LuciaFfiFn {
         }
         let ffi_arg_types: Vec<Type> = self.arg_types.iter().map(|t| match t {
             ValueType::Int => Type::i64(),
-            ValueType::Float => Type::f64(),
+            ValueType::Float64 => Type::f64(),
+            ValueType::Float32 => Type::f32(),
             ValueType::Boolean => Type::u8(),
             ValueType::Ptr => Type::pointer(),
             ValueType::Void => Type::void(),
+            ValueType::Byte => Type::u8(),
         }).collect();
 
         let ffi_ret_type = match self.ret_type {
             ValueType::Int => Type::i64(),
-            ValueType::Float => Type::f64(),
+            ValueType::Float64 => Type::f64(),
+            ValueType::Float32 => Type::f32(),
             ValueType::Boolean => Type::u8(),
+            ValueType::Byte => Type::u8(),
             ValueType::Ptr => Type::pointer(),
             ValueType::Void => Type::void(),
         };
@@ -145,15 +168,29 @@ impl LuciaFfiFn {
                         unreachable!()
                     }
                 }
-                (Value::Float(f), ValueType::Float) => {
+                (Value::Float(f), ValueType::Float64) => {
+                    let val_f64 = match f.to_f64() {
+                        Ok(v) => v,
+                        Err(_) => f.to_str().parse::<f64>().unwrap_or(0.0),
+                    };
+                    stored_args.push(StoredValue::Float64(val_f64));
+                    if let StoredValue::Float64(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
+                }
+                (Value::Float(f), ValueType::Float32) => {
                     let val_f32 = match f.to_f64() {
                         Ok(v) => v as f32,
                         Err(_) => f.to_str().parse::<f32>().unwrap_or(0.0),
                     };
-                    let float_box = Box::new(val_f32);
-                    let float_ptr = &*float_box as *const f32;
-                    stored_args.push(StoredValue::Ptr(float_ptr as *const std::ffi::c_void));
-                    Ok(Arg::new(&*float_box))
+                    stored_args.push(StoredValue::Float32(val_f32));
+                    if let StoredValue::Float32(stored_val) = stored_args.last().unwrap() {
+                        Ok(Arg::new(stored_val))
+                    } else {
+                        unreachable!()
+                    }
                 }
                 (Value::Boolean(b), ValueType::Boolean) => {
                     stored_args.push(StoredValue::Boolean(*b as u8));
@@ -192,6 +229,22 @@ impl LuciaFfiFn {
                         Err("Expected Value::Int inside pointer Arc".into())
                     }
                 }
+                (Value::Int(b), ValueType::Byte) => {
+                    let val = b.to_i64().unwrap_or(0) as u8;
+
+                    if let Some(StoredValue::ByteVec(vec)) = stored_args.last_mut() {
+                        vec.push(val);
+                        let val_ref = &vec[vec.len() - 1];
+                        Ok(Arg::new(val_ref))
+                    } else {
+                        stored_args.push(StoredValue::ByteVec(vec![val]));
+                        let val_ref = match stored_args.last().unwrap() {
+                            StoredValue::ByteVec(vec) => &vec[0],
+                            _ => unreachable!(),
+                        };
+                        Ok(Arg::new(val_ref))
+                    }
+                }
                 (Value::Null, ValueType::Void) => Ok(Arg::new(&StoredValue::Null)),
                 _ => Err("Unsupported Value/ValueType combination for ffi call".to_string()),
             }
@@ -205,9 +258,17 @@ impl LuciaFfiFn {
                 let ret: i64 = unsafe { cif.call(self.func_ptr, &ffi_args) };
                 Value::Int(ret.into())
             }
-            ValueType::Float => {
+            ValueType::Float64 => {
                 let ret: f64 = unsafe { cif.call(self.func_ptr, &ffi_args) };
                 Value::Float(ret.into())
+            }
+            ValueType::Float32 => {
+                let ret: f32 = unsafe { cif.call(self.func_ptr, &ffi_args) };
+                Value::Float((ret as f64).into())
+            }
+            ValueType::Byte => {
+                let ret: u8 = unsafe { cif.call(self.func_ptr, &ffi_args) };
+                Value::Int((ret as i64).into())
             }
             ValueType::Boolean => {
                 let ret: u8 = unsafe { cif.call(self.func_ptr, &ffi_args) };

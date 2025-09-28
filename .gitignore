@@ -41,3 +41,6 @@ Desktop.ini
 # Lucia cache
 /src/env/cache/
 /src/env/.cache/
+
+# Raylib
+/src/env/libs/raylib_lucia/
