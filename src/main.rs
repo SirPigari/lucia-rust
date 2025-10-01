@@ -2153,7 +2153,16 @@ fn main() {
         exit(0);
     }
 
-    let mut arg_pos = 1;
+    let mut arg_pos = 0;
+    if !vec_args.is_empty() {
+        if let Ok(first_arg_path) = PathBuf::from(&vec_args[0]).canonicalize() {
+            if let Ok(current_exe_path) = std_env::current_exe().and_then(|p| p.canonicalize()) {
+                if first_arg_path == current_exe_path {
+                    arg_pos += 1;
+                }
+            }
+        }
+    }
     let mut file_args = Vec::new();
     while arg_pos < vec_args.len() {
         let arg = &vec_args[arg_pos];
