@@ -1975,7 +1975,6 @@ fn main() {
         ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
         ("--allow-unsafe", "Allow unsafe operations"),
         ("--stack-size=<size>", "Set the stack size for the interpreter, default: 8388608 (8MB)"),
-        ("--compile, -c", "Compile the source code to a binary"),
         ("--run, -r", "Run the source code after compiling"),
         ("--cache=<format>", "Enable or disable caching (default: 'no_cache') (check config-guide.md)"),
         ("--clean-cache, -cc", "Clear the cache directory"),
@@ -2154,7 +2153,11 @@ fn main() {
         exit(0);
     }
 
-    for arg in &args {
+    let mut arg_pos = 1;
+    let mut file_args = Vec::new();
+    while arg_pos < vec_args.len() {
+        let arg = &vec_args[arg_pos];
+        arg_pos += 1;
         match arg.as_str() {
             "--check" | "-u" => static_check_flag = true,
             "-wf" => { static_check_flag = true; static_check_flag_force_run = true; }
@@ -2255,6 +2258,7 @@ fn main() {
             arg if arg.starts_with("--debug-mode=") => debug_mode_flag = true,
             _ => {
                 if PathBuf::from(arg).exists() {
+                    file_args.push(arg.to_string());
                     continue;
                 }
                 eprintln!("Unknown argument: {}", arg);
@@ -2562,27 +2566,7 @@ fn main() {
         }
     }
 
-    let args: Vec<String> = std_env::args().collect();
-
-    let non_flag_args: Vec<String> = args.iter()
-        .skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .cloned()
-        .filter_map(|arg| {
-            let mut path: PathBuf = PathBuf::from(&arg);
-
-            if path.is_relative() {
-                path = cwd.join(path);
-            }
-
-            if !path.exists() {
-                eprintln!("Error: File '{}' does not exist or is not a valid file", fix_path(path.display().to_string()));
-                exit(1);
-            };
-
-            Some(path.display().to_string())
-        })
-        .collect();
+    let non_flag_args: Vec<String> = file_args;
 
     if exit_flag {
         if non_flag_args.is_empty() {
@@ -2772,7 +2756,7 @@ fn main() {
                 timer_flag,
                 command_to_run,
                 if use_project_env { Some(project_env_path) } else { None },
-                static_check_args,
+                static_check_args
             );
         })
         .unwrap();

@@ -446,7 +446,7 @@ impl<'de, C> BorrowDecode<'de, C> for Function {
 struct PlaceholderNativeCallable;
 impl NativeCallable for PlaceholderNativeCallable {
     fn call(&self, _args: &HashMap<String, Value>) -> Value {
-        Value::Null
+        Value::Error("RuntimeError", "This is a placeholder function", None)
     }
 }
 

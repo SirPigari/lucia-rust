@@ -10,8 +10,9 @@ use crate::env::runtime::utils::to_static;
 use std::default::Default;
 use std::collections::HashMap;
 use crate::env::runtime::internal_structs::{LibInfo, CacheFormat};
+use bincode::{Encode, Decode};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 #[serde(default)]
 pub struct Config {
     pub moded: bool,
@@ -32,7 +33,7 @@ pub struct Config {
     pub color_scheme: ColorScheme,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 #[serde(default)]
 pub struct ColorScheme {
     pub exception: String,
@@ -45,7 +46,7 @@ pub struct ColorScheme {
     pub info: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
 #[serde(default)]
 pub struct TypeCheckerConfig {
     pub enabled: bool,

@@ -39,7 +39,7 @@ impl PathElement {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Stack {
     pub frames: Vec<StackFrame>,
 }
@@ -77,7 +77,7 @@ impl Stack {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct StackFrame {
     pub file_path: String,
     pub location: Option<Location>,
@@ -94,7 +94,7 @@ impl StackFrame {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub enum StackType {
     FunctionCall,
     MethodCall,
@@ -229,7 +229,7 @@ impl PatternMethod {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub enum State {
     Normal,
     Exit,
@@ -239,7 +239,7 @@ pub enum State {
     TCO(Statement),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
 pub enum CacheFormat {
     NoCache,
     Json,
@@ -324,7 +324,7 @@ pub struct Cache {
     pub iterables: FxHashMap<Value, Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct InternalStorage {
     pub lambda_counter: usize,
     pub use_42: (bool, bool),

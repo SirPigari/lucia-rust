@@ -2,14 +2,16 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, SortIter};
- use crate::env::runtime::precompile::interpret;
+use crate::env::runtime::precompile::interpret;
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
+use serde::{Serialize, Deserialize};
 use crate::interpreter::Interpreter;
 use std::sync::{Arc, Mutex};
+use bincode::{Encode, Decode};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Variable {
     name: String,
     pub value: Value,

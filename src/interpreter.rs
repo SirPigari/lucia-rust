@@ -29,6 +29,7 @@ use crate::env::runtime::utils::{
     remove_loc_keys,
     type_matches,
     generate_name_variants,
+    escape_string,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -65,6 +66,8 @@ use std::io::{stdout, Write};
 use std::sync::Mutex;
 use std::panic::Location as PanicLocation;
 use rustc_hash::FxHashMap;
+use serde::{Serialize, Deserialize};
+use bincode::{Encode, Decode};
 use super::VERSION;
 
 use crate::lexer::Lexer;
@@ -72,7 +75,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::parser::Parser;
 use crate::env::runtime::tokens::{Token, Location};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Interpreter {
     config: Config,
     og_cfg: Config,
@@ -91,6 +94,8 @@ pub struct Interpreter {
     internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
+    
+    #[serde(skip)]
     pub stop_flag: Option<Arc<AtomicBool>>,
 }
 
@@ -179,7 +184,7 @@ impl Interpreter {
                 "__dir__".to_owned(),
                 Variable::new(
                     "__dir__".to_owned(),
-                    Value::String(dir),
+                    Value::String(escape_string(&dir).unwrap_or_else(|_| dir)),
                     "str".to_owned(),
                     true,
                     false,
@@ -409,6 +414,10 @@ impl Interpreter {
                             err = Some(make_err("TypeError", &format!("Expected type with 2 elements, got {}", elements.len()), self.get_location_from_current_statement()));
                             status = false;
                         }
+                    }
+                    Value::Pointer(ptr) => {
+                        let ptr_val = (*ptr).clone();
+                        self.check_type(&ptr_val, expected);
                     }
                     _ => {
                         err = Some(make_err("TypeError", &format!("Expected type '{}' for indexed type, got '{}'", base.display(), value.get_type().display()), self.get_location_from_current_statement()));
@@ -4666,15 +4675,38 @@ impl Interpreter {
     }
 
     fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let mut prev_err = None;
+
         let error_type_val = match statement.get(&Value::String("from".to_string())) {
             Some(v) => self.evaluate(Value::convert_to_statement(v)),
             None => return self.raise("RuntimeError", "Missing 'from' in throw statement"),
         };
+
+        if self.err.is_some() {
+            prev_err = self.err.clone();
+            self.err = None;
+        }
         
         let error_msg_val = match statement.get(&Value::String("message".to_string())) {
             Some(v) => self.evaluate(Value::convert_to_statement(v)),
             None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
         };
+
+        if self.err.is_some() {
+            if prev_err.is_some() {
+                self.raise_with_ref(
+                    &self.err.clone().unwrap().error_type,
+                    &self.err.clone().unwrap().msg,
+                    prev_err.clone().unwrap(),
+                );
+                prev_err = self.err.clone();
+                return self.raise_with_ref(
+                    to_static(error_type_val.to_string()),
+                    to_static(error_msg_val.to_string()),
+                    prev_err.clone().unwrap(),
+                );
+            }
+        }
         
         self.raise(
             to_static(error_type_val.to_string()),
@@ -5125,9 +5157,21 @@ impl Interpreter {
 
                 let base = match base_val {
                     Value::String(s) => {
+                        let mut s = s.as_str();
+                        let mut is_ref = false;
+                        let mut is_maybe = false;
+                        while s.starts_with('&') || s.starts_with('?') {
+                            if s.starts_with('&') {
+                                is_ref = true;
+                                s = &s[1..];
+                            } else if s.starts_with('?') {
+                                is_maybe = true;
+                                s = &s[1..];
+                            }
+                        }
                         match self.variables.get(s) {
                             Some(val) => match &val.value {
-                                Value::Type(t) => t.clone(),
+                                Value::Type(t) => t.clone().set_reference(is_ref).set_maybe_type(is_maybe).unmut(),
                                 _ => {
                                     self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
                                     return NULL;

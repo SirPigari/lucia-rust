@@ -248,8 +248,12 @@ impl Encode for Value {
                 9u8.encode(encoder)?;
                 t.encode(encoder)
             }
-            Function(_) | Module(_) | Error(_, _, _) | Generator(_) => {
+            Module(_) | Error(_, _, _) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
+            }
+            Function(func) => {
+                13u8.encode(encoder)?;
+                func.encode(encoder)
             }
             Enum(enm) => {
                 10u8.encode(encoder)?;
@@ -297,6 +301,7 @@ impl<C> Decode<C> for Value {
             10 => Ok(Value::Enum(Enum::decode(decoder)?)),
             11 => Ok(Value::Struct(Struct::decode(decoder)?)),
             12 => Ok(Value::Pointer(unsafe { Arc::from_raw(usize::decode(decoder)? as *const Value) })),
+            13 => Ok(Value::Function(Function::decode(decoder)?)),
             _ => Err(DecodeError::Other("invalid tag".into())),
         }
     }

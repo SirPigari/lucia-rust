@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
-use std::ffi::CString;
+use std::ffi::{c_void, CStr, CString};
 use std::sync::Mutex;
 use once_cell::sync::OnceCell;
-use std::ffi::c_void;
+use crate::env::runtime::utils::escape_string;
 
 #[cfg(unix)]
 use libc::{dlsym, RTLD_DEFAULT};
@@ -66,6 +66,61 @@ pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
     Value::Pointer(Arc::new(Value::Int((ptr as usize as i64).into())))
 }
 
+fn manual_escape_string(s: &str) -> String {
+    let mut escaped = String::new();
+    for c in s.chars() {
+        match c {
+            '\0' => escaped.push_str("\\0"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\\' => escaped.push_str("\\\\"),
+            '"'  => escaped.push_str("\\\""),
+            '\'' => escaped.push_str("\\\'"),
+            c if (c as u32) < 0x20 => escaped.push_str(&format!("\\u{:04X}", c as u32)),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+pub fn parse_str_ptr(args: &HashMap<String, Value>) -> Value {
+    let ptr_val = args.get("ptr");
+    let ptr = match ptr_val {
+        Some(Value::Pointer(arc)) => {
+            if let Value::Int(i) = arc.as_ref() {
+                i.to_i64().unwrap_or(0) as *const i8
+            } else {
+                return Value::Error("TypeError", "Pointer must wrap Int", None);
+            }
+        }
+        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+    };
+
+    if ptr.is_null() {
+        return Value::Error("ValueError", "Null pointer provided", None);
+    }
+
+    unsafe {
+        let cstr = CStr::from_ptr(ptr);
+        let mut bytes: Vec<u8> = cstr.to_bytes().to_vec();
+
+        bytes.retain(|&b| ![b'\r'].contains(&b));
+
+        if bytes.is_empty() {
+            return Value::String(String::new());
+        }
+
+        let s = String::from_utf8_lossy(&bytes);
+
+        let escaped = match escape_string(&s) {
+            Ok(e) => e,
+            Err(_) => manual_escape_string(&s),
+        };
+
+        Value::String(escaped)
+    }
+}
 
 fn get_list_native(args: &HashMap<String, Value>) -> Value {
     let ptr_val = args.get("ptr");
@@ -90,8 +145,8 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
         Some(Value::String(s)) => {
             let elem_type = match s.as_str() {
                 "int" => ValueType::Int,
-                "float" | "float64" => ValueType::Float64,
-                "float32" => ValueType::Float32,
+                "float64" => ValueType::Float64,
+                "float" | "float32" => ValueType::Float32,
                 "bool" => ValueType::Boolean,
                 "byte" => ValueType::Byte,
                 "ptr" => ValueType::Ptr,
@@ -277,8 +332,8 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
 
             let parse_ty = |s: &str| match s {
                 "int" => Some(ValueType::Int),
-                "float" | "float64" => Some(ValueType::Float64),
-                "float32" => Some(ValueType::Float32),
+                "float64" => Some(ValueType::Float64),
+                "float" | "float32" => Some(ValueType::Float32),
                 "bool" => Some(ValueType::Boolean),
                 "void" => Some(ValueType::Void),
                 "byte" => Some(ValueType::Byte),
@@ -328,8 +383,8 @@ pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
         (Some(Value::String(name)), Some(Value::List(arg_tys)), Some(Value::String(ret_ty))) => {
             let parse_basic_ty = |s: &str| match s {
                 "int" => Some(ValueType::Int),
-                "float" | "float64" => Some(ValueType::Float64),
-                "float32" => Some(ValueType::Float32),
+                "float64" => Some(ValueType::Float64),
+                "float" | "float32" => Some(ValueType::Float32),
                 "bool" => Some(ValueType::Boolean),
                 "void" => Some(ValueType::Void),
                 "any" | "str" | "ptr" => Some(ValueType::Ptr),
@@ -791,6 +846,14 @@ pub fn register() -> HashMap<String, Variable> {
         create_str_ptr,
         vec![Parameter::positional("string", "str")],
         "any"
+    );
+
+    insert_native_fn!(
+        map,
+        "parse_str_ptr",
+        parse_str_ptr,
+        vec![Parameter::positional("ptr", "any")],
+        "str"
     );
 
     insert_native_fn!(

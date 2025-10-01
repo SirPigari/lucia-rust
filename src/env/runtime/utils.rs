@@ -864,7 +864,7 @@ pub fn get_type_from_token_name(token_name: &str) -> String {
         "TUPLE" => "tuple".to_string(),
         "TYPE" => "type".to_string(),
         "POINTER_REF" => "pointer".to_string(),
-        _ => "unknown".to_string(),
+        t => t.to_string(),
     }
 }
 
