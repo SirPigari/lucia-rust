@@ -166,7 +166,6 @@ pub fn handle_error(
             }
         };
 
-        // Optional debug info
         let lucia_source_loc = if debug && loc.lucia_source_loc != "<unknown>" && !loc.lucia_source_loc.is_empty() {
             format!("Raised from {}\n", loc.lucia_source_loc)
         } else {
@@ -176,10 +175,9 @@ pub fn handle_error(
         let file_name = fix_path(loc.file.to_string());
         let line_number = loc.line_number;
         let range = loc.range;
-        let col = range.0;
+        let col = range.0.saturating_add(1);
         let reset = hex_to_ansi("reset", use_colors);
 
-        // Get the source lines safely
         let current_line = if line_number > 0 {
             get_line_info(source, line_number).unwrap_or_else(|| {
                 if file_name.starts_with('<') && file_name.ends_with('>') {
@@ -197,16 +195,15 @@ pub fn handle_error(
 
         let indent = " ".repeat(line_number.to_string().len());
 
-        // Build arrows under the error, safely using char indices
         let mut arrows_under = String::new();
         if line_number > 0 {
             let chars: Vec<char> = current_line.chars().collect();
             let line_len = chars.len();
-            let start = range.0.saturating_sub(1).min(line_len);
+            let start = col.saturating_sub(1).min(line_len);
             let end = range.1.min(line_len);
 
             if start >= line_len || end == 0 || start >= end {
-                arrows_under = " ".repeat(col.saturating_sub(1)) + "^";
+                arrows_under = " ".repeat(col) + "^";
             } else {
                 arrows_under = "~".repeat(line_len);
                 arrows_under = arrows_under.chars()
@@ -216,7 +213,6 @@ pub fn handle_error(
             }
         }
 
-        // Compose trace
         trace.push_str(&format!(
             "{}{}{}",
             hex_to_ansi(&config.color_scheme.debug, use_colors),
