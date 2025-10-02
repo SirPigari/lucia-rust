@@ -273,16 +273,39 @@ pub fn clear_terminal() -> Result<(), io::Error> {
     Ok(())
 }
 
+static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    m.insert("black", "\x1b[30m");
+    m.insert("red", "\x1b[31m");
+    m.insert("green", "\x1b[32m");
+    m.insert("yellow", "\x1b[33m");
+    m.insert("blue", "\x1b[34m");
+    m.insert("magenta", "\x1b[35m");
+    m.insert("cyan", "\x1b[36m");
+    m.insert("white", "\x1b[37m");
+    m.insert("gray", "\x1b[90m");
+    m.insert("bright_black", "\x1b[90m");
+    m.insert("bright_red", "\x1b[91m");
+    m.insert("bright_green", "\x1b[92m");
+    m.insert("bright_yellow", "\x1b[93m");
+    m.insert("bright_blue", "\x1b[94m");
+    m.insert("bright_magenta", "\x1b[95m");
+    m.insert("bright_cyan", "\x1b[96m");
+    m.insert("bright_white", "\x1b[97m");
+    m.insert("reset", "\x1b[0m");
+    m
+});
+
 pub fn hex_to_ansi(hex_color: &str, use_colors: bool) -> String {
     if !use_colors {
         return "".to_string();
     }
 
-    if hex_color == "reset" {
-        return "\x1b[0m".to_string();
+    if let Some(ansi) = COLOR_MAP.get(hex_color.to_lowercase().replace(' ', "_").as_str()) {
+        return ansi.to_string();
     }
 
-    let hex = if hex_color.starts_with('#') { &hex_color[1..] } else { hex_color };
+    let hex = if hex_color.starts_with('#') { &hex_color[1..] } else if hex_color.starts_with("0x") { &hex_color[2..] } else { hex_color };
 
     if hex.len() == 6 {
         let r = u8::from_str_radix(&hex[0..2], 16).unwrap();
