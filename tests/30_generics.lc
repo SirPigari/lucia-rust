@@ -110,6 +110,7 @@ p2: Pair[int, str] = Pair { first = 1, second = "one" }
 assert_eq!(p1, p2)
 
 
+#config allow_unsafe = true
 mutable initialized_h: &bool = &false
 
 h: Lazy[int] = Lazy.new(() => (\

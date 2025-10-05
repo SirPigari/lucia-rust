@@ -1416,7 +1416,7 @@ impl Preprocessor {
             result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
         }
 
-        let unsafe_macro_output = format!("__unsafe_macro_output_{}", call_loc.as_ref().map(|loc| (loc.line_number * loc.range.0 / loc.range.1)).unwrap_or(0));
+        let unsafe_macro_output = format!("__unsafe_macro_output_{}", call_loc.as_ref().map(|loc| loc.line_number * loc.range.0 / loc.range.1).unwrap_or(0));
 
         if is_unsafe {
             result.push(Token("IDENTIFIER".to_string(), "scope".to_string(), call_loc.clone()));
