@@ -1675,9 +1675,10 @@ impl Variable {
 
                                 let (new_keys, new_values): (Vec<Value>, Vec<Value>) = keys.iter().zip(values.iter()).filter_map(|(key, val)| {
                                     let result = interpreter.call_function(
-                                        func.get_name(),
+                                        func,
                                         vec![key.clone(), val.clone()],
                                         HashMap::default(),
+                                        None
                                     );
                                     if result.is_truthy() {
                                         Some((key.clone(), val.clone()))
@@ -1717,9 +1718,9 @@ impl Variable {
 
                                 let new_values: Vec<Value> = keys.iter().zip(values.iter()).map(|(key, val)| {
                                     interpreter.call_function(
-                                        func.get_name(),
+                                        func,
                                         vec![key.clone(), val.clone()],
-                                        HashMap::default(),
+                                        HashMap::default(), None
                                     )
                                 }).collect();
 
@@ -1956,11 +1957,15 @@ impl Variable {
     }
 
     pub fn is_init(&self) -> bool {
-        !self.properties.is_empty()
+        !self.properties.is_empty() && matches!(self.value, Value::Struct(_) | Value::Module(_))
     }
 
     pub fn get_value(&self) -> &Value {
         &self.value
+    }
+
+    pub fn get_value_mut(&mut self) -> &mut Value {
+        &mut self.value
     }
 
     pub fn set_value(&mut self, value: Value) {

@@ -4213,6 +4213,11 @@ impl Parser {
                     Statement::Null
                 }
 
+                "SEPARATOR" if token.1 == "," => {
+                    self.next();
+                    Statement::Null
+                }
+
                 _ => {
                     self.raise("SyntaxError", &format!("Invalid syntax. '{}' was unexpected.", token.1));
                     Statement::Null

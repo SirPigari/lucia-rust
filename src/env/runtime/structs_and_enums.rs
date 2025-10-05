@@ -15,7 +15,7 @@ pub struct Enum {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Struct {
     pub ty: Type,
-    pub fields: HashMap<String, Box<Value>>,
+    pub fields: HashMap<String, (Box<Value>, Type)>,
 }
 
 impl Enum {
@@ -81,7 +81,7 @@ impl Struct {
         }
     }
 
-    pub fn new_with_fields(ty: Type, fields: HashMap<String, Box<Value>>) -> Self {
+    pub fn new_with_fields(ty: Type, fields: HashMap<String, (Box<Value>, Type)>) -> Self {
         Self { ty, fields }
     }
 
@@ -93,7 +93,7 @@ impl Struct {
         };
         let mut fields = vec![];
         for field in type_fields {
-            fields.push((field.0.clone(), Box::new(Value::Null)));
+            fields.push((field.0.clone(), (Box::new(Value::Null), Type::new_simple("any"))));
         }
         Self {
             ty,
@@ -124,12 +124,19 @@ impl Struct {
         None
     }
 
+    pub fn get_field(&self, field: &str) -> Option<&Value> {
+        match self.fields.get(field) {
+            Some((v, _)) => Some(&**v),
+            None => None,
+        }
+    }
+
     pub fn display(&self) -> String {
         if self.fields.is_empty() {
             format!("{} {{}}", self.ty.display_simple())
         } else {
             format!("{} {{ {} }}", self.ty.display_simple(), self.fields.iter()
-                .map(|(k, v)| format!("{} = {}", k, format_value(&v)))
+                .map(|(k, (v, _))| format!("{} = {}", k, format_value(&v)))
                 .collect::<Vec<_>>().join(", "))
         }
     }
@@ -139,7 +146,7 @@ impl Struct {
     }
 
     pub fn get_size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.fields.iter().map(|(k, v)| k.len() + v.get_size()).sum::<usize>()
+        std::mem::size_of::<Self>() + self.fields.iter().map(|(k, (v, _))| k.len() + v.get_size()).sum::<usize>()
     }
 
     pub fn is_truthy(&self) -> bool {
@@ -167,8 +174,8 @@ impl Struct {
             let (is_public, is_static, is_final) = self.get_field_mods(&field.0).unwrap_or((true, false, false));
             map.insert(field.0.clone(), Variable::new_pt(
                 field.0.clone(),
-                *field.1.clone(),
-                self.ty.clone(),
+                *(field.1.0).clone(),
+                (field.1.1).clone(),
                 is_static,
                 is_public,
                 is_final,
@@ -178,15 +185,15 @@ impl Struct {
     }
 
     pub fn get(&self, field: &str) -> Option<&Value> {
-        self.fields.get(field).map(|v| v.as_ref())
+        self.fields.get(field).map(|(v, _)| v.as_ref())
     }
     pub fn set(&mut self, field: String, value: Value) -> Option<Box<Value>> {
-        self.fields.insert(field, Box::new(value))
+        self.fields.insert(field, (Box::new(value.clone()), value.get_type())).map(|(v, _)| v)
     }
     pub fn remove(&mut self, field: &str) -> Option<Box<Value>> {
-        self.fields.remove(field)
+        self.fields.remove(field).map(|(v, _)| v)
     }
-    pub fn fields(&self) -> &HashMap<String, Box<Value>> {
+    pub fn fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
         &self.fields
     }
 }

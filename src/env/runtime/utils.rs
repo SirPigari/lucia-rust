@@ -10,6 +10,7 @@ use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::structs_and_enums::Struct;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::value::{Value};
 use std::str::FromStr;
@@ -18,6 +19,7 @@ use std::time::Duration;
 use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
+use crate::env::runtime::native;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
@@ -1860,7 +1862,7 @@ pub fn format_with_dynamic_fill(s: &str, fill: char, width: usize, align: char) 
 }
 
 pub fn apply_format_spec(value: &Value, spec: &str) -> Result<String, String> {
-    let mut s = value.to_string();
+    let mut s = escape_string(&native::format_value(&value))?;
 
     if spec.trim() == "?" {
         s = escape_string(&format_value(&value))?;
@@ -2002,16 +2004,16 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
 
     use Type::*;
 
-    match &inner_expected {
-        Simple { name, is_reference, .. } if name == "any" => {
-            let actual_ref = match &inner_actual {
-                Simple { is_reference, .. } => *is_reference,
-                _ => false,
-            };
-            return *is_reference == actual_ref;
-        }
-        _ => {}
-    }
+    // match &inner_expected {
+    //     Simple { name, is_reference, .. } if name == "any" => {
+    //         let actual_ref = match &inner_actual {
+    //             Simple { is_reference, .. } => *is_reference,
+    //             _ => false,
+    //         };
+    //         return *is_reference == actual_ref;
+    //     }
+    //     _ => {}
+    // }
 
     if inner_actual == inner_expected {
         return true;
@@ -2019,11 +2021,26 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
 
     match (&inner_actual, &inner_expected) {
         (
-            Simple { is_reference: actual_ref, .. },
-            Simple { name, is_reference: expected_ref, .. },
-        ) if name == "any" =>
+            Simple { name: actual_name, is_reference: actual_ref, .. },
+            Simple { name: expected_name, is_reference: expected_ref, .. },
+        ) if expected_name == "any" || actual_name == "any" =>
         {
             return actual_ref == expected_ref;
+        }
+
+        (
+            Simple { name: actual_name, .. },
+            _
+        ) if actual_name == "any" =>
+        {
+            return true;
+        }
+
+        (
+            _, Simple { name: expected_name, .. }
+        ) if expected_name == "any" =>
+        {
+            return true;
         }
 
         (
@@ -2095,6 +2112,110 @@ pub fn generate_name_variants(name: &str) -> Vec<String> {
 
     variants
 }
+
+pub fn find_struct_method(
+    s1: &Struct,
+    s2: Option<&Struct>,
+    func_name: &str,
+    expected_param_types: &[Type],
+    expected_return_type: &Type
+) -> Result<Function, (String, String, String)> {
+    let struct_type_1 = s1.get_type();
+    // let struct_type_2 = s2.map(|s| s.get_type());
+
+    if let Type::Struct { methods, .. } = &struct_type_1 {
+        if let Some(func) = methods.iter().find(|(name, _)| name == func_name).map(|(_, f)| f) {
+            if let Type::Function { parameter_types, return_type } = func.get_type() {
+                if parameter_types.len() != expected_param_types.len() {
+                    return Err((
+                        "ParameterError".to_string(),
+                        format!("Expected {} parameters for '{}', got {}", expected_param_types.len(), func_name, parameter_types.len()),
+                        "".to_string(),
+                    ));
+                }
+
+                for (i, expected_type) in expected_param_types.iter().enumerate() {
+                    if !type_matches(&parameter_types[i], expected_type) {
+                        return Err((
+                            "TypeError".to_string(),
+                            format!(
+                                "Expected parameter type '{}' at position {} for '{}', got '{}'",
+                                expected_type.display_simple(),
+                                i,
+                                func_name,
+                                parameter_types[i].display_simple()
+                            ),
+                            "".to_string(),
+                        ));
+                    }
+                }
+
+                if !type_matches(&return_type, expected_return_type) {
+                    return Err((
+                        "TypeError".to_string(),
+                        format!(
+                            "Expected return type '{}' for '{}', got '{}'",
+                            expected_return_type.display_simple(),
+                            func_name,
+                            return_type.display_simple()
+                        ),
+                        "".to_string(),
+                    ));
+                }
+
+                return Ok(func.clone());
+            } else {
+                return Err((
+                    "TypeError".to_string(),
+                    format!("Expected '{}' to be a function", func_name),
+                    "".to_string(),
+                ));
+            }
+        }
+
+        if let Some(s2) = s2 {
+            if let Type::Struct { methods: methods2, .. } = &s2.get_type() {
+                for (method_name, func) in methods2 {
+                    if !func.is_static() { continue; }
+
+                    if let Type::Function { parameter_types, return_type } = func.get_type() {
+                        if parameter_types.len() == 1 &&
+                           type_matches(&parameter_types[0], &struct_type_1) &&
+                           type_matches(&return_type, &s2.get_type()) {
+                            return Err((
+                                "TypeError".to_string(),
+                                format!(
+                                    "Cannot perform struct operation between different struct types '{}' and '{}'",
+                                    struct_type_1.display_simple(),
+                                    s2.get_type().display_simple()
+                                ),
+                                format!(
+                                    "Try calling '{}.{}({})'",
+                                    s2.display(),
+                                    method_name,
+                                    s1.display()
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        return Err((
+            "TypeError".to_string(),
+            format!("Struct type '{}' does not have method '{}'", struct_type_1.display_simple(), func_name),
+            "".to_string(),
+        ));
+    } else {
+        return Err((
+            "TypeError".to_string(),
+            format!("Expected a struct type, got '{}'", struct_type_1.display_simple()),
+            "".to_string(),
+        ));
+    }
+}
+
 
 pub const KEYWORDS: &[&str] = &[
     "fun", "gen", "return", "export", "throw", "end", "catch", "try", "static", "non-static",

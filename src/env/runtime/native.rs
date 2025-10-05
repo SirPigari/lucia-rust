@@ -555,7 +555,7 @@ fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
 
 // -------------------------------
 // Utility Functions
-fn format_value(value: &Value) -> String {
+pub fn format_value(value: &Value) -> String {
     match value {
         Value::Float(n) => n.to_str(),
         Value::Int(n) => format_int(&n.clone()),

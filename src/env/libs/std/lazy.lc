@@ -1,0 +1,37 @@
+#ifndef LUCIA_STD_LAZY
+#define LUCIA_STD_LAZY true
+
+// A simple implementation of lazy initialization in Lucia
+private typedef struct Lazy<T> = {
+    private value: ?T,
+    private initialized: bool,
+    private initializer: function[] -> T,
+}
+
+for Lazy:
+    public static fun new(initializer: function[] -> any) -> Lazy:
+        return Lazy {
+            value = null,
+            initialized = false,
+            initializer = initializer,
+        }
+    end
+
+    public fun is_initialized(self) -> bool:
+        return self.initialized
+    end
+
+    public fun get_callback(self) -> function[] -> any:
+        return self.initializer
+    end
+
+    public fun op_get(self) -> any:
+        if (!self.initialized):
+            self.value = self.initializer()
+            self.initialized = true
+        end
+        return self.value
+    end
+end
+
+#endif

@@ -103,7 +103,7 @@ for Point3D:
 end
 
 p3: Point3D = Point3D.new(1, 2, 3)
-assert_eq!(p1, p3)
+assert_eq!(p3, p1)
 
 assert_err!(a != p3)  // different types
 assert_err!(a < p3)

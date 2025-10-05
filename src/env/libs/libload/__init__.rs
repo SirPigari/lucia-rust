@@ -253,7 +253,7 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
             }
 
             for stmt in cb.body.iter() {
-                let _res = interp.evaluate(stmt.clone());
+                let _res = interp.evaluate(&stmt);
                 if interp.err.is_some() {
                     return;
                 }

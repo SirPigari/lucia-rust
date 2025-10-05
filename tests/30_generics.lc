@@ -1,4 +1,5 @@
 #include <std/assert>
+#include <std/lazy>
 
 typedef struct Holder<T> { value: T }
 int_holder: Holder[int] = Holder { value = 10 }
@@ -107,3 +108,18 @@ p1: Pair[int, str] = Pair { first = 1, second = "one" }
 p2: Pair[int, str] = Pair { first = 1, second = "one" }
 
 assert_eq!(p1, p2)
+
+
+mutable initialized_h: &bool = &false
+
+h: Lazy[int] = Lazy.new(() => (\
+    *initialized_h = true
+    return 42
+\))
+
+assert!(!*initialized_h, "h should not be initialized yet")
+assert_eq!(h, 42)
+assert!(*initialized_h, "h should be initialized after access")
+(*initialized_h) = false
+assert_eq!(h, 42)
+assert!(!*initialized_h, "h should not re-initialize on second access")

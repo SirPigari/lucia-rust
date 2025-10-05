@@ -404,14 +404,14 @@ impl Iterator for CustomGenerator {
                             continue;
                         }
 
-                        if !self.interpreter.evaluate(condition.clone().convert_to_statement()).is_truthy() {
+                        if !self.interpreter.evaluate(&condition.convert_to_statement()).is_truthy() {
                             self.loop_stack.pop();
                             self.index += 1;
                             continue;
                         }
 
                         let stmt = body[pc].clone();
-                        let result = self.interpreter.evaluate(stmt.convert_to_statement());
+                        let result = self.interpreter.evaluate(&stmt.convert_to_statement());
 
                         if self.interpreter.err.is_some() {
                             self.done = true;
@@ -479,7 +479,7 @@ impl Iterator for CustomGenerator {
                         }
 
                         let stmt = body_clone[*body_pc].clone();
-                        let result = self.interpreter.evaluate(stmt.convert_to_statement());
+                        let result = self.interpreter.evaluate(&stmt.convert_to_statement());
 
                         if self.interpreter.err.is_some() {
                             self.done = true;
@@ -549,7 +549,7 @@ impl Iterator for CustomGenerator {
                     let data = statement.convert_to_hashmap();
 
                     let iterable_val = data.get(&Value::String("iterable".to_string()))
-                        .map(|v| self.interpreter.evaluate(v.convert_to_statement()))
+                        .map(|v| self.interpreter.evaluate(&v.convert_to_statement()))
                         .unwrap_or(Value::Null);
 
                     if !iterable_val.is_iterable() {
@@ -585,7 +585,7 @@ impl Iterator for CustomGenerator {
                 }
 
                 _ => {
-                    let result = self.interpreter.evaluate(statement);
+                    let result = self.interpreter.evaluate(&statement);
 
                     if self.interpreter.err.is_some() {
                         self.done = true;
@@ -739,7 +739,6 @@ pub struct SortIter {
     pub sort_func: Function,
     pub reversed: bool,
     pub interpreter: Arc<Mutex<Interpreter>>,
-    pub sort_key: String,
     pub sorted_items: Option<VecDeque<Value>>,
     pub done: bool,
 }
@@ -750,7 +749,6 @@ impl SortIter {
             generator: Box::new(generator.clone()),
             sort_func,
             reversed,
-            sort_key: format!("__sort_key_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()),
             interpreter: Arc::new(Mutex::new(interpreter.clone())),
             sorted_items: None,
             done: false,
@@ -894,9 +892,10 @@ impl Iterator for FilterIter {
 
         while let Some(val) = self.generator.next() {
             let result = interpreter.call_function(
-                &self.filter_func.get_name(),
+                &self.filter_func,
                 vec![val.clone()],
                 HashMap::new(),
+                None,
             );
 
             if interpreter.err.is_some() {
@@ -930,9 +929,10 @@ impl Iterator for MapIter {
 
         if let Some(val) = self.generator.next() {
             let result = interpreter.call_function(
-                &self.map_func.get_name(),
+                &self.map_func,
                 vec![val.clone()],
                 HashMap::new(),
+                None,
             );
 
             if interpreter.err.is_some() {
@@ -973,19 +973,9 @@ impl Iterator for SortIter {
                 return None;
             }
 
-            interpreter.variables.entry(self.sort_key.clone())
-                .or_insert_with(|| Variable::new(
-                    self.sort_key.clone(),
-                    Value::Function(self.sort_func.clone()),
-                    "any".to_string(),
-                    false,
-                    true,
-                    true,
-                ));
-
             let mut keyed_items: Vec<(Value, Value)> = Vec::with_capacity(items.len());
             for item in items {
-                let key = interpreter.call_function(&self.sort_key, vec![item.clone()], HashMap::new());
+                let key = interpreter.call_function(&self.sort_func, vec![item.clone()], HashMap::new(), None);
 
                 if interpreter.err.is_some() {
                     self.done = true;
