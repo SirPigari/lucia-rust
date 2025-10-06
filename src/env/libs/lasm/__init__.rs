@@ -4,6 +4,7 @@ use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::variables::Variable;
 
 use crate::env::libs::lasm::cpu::CPU;
@@ -47,7 +48,8 @@ pub fn register() -> HashMap<String, Variable> {
         "asm",
         asm,
         vec![Parameter::positional("asm", "str")],
-        "int"
+        "int",
+        EffectFlags::UNKNOWN
     );
     
     map

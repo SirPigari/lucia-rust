@@ -3,6 +3,8 @@
 #ifndef LUCIA_STD_MACROS
 #define LUCIA_STD_MACROS
 #include "./_import.lc"
+
+// keep backwards compatibility
 #include "./assert.lc"
 
 #macro unreachable($msg=("Entered unreachable code")):

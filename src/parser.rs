@@ -4,7 +4,7 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
-use crate::env::runtime::internal_structs::PathElement;
+use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
 use crate::env::runtime::utils::RESERVED_KEYWORDS;
 
 pub struct Parser {
@@ -2431,7 +2431,7 @@ impl Parser {
                             self.next();
                             let mut pos_args = vec![];
                             let mut named_args = vec![];
-                            let mut may_fail = false;
+                            let mut effect_flags: EffectFlags = EffectFlags::empty();
 
                             while let Some(mut current_tok) = self.token().cloned() {
                                 let mut param_modifiers = vec![];
@@ -2511,7 +2511,7 @@ impl Parser {
                             self.next();
 
                             if is_function && self.token_is("OPERATOR", "?") {
-                                may_fail = true;
+                                effect_flags |= EffectFlags::MAY_FAIL;
                                 self.next();
                             }
 
@@ -2545,6 +2545,73 @@ impl Parser {
                                 return Statement::Null;
                             }
 
+                            let mut uses_the_goofy_ahh_arrow_just_to_separate_type_from_the_exlamation_mark_so_the_preprocessor_understands = false;
+                            if self.token_is("OPERATOR", "<") && self.peek(1).map(|t| t.1.as_str()) == Some("!") {
+                                uses_the_goofy_ahh_arrow_just_to_separate_type_from_the_exlamation_mark_so_the_preprocessor_understands = true;
+                                self.next();
+                            }
+                            if self.token_is("OPERATOR", "!") {
+                                self.next();
+                                if self.token_is("SEPARATOR", "[") {
+                                    while !self.token_is("SEPARATOR", "]") {
+                                        self.next();
+                                        let effect_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
+                                        if effect_token.0 != "IDENTIFIER" {
+                                            self.raise("SyntaxError", "Expected effect name in effect specification");
+                                            return Statement::Null;
+                                        }
+                                        match effect_token.1.to_lowercase().as_str() {
+                                            "pure" => { effect_flags |= EffectFlags::PURE; },
+                                            "io" => { effect_flags |= EffectFlags::IO; },
+                                            "state" => { effect_flags |= EffectFlags::STATE; },
+                                            "unsafe" => { effect_flags |= EffectFlags::UNSAFE; },
+                                            "throw" | "fail" => { effect_flags |= EffectFlags::MAY_FAIL; },
+                                            "all" => { effect_flags |= EffectFlags::ALL; },
+                                            "unknown" => { effect_flags |= EffectFlags::UNKNOWN; },
+                                            _ => {
+                                                self.raise_with_help(
+                                                    "SyntaxError",
+                                                    &format!("Unknown effect '{}'", effect_token.1),
+                                                    "Valid effects are: PURE, IO, STATE, UNSAFE and FAIL",
+                                                );
+                                                return Statement::Null;
+                                            }
+                                        }
+                                        self.next();
+                                        if !(self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "]")) {
+                                            self.raise("SyntaxError", "Expected ',' or ']' in effect specification");
+                                            return Statement::Null;
+                                        }
+                                    }
+                                    self.next();
+                                    if uses_the_goofy_ahh_arrow_just_to_separate_type_from_the_exlamation_mark_so_the_preprocessor_understands {
+                                        if !self.token_is("OPERATOR", ">") {
+                                            self.raise_with_help(
+                                                "SyntaxError",
+                                                "Expected '>' after effect specification",
+                                                "Did you forget to close the effect specification with '>'?",
+                                            );
+                                        }
+                                        self.next();
+                                    }
+                                } else {
+                                    if self.token_is("SEPARATOR", "(") {
+                                        return self.raise_with_help(
+                                            "SyntaxError",
+                                            "Expected '[' after '!' for effect specification",
+                                            &format!("Did you mean to use '-> ![...]' instead of '-> !(...)'?"),
+                                        )
+                                    }
+                                    return self.raise_with_help(
+                                        "SyntaxError",
+                                        "Expected '[' after '!' for effect specification",
+                                        &format!("Specify effects like '-> ![IO, STATE]', or use '-> ![PURE]' for no effects"),
+                                    )
+                                }
+                            } else {
+                                effect_flags |= EffectFlags::UNKNOWN;
+                            }
+
                             if self.token_is("SEPARATOR", ":") {
                                 self.next();
                             } else if !self.token_is("IDENTIFIER", "end") {
@@ -2576,7 +2643,7 @@ impl Parser {
                                     Value::String("named_args".to_string()),
                                     Value::String("body".to_string()),
                                     Value::String("return_type".to_string()),
-                                    Value::String("may_fail".to_string()),
+                                    Value::String("effects".to_string()),
                                 ],
                                 values: vec![
                                     if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
@@ -2589,7 +2656,7 @@ impl Parser {
                                     },
                                     Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                     return_type.convert_to_map(),
-                                    Value::Boolean(may_fail),
+                                    Value::Int((effect_flags.bits() as i64).into()),
                                 ],
                                 loc: self.get_loc(),
                             };

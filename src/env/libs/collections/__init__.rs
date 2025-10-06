@@ -18,6 +18,7 @@ use crate::env::runtime::utils::{
     TRUE, FALSE, NULL,
 };
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::internal_structs::EffectFlags;
 use sha2::{Sha256, Digest};
 
 use crate::{insert_native_fn, insert_native_var, insert_native_fn_state};
@@ -278,7 +279,8 @@ pub fn register() -> HashMap<String, Variable> {
         "clear_terminal",
         clear_terminal_handler,
         vec![],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
@@ -288,21 +290,24 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("s1", "str"),
             Parameter::positional("s2", "str")
         ],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "hex_to_ansi",
         hex_to_ansi_handler,
         vec![Parameter::positional("hex", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "format_value",
         format_value_handler,
         vec![Parameter::positional("value", "any")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
@@ -312,21 +317,24 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("format", "str"),
             Parameter::positional("args", "list")
         ],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "unescape_string",
         unescape_string_handler,
         vec![Parameter::positional("s", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "capitalize",
         capitalize_handler,
         vec![Parameter::positional("s", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
@@ -336,35 +344,40 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("s", "str"),
             Parameter::positional("stream", "int")
         ],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "read_line",
         read_line_handler,
         vec![Parameter::positional("input_stream", "int")],
-        "str"
+        "str",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "get_type_default",
         get_type_default_handler,
         vec![Parameter::positional("type", "str")],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "replace_accented",
         replace_accented_handler,
         vec![Parameter::positional("s", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "valid_alias",
         sanitize_alias_handler,
         vec![Parameter::positional("s", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
@@ -377,7 +390,8 @@ pub fn register() -> HashMap<String, Variable> {
             }
         },
         vec![Parameter::positional("input", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn_state!(
         map,
@@ -389,7 +403,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("step", "int", Value::Int(Int::from_i64(1)))
         ],
         "list",
-        "deprecated: 'range' was added to builins in v2.0.0, use 'range' from there instead."
+        "deprecated: 'range' was added to builins in v2.0.0, use 'range' from there instead.",
+        EffectFlags::PURE
     );
 
     insert_native_var!(

@@ -3,11 +3,183 @@
 use crate::env::runtime::value::Value;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use core::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign, Not};
 use bincode::{Encode, Decode};
 use std::sync::RwLock;
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
 use rustc_hash::FxHashMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Encode, Decode, Hash)]
+pub struct EffectFlags(u32);
+
+impl EffectFlags {
+    /// PURE — no side effects at all.
+    /// Functions with this flag do not perform IO, mutate state,
+    /// fail, or use unsafe features.
+    pub const PURE: Self                = Self(1 << 1);
+
+    /// IO — the function performs input/output,
+    /// such as 'print', 'input', or interacting with ports.
+    pub const IO: Self                  = Self(1 << 2);
+
+    /// STATE — the function modifies or reads global state.
+    /// (local variables don't count)
+    pub const STATE: Self               = Self(1 << 3);
+
+    /// UNSAFE — the function uses unsafe constructs that require
+    /// '#config allow_unsafe = true', such as raw pointers or C interop.
+    pub const UNSAFE: Self              = Self(1 << 4);
+
+    /// MAY_FAIL — the function may throw an error,
+    /// or is marked with '?' (which implicitly adds this flag).
+    pub const MAY_FAIL: Self            = Self(1 << 5);
+
+    /// UNKNOWN — the function's effects are not known,
+    /// such as when calling an external library function.
+    pub const UNKNOWN: Self             = Self(1 << 6);
+
+    // ALL — all possible effects.
+    pub const ALL: Self                 = Self(Self::PURE.0 | Self::IO.0 | Self::STATE.0 | Self::UNSAFE.0 | Self::MAY_FAIL.0 | Self::UNKNOWN.0);
+
+    /// Returns an empty flag set (equivalent to PURE).
+    #[inline]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    #[inline]
+    pub const fn is_some(self) -> bool {
+        self.0 != 0
+    }
+
+    /// Combines two flags into one (bitwise OR).
+    #[inline]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Adds another flag to this set (bitwise OR assignment).
+    #[inline]
+    pub fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    /// Removes a flag from this set (bitwise AND with inverse).
+    #[inline]
+    pub fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    /// Checks if a specific flag is set.
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) != 0
+    }
+
+    /// Returns true if there are no side effects (PURE).
+    #[inline]
+    pub const fn is_pure(self) -> bool {
+        self.0 == Self::PURE.0
+    }
+
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Returns the raw bit value (for debugging or serialization).
+    #[inline]
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Creates a flag set from a raw u32 bitmask.
+    #[inline]
+    pub const fn from_u32(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    pub fn check_branches(self, a: EffectFlags, mask: EffectFlags) -> Option<(bool, EffectFlags)> {
+        let mask = !mask.0;
+        let self_masked = self.0 & mask;
+        let a_masked = a.0 & mask;
+
+        let missing_bits = a_masked & !self_masked;
+        if missing_bits != 0 {
+            return Some((false, EffectFlags(missing_bits)));
+        }
+
+        let extra_bits = self_masked & !a_masked;
+        if extra_bits != 0 {
+            return Some((true, EffectFlags(extra_bits)));
+        }
+
+        None
+    }
+
+    pub fn get_names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        if self.contains(Self::PURE) {
+            names.push("PURE");
+        }
+        if self.contains(Self::IO) {
+            names.push("IO");
+        }
+        if self.contains(Self::STATE) {
+            names.push("STATE");
+        }
+        if self.contains(Self::UNSAFE) {
+            names.push("UNSAFE");
+        }
+        if self.contains(Self::MAY_FAIL) {
+            names.push("MAY_FAIL");
+        }
+        if self.contains(Self::UNKNOWN) {
+            names.push("UNKNOWN");
+        }
+        names
+    }
+}
+
+impl BitOr for EffectFlags {
+    type Output = Self;
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for EffectFlags {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl BitAnd for EffectFlags {
+    type Output = Self;
+    #[inline]
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitAndAssign for EffectFlags {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
+impl Not for EffectFlags {
+    type Output = Self;
+    #[inline]
+    fn not(self) -> Self::Output {
+        Self(!self.0)
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathElement {
@@ -328,6 +500,8 @@ pub struct Cache {
 pub struct InternalStorage {
     pub lambda_counter: usize,
     pub use_42: (bool, bool),
+    pub in_try_block: bool,
+    pub in_function: bool,
 }
 
 #[derive(Serialize)]

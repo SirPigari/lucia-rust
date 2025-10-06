@@ -44,9 +44,9 @@
     forget result
 #endmacro
 
-#macro assert_type($value, $type_, $msg=(f"Type mismatch")):
+#macro assert_type($value, $it, $msg=(f"Type mismatch")):
     // innit?
-    if ($value isn't $type_):
+    if ($value isn't $it):
         throw $msg from "TypeError"
     end
 #endmacro

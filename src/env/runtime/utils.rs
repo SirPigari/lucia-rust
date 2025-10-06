@@ -20,6 +20,7 @@ use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
+use crate::env::runtime::internal_structs::EffectFlags;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
@@ -631,7 +632,7 @@ pub fn make_native_method<F>(
     is_public: bool,
     is_static: bool,
     is_final: bool,
-    state: Option<String>,
+    state: Option<String>
 ) -> Value
 where
     F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
@@ -647,6 +648,7 @@ where
             is_final,
             is_native: true,
             state,
+            effects: EffectFlags::UNKNOWN,
         },
     };
 
@@ -981,6 +983,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::IO,
         },
     );
     map.insert(
@@ -1001,6 +1004,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::IO,
         }
     );
     map.insert(
@@ -1014,6 +1018,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::UNKNOWN,
         },
     );
     map.insert(
@@ -1027,6 +1032,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::UNKNOWN,
         },
     );
     map.insert(
@@ -1040,6 +1046,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::IO,
         },
     );
     map.insert(
@@ -1053,6 +1060,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::PURE,
         },
     );
     map.insert(
@@ -1066,6 +1074,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::IO,
         },
     );
     map.insert(
@@ -1082,6 +1091,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::STATE,
         },
     );
     map.insert(
@@ -1098,6 +1108,7 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_final: true,
             is_native: true,
             state: None,
+            effects: EffectFlags::STATE,
         },
     );
 

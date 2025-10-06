@@ -5,7 +5,7 @@ import math
 
 // Bouncing Square with Raylib in Lucia
 // made by Markofwitch 2025, the developer of Lucia
-// NOTE: This example requires the `raylib_lucia` module, do 'lym install raylib_lucia' to install it
+// NOTE: This example requires the 'raylib_lucia' module, do 'lym install raylib_lucia' to install it
 
 SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN)
 InitWindow(800, 600, "Bouncing Square")

@@ -6,6 +6,7 @@ use rand::prelude::{SliceRandom, IndexedRandom};
 
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int, Float};
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::insert_native_fn;
@@ -121,7 +122,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("min", "int", Value::Int(Int::from_i64(0))),
             Parameter::positional_optional("max", "int", Value::Int(Int::from_i64(100))),
         ],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -132,7 +134,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("min", "float", Value::Float(Float::from_f64(0.0))),
             Parameter::positional_optional("max", "float", Value::Float(Float::from_f64(1.0))),
         ],
-        "float"
+        "float",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -140,7 +143,8 @@ pub fn register() -> HashMap<String, Variable> {
         "randchoice",
         random_choice_handler,
         vec![Parameter::positional("list", "list")],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -148,7 +152,8 @@ pub fn register() -> HashMap<String, Variable> {
         "shuffle",
         shuffle_handler,
         vec![Parameter::positional("list", "list")],
-        "list"
+        "list",
+        EffectFlags::PURE
     );
 
     map

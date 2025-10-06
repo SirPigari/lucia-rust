@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer};
 use rustc_hash::FxHashMap;
+use crate::env::runtime::internal_structs::EffectFlags;
 use bincode::{
     enc::{Encode, Encoder},
     de::{BorrowDecode, Decode, Decoder},
@@ -46,6 +47,7 @@ pub struct FunctionMetadata {
     pub is_final: bool,
     pub is_native: bool,
     pub state: Option<String>,
+    pub effects: EffectFlags,
 }
 
 impl std::default::Default for FunctionMetadata {
@@ -59,6 +61,7 @@ impl std::default::Default for FunctionMetadata {
             is_final: false,
             is_native: false,
             state: None,
+            effects: EffectFlags::empty(),
         }
     }
 }
@@ -117,6 +120,7 @@ impl SharedNativeFunction {
         is_static: bool,
         is_final: bool,
         state: Option<String>,
+        effects: EffectFlags,
     ) -> Self
     where
         F: SharedNativeCallable + 'static,
@@ -132,6 +136,7 @@ impl SharedNativeFunction {
                 is_final,
                 is_native: true,
                 state,
+                effects,
             },
         }
     }
@@ -145,6 +150,7 @@ impl SharedNativeFunction {
         is_static: bool,
         is_final: bool,
         state: Option<String>,
+        effects: EffectFlags,
     ) -> Self
     where
         F: SharedNativeCallable + 'static,
@@ -160,6 +166,7 @@ impl SharedNativeFunction {
                 is_final,
                 is_native: true,
                 state,
+                effects,
             },
         }
     }
@@ -198,6 +205,7 @@ impl NativeFunction {
         is_static: bool,
         is_final: bool,
         state: Option<String>,
+        effects: EffectFlags,
     ) -> Self
     where
         F: NativeCallable + 'static,
@@ -213,6 +221,7 @@ impl NativeFunction {
                 is_final,
                 is_native: true,
                 state,
+                effects,
             },
         }
     }
@@ -226,6 +235,7 @@ impl NativeFunction {
         is_static: bool,
         is_final: bool,
         state: Option<String>,
+        effects: EffectFlags,
     ) -> Self
     where
         F: NativeCallable + 'static,
@@ -241,6 +251,7 @@ impl NativeFunction {
                 is_final,
                 is_native: true,
                 state,
+                effects,
             },
         }
     }

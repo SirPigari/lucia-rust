@@ -4,6 +4,7 @@ use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{get_imagnum_error_message, to_static, parse_type};
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::variables::Variable;
 
 use crate::{insert_native_fn, insert_native_var};
@@ -191,7 +192,8 @@ pub fn register() -> HashMap<String, Variable> {
             name,
             func,
             vec![Parameter::positional_pt("x", &int_float_type)],
-            "float"
+            "float",
+            EffectFlags::PURE
         );
     }
 
@@ -200,35 +202,40 @@ pub fn register() -> HashMap<String, Variable> {
         "log_base",
         log_base,
         vec![Parameter::positional("x", "float"), Parameter::positional("base", "float")],
-        "float"
+        "float",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "powf",
         pow,
         vec![Parameter::positional("x", "float"), Parameter::positional("y", "float")],
-        "float"
+        "float",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "powi",
         pow,
         vec![Parameter::positional("x", "int"), Parameter::positional("y", "int")],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "pow",
         pow,
         vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_pt("y", &int_float_type)],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "sign",
         sign,
         vec![Parameter::positional_pt("x", &int_float_type)],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
 
     macro_rules! insert_irrational {

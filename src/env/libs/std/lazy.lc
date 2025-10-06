@@ -17,14 +17,7 @@ for Lazy:
         }
     end
 
-    public fun is_initialized(self) -> bool:
-        return self.initialized
-    end
-
-    public fun get_callback(self) -> function[] -> any:
-        return self.initializer
-    end
-
+    // op_get is called when the value is accessed
     public fun op_get(self) -> any:
         if (!self.initialized):
             self.value = self.initializer()

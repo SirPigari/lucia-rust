@@ -253,7 +253,7 @@ pub fn check_project_deps(
 
 #[macro_export]
 macro_rules! insert_native_fn {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr) => {{
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
@@ -263,6 +263,38 @@ macro_rules! insert_native_fn {
             true,
             true,
             None,
+            $effects,
+        );
+
+        let func = Function::Native(Arc::new(native_fn));
+
+        $map.insert(
+            $name.to_string(),
+            Variable::new(
+                $name.to_string(),
+                Value::Function(func),
+                "function".to_string(),
+                true,
+                true,
+                true,
+            ),
+        );
+    }};
+}
+
+#[macro_export]
+macro_rules! insert_native_fn_pt {
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            true,
+            true,
+            None,
+            $effects,
         );
 
         let func = Function::Native(Arc::new(native_fn));
@@ -283,7 +315,7 @@ macro_rules! insert_native_fn {
 
 #[macro_export]
 macro_rules! insert_native_shared_fn {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr) => {{
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::SharedNativeFunction::new(
             $name,
             $handler,
@@ -293,6 +325,7 @@ macro_rules! insert_native_shared_fn {
             true,
             true,
             None,
+            $effects,
         );
 
         let func = Function::SharedNative(Arc::new(native_fn));
@@ -313,7 +346,7 @@ macro_rules! insert_native_shared_fn {
 
 #[macro_export]
 macro_rules! insert_native_fn_state {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr) => {{
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
@@ -323,6 +356,7 @@ macro_rules! insert_native_fn_state {
             true,
             true,
             Some($state.to_string()),
+            $effects,
         );
 
         let func = Function::Native(Arc::new(native_fn));

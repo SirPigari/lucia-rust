@@ -29,7 +29,9 @@ use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::functions::Function;
-use crate::{insert_native_fn};
+use crate::env::runtime::utils::parse_type;
+use crate::env::runtime::internal_structs::EffectFlags;
+use crate::{insert_native_fn, insert_native_fn_pt};
 
 const MAX_ALLOC_SIZE: usize = 1 << 30; // 1 GB
 
@@ -48,42 +50,44 @@ pub fn init_clib(config: Arc<Config>, file_path: String) -> Result<(), Error> {
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
-    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("text", "str")], "int");
+    let any_ptr_type = parse_type("&any");
 
-    insert_native_fn!(map, "malloc", malloc_fn, vec![Parameter::positional("size", "int")], "&any");
-    insert_native_fn!(map, "calloc", calloc_fn, vec![
+    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("text", "str")], "int", EffectFlags::IO | EffectFlags::UNSAFE);
+
+    insert_native_fn_pt!(map, "malloc", malloc_fn, vec![Parameter::positional("size", "int")], &any_ptr_type, EffectFlags::UNSAFE);
+    insert_native_fn_pt!(map, "calloc", calloc_fn, vec![
         Parameter::positional("count", "int"),
         Parameter::positional("size", "int")
-    ], "&any");
-    insert_native_fn!(map, "realloc", realloc_fn, vec![
-        Parameter::positional("ptr", "&any"),
+    ], &any_ptr_type, EffectFlags::UNSAFE);
+    insert_native_fn_pt!(map, "realloc", realloc_fn, vec![
+        Parameter::positional_pt("ptr", &any_ptr_type),
         Parameter::positional("new_size", "int")
-    ], "&any");
-    insert_native_fn!(map, "free", free_fn, vec![Parameter::positional("ptr", "&any")], "void");
+    ], &any_ptr_type, EffectFlags::UNSAFE);
+    insert_native_fn!(map, "free", free_fn, vec![Parameter::positional("ptr", "&any")], "void", EffectFlags::UNSAFE);
 
-    insert_native_fn!(map, "strlen", strlen_fn, vec![Parameter::positional("ptr", "&int")], "int");
-    insert_native_fn!(map, "strcpy", strcpy_fn, vec![
-        Parameter::positional("dst", "&int"),
-        Parameter::positional("src", "&int")
-    ], "&int");
+    insert_native_fn!(map, "strlen", strlen_fn, vec![Parameter::positional_pt("ptr", &parse_type("&int"))], "int", EffectFlags::UNSAFE);
+    insert_native_fn_pt!(map, "strcpy", strcpy_fn, vec![
+        Parameter::positional_pt("dst", &any_ptr_type),
+        Parameter::positional_pt("src", &any_ptr_type)
+    ], &any_ptr_type, EffectFlags::UNSAFE);
 
     insert_native_fn!(map, "strcmp", strcmp_fn, vec![
-        Parameter::positional("a", "&int"),
-        Parameter::positional("b", "&int")
-    ], "int");
+        Parameter::positional_pt("a", &any_ptr_type),
+        Parameter::positional_pt("b", &any_ptr_type)
+    ], "int", EffectFlags::UNSAFE);
 
-    insert_native_fn!(map, "memcpy", memcpy_fn, vec![
-        Parameter::positional("dst", "&any"),
-        Parameter::positional("src", "&any"),
+    insert_native_fn_pt!(map, "memcpy", memcpy_fn, vec![
+        Parameter::positional_pt("dst", &any_ptr_type),
+        Parameter::positional_pt("src", &any_ptr_type),
         Parameter::positional("size", "int")
-    ], "&any");
+    ], &any_ptr_type, EffectFlags::UNSAFE);
 
-    insert_native_fn!(map, "alloc_string", alloc_string_fn, vec![Parameter::positional("text", "str")], "&any");
+    insert_native_fn_pt!(map, "alloc_string", alloc_string_fn, vec![Parameter::positional("text", "str")], &any_ptr_type, EffectFlags::UNSAFE);
 
-    insert_native_fn!(map, "time", time_fn, vec![], "int");
-    insert_native_fn!(map, "getenv", getenv_fn, vec![Parameter::positional("key", "str")], "str");
+    insert_native_fn!(map, "time", time_fn, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "getenv", getenv_fn, vec![Parameter::positional("key", "str")], "str", EffectFlags::IO);
 
-    insert_native_fn!(map, "exit", exit_fn, vec![Parameter::positional("code", "int")], "void");
+    insert_native_fn!(map, "exit", exit_fn, vec![Parameter::positional("code", "int")], "void", EffectFlags::IO);
 
     map
 }

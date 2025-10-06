@@ -10,6 +10,7 @@ use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::utils::{to_static, fix_path};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::insert_native_fn;
 
 use hound::{WavWriter, WavSpec, SampleFormat};
@@ -381,21 +382,24 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("path", "str"),
             Parameter::positional("content", "str")
         ],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "read_file",
         read_file_handler,
         vec![Parameter::positional("path", "str")],
-        "str"
+        "str",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "read_file_to_bytes",
         read_file_to_bytes_handler,
         vec![Parameter::positional("path", "str")],
-        "bytes"
+        "bytes",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
@@ -405,77 +409,88 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("path", "str"),
             Parameter::positional("content", "str")
         ],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "file_exists",
         file_exists_handler,
         vec![Parameter::positional("path", "str")],
-        "bool"
+        "bool",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "dir_exists",
         dir_exists_handler,
         vec![Parameter::positional("path", "str")],
-        "bool"
+        "bool",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "delete_file",
         delete_file_handler,
         vec![Parameter::positional("path", "str")],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "make_dir",
         make_dir_handler,
         vec![Parameter::positional("path", "str")],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "remove_dir",
         remove_dir_handler,
         vec![Parameter::positional("path", "str")],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "read_dir",
         read_dir_handler,
         vec![Parameter::positional("path", "str")],
-        "list"
+        "list",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "change_dir",
         change_dir_handler,
         vec![Parameter::positional("path", "str")],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "current_dir",
         current_dir_handler,
         vec![],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "size_bytes",
         size_bytes_handler,
         vec![Parameter::positional("path", "str")],
-        "int"
+        "int",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "size_bits",
         size_bits_handler,
         vec![Parameter::positional("path", "str")],
-        "int"
+        "int",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
@@ -485,7 +500,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("path", "str"),
             Parameter::positional_optional("unit", "str", "AUTO".into())
         ],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
@@ -495,35 +511,40 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("input", "str"),
             Parameter::positional("output", "str")
         ],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "basename",
         basename_handler,
         vec![Parameter::positional("path", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "extension",
         extension_handler,
         vec![Parameter::positional("path", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "fix_path",
         fix_path_handler,
         vec![Parameter::positional("path", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "cwd",
         cwd_handler,
         vec![],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
 
     map

@@ -25,6 +25,7 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::types::{Type, Int, Float};
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::interpreter::Interpreter;
 
 use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType, get_list};
@@ -800,7 +801,8 @@ pub fn register() -> HashMap<String, Variable> {
         "load_lib",
         load_lib,
         vec![Parameter::positional("path", "str")],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -813,7 +815,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("args", "list"),
             Parameter::positional("ret", "str"),
         ],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -825,7 +828,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("args", "list"),
             Parameter::positional("ret", "str"),
         ],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -837,7 +841,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("args", "list"),
             Parameter::positional_optional("stdcall", "bool", Value::Boolean(false)),
         ],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -845,7 +850,8 @@ pub fn register() -> HashMap<String, Variable> {
         "create_str_ptr",
         create_str_ptr,
         vec![Parameter::positional("string", "str")],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -853,7 +859,8 @@ pub fn register() -> HashMap<String, Variable> {
         "parse_str_ptr",
         parse_str_ptr,
         vec![Parameter::positional("ptr", "any")],
-        "str"
+        "str",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -865,7 +872,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("type", "str"),
             Parameter::positional("len", "int")
         ],
-        "list"
+        "list",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -875,14 +883,16 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("value", "any"),
             Parameter::positional("to", "any")
         ],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
     insert_native_shared_fn!(
         map,
         "create_callback",
         create_callback,
         vec![Parameter::positional("f", "function")],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -894,7 +904,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("packed", "bool", Value::Boolean(false)),
             Parameter::positional_optional("is_ptr", "bool", Value::Boolean(false)),
         ],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -906,7 +917,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_optional("packed", "bool", Value::Boolean(false)),
             Parameter::positional_optional("is_ptr", "bool", Value::Boolean(false)),
         ],
-        "list"
+        "list",
+        EffectFlags::UNSAFE
     );
 
     insert_native_fn!(
@@ -914,7 +926,8 @@ pub fn register() -> HashMap<String, Variable> {
         "malloc",
         malloc_fn,
         vec![Parameter::positional("size", "int")],
-        "any"
+        "any",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -925,7 +938,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("offset", "int"),
             Parameter::positional("value", "int"),
         ],
-        "int"
+        "int",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -936,7 +950,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("offset", "int"),
             Parameter::positional("value", "int"),
         ],
-        "int"
+        "int",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -947,7 +962,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("offset", "int"),
             Parameter::positional("value", "float"),
         ],
-        "int"
+        "int",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
@@ -958,14 +974,16 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("offset", "int"),
             Parameter::positional("ptr", "any"),
         ],
-        "int"
+        "int",
+        EffectFlags::UNSAFE
     );
     insert_native_fn!(
         map,
         "unload_lib",
         unload_lib,
         vec![Parameter::positional("lib", "any")],
-        "void"
+        "void",
+        EffectFlags::UNSAFE
     );
 
     map

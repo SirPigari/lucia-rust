@@ -6,6 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::to_static;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use crate::env::runtime::internal_structs::EffectFlags;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -234,26 +235,27 @@ fn sleep(args: &HashMap<String, Value>) -> Value {
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
-    insert_native_fn!(map, "timestamp", get_unix_timestamp, vec![], "int");
-    insert_native_fn!(map, "utc_now", get_utc_now, vec![], "str");
-    insert_native_fn!(map, "local_now", get_local_now, vec![], "str");
-    insert_native_fn!(map, "utc_now_simple", utc_now_simple, vec![], "str");
-    insert_native_fn!(map, "local_now_simple", local_now_simple, vec![], "str");
+    insert_native_fn!(map, "timestamp", get_unix_timestamp, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "utc_now", get_utc_now, vec![], "str", EffectFlags::IO);
+    insert_native_fn!(map, "local_now", get_local_now, vec![], "str", EffectFlags::IO);
+    insert_native_fn!(map, "utc_now_simple", utc_now_simple, vec![], "str", EffectFlags::IO);
+    insert_native_fn!(map, "local_now_simple", local_now_simple, vec![], "str", EffectFlags::IO);
 
-    insert_native_fn!(map, "year", get_year, vec![], "int");
-    insert_native_fn!(map, "month", get_month, vec![], "int");
-    insert_native_fn!(map, "day", get_day, vec![], "int");
+    insert_native_fn!(map, "year", get_year, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "month", get_month, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "day", get_day, vec![], "int", EffectFlags::IO);
 
-    insert_native_fn!(map, "hour", get_hour, vec![], "int");
-    insert_native_fn!(map, "minute", get_minute, vec![], "int");
-    insert_native_fn!(map, "second", get_second, vec![], "int");
+    insert_native_fn!(map, "hour", get_hour, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "minute", get_minute, vec![], "int", EffectFlags::IO);
+    insert_native_fn!(map, "second", get_second, vec![], "int", EffectFlags::IO);
 
     insert_native_fn!(
         map,
         "format",
         format_datetime,
         vec![Parameter::positional("format", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -264,7 +266,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("time", "str"),
             Parameter::positional("format", "str")
         ],
-        "map"
+        "map",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -272,7 +275,8 @@ pub fn register() -> HashMap<String, Variable> {
         "sleep",
         sleep,
         vec![Parameter::positional("duration", "int")],
-        "void"
+        "void",
+        EffectFlags::IO
     );
 
     insert_native_fn!(
@@ -283,7 +287,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("time", "int"),
             Parameter::positional_optional("format", "str", "%Y-%m-%d %H:%M:%S%.f".into()),
         ],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -291,7 +296,8 @@ pub fn register() -> HashMap<String, Variable> {
         "current_apollo_time",
         get_current_apollo_time,
         vec![],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -299,7 +305,8 @@ pub fn register() -> HashMap<String, Variable> {
         "format_apollo_time_ms",
         format_apollo_time_ms,
         vec![Parameter::positional("time", "int")],
-        "float"
+        "float",
+        EffectFlags::PURE
     );
 
     map

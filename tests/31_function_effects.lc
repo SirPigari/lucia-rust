@@ -1,0 +1,68 @@
+#include <std/assert.h>
+
+// NOTE: these effects are mainly for documentation purposes
+// and to help catch unsafe code in safe contexts
+// they do not enforce strict purity or anything like that (only unsafe is strictly enforced if configured)
+
+fun unsafe_operation() ![unsafe]:
+    // some unsafe code here
+    // this will warn because we arent using unsafe here
+end
+
+#config allow_unsafe = false
+// should throw an error because the global scope is marked safe but function is unsafe
+assert_err!(unsafe_operation())
+#config allow_unsafe = true
+
+unsafe_operation()  // should work now
+
+//                                V -- when the function has a return type you must put '<' before the effects and '>' after them
+fun print_data(data: str) -> void <![io]>:
+    print(data)
+end
+
+print_data("Hello, World!")  // should work
+
+// table of effects:
+// pure: for pure functions (no side effects, always returns the same output for the same input)
+// io: for input/output operations
+// state: for functions that modify state (global variables, object properties)
+// unsafe: for unsafe operations
+// all: for functions that can have any side effect
+// unknown: for functions where the side effects are not known or cannot be determined (explicit)
+// fail/throw: for functions that can fail (throw exceptions, return error codes)
+
+//                      V -- '?' means the function may fail (just an abbreviation for '![fail]')
+fun may_fail_operation()?:
+    // in this case we DONT do anything that may fail to test the effect system
+    // throw "An error occurred"
+end
+
+may_fail_operation()  // should work
+
+mutable global_state: &int = &0
+
+fun m() -> void <![io, state]>:
+    *global_state += 42
+    print("Global state modified to ", global_state.to_string())
+end
+
+m()
+
+assert_eq!(global_state, 42)
+
+
+fun n(i) -> int <![pure]>:
+    return i + 1
+end
+
+assert_eq!(n(1), 2)
+
+
+// if no effects are specified, the function is considered 'unknown' by default.
+// i wanted 'pure' for default but it would not be backwards compatible
+fun o() -> void:
+    m()
+end
+
+o()  // should work

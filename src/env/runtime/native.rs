@@ -3,6 +3,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
+use crate::env::runtime::internal_structs::{EffectFlags};
 use serde_json::json;
 use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
@@ -629,6 +630,7 @@ pub fn print_fn() -> Function {
         "void",
         true, true, true,
         None,
+        EffectFlags::IO,
     )))
 }
 
@@ -653,6 +655,7 @@ pub fn styled_print_fn() -> Function {
         "void",
         true, true, true,
         None,
+        EffectFlags::IO,
     )))
 }
 
@@ -666,6 +669,7 @@ pub fn input_fn() -> Function {
         "str",
         true, true, true,
         None,
+        EffectFlags::IO,
     )))
 }
 
@@ -679,6 +683,7 @@ pub fn len_fn() -> Function {
         "int",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -692,6 +697,7 @@ pub fn help_fn() -> Function {
         "void",
         true, true, true,
         None,
+        EffectFlags::IO,
     )))
 }
 
@@ -705,6 +711,7 @@ pub fn type_fn() -> Function {
         "type",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -718,6 +725,7 @@ pub fn size_of_fn() -> Function {
         "int",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -732,6 +740,7 @@ pub fn sum_fn() -> Function {
         "float",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -745,6 +754,7 @@ pub fn ord_fn() -> Function {
         "int",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -758,6 +768,7 @@ pub fn char_fn() -> Function {
         "str",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -782,6 +793,7 @@ pub fn styledstr_fn() -> Function {
         "str",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -796,6 +808,7 @@ pub fn array_fn() -> Function {
         "list",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -815,6 +828,7 @@ pub fn range_fn() -> Function {
         &LIST_OR_GEN,
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }
 
@@ -829,5 +843,6 @@ pub fn placeholder_fn() -> Function {
         "void",
         true, true, true,
         None,
+        EffectFlags::PURE,
     )))
 }

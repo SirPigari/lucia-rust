@@ -9,6 +9,7 @@ use crate::env::runtime::types::{Int};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config};
+use crate::env::runtime::internal_structs::{EffectFlags};
 
 use crate::{insert_native_fn, insert_native_var};
 
@@ -62,7 +63,8 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
         "hello",
         hello,
         vec![],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -70,7 +72,8 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
         "sow",
         sow,
         vec![],
-        "list"
+        "list",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
@@ -79,7 +82,8 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
         vec![
             Parameter::positional("level", "int"),
         ],
-        "str"
+        "str",
+        EffectFlags::IO
     );
 
     // you wont be able to access this variable lol

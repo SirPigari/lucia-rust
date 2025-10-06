@@ -5,6 +5,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;
 use super::regex_engine::{RegexEngine, normal, fancy};
+use crate::env::runtime::internal_structs::EffectFlags;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
 use crate::insert_native_fn;
@@ -291,14 +292,16 @@ pub fn register() -> HashMap<String, Variable> {
         "match",
         regex_match,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "is_match",
         regex_is_match,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "bool"
+        "bool",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
@@ -309,63 +312,72 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("value", "str"),
             Parameter::positional_optional("replacement", "str", Value::String("".into()))
         ],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
-        insert_native_fn!(
+    insert_native_fn!(
         map,
         "find_all",
         regex_find_all,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "list"
+        "list",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "split",
         regex_split,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "list"
+        "list",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "count",
         regex_count,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "int"
+        "int",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "capture",
         regex_capture,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "map"
+        "map",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "match_all",
         regex_match_all,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "list"
+        "list",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "named_groups",
         regex_named_groups,
         vec![Parameter::positional("pattern", "str"), Parameter::positional("value", "str")],
-        "map"
+        "map",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "escape",
         regex_escape,
         vec![Parameter::positional("value", "str")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "is_fancy",
         regex_is_fancy,
         vec![Parameter::positional("pattern", "str")],
-        "bool"
+        "bool",
+        EffectFlags::PURE
     );
 
     map

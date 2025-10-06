@@ -7,6 +7,7 @@ use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::utils::to_static;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::internal_structs::EffectFlags;
 use crate::insert_native_fn;
 
 use serde_json::{self, Serializer, Value as JsonValue};
@@ -114,7 +115,8 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("value", "any"),
             Parameter::positional_optional("indent", "int", Value::Int(Int::from_i64(0))),
         ],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -132,7 +134,8 @@ pub fn register() -> HashMap<String, Variable> {
             }
         },
         vec![Parameter::positional("text", "str")],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
 
     insert_native_fn!(
@@ -189,21 +192,24 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional("value", "any"),
             Parameter::positional_optional("indent", "int", Value::Int(Int::from_i64(0))),
         ],
-        "void"
+        "void",
+        EffectFlags::IO
     );
     insert_native_fn!(
         map,
         "escape",
         escape_handler,
         vec![Parameter::positional("value", "any")],
-        "str"
+        "str",
+        EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "unescape",
         unescape_handler,
         vec![Parameter::positional("value", "str")],
-        "any"
+        "any",
+        EffectFlags::PURE
     );
 
     map

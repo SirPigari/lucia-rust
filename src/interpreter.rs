@@ -51,7 +51,7 @@ use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
-use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType};
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags};
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
@@ -95,6 +95,7 @@ pub struct Interpreter {
     internal_storage: InternalStorage,
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
+    pub collected_effects: EffectFlags,
     
     #[serde(skip)]
     pub stop_flag: Option<Arc<AtomicBool>>,
@@ -124,10 +125,13 @@ impl Interpreter {
             internal_storage: InternalStorage {
                 lambda_counter: 0,
                 use_42: (false, false),
+                in_try_block: false,
+                in_function: false,
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
             stop_flag: None,
+            collected_effects: EffectFlags::empty(),
         };
 
 
@@ -1857,12 +1861,12 @@ impl Interpreter {
     fn handle_generator_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
         let name = match statement.get(&Value::String("name".to_string())) {
             Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in function declaration"),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in generator declaration"),
         };
     
         let pos_args = match statement.get(&Value::String("pos_args".to_string())) {
             Some(Value::List(p)) => p,
-            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in function declaration"),
+            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in generator declaration"),
         };
 
         let named_args = match statement.get(&Value::String("named_args".to_string())) {
@@ -1872,17 +1876,17 @@ impl Interpreter {
                     values: values.clone(),
                 }
             }
-            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in function declaration"),
+            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in generator declaration"),
         };
     
         let body = match statement.get(&Value::String("body".to_string())) {
             Some(Value::List(b)) => b,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in function declaration"),
+            _ => return self.raise("RuntimeError", "Expected a list for 'body' in generator declaration"),
         };
 
         let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
             Some(Value::List(m)) => m,
-            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in function declaration"),
+            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in generator declaration"),
         };
     
         let return_type = match statement.get(&Value::String("return_type".to_string())) {
@@ -1890,7 +1894,15 @@ impl Interpreter {
                 keys: keys.clone(),
                 values: values.clone(),
             },
-            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in function declaration"),
+            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in generator declaration"),
+        };
+
+        let effect_flags: EffectFlags = match statement.get(&Value::String("effects".to_string())) {
+            Some(Value::Int(i)) => match i.to_i64() {
+                Ok(v) if v >= 0 => EffectFlags::from_u32(v as u32),
+                _ => return self.raise("RuntimeError", "'effect_flags' must be a non-negative integer"),
+            },
+            _ => return self.raise("RuntimeError", "Expected an integer for 'effect_flags' in generator declaration"),
         };
 
         if self.err.is_some() {
@@ -1910,10 +1922,10 @@ impl Interpreter {
                     "private" => is_public = false,
                     "non-static" => is_static = false,
                     "mutable" => is_final = false,
-                    _ => return self.raise("SyntaxError", &format!("Unknown function modifier: {}", modifier_str)),
+                    _ => return self.raise("SyntaxError", &format!("Unknown generator modifier: {}", modifier_str)),
                 }
             } else {
-                return self.raise("TypeError", "Function modifiers must be strings");
+                return self.raise("TypeError", "Generator modifiers must be strings");
             }
         }
 
@@ -1924,9 +1936,9 @@ impl Interpreter {
                 let name = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
                     Some(pos) => match &values[pos] {
                         Value::String(n) => n,
-                        _ => return self.raise("RuntimeError", "'name' must be a string in function parameter"),
+                        _ => return self.raise("RuntimeError", "'name' must be a string in generator parameter"),
                     },
-                    None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
+                    None => return self.raise("RuntimeError", "Missing 'name' in generator parameter"),
                 };
 
                 let type_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
@@ -1940,7 +1952,7 @@ impl Interpreter {
                             }
                         }
                     }
-                    None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
+                    None => return self.raise("RuntimeError", "Missing 'type' in generator parameter"),
                 };
 
                 let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
@@ -1971,7 +1983,7 @@ impl Interpreter {
                     parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
                 }
             } else {
-                return self.raise("TypeError", "Expected a map for function parameter");
+                return self.raise("TypeError", "Expected a map for generator parameter");
             }
         }
 
@@ -2102,6 +2114,7 @@ impl Interpreter {
                     is_static,
                     is_final,
                     None,
+                    effect_flags,
                 )))),
                 "generator".to_string(),
                 is_static,
@@ -4482,6 +4495,14 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Invalid 'return_type' in function declaration"),
         };
 
+        let effect_flags: EffectFlags = match statement.get(&Value::String("effects".to_string())) {
+            Some(Value::Int(i)) => EffectFlags::from_u32(match i.to_i64() {
+                Ok(v) if v >= 0 => v as u32,
+                _ => return self.raise("TypeError", "'effects' must be a non-negative integer"),
+            }),
+            _ => EffectFlags::empty(),
+        };
+
         if return_type_str == Type::new_simple("auto") {
             return_type_str = Type::new_simple("any");
         }
@@ -4645,6 +4666,7 @@ impl Interpreter {
             is_final,
             is_native: false,
             state: None,
+            effects: effect_flags,
         };
 
         if self.variables.contains_key(name) && !name.starts_with("<") {
@@ -5692,6 +5714,10 @@ impl Interpreter {
         }
     
         let mut result = NULL;
+        let change_in_try = !self.internal_storage.in_try_block;
+        if change_in_try {
+            self.internal_storage.in_try_block = true;
+        }
         for stmt in body {
             if !stmt.is_statement() {
                 continue;
@@ -5792,6 +5818,9 @@ impl Interpreter {
                 }
     
                 let mut err_result = NULL;
+                if change_in_try {
+                    self.internal_storage.in_try_block = false;
+                }
                 for catch_stmt in catch_body {
                     if !catch_stmt.is_statement() {
                         continue;
@@ -7881,6 +7910,7 @@ impl Interpreter {
                     is_final: false,
                     is_native: true,
                     state: None,
+                    effects: EffectFlags::empty(),
                 },
             }))
         } else {
@@ -8100,7 +8130,17 @@ impl Interpreter {
 
         let passed_args_count = positional.len() + named_map.len();
         let expected_args_count = metadata.parameters.len();
-        
+
+        let mut effect_flags = metadata.effects;
+        let mut effect_mask = EffectFlags::UNKNOWN;
+
+        if effect_flags.contains(EffectFlags::MAY_FAIL) && self.internal_storage.in_try_block {
+            effect_flags.remove(EffectFlags::MAY_FAIL);
+            effect_mask.insert(EffectFlags::MAY_FAIL);
+        }
+
+        self.collected_effects |= effect_flags;
+
         if expected_args_count == 0 && passed_args_count > 0 {
             return self.raise(
                 "TypeError",
@@ -8298,7 +8338,6 @@ impl Interpreter {
                 }
             }
         }
-        
 
         if !named_map.is_empty() {
             let mut expect_one_of = String::new();
@@ -8369,6 +8408,24 @@ impl Interpreter {
 
         self.stack.push((function_name.to_string(), self.get_location_from_current_statement(), StackType::FunctionCall));
 
+        let change_in_function = !self.internal_storage.in_function;
+        if change_in_function {
+            self.internal_storage.in_function = true;
+        }
+
+        if change_in_function {
+            effect_mask |= EffectFlags::ALL;
+            if !self.config.allow_unsafe {
+                if effect_flags.contains(EffectFlags::UNSAFE) {
+                    return self.raise_with_help(
+                        "RuntimeError",
+                        &format!("Unsafe function '{}' called in safe mode.", function_name),
+                        "Any function called in the global scope uses the configs state of 'allow_unsafe' to determine if unsafe functions are allowed.",
+                    );
+                }
+            }
+        }
+
         let result;
 
         let final_args_variables = final_args
@@ -8397,10 +8454,16 @@ impl Interpreter {
         
         if self.err.is_some() {
             self.stack.pop();
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
             return NULL;
         }
         
-        if is_special_function {
+        if is_special_function {      
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
             match function_name {
                 "exit" => {
                     let code = if let Some(code) = named_args.get("code") {
@@ -8633,6 +8696,9 @@ impl Interpreter {
 
         if self.err.is_some() {
             self.stack.pop();
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
             return NULL;
         }
 
@@ -8650,14 +8716,68 @@ impl Interpreter {
             merged_variables.extend(final_args_variables);
             new_interpreter.variables = merged_variables;
             new_interpreter.stack = self.stack.clone();
+            new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
+            new_interpreter.internal_storage.in_function = true;
             let body = func.get_body();
             let _ = new_interpreter.interpret(body, true);
+            result = new_interpreter.return_value.clone();
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
             if new_interpreter.err.is_some() {
                 self.stack.pop();
                 self.err = new_interpreter.err.clone();
                 return NULL;
             }
-            result = new_interpreter.return_value.clone();
+            if let Value::Error(err_type, err_msg, referr) = &result {
+                if let Some(rerr) = referr {
+                    let err = Error::with_ref(
+                        err_type,
+                        err_msg,
+                        rerr.clone(),
+                        &self.file_path,
+                    );
+                    self.raise_with_ref(
+                        "RuntimeError",
+                        "Error in lambda call",
+                        err,
+                    );
+                }
+                let err = Error::new(
+                    err_type,
+                    err_msg,
+                    &self.file_path,
+                );
+                self.raise_with_ref(
+                    "RuntimeError",
+                    "Error in lambda call",
+                    err,
+                );
+                self.stack.pop();
+                return NULL;
+            };
+            if !effect_flags.contains(EffectFlags::UNKNOWN) {
+                match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
+                    Some((false, extra_bits)) => {
+                        let names = extra_bits.get_names();
+                        return self.raise_with_help(
+                            "EffectError",
+                            &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
+                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                        );
+                    }
+                    Some((true, missing_bits)) => {
+                        let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
+                        if !missing_bits.is_empty() {
+                            let names = missing_bits.get_names();
+                            self.warn(
+                                &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
+                            );
+                        }
+                    }
+                    None => {}
+                }
+            }
             for var in instance_variables {
                 if let Some(v) = new_interpreter.variables.get_mut(&var) {
                     if let Some(ref mut object_variable) = object_variable {
@@ -8669,6 +8789,8 @@ impl Interpreter {
         } else if let Function::CustomMethod(func) = func {
             let interpreter_arc = func.get_interpreter();
             let mut interpreter = interpreter_arc.lock().unwrap();
+            interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
+            interpreter.internal_storage.in_function = true;
 
             result = interpreter.call_function(
                 &Function::Custom(func.get_function()),
@@ -8676,6 +8798,10 @@ impl Interpreter {
                 named_map,
                 None,
             );
+  
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
 
             for var in instance_variables {
                 if let Some(v) = interpreter.variables.get_mut(&var) {
@@ -8722,6 +8848,29 @@ impl Interpreter {
                 self.stack.pop();
                 return NULL;
             };
+
+            if !effect_flags.contains(EffectFlags::UNKNOWN) {
+                match effect_flags.check_branches(interpreter.collected_effects, effect_mask) {
+                    Some((false, extra_bits)) => {
+                        let names = extra_bits.get_names();
+                        return self.raise_with_help(
+                            "EffectError",
+                            &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
+                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                        );
+                    }
+                    Some((true, missing_bits)) => {
+                        let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
+                        if !missing_bits.is_empty() {
+                            let names = missing_bits.get_names();
+                            self.warn(
+                                &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
+                            );
+                        }
+                    }
+                    None => {}
+                }
+            }
         } else if !is_module {
             self.stack.push((function_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
             if !func.is_native() {
@@ -8749,9 +8898,14 @@ impl Interpreter {
                 let mut merged_variables = self.variables.clone();
                 merged_variables.extend(final_args_variables);
                 new_interpreter.variables.extend(merged_variables);
+                new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
+                new_interpreter.internal_storage.in_function = true;
                 new_interpreter.stack = self.stack.clone();
                 let body = func.get_body();
                 let _ = new_interpreter.interpret(body, true);
+                if change_in_function {
+                    self.internal_storage.in_function = false;
+                }
                 if new_interpreter.err.is_some() {
                     self.stack.pop();
                     self.raise_with_ref(
@@ -8760,6 +8914,29 @@ impl Interpreter {
                         new_interpreter.err.unwrap()
                     );
                     return NULL;
+                }
+                if !effect_flags.contains(EffectFlags::UNKNOWN) {
+                    match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
+                        Some((false, extra_bits)) => {
+                            let names = extra_bits.get_names();
+                            return self.raise_with_help(
+                                "EffectError",
+                                &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
+                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                            );
+                        }
+                        Some((true, missing_bits)) => {
+                            // ignore these in warnings
+                            let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
+                            if !missing_bits.is_empty() {
+                                let names = missing_bits.get_names();
+                                self.warn(
+                                    &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
+                                );
+                            }
+                        }
+                        None => {}
+                    }
                 }
                 result = new_interpreter.return_value.clone();
                 for var in instance_variables {
@@ -8776,6 +8953,9 @@ impl Interpreter {
                 } else {
                     result = func.call_shared(&final_args_no_mods, self);
                 }
+                if change_in_function {
+                    self.internal_storage.in_function = false;
+                }
             }
         } else {
             if !func.is_native() {
@@ -8783,6 +8963,9 @@ impl Interpreter {
                     Some(var) => var.get_value().clone(),
                     None => {
                         self.stack.pop();
+                        if change_in_function {
+                            self.internal_storage.in_function = false;
+                        }
                         return self.raise(
                             "TypeError",
                             "Method call without an object",
@@ -8793,6 +8976,9 @@ impl Interpreter {
                     Value::Module(ref obj) => obj,
                     _ => {
                         self.stack.pop();
+                        if change_in_function {
+                            self.internal_storage.in_function = false;
+                        }
                         return self.raise(
                             "TypeError",
                             &format!("Expected a module, but got '{}'", object_value.type_name())
@@ -8803,6 +8989,9 @@ impl Interpreter {
                     Value::Module(o) => o.path().clone(),
                     _ => {
                         self.stack.pop();
+                        if change_in_function {
+                            self.internal_storage.in_function = false;
+                        }
                         return self.raise(
                             "TypeError",
                             &format!("Expected a module, but got '{}'", object_value.get_type().display_simple())
@@ -8819,10 +9008,15 @@ impl Interpreter {
                 );
                 new_interpreter.variables.extend(final_args_variables);
                 new_interpreter.stack = self.stack.clone();
+                new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
+                new_interpreter.internal_storage.in_function = true;
                 let props = module.get_properties();
                 new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
                 let body = func.get_body();
                 let _ = new_interpreter.interpret(body, true);
+                if change_in_function {
+                    self.internal_storage.in_function = false;
+                }
                 if new_interpreter.err.is_some() {
                     self.stack.pop();
                     self.raise_with_ref(
@@ -8860,12 +9054,37 @@ impl Interpreter {
                     self.stack.pop();
                     return NULL;
                 };
+                if !effect_flags.contains(EffectFlags::UNKNOWN) {
+                    match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
+                        Some((true, extra_bits)) => {
+                            let names = extra_bits.get_names();
+                            return self.raise_with_help(
+                                "EffectError",
+                                &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
+                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                            );
+                        }
+                        Some((false, missing_bits)) => {
+                            let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
+                            if !missing_bits.is_empty() {
+                                let names = missing_bits.get_names();
+                                self.warn(
+                                    &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
+                                );
+                            }
+                        }
+                        None => {}
+                    }
+                }
                 self.stack = new_interpreter.stack;
             } else {
                 if func.is_natively_callable() {
                     result = func.call(&final_args_no_mods);
                 } else {
                     result = func.call_shared(&final_args_no_mods, self);
+                }
+                if change_in_function {
+                    self.internal_storage.in_function = false;
                 }
             }
         }
