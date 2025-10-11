@@ -2,7 +2,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::interpreter::Interpreter;
 use crate::env::runtime::internal_structs::State;
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, check_pattern};
 use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::functions::Function;
@@ -365,12 +365,12 @@ enum LoopType {
         body: Vec<Value>,
     },
     For {
-        var: String,
+        var: Value,
         iterable: Vec<Value>,
         body: Vec<Value>,
         index: usize,
         body_pc: usize,
-        saved_var: Option<Variable>,
+        saved_var: Vec<Variable>,
     },
 }
 
@@ -449,10 +449,8 @@ impl Iterator for CustomGenerator {
 
                     LoopType::For { var, iterable, body, index, body_pc, saved_var } => {
                         if *index >= iterable.len() {
-                            if let Some(saved) = saved_var.take() {
-                                self.interpreter.variables.insert(saved.get_name().to_string(), saved);
-                            } else {
-                                self.interpreter.variables.remove(var);
+                            for prev in saved_var.drain(..) {
+                                self.interpreter.variables.insert(prev.get_name().to_string(), prev);
                             }
                             self.loop_stack.pop();
                             self.index += 1;
@@ -461,14 +459,38 @@ impl Iterator for CustomGenerator {
 
                         let item = iterable[*index].clone();
 
-                        if saved_var.is_none() {
-                            *saved_var = self.interpreter.variables.get(var).cloned();
+                        if saved_var.is_empty() {
+                            if let Ok((_, bindings)) = check_pattern(&item, var) {
+                                for name in bindings.keys() {
+                                    if let Some(existing) = self.interpreter.variables.get(name) {
+                                        saved_var.push(existing.clone());
+                                    }
+                                }
+                            }
                         }
 
-                        self.interpreter.variables.insert(
-                            var.clone(),
-                            Variable::new(var.clone(), item.clone(), item.type_name(), false, true, true),
-                        );
+                        let bindings = match check_pattern(&item, var) {
+                            Ok((true, vars)) => vars,
+                            Ok((false, _)) => {
+                                self.interpreter.raise("ValueError", "Item did not match for-loop variable pattern");
+                                self.done = true;
+                                return Some(Value::Null);
+                            }
+                            Err((etype, emsg)) => {
+                                self.interpreter.raise(&etype, &emsg);
+                                self.done = true;
+                                return Some(Value::Null);
+                            }
+                        };
+
+                        for (name, val) in &bindings {
+                            self.interpreter.variables.insert(name.clone(), Variable::new(
+                                name.clone(),
+                                val.clone(),
+                                val.type_name(),
+                                false, true, true,
+                            ));
+                        }
 
                         let body_clone = body.clone();
 
@@ -494,10 +516,8 @@ impl Iterator for CustomGenerator {
                         match self.interpreter.state {
                             State::Break => {
                                 self.interpreter.state = State::Normal;
-                                if let Some(saved) = saved_var.take() {
-                                    self.interpreter.variables.insert(saved.get_name().to_string(), saved);
-                                } else {
-                                    self.interpreter.variables.remove(var);
+                                for prev in saved_var.drain(..) {
+                                    self.interpreter.variables.insert(prev.get_name().to_string(), prev);
                                 }
                                 self.loop_stack.pop();
                                 self.index += 1;
@@ -559,11 +579,10 @@ impl Iterator for CustomGenerator {
 
                     let iterable_vec = iterable_val.iterable_to_vec();
 
-                    let var_name = data.get(&Value::String("variable".to_string()))
-                        .and_then(|v| match v {
-                            Value::String(s) => Some(s.clone()),
-                            _ => None,
-                        }).unwrap_or_default();
+                    let variable = match data.get(&Value::String("variable".to_string())) {
+                        Some(v) => v.clone(),
+                        None => Value::Null,
+                    };
 
                     let body = data.get(&Value::String("body".to_string()))
                         .and_then(|v| match v {
@@ -573,12 +592,12 @@ impl Iterator for CustomGenerator {
 
                     self.loop_stack.push(Frame {
                         loop_type: LoopType::For {
-                            var: var_name,
+                            var: variable,
                             iterable: iterable_vec,
                             body,
                             index: 0,
                             body_pc: 0,
-                            saved_var: None,
+                            saved_var: Vec::new(),
                         },
                         while_pc: 0,
                     });

@@ -87,3 +87,12 @@ for (ch in "Hello, World!"):
 end
 
 assert_eq!(output, ("Hello,World!"))
+
+// pattern based for loops
+pairs: list[list[int, tuple[int, int]]] = [[1, (2, 3)], [4, (5, 6)], [7, (8, 9)]]
+sums: list[int] = []
+// internaly uses the same as match expressions
+for ([a, (b, c)] in pairs):
+    sums = sums.append(a + b + c)
+end
+assert_eq!(sums, ([6, 15, 24]))

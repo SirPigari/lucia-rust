@@ -184,10 +184,11 @@ impl Not for EffectFlags {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathElement {
     Path {
-        segments: Vec<String>,       // a::b::c
-        args: Vec<PathElement>,      // for variants like a::b(x, y)
+        segments: Vec<String>,       // a.b.c
+        args: Vec<PathElement>,      // for variants like a.b(x, y)
     },
     Tuple(Vec<PathElement>),         // for (a, b, c)
+    List(Vec<PathElement>),          // for [a, b, c]
     Literal(Value),                  // for literal values like 42, "hello"
     Union(Vec<PathElement>),         // for union types like a | b | c
 }
@@ -203,9 +204,40 @@ impl PathElement {
                     values: vec![Value::List(seg_values), Value::List(arg_values)],
                 }
             }
+            PathElement::List(elems) => Value::List(elems.iter().map(|e| e.to_value()).collect()),
             PathElement::Tuple(elems) => Value::Tuple(elems.iter().map(|e| e.to_value()).collect()),
             PathElement::Literal(value) => value.clone(),
-            PathElement::Union(elems) => Value::List(elems.iter().map(|e| e.to_value()).collect()),
+            PathElement::Union(elems) => Value::Map {
+                keys: vec![Value::String("union".into())],
+                values: elems.iter().map(|e| e.to_value()).collect(),
+            },
+        }
+    }
+
+    pub fn display(&self) -> String {
+        match self {
+            PathElement::Path { segments, args } => {
+                let seg_str = segments.join(".");
+                if args.is_empty() {
+                    seg_str
+                } else {
+                    let arg_strs: Vec<String> = args.iter().map(|a| a.display()).collect();
+                    format!("{}({})", seg_str, arg_strs.join(", "))
+                }
+            }
+            PathElement::Tuple(elems) => {
+                let elem_strs: Vec<String> = elems.iter().map(|e| e.display()).collect();
+                format!("({})", elem_strs.join(", "))
+            }
+            PathElement::List(elems) => {
+                let elem_strs: Vec<String> = elems.iter().map(|e| e.display()).collect();
+                format!("[{}]", elem_strs.join(", "))
+            }
+            PathElement::Literal(value) => format!("{}", value),
+            PathElement::Union(elems) => {
+                let elem_strs: Vec<String> = elems.iter().map(|e| e.display()).collect();
+                elem_strs.join(" | ")
+            }
         }
     }
 }

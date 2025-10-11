@@ -1849,54 +1849,12 @@ impl Parser {
                         self.next();
                     }
 
-                    let variable = if self.token_is("SEPARATOR", "(") {
-                        self.next();
-                        let mut vars = Vec::new();
-                        loop {
-                            if let Some(tok) = self.token() {
-                                if tok.0 == "IDENTIFIER" {
-                                    let name = tok.1.clone();
-                                    if RESERVED_KEYWORDS.contains(&name.as_str()) {
-                                        self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", name));
-                                        return Statement::Null;
-                                    }
-                                    vars.push(name);
-                                    self.next();
-                                } else {
-                                    self.raise("SyntaxError", "Expected identifier in tuple unpacking");
-                                    return Statement::Null;
-                                }
-
-                                if self.token_is("SEPARATOR", ",") {
-                                    self.next();
-                                    continue;
-                                } else if self.token_is("SEPARATOR", ")") {
-                                    self.next();
-                                    break;
-                                } else {
-                                    self.raise("SyntaxError", "Expected ',' or ')' in tuple unpacking");
-                                    return Statement::Null;
-                                }
-                            } else {
-                                self.raise("SyntaxError", "Unexpected end of input in tuple unpacking");
-                                return Statement::Null;
-                            }
-                        }
-                        Value::List(vars.into_iter().map(Value::String).collect())
-                    } else {
-                        let t = self.token().cloned().unwrap_or_else(|| {
-                            self.raise("SyntaxError", "Expected identifier after 'for'");
-                            return Token("".to_string(), "".to_string(), None);
-                        });
-                        if self.err.is_some() {
+                    let variable: PathElement = match self.parse_path() {
+                        Some(var) => var,
+                        None => {
+                            self.raise("SyntaxError", "Expected variable or path after 'for'");
                             return Statement::Null;
                         }
-                        if RESERVED_KEYWORDS.contains(&t.1.as_str()) {
-                            self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", t.1));
-                            return Statement::Null;
-                        }
-                        self.next();
-                        Value::String(t.1)
                     };
 
                     if self.err.is_some() {
@@ -1931,6 +1889,13 @@ impl Parser {
                             }
                         }
                         self.next();
+                        let var = match variable {
+                            PathElement::Path { segments, args: _ } if segments.len() == 1 => Value::String(segments[0].clone()),
+                            _ => {
+                                self.raise("SyntaxError", &format!("'{}' is not a valid struct name", variable.display()));
+                                return Statement::Null;
+                            }
+                        };
                         return Statement::Statement {
                             keys: vec![
                                 Value::String("type".to_string()),
@@ -1939,7 +1904,7 @@ impl Parser {
                             ],
                             values: vec![
                                 Value::String("STRUCT_METHODS".to_string()),
-                                variable,
+                                var,
                                 Value::List(functions.into_iter().map(|f| f.convert_to_map()).collect()),
                             ],
                             loc,
@@ -1995,7 +1960,7 @@ impl Parser {
                         ],
                         values: vec![
                             Value::String("FOR".to_string()),
-                            variable,
+                            variable.to_value(),
                             iterable.convert_to_map(),
                             Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                         ],
@@ -4365,6 +4330,28 @@ impl Parser {
                 }
             }
 
+            Some(Token(kind, val, _)) if kind == "SEPARATOR" && val == "[" => {
+                self.next();
+                let mut elems = Vec::new();
+                while !self.token_is("SEPARATOR", "]") {
+                    let e = self.parse_path()?;
+                    elems.push(e);
+                    if self.token_is("SEPARATOR", ",") {
+                        self.next();
+                    }
+                }
+                if !self.token_is("SEPARATOR", "]") {
+                    self.raise("SyntaxError", "Expected ']' after list");
+                    return None;
+                }
+                self.next();
+                if elems.len() == 1 {
+                    elems.remove(0)
+                } else {
+                    PathElement::List(elems)
+                }
+            }
+
             Some(Token(kind, val, _)) if kind == "NUMBER" => {
                 self.next();
                 match val.parse::<i64>() {
@@ -5325,7 +5312,63 @@ impl Parser {
             if self.err.is_some() {
                 return Statement::Null;
             }
-    
+
+            if self.token_is("IDENTIFIER", "for") {
+                let mut for_clauses = Vec::new();
+
+                while self.token_is("IDENTIFIER", "for") {
+                    self.next();
+
+                    let variables: PathElement = match self.parse_path() {
+                        Some(v) => v,
+                        None => {
+                            self.raise("PathError", "Failed to parse variable path in list comprehension");
+                            return Statement::Null;
+                        }
+                    };
+
+                    if self.err.is_some() { return Statement::Null; }
+
+                    self.check_for("OPERATOR", "in");
+                    self.next();
+                    let iterable = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
+
+                    let mut filters = Vec::new();
+                    while self.token_is("IDENTIFIER", "if") {
+                        self.next();
+                        let cond = self.parse_expression();
+                        if self.err.is_some() { return Statement::Null; }
+                        filters.push(cond.convert_to_map());
+                    }
+
+                    for_clauses.push((variables, iterable.convert_to_map(), Value::List(filters)));
+                }
+
+                let map_expression = expr.convert_to_map();
+
+                self.check_for("SEPARATOR", "]");
+                self.next();
+
+                return Statement::Statement {
+                    keys: vec![
+                        Value::String("type".to_string()),
+                        Value::String("iterable_type".to_string()),
+                        Value::String("for_clauses".to_string()),
+                        Value::String("map_expression".to_string()),
+                    ],
+                    values: vec![
+                        Value::String("ITERABLE".to_string()),
+                        Value::String("LIST_COMPREHENSION".to_string()),
+                        Value::List(for_clauses.into_iter().map(|(v,it,f)| {
+                            Value::List(vec![v.to_value(), it, f])
+                        }).collect()),
+                        map_expression,
+                    ],
+                    loc,
+                };
+            }
+            
             elements.push(expr.convert_to_map());
     
             if let Some(next_token) = self.token() {

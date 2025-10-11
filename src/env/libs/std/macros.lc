@@ -58,8 +58,20 @@
     return $!tokens
 #endmacro
 
-#macro range($a, $b=(null), $step=(1)):
-    return _collections.range($a, $b, $step)
+// pattern must be a valid pattern (path) not a value
+#macro matches!($value, $pattern):
+    match $value:
+        $pattern -> true,
+        _ -> false,
+    end
+#endmacro
+
+#macro #no-mangle get_matched!($value, $pattern, $vars):
+    match $value:
+        $pattern -> true,
+        _ -> false,
+    end
+    $vars
 #endmacro
 
 // return null

@@ -228,6 +228,7 @@ impl Interpreter {
         insert_builtin("char", Value::Function(native::char_fn()));
         insert_builtin("styledstr", Value::Function(native::styledstr_fn()));
         insert_builtin("array", Value::Function(native::array_fn()));
+        // added for u/Truite_Morte
         insert_builtin("range", Value::Function(native::range_fn()));
         this.variables.insert(
             "00__placeholder__".to_owned(),
@@ -6783,9 +6784,7 @@ impl Interpreter {
         };
 
         let iterable_value = self.evaluate(&iterable.convert_to_statement());
-        if self.err.is_some() {
-            return NULL;
-        }
+        if self.err.is_some() { return NULL; }
         if !iterable_value.is_iterable() {
             return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
         }
@@ -6795,37 +6794,17 @@ impl Interpreter {
             _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
         };
 
-        let variable_value = match statement.get(&*KEY_VARIABLE) {
-            Some(Value::String(name)) => Value::List(vec![Value::String(name.clone())]),
-            Some(Value::List(names)) => Value::List(names.clone()),
-            _ => return self.raise("RuntimeError", "Expected a string or list for 'variable' in for loop statement"),
-        };
+        let body: Vec<Statement> = body.iter().map(|s| s.convert_to_statement()).collect();
 
-        let variable_names: Vec<String> = match &variable_value {
-            Value::List(vars) => {
-                let mut names = Vec::new();
-                for v in vars {
-                    if let Value::String(s) = v {
-                        names.push(s.clone());
-                    } else {
-                        return self.raise("RuntimeError", "Variable names must be strings");
-                    }
-                }
-                names
-            }
-            _ => unreachable!(),
+        let variable_pattern = match statement.get(&*KEY_VARIABLE) {
+            Some(v) => v,
+            None => return self.raise("RuntimeError", "Missing 'variable' in for loop statement"),
         };
 
         let mut result = NULL;
 
         for item in iterable_value.iter() {
-            let previous_vars: Vec<Option<Variable>> = variable_names.iter()
-                .map(|name| self.variables.get(name).cloned())
-                .collect();
-
-            if self.check_stop_flag() {
-                return NULL;
-            }
+            if self.check_stop_flag() { return NULL; }
 
             if let Value::Error(err_type, err_msg, ref_err) = item {
                 if let Some(re) = ref_err {
@@ -6836,72 +6815,43 @@ impl Interpreter {
                 return NULL;
             }
 
-            if variable_names.len() == 1 {
-                self.variables.insert(
-                    variable_names[0].clone(),
-                    Variable::new(variable_names[0].clone(), item.clone(), item.type_name(), false, true, true),
-                );
-            } else {
-                let values_to_assign = match item {
-                    Value::List(inner) => inner,
-                    Value::Tuple(inner) => inner,
-                    t => {
-                        return self.raise("TypeError", &format!("Cannot destructure non-list/tuple ({}) value into multiple variables", t.get_type().display_simple()));
-                    }
-                };
+            let bindings = match check_pattern(&item, variable_pattern) {
+                Ok((true, vars)) => vars,
+                Ok((false, _)) => return self.raise("ValueError", "Item did not match for-loop variable pattern"),
+                Err((etype, emsg)) => return self.raise(&etype, &emsg),
+            };
 
-                if values_to_assign.len() != variable_names.len() {
-                    return self.raise("ValueError", &format!("Mismatched number of variables and values to destructure ({} vs {})", variable_names.len(), values_to_assign.len()));
-                }
+            let previous_vars: Vec<Option<Variable>> = bindings.keys()
+                .map(|name| self.variables.get(name).cloned())
+                .collect();
 
-                for (name, val) in variable_names.iter().zip(values_to_assign.iter()) {
-                    self.variables.insert(
-                        name.clone(),
-                        Variable::new(name.clone(), val.clone(), val.type_name(), false, true, true),
-                    );
-                }
+            for (name, val) in &bindings {
+                self.variables.insert(name.clone(), Variable::new_pt(
+                    name.clone(),
+                    val.clone(),
+                    val.get_type(),
+                    false, true, true,
+                ));
             }
 
-            for stmt in body {
-                result = self.evaluate(&stmt.convert_to_statement());
+            for stmt in &body {
+                result = self.evaluate(&stmt);
 
-                if self.err.is_some() {
-                    for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
-                        match prev_var {
-                            Some(var) => self.variables.insert(name.clone(), var.clone()),
-                            None => self.variables.remove(name),
-                        };
-                    }
-                    return NULL;
-                }
-
-                if self.is_returning {
-                    for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
-                        match prev_var {
-                            Some(var) => self.variables.insert(name.clone(), var.clone()),
-                            None => self.variables.remove(name),
-                        };
+                if self.err.is_some() || self.is_returning {
+                    for (name, prev_var) in bindings.keys().zip(previous_vars.iter()) {
+                        match prev_var { Some(var) => self.variables.insert(name.clone(), var.clone()), None => self.variables.remove(name) };
                     }
                     return result;
                 }
             }
 
-            for (name, prev_var) in variable_names.iter().zip(previous_vars.iter()) {
-                match prev_var {
-                    Some(var) => self.variables.insert(name.clone(), var.clone()),
-                    None => self.variables.remove(name),
-                };
+            for (name, prev_var) in bindings.keys().zip(previous_vars.iter()) {
+                match prev_var { Some(var) => self.variables.insert(name.clone(), var.clone()), None => self.variables.remove(name) };
             }
 
             match self.state {
-                State::Break => {
-                    self.state = State::Normal;
-                    break;
-                }
-                State::Continue => {
-                    self.state = State::Normal;
-                    continue;
-                }
+                State::Break => { self.state = State::Normal; break; },
+                State::Continue => { self.state = State::Normal; continue; },
                 _ => {}
             }
         }
@@ -7437,7 +7387,132 @@ impl Interpreter {
 
                 return result;
             }
-            _ => self.raise("TypeError", &format!("Unsupported iterable type: {}", iterable_type)),
+            "LIST_COMPREHENSION" => {
+                let raw_for_clauses = match statement.get(&Value::String("for_clauses".to_string())) {
+                    Some(val) => val.clone(),
+                    None => {
+                        self.raise("RuntimeError", "Missing 'for_clauses' in list comprehension statement");
+                        return NULL;
+                    }
+                };
+
+                let map_expression = match statement.get(&Value::String("map_expression".to_string())) {
+                    Some(val) => val.convert_to_statement(),
+                    None => {
+                        self.raise("RuntimeError", "Missing 'map_expression' in list comprehension statement");
+                        return NULL;
+                    }
+                };
+
+                if self.err.is_some() { return NULL; }
+
+                fn eval_nested(
+                    interpreter: &mut Interpreter,
+                    clauses: &[Value],
+                    depth: usize,
+                    result: &mut Vec<Value>,
+                    map_expression: &Statement
+                ) {
+                    if depth >= clauses.len() {
+                        let mapped_value = interpreter.evaluate(map_expression);
+                        if interpreter.err.is_some() { return; }
+                        result.push(mapped_value);
+                        return;
+                    }
+
+                    let clause = match &clauses[depth] {
+                        Value::List(lst) if lst.len() == 3 => lst,
+                        _ => {
+                            interpreter.raise("RuntimeError", "Each for clause must be a list of 3 elements: pattern, iterable, filters");
+                            return;
+                        }
+                    };
+
+                    let pattern = &clause[0];
+                    let iterable = interpreter.evaluate(&clause[1].convert_to_statement());
+                    if interpreter.err.is_some() { return; }
+                    if !iterable.is_iterable() {
+                        interpreter.raise("TypeError", &format!("Value of type '{}' is not iterable", iterable.get_type().display_simple()));
+                        return;
+                    }
+
+                    let filter_conditions: Vec<Statement> = match &clause[2] {
+                        Value::List(lst) => lst.iter().map(|c| c.convert_to_statement()).collect(),
+                        _ => vec![],
+                    };
+
+                    for item in iterable.iter() {
+                        if interpreter.check_stop_flag() { return; }
+
+                        let bindings = match check_pattern(&item, pattern) {
+                            Ok((true, new_bindings)) => new_bindings,
+                            Ok((false, _)) => {
+                                interpreter.raise("ValueError", "Pattern did not match item in list comprehension");
+                                return;
+                            }
+                            Err((err_type, msg)) => {
+                                interpreter.raise(&err_type, &msg);
+                                return;
+                            }
+                        };
+
+                        let prev_vars: Vec<Option<Variable>> = bindings.keys()
+                            .map(|name| interpreter.variables.get(name).cloned())
+                            .collect();
+
+                        for (name, val) in &bindings {
+                            interpreter.variables.insert(
+                                name.clone(),
+                                Variable::new(name.clone(), val.clone(), val.type_name(), false, true, true)
+                            );
+                        }
+
+                        let mut skip = false;
+                        for cond in &filter_conditions {
+                            if !interpreter.evaluate(cond).is_truthy() || interpreter.err.is_some() {
+                                skip = true;
+                                break;
+                            }
+                        }
+
+                        if skip {
+                            for (name, prev) in bindings.keys().zip(prev_vars.iter()) {
+                                match prev {
+                                    Some(v) => { interpreter.variables.insert(name.clone(), v.clone()); },
+                                    None => { interpreter.variables.remove(name); },
+                                }
+                            }
+                            continue;
+                        }
+
+                        eval_nested(interpreter, clauses, depth + 1, result, map_expression);
+
+                        for (name, prev) in bindings.keys().zip(prev_vars.iter()) {
+                            match prev {
+                                Some(v) => { interpreter.variables.insert(name.clone(), v.clone()); },
+                                None => { interpreter.variables.remove(name); },
+                            }
+                        }
+
+                        match interpreter.state {
+                            State::Break => { interpreter.state = State::Normal; break; },
+                            State::Continue => { interpreter.state = State::Normal; continue; },
+                            _ => {}
+                        }
+                    }
+                }
+                let result = if let Value::List(for_clauses_list) = raw_for_clauses {
+                    let mut flat_result = Vec::with_capacity(for_clauses_list.len() * 4);
+                    eval_nested(self, &for_clauses_list, 0, &mut flat_result, &map_expression);
+                    Value::List(flat_result)
+                } else {
+                    self.raise("RuntimeError", "Expected 'for_clauses' to be a list of clauses");
+                    return NULL;
+                };
+
+                result
+            }
+            _ => self.raise("RuntimeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }
     }
 

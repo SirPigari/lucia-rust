@@ -1647,18 +1647,20 @@ pub fn check_pattern(
         value: &Value,
         pat: &Value,
         vars: &mut HashMap<String, Value>,
-    ) -> Result<bool, (String, String)> {    
+    ) -> Result<bool, (String, String)> {
         // Union pattern
-        if let Value::List(pats) = pat {
-            if !pats.is_empty() {
-                for subpat in pats {
-                    let mut local_vars = vars.clone();
-                    if inner(value, subpat, &mut local_vars)? {
-                        *vars = local_vars;
-                        return Ok(true);
+        if let Value::Map { keys, values: pats } = pat {
+            if keys.len() == 1 && keys[0] == Value::String("union".into()) {
+                if !pats.is_empty() {
+                    for subpat in pats {
+                        let mut local_vars = vars.clone();
+                        if inner(value, subpat, &mut local_vars)? {
+                            *vars = local_vars;
+                            return Ok(true);
+                        }
                     }
+                    return Ok(false);
                 }
-                return Ok(false);
             }
         }
 
@@ -1683,7 +1685,17 @@ pub fn check_pattern(
             (Value::String(a), Value::String(b)) if a == b => Ok(true),
 
             // Tuple match
-            (Value::Tuple(c_elems), Value::Tuple(p_elems)) => {
+            (val, Value::Tuple(p_elems)) if val.is_iterable() => {
+                let iter = val.iter().collect::<Vec<_>>();
+                if p_elems.len() != iter.len() { return Ok(false); }
+                for (p, c) in p_elems.iter().zip(iter.iter()) {
+                    if !inner(c, p, vars)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+
+            // List match
+            (Value::List(c_elems), Value::List(p_elems)) => {
                 if c_elems.len() != p_elems.len() { return Ok(false); }
                 for (c, p) in c_elems.iter().zip(p_elems.iter()) {
                     if !inner(c, p, vars)? { return Ok(false); }
@@ -1756,7 +1768,7 @@ pub fn check_pattern(
                     let p_args = match &values[1] { Value::List(l) => l, _ => return Ok(false) };
                     if p_segments.len() == 1 && p_args.is_empty() {
                         if let Value::String(var_name) = &p_segments[0] {
-                            if !var_name.starts_with('_') {
+                            if var_name != "_" {
                                 if let Some(existing) = vars.get(var_name) {
                                     if existing != val {
                                         return Ok(false);
