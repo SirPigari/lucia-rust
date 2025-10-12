@@ -113,8 +113,14 @@ typedef struct I = {
     g: int,
 }
 
+typedef struct P = {
+    h: str,
+}
+
 k := H { f = 10 }
 
 l := k as I
 
 assert_eq!(l.g, 10)
+assert_err!(l.f)
+assert_err!(k as P) // incompatible types

@@ -8,6 +8,9 @@ Be free to fix them or add new ones.
 _Total TODOs found: 6_
 ---
 
+### [`src/interpreter.rs:3578:1`](../../../src/interpreter.rs#L3578) _(added by **SirPigari** on **2025-10-12**)_
+- Implement enum conversion
+
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
 - fix this later
 
@@ -22,9 +25,6 @@ _Total TODOs found: 6_
 
 ### [`src/interpreter.rs:5899:1`](../../../src/interpreter.rs#L5899) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
-
-### [`src/interpreter.rs:3578:1`](../../../src/interpreter.rs#L3578) **(TODO not committed yet)**
-- Implement enum conversion
 
 ---
 *Report generated automatically.*
