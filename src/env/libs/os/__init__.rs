@@ -7,6 +7,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::{insert_native_fn, insert_native_var};
+use std::sync::Mutex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::env::consts;
@@ -14,7 +15,7 @@ use std::env::consts;
 use sys_info;
 
 #[cfg(target_pointer_width = "64")]
-const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
+pub const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
 
 #[cfg(target_pointer_width = "32")]
 const MAX_PTR: usize = 0xFFFF_FFFF; // max for 32-bit usize
@@ -55,11 +56,12 @@ where
 }
 
 // Unsafe pointer functions are the same for all platforms
+
 fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
         return Value::Error(
             "TypeError",
-            "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.",
+            "This function is unsafe. Enable allow_unsafe to use it.",
             None,
         );
     }
@@ -69,8 +71,12 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 
     unsafe {
-        let arc = Arc::from_raw(ptr as *const Value);
-        Value::Pointer(arc)
+        // Assume the ptr is a valid pointer to Arc<Mutex<Value>>
+        let arc_ptr = ptr as *const Mutex<Value>;
+        let arc_ref: Arc<Mutex<Value>> = Arc::from_raw(arc_ptr);
+        let cloned_arc = Arc::clone(&arc_ref);
+        std::mem::forget(arc_ref); // don’t drop the original Arc
+        Value::Pointer(cloned_arc)
     }
 }
 
@@ -78,7 +84,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
         return Value::Error(
             "TypeError",
-            "This function is unsafe and can result in segmentation fault. Set 'allow_unsafe' to true to run this function.",
+            "This function is unsafe. Enable allow_unsafe to use it.",
             None,
         );
     }
@@ -88,8 +94,11 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 
     unsafe {
-        let raw = ptr as *const Value;
-        (*raw).clone()
+        let arc_ptr = ptr as *const Mutex<Value>;
+        let arc_ref: Arc<Mutex<Value>> = Arc::from_raw(arc_ptr);
+        let val = arc_ref.lock().unwrap().clone(); // safely get inner value
+        std::mem::forget(arc_ref); // don’t drop the Arc
+        val
     }
 }
 

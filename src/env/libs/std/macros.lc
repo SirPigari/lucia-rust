@@ -7,15 +7,15 @@
 // keep backwards compatibility
 #include "./assert.lc"
 
-#macro unreachable($msg=("Entered unreachable code")):
+#macro unreachable!($msg=("Entered unreachable code")):
     throw $msg from "UnreachableError"
 #endmacro
 
-#macro todo($msg=("Not implemented yet")):
+#macro todo!($msg=("Not implemented yet")):
     throw $msg from "NotImplemented"
 #endmacro
 
-#macro dbg($value...):
+#macro dbg!($value...):
     // when a variadic arg in macros is used, the value of it isnt a tuple or a list, its just the values separated by commas
     // its on the macro to decide the type
     // here we use a list (denoted by the [])
@@ -31,12 +31,12 @@
     null  // otherwise it will return the last value (values)
 #endmacro
 
-#macro dbglog($value):
+#macro dbglog!($value):
     styledprint($value, fg_color=#config.color_scheme["debug"])
 #endmacro
 
 // TODO: Fix apollo time in time module (src/env/libs/time/__init__.rs)
-#macro time_it($expr):
+#macro time_it!($expr):
     scope time_it_scope (_time): 
         start_time: int = _time.current_apollo_time()
         result: any = ($expr)
@@ -46,7 +46,7 @@
     end
 #endmacro
 
-#macro stringify($value):
+#macro stringify!($value):
     if ($value is str):
         return $value
     else:
@@ -54,7 +54,7 @@
     end
 #endmacro
 
-#macro stringify_tokens($tokens):
+#macro stringify_tokens!($tokens):
     return $!tokens
 #endmacro
 

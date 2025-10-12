@@ -658,9 +658,11 @@ where
 pub fn get_type_default(type_: &str) -> Value {
     if type_.starts_with("&") {
         let inner_type = &type_[1..];
-        let boxed = Box::new(get_type_default(inner_type));
-        let ptr = Box::into_raw(boxed) as usize;
-        return Value::Pointer( unsafe { Arc::from_raw(ptr as *const Value) });
+        let default_val = get_type_default(inner_type);
+
+        let arc = Arc::new(Mutex::new(default_val));
+
+        return Value::Pointer(arc);
     }
     if type_.starts_with("?") {
         let inner_type = &type_[1..];
@@ -2239,6 +2241,57 @@ pub fn find_struct_method(
     }
 }
 
+pub fn diff_fields(
+    a_name: &str,
+    b_name: &str,
+    a: &Vec<(String, Statement, Vec<String>)>,
+    b: &Vec<(String, Statement, Vec<String>)>,
+) -> Result<HashMap<String, String>, String> {
+    let mut map = HashMap::new();
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < a.len() && j < b.len() {
+        let (name_a, stmt_a, mods_a) = &a[i];
+        let (name_b, stmt_b, mods_b) = &b[j];
+
+        map.insert(name_a.clone(), name_b.clone());
+
+        let is_a_stmt_b_stmt = stmt_a.is_equal_to_statement(stmt_b);
+
+        if is_a_stmt_b_stmt && mods_a == mods_b {
+            i += 1;
+            j += 1;
+            continue;
+        }
+
+        if !is_a_stmt_b_stmt {
+            return Err(format!("Field {} has a different type", name_a));
+        }
+
+        if mods_a != mods_b {
+            return Err(format!("Field {} has different modifiers", name_a));
+        }
+
+        i += 1;
+        j += 1;
+    }
+
+    while i < a.len() {
+        let (name, _, _) = &a[i];
+        return Err(format!("Field {} is not in {}", name, b_name));
+    }
+
+    while j < b.len() {
+        let (name, _, _) = &b[j];
+        return Err(format!(
+            "Field {} is in {} but not in {}",
+            name, b_name, a_name
+        ));
+    }
+
+    Ok(map)
+}
 
 pub const KEYWORDS: &[&str] = &[
     "fun", "gen", "return", "export", "throw", "end", "catch", "try", "static", "non-static",

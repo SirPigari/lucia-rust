@@ -5,7 +5,7 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 5_
+_Total TODOs found: 6_
 ---
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
@@ -20,8 +20,11 @@ _Total TODOs found: 5_
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
 
-### [`src/interpreter.rs:5842:1`](../../../src/interpreter.rs#L5842) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:5899:1`](../../../src/interpreter.rs#L5899) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
+
+### [`src/interpreter.rs:3578:1`](../../../src/interpreter.rs#L3578) **(TODO not committed yet)**
+- Implement enum conversion
 
 ---
 *Report generated automatically.*

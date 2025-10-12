@@ -17,9 +17,10 @@ use bincode::{
     de::{BorrowDecode, Decode, Decoder},
     error::{EncodeError, DecodeError},
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::cmp::Ordering;
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone)]
 pub enum Value {
     Float(Float),
     Int(Int),
@@ -39,8 +40,65 @@ pub enum Value {
     Module(Module),
     Enum(Enum),
     Struct(Struct),
-    Pointer(Arc<Value>),
+    Pointer(Arc<Mutex<Value>>),
     Error(&'static str, &'static str, Option<Error>),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        use Value::*;
+        match (self, other) {
+            (Float(a), Float(b)) => a == b,
+            (Int(a), Int(b)) => a == b,
+            (String(a), String(b)) => a == b,
+            (Boolean(a), Boolean(b)) => a == b,
+            (Null, Null) => true,
+            (Map { keys: ak, values: av }, Map { keys: bk, values: bv }) => ak == bk && av == bv,
+            (Tuple(a), Tuple(b)) => a == b,
+            (List(a), List(b)) => a == b,
+            (Bytes(a), Bytes(b)) => a == b,
+            (Type(a), Type(b)) => a == b,
+            (Function(a), Function(b)) => a == b,
+            (Generator(a), Generator(b)) => a == b,
+            (Module(a), Module(b)) => a == b,
+            (Enum(a), Enum(b)) => a == b,
+            (Struct(a), Struct(b)) => a == b,
+            (Pointer(a), Pointer(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                *a_lock == *b_lock
+            }
+            (Error(ac, am, _), Error(bc, bm, _)) => ac == bc && am == bm,
+            _ => false,
+        }
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        use Value::*;
+        match (self, other) {
+            (Float(a), Float(b)) => a.partial_cmp(b),
+            (Int(a), Int(b)) => a.partial_cmp(b),
+            (String(a), String(b)) => a.partial_cmp(b),
+            (Boolean(a), Boolean(b)) => a.partial_cmp(b),
+            (Null, Null) => Some(Ordering::Equal),
+            (Tuple(a), Tuple(b)) => a.partial_cmp(b),
+            (List(a), List(b)) => a.partial_cmp(b),
+            (Bytes(a), Bytes(b)) => a.partial_cmp(b),
+            (Type(a), Type(b)) => a.partial_cmp(b),
+            (Function(a), Function(b)) => a.partial_cmp(b),
+            (Generator(a), Generator(b)) => a.partial_cmp(b),
+            (Enum(a), Enum(b)) => a.partial_cmp(b),
+            (Struct(a), Struct(b)) => a.partial_cmp(b),
+            (Pointer(a), Pointer(b)) => {
+                let a_lock = a.lock().unwrap();
+                let b_lock = b.lock().unwrap();
+                a_lock.partial_cmp(&*b_lock)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Debug for Value {
@@ -300,7 +358,19 @@ impl<C> Decode<C> for Value {
             9 => Ok(Value::Type(Type::decode(decoder)?)),
             10 => Ok(Value::Enum(Enum::decode(decoder)?)),
             11 => Ok(Value::Struct(Struct::decode(decoder)?)),
-            12 => Ok(Value::Pointer(unsafe { Arc::from_raw(usize::decode(decoder)? as *const Value) })),
+            12 => {
+                let ptr_usize = usize::decode(decoder)?;
+                if ptr_usize < 0x1000 || ptr_usize > crate::env::libs::os::__init__::MAX_PTR {
+                    return Err(DecodeError::Other("Pointer value out of range".into()));
+                }
+
+                let arc = unsafe {
+                    let arc_ref: &Arc<Mutex<Value>> = &*(ptr_usize as *const Arc<Mutex<Value>>);
+                    Arc::clone(arc_ref)
+                };
+
+                Ok(Value::Pointer(arc))
+            }
             13 => Ok(Value::Function(Function::decode(decoder)?)),
             _ => Err(DecodeError::Other("invalid tag".into())),
         }
@@ -404,7 +474,7 @@ impl Hash for Value {
             }
             Value::Pointer(ptr) => {
                 4u8.hash(state);
-                ptr.hash(state);
+                ptr.lock().unwrap().hash(state);
             }
         }
     }
@@ -585,7 +655,7 @@ impl Value {
             Value::Enum(e) => e.get_type(),
             Value::Struct(s) => s.get_type(),
             Value::Pointer(arc) => {
-                let mut t = arc.get_type();
+                let mut t = (arc.lock().unwrap()).get_type();
                 t.set_reference(true);
                 t
             }
@@ -636,7 +706,12 @@ impl Value {
             Value::Enum(e) => e.is_truthy(),
             Value::Struct(s) => s.is_truthy(),
             Value::Error(_, _, _) => true,
-            Value::Pointer(p) => Arc::strong_count(p) > 0 && !p.is_null(),
+            Value::Pointer(p) => {
+                Arc::strong_count(p) > 0 && {
+                    let inner = p.lock().unwrap();
+                    !inner.is_null()
+                }
+            }
             Value::Null => false,
         }
     }

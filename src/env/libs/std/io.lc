@@ -8,19 +8,19 @@ final STDOUT: int = 1
 final STDERR: int = 2
 final STDIN: int = 3
 
-#macro printf($format, $args...):
+#macro printf!($format, $args...):
     print(_collections.format_string($format, [$args]))
 #endmacro
 
-#macro println($value, $output_stream=(STDOUT)):
+#macro println!($value, $output_stream=(STDOUT)):
     _collections.printto($value, $output_stream)
 #endmacro
 
-#macro format($format, $args...):
+#macro format!($format, $args...):
     _collections.format_string($format, [$args])
 #endmacro
 
-#macro read_line($input_stream=(STDIN)):
+#macro read_line!($input_stream=(STDIN)):
     _collections.read_line($input_stream)
 #endmacro
 

@@ -51,7 +51,7 @@ pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
         if let Ok(existing_str) = cstr.to_str() {
             if existing_str == s {
                 let ptr = cstr.as_ptr() as usize as i64;
-                return Value::Pointer(Arc::new(Value::Int(ptr.into())));
+                return Value::Pointer(Arc::new(Mutex::new(Value::Int(ptr.into()))));
             }
         }
     }
@@ -64,7 +64,7 @@ pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
 
     locked.push(cstring);
 
-    Value::Pointer(Arc::new(Value::Int((ptr as usize as i64).into())))
+    Value::Pointer(Arc::new(Mutex::new(Value::Int((ptr as usize as i64).into()))))
 }
 
 fn manual_escape_string(s: &str) -> String {
@@ -89,7 +89,7 @@ pub fn parse_str_ptr(args: &HashMap<String, Value>) -> Value {
     let ptr_val = args.get("ptr");
     let ptr = match ptr_val {
         Some(Value::Pointer(arc)) => {
-            if let Value::Int(i) = arc.as_ref() {
+            if let Value::Int(i) = &*arc.lock().unwrap() {
                 i.to_i64().unwrap_or(0) as *const i8
             } else {
                 return Value::Error("TypeError", "Pointer must wrap Int", None);
@@ -129,7 +129,7 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
     let len_val = args.get("len");
     let ptr = match ptr_val {
         Some(Value::Pointer(arc)) => {
-            if let Value::Int(i) = arc.as_ref() {
+            if let Value::Int(i) = &*arc.lock().unwrap() {
                 let raw = i.to_i64().unwrap_or(0) as usize;
                 raw as *const std::ffi::c_void
             } else {
@@ -196,7 +196,7 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
                                 "ptr" => {
                                     let p = unsafe { struct_ptr.add(offset) as *const *const std::ffi::c_void };
                                     offset += std::mem::size_of::<*const std::ffi::c_void>();
-                                    Value::Pointer(Arc::new(Value::Int(unsafe { *p as usize as i64 }.into())))
+                                    Value::Pointer(Arc::new(Mutex::new(Value::Int(unsafe { *p as usize as i64 }.into()))))
                                 }
                                 _ => Value::Null,
                             };
@@ -263,7 +263,7 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
     }
 
     let func_ptr_int: Int = (wrapper as usize as i64).into();
-    Value::Pointer(Arc::new(Value::Int(func_ptr_int)))
+    Value::Pointer(Arc::new(Mutex::new(Value::Int(func_ptr_int))))
 }
 
 
@@ -273,23 +273,16 @@ fn cast(args: &HashMap<String, Value>) -> Value {
         None => return Value::Error("TypeError", "Expected value argument", None),
     };
 
-    let ptr_as_int = match args.get("to") {
-        Some(Value::Pointer(ptr)) => match &**ptr {
-            Value::Int(i) => match i.to_i64() {
-                Ok(i) => i as usize,
-                Err(_) => return Value::Error("TypeError", "Invalid pointer conversion", None),
-            },
-            _ => return Value::Error("TypeError", "Expected Int pointer", None),
-        },
+    let ptr_arc = match args.get("to") {
+        Some(Value::Pointer(p)) => p.clone(),
         _ => return Value::Error("TypeError", "Expected a pointer", None),
     };
-
-    let raw_ptr = ptr_as_int as *mut Value;
-
-    unsafe {
-        raw_ptr.write(val.clone());
-        Value::Pointer(Arc::from_raw(raw_ptr))
+    {
+        let mut inner = ptr_arc.lock().unwrap();
+        std::mem::drop(std::mem::replace(&mut *inner, val));
     }
+
+    Value::Pointer(ptr_arc)
 }
 
 fn load_lib(args: &HashMap<String, Value>) -> Value {
@@ -298,7 +291,7 @@ fn load_lib(args: &HashMap<String, Value>) -> Value {
             match unsafe { LuciaLib::load(Path::new(path)) } {
                 Ok(lib) => {
                     let ptr_val = Box::into_raw(Box::new(lib)) as usize;
-                    Value::Pointer(Arc::new(Value::Int((ptr_val as i64).into())))
+                    Value::Pointer(Arc::new(Mutex::new(Value::Int((ptr_val as i64).into()))))
                 }
                 Err(e) => libload_error(&format!("Failed to load library: {}", e)),
             }
@@ -320,7 +313,7 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
             Some(Value::List(arg_tys)),
             Some(Value::String(ret_ty)),
         ) => {
-            let raw_ptr = if let Value::Int(ptr_int) = &**lib_ptr_arc {
+            let raw_ptr = if let Value::Int(ptr_int) = &*lib_ptr_arc.lock().unwrap() {
                 match ptr_int.to_i64() {
                     Ok(i) => i as usize as *mut LuciaLib,
                     Err(_) => return libload_error("Invalid library pointer conversion"),
@@ -363,7 +356,7 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
                     match unsafe { lib.get_function(name, arg_types, ret_ty.clone()) } {
                         Ok(f) => {
                             let fn_ptr = Box::into_raw(Box::new(f)) as usize as i64;
-                            Value::Pointer(Arc::new(Value::Int(fn_ptr.into())))
+                            Value::Pointer(Arc::new(Mutex::new(Value::Int(fn_ptr.into()))))
                         }
                         Err(e) => libload_error(&format!("Failed to get function: {}", e)),
                     }
@@ -436,7 +429,7 @@ pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
                     }
 
                     let fn_ptr = Box::into_raw(Box::new((f_ptr, is_variadic))) as usize as i64;
-                    Value::Pointer(Arc::new(Value::Int(fn_ptr.into())))
+                    Value::Pointer(Arc::new(Mutex::new(Value::Int(fn_ptr.into()))))
                 }
                 _ => libload_error("Invalid argument or return types"),
             }
@@ -448,7 +441,7 @@ pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
 fn call_fn(args: &HashMap<String, Value>) -> Value {
     match (args.get("fn"), args.get("args"), args.get("stdcall")) {
         (Some(Value::Pointer(fn_ptr_arc)), Some(Value::List(call_args)), Some(Value::Boolean(stdcall))) => {
-            let fn_ptr = if let Value::Int(ptr_int) = &**fn_ptr_arc {
+            let fn_ptr = if let Value::Int(ptr_int) = &*fn_ptr_arc.lock().unwrap() {
                 match ptr_int.to_i64() {
                     Ok(i) => i as usize as *mut LuciaFfiFn,
                     Err(_) => return libload_error("Invalid function pointer (failed to convert to i64)"),
@@ -508,7 +501,7 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
                 bytes_vec.extend(&f.to_f64().unwrap_or(0.0).to_le_bytes());
             },
             "ptr" => if let Value::Pointer(p) = val {
-                let addr = match &**p {
+                let addr = match &*p.lock().unwrap() {
                     Value::Int(i) => i.to_i64().unwrap_or(0) as usize,
                     _ => 0usize,
                 };
@@ -524,7 +517,7 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
     if is_ptr {
         let boxed = bytes_vec.into_boxed_slice();
         let raw_ptr = Box::into_raw(boxed) as *mut u8;
-        return Value::Pointer(Arc::new(Value::Int(Int::from(raw_ptr as usize))));
+        return Value::Pointer(Arc::new(Mutex::new(Value::Int(Int::from(raw_ptr as usize)))));
     }
 
     let hex_string: String = bytes_vec.iter().rev().map(|b| format!("{:02X}", b)).collect();
@@ -560,7 +553,7 @@ fn parse_struct(args: &HashMap<String, Value>) -> Value {
 
     let bytes: Vec<u8> = if is_ptr {
         if let Value::Pointer(p) = struct_val {
-            let addr = match &**p {
+            let addr = match &*p.lock().unwrap() {
                 Value::Int(i) => i.to_i64().unwrap_or(0) as *const u8,
                 _ => return Value::Error("TypeError", "Expected pointer to struct bytes", None),
             };
@@ -631,7 +624,7 @@ fn parse_struct(args: &HashMap<String, Value>) -> Value {
                 let mut buf = [0u8; std::mem::size_of::<usize>()];
                 buf.copy_from_slice(&bytes[offset..offset+std::mem::size_of::<usize>()]);
                 fields.push(Value::Pointer(
-                    Arc::new(Value::Int(Int::from(usize::from_le_bytes(buf))))
+                    Arc::new(Mutex::new(Value::Int(Int::from(usize::from_le_bytes(buf)))))
                 ));
             }
             _ => {}
@@ -668,13 +661,13 @@ fn malloc_fn(args: &HashMap<String, Value>) -> Value {
         return Value::Error("MemoryError", "Failed to allocate memory", None);
     }
 
-    Value::Pointer(Arc::new(Value::Int((ptr as usize as i64).into())))
+    Value::Pointer(Arc::new(Mutex::new(Value::Int((ptr as usize as i64).into()))))
 }
 
 fn write_byte_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
-            if let Value::Int(i) = &**p { i.to_i64().unwrap_or(0) as *mut u8 } else { return Value::Int(0.into()); }
+            if let Value::Int(i) = &*p.lock().unwrap() { i.to_i64().unwrap_or(0) as *mut u8 } else { return Value::Int(0.into()); }
         }
         _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
     };
@@ -697,7 +690,7 @@ fn write_byte_fn(args: &HashMap<String, Value>) -> Value {
 fn write_i64_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
-            if let Value::Int(i) = &**p { i.to_i64().unwrap_or(0) as *mut i64 } else { return Value::Int(0.into()); }
+            if let Value::Int(i) = &*p.lock().unwrap() { i.to_i64().unwrap_or(0) as *mut i64 } else { return Value::Int(0.into()); }
         }
         _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
     };
@@ -720,7 +713,7 @@ fn write_i64_fn(args: &HashMap<String, Value>) -> Value {
 fn write_f64_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
-            if let Value::Int(i) = &**p {
+            if let Value::Int(i) = &*p.lock().unwrap() {
                 i.to_i64().unwrap_or(0) as *mut f64
             } else { return Value::Int(0.into()); }
         }
@@ -744,7 +737,7 @@ fn write_f64_fn(args: &HashMap<String, Value>) -> Value {
 
 pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
-        Some(Value::Pointer(p)) => match &**p {
+        Some(Value::Pointer(p)) => match &*p.lock().unwrap() {
             Value::Int(addr) => addr.to_i64().unwrap_or(0) as *mut u8,
             _ => return Value::Error("TypeError", "'base' Pointer must contain Int", None),
         },
@@ -757,7 +750,7 @@ pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
     };
 
     let value = match args.get("ptr") {
-        Some(Value::Pointer(p)) => match &**p {
+        Some(Value::Pointer(p)) => match &*p.lock().unwrap() {
             Value::Int(addr) => addr.to_i64().unwrap_or(0) as *const c_void,
             _ => std::ptr::null(),
         },
@@ -774,7 +767,7 @@ pub fn unload_lib(args: &HashMap<String, Value>) -> Value {
 
     match lib_val {
         Some(Value::Pointer(lib_ptr_arc)) => {
-            let raw_ptr = if let Value::Int(ptr_int) = &**lib_ptr_arc {
+            let raw_ptr = if let Value::Int(ptr_int) = &*lib_ptr_arc.lock().unwrap() {
                 match ptr_int.to_i64() {
                     Ok(i) => i as usize as *mut LuciaLib,
                     Err(_) => return libload_error("Invalid library pointer conversion"),

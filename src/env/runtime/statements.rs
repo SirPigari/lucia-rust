@@ -257,6 +257,29 @@ impl Statement {
             Statement::Null => true,
         }
     }
+    pub fn is_equal_to_statement(&self, other: &Statement) -> bool {
+        match (self, other) {
+            (Statement::Statement { keys: keys_a, values: values_a, .. },
+             Statement::Statement { keys: keys_b, values: values_b, .. }) => {
+                if keys_a.len() != keys_b.len() || values_a.len() != values_b.len() {
+                    return false;
+                }
+                for (k_a, k_b) in keys_a.iter().zip(keys_b.iter()) {
+                    if k_a != k_b {
+                        return false;
+                    }
+                }
+                for (v_a, v_b) in values_a.iter().zip(values_b.iter()) {
+                    if v_a != v_b {
+                        return false;
+                    }
+                }
+                true
+            },
+            (Statement::Null, Statement::Null) => true,
+            _ => false,
+        }
+    }
     pub fn from_hashmap_values(values: &HashMap<Value, Value>) -> Statement {
         Statement::convert_from_hashmap(values)
     }

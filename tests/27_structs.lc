@@ -103,3 +103,18 @@ for Point:
         return Point { x = 0, y = 0 }
     end
 end
+
+// casting structs
+typedef struct H = {
+    f: int,
+}
+
+typedef struct I = {
+    g: int,
+}
+
+k := H { f = 10 }
+
+l := k as I
+
+assert_eq!(l.g, 10)

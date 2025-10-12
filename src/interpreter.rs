@@ -31,6 +31,7 @@ use crate::env::runtime::utils::{
     generate_name_variants,
     escape_string,
     find_struct_method,
+    diff_fields,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -422,7 +423,7 @@ impl Interpreter {
                         }
                     }
                     Value::Pointer(ptr) => {
-                        let ptr_val = (*ptr).clone();
+                        let ptr_val = ptr.lock().unwrap();
                         self.check_type(&ptr_val, expected);
                     }
                     _ => {
@@ -2974,13 +2975,16 @@ impl Interpreter {
                     Value::Type(mut t) => {
                         Value::Type(t.set_reference(true).unmut())
                     }
-                    _ => Value::Pointer(Arc::new(value)),
+                    _ => {
+                        Value::Pointer(Arc::new(Mutex::new(value)))
+                    }
                 }
             }
 
             Value::String(t) if t == "POINTER_DEREF" => {
                 if let Value::Pointer(ptr_arc) = value {
-                    (*ptr_arc).clone()
+                    let inner = ptr_arc.lock().unwrap();
+                    (*inner).clone()
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
                     NULL
@@ -3003,19 +3007,14 @@ impl Interpreter {
                         .unwrap_or(&NULL)
                         .convert_to_statement(),
                 );
-
                 if self.err.is_some() {
                     return NULL;
                 }
 
                 if let Value::Pointer(ref ptr_arc) = left {
-                    let raw_ptr = Arc::as_ptr(&ptr_arc) as *mut Value;
-
-                    unsafe {
-                        raw_ptr.write(right.clone());
-                    }
-
-                    left
+                    let mut inner = ptr_arc.lock().unwrap();
+                    let _old = std::mem::replace(&mut *inner, right.clone());
+                    left.clone()
                 } else {
                     self.raise("TypeError", "Expected pointer reference for assignment");
                     NULL
@@ -3531,29 +3530,64 @@ impl Interpreter {
         if self.err.is_some() {
             return NULL;
         }
-        let (target_type, target_type_type) = match &binding {
-            Value::Type(tt) => match get_inner_type(tt) {
-                Ok((t, _)) => (t, tt),
-                Err(e) => return self.raise("TypeError", &e),
-            },
+
+        let target_type_type = match &binding {
+            Value::Type(tt) => tt,
             _ => return self.raise("TypeError", &format!(
                     "Type '{}' is not a valid target type for conversion",
                     value.type_name()
                 )),
         };
 
-        if self.err.is_some() {
-            return NULL;
-        }
-
         match target_type_type {
             Type::Struct { .. } => {
-                return self.raise("NotImplemented", "Conversion to struct types is not implemented yet");
+                match value {
+                    Value::Struct(s) => {
+                        let s_ty = s.get_type();
+                        let t_ty = target_type_type;
+                        match (&s_ty, &t_ty) {
+                            (Type::Struct { fields: s_fields, .. }, Type::Struct { fields: t_fields, .. }) => {
+                                match diff_fields(&s_ty.display_simple(), &t_ty.display_simple(), &s_fields, &t_fields) {
+                                    Ok(hm) => {
+                                        let field_values = s.get_fields();
+                                        let mut new_fields = HashMap::with_capacity(t_fields.len());
+                                        for (key, val) in field_values {
+                                            if let Some(new_key) = hm.get(key) {
+                                                new_fields.insert(new_key.clone(), (val.0.clone(), val.1.clone()));
+                                            }
+                                        }
+                                        return Value::Struct(Struct::new_with_fields(t_ty.clone(), new_fields))
+                                    }
+                                    Err(e) => {
+                                        return self.raise_with_help("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()), &e);
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.raise("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()));
+                                return NULL;
+                            }
+                        }
+                    }
+                    _ => {
+                        return self.raise("TypeError", &format!("Cannot convert '{}' to struct", value.get_type().display_simple()));
+                    }
+                }
             }
             Type::Enum { .. } => {
+                // TODO: Implement enum conversion
                 return self.raise("NotImplemented", "Conversion to enum types is not implemented yet");
             }
             _ => {}
+        }
+
+        let target_type = match get_inner_type(target_type_type) {
+            Ok((t, _)) => t,
+            Err(e) => return self.raise("TypeError", &e),
+        };
+
+        if self.err.is_some() {
+            return NULL;
         }
 
         if target_type.starts_with("&") {
@@ -3565,7 +3599,7 @@ impl Interpreter {
             if self.err.is_some() {
                 return NULL;
             }
-            return Value::Pointer(Arc::new(new_value));
+            return Value::Pointer(Arc::new(Mutex::new(new_value)));
         }
 
         if target_type.starts_with("?") {
@@ -4971,6 +5005,29 @@ impl Interpreter {
                 }
 
                 Value::Tuple(results)
+            }
+
+            "POINTER_DEREF" => {
+                let value = match value_map.get(&Value::String("value".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'value' in pointer deref forget"),
+                };
+                let evaluated_value = self.evaluate(&Value::convert_to_statement(value));
+                if self.err.is_some() {
+                    return NULL;
+                }
+                match evaluated_value {
+                    Value::Pointer(ptr) => {
+                        let mut inner = ptr.lock().unwrap();
+
+                        let old_value = std::mem::replace(&mut *inner, Value::Null);
+
+                        drop(old_value);
+
+                        Value::Null
+                    }
+                    _ => return self.raise("TypeError", "Expected a pointer for pointer deref forget"),
+                }   
             }
 
             _ => self.raise("RuntimeError", &format!("Unsupported forget value type: {}", value_type)),
@@ -9226,13 +9283,7 @@ impl Interpreter {
             };
 
             if let Value::Pointer(lp) = &left_test {
-                let l_val = unsafe {
-                    let raw = Arc::as_ptr(lp);
-                    let arc = Arc::from_raw(raw);
-                    let val = (*arc).clone();
-                    std::mem::forget(arc);
-                    val
-                };
+                let l_val = lp.lock().unwrap().clone();
                 left_test = l_val;
             }
 
@@ -9269,40 +9320,16 @@ impl Interpreter {
 
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
-                let l_val = unsafe {
-                    let raw = Arc::as_ptr(lp);
-                    let arc = Arc::from_raw(raw);
-                    let val = (*arc).clone();
-                    std::mem::forget(arc);
-                    val
-                };
-                let r_val = unsafe {
-                    let raw = Arc::as_ptr(rp);
-                    let arc = Arc::from_raw(raw);
-                    let val = (*arc).clone();
-                    std::mem::forget(arc);
-                    val
-                };
+                let l_val = lp.lock().unwrap().clone();
+                let r_val = rp.lock().unwrap().clone();
                 (l_val, r_val)
             }
             (Value::Pointer(lp), r) => {
-                let l_val = unsafe {
-                    let raw = Arc::as_ptr(lp);
-                    let arc = Arc::from_raw(raw);
-                    let val = (*arc).clone();
-                    std::mem::forget(arc);
-                    val
-                };
+                let l_val = lp.lock().unwrap().clone();
                 (l_val, r.clone())
             }
             (l, Value::Pointer(rp)) => {
-                let r_val = unsafe {
-                    let raw = Arc::as_ptr(rp);
-                    let arc = Arc::from_raw(raw);
-                    let val = (*arc).clone();
-                    std::mem::forget(arc);
-                    val
-                };
+                let r_val = rp.lock().unwrap().clone();
                 (l.clone(), r_val)
             }
             _ => (left.clone(), right.clone()),

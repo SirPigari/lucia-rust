@@ -131,6 +131,10 @@ impl Struct {
         }
     }
 
+    pub fn get_fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
+        &self.fields
+    }
+
     pub fn display(&self) -> String {
         if self.fields.is_empty() {
             format!("{} {{}}", self.ty.display_simple())

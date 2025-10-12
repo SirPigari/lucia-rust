@@ -13,26 +13,26 @@
 // in macro f-strings you can use the $arg$ for the value of the arg
 // gets replaced by {arg_value} in the string
 // also the string MUST be f-string, otherwise it will not work
-#macro assert_eq($a, $b, $msg=(f"Values are not equal, expected: $b$, got: $a$")):
+#macro assert_eq!($a, $b, $msg=(f"Values are not equal, expected: $b$, got: $a$")):
     if (($a) != ($b)):
         throw $msg from "AssertionError"
     end
 #endmacro
 
-#macro assert_approx_eq($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $b$, got: $a$ (within $epsilon$)")):
+#macro assert_approx_eq!($a, $b, $epsilon=(0.000001), $msg=(f"Values are not approximately equal, expected: $b$, got: $a$ (within $epsilon$)")):
     if ((|($a) - ($b)|) > $epsilon):
         throw $msg from "AssertionError"
     end
 #endmacro
 
 
-#macro assert_ne($a, $b, $msg=(f"Values are equal but should not be, expected: $b$, got: $a$")):
+#macro assert_ne!($a, $b, $msg=(f"Values are equal but should not be, expected: $b$, got: $a$")):
     if (($a) == ($b)):
         throw $msg from "AssertionError"
     end
 #endmacro
 
-#macro assert_err($expr, $msg=("Expected an error but got success")):
+#macro assert_err!($expr, $msg=("Expected an error but got success")):
     // smallest assert err macro i could come up with
     // you could argue that the before ones were more readable, but this is the smallest
     //               | --------------------- wrapping into a group
@@ -44,10 +44,17 @@
     forget result
 #endmacro
 
-#macro assert_type($value, $it, $msg=(f"Type mismatch")):
+#macro assert_type!($value, $it, $msg=(f"Type mismatch")):
     // innit?
     if ($value isn't $it):
         throw $msg from "TypeError"
+    end
+#endmacro
+
+#macro assert_matches!($value, $pattern, $msg=(f"Value does not match the pattern")):
+    match $value:
+        $pattern -> null,
+        _ -> throw $msg from "AssertionError",
     end
 #endmacro
 

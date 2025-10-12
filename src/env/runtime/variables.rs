@@ -1209,7 +1209,10 @@ impl Variable {
                         "extract_ptr",
                         move |_args| {
                             match &val_clone {
-                                Value::Pointer(ptr) => Value::Int(create_int(&ptr.to_string())),
+                                Value::Pointer(ptr_arc) => {
+                                    let raw_ptr: *const Mutex<Value> = Arc::as_ptr(ptr_arc);
+                                    Value::Int((raw_ptr as usize).into())
+                                }
                                 _ => Value::Null,
                             }
                         },
