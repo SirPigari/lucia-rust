@@ -229,6 +229,7 @@ impl Interpreter {
         insert_builtin("char", Value::Function(native::char_fn()));
         insert_builtin("styledstr", Value::Function(native::styledstr_fn()));
         insert_builtin("array", Value::Function(native::array_fn()));
+        insert_builtin("complex", Value::Function(native::complex_fn()));
         // added for u/Truite_Morte
         insert_builtin("range", Value::Function(native::range_fn()));
         this.variables.insert(
@@ -1621,7 +1622,7 @@ impl Interpreter {
                     methods.insert(f.get_name().to_string(), Value::Function(f));
                 }
             } else {
-                return self.raise("TypeError", "Expected a function in struct methods");
+                return self.raise("TypeError", &format!("Expected a function in struct methods, got '{}'", func.get_type().display_simple()));
             }
         }
         self.variables = saved_variables;
@@ -3539,38 +3540,68 @@ impl Interpreter {
                 )),
         };
 
+        match value {
+            Value::Struct(ref s) => {
+                if let Ok(method) = find_struct_method(&s, None, "op_as", &[s.get_type(), Type::new_simple("type")], &Type::new_simple("any")) {
+                    let mut var = Variable::new_pt(s.name().to_string(), Value::Struct(s.clone()), s.get_type(), false, false, false);
+                    if method.is_static() {
+                        return self.raise("TypeError", "Cannot call static method 'op_as' on struct instance");
+                    }
+                    let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, Some(&mut var))));
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+                    return result;
+                }
+            }
+            _ => {}
+        }
+
         match target_type_type {
             Type::Struct { .. } => {
                 match value {
                     Value::Struct(s) => {
-                        let s_ty = s.get_type();
-                        let t_ty = target_type_type;
-                        match (&s_ty, &t_ty) {
-                            (Type::Struct { fields: s_fields, .. }, Type::Struct { fields: t_fields, .. }) => {
-                                match diff_fields(&s_ty.display_simple(), &t_ty.display_simple(), &s_fields, &t_fields) {
-                                    Ok(hm) => {
-                                        let field_values = s.get_fields();
-                                        let mut new_fields = HashMap::with_capacity(t_fields.len());
-                                        for (key, val) in field_values {
-                                            if let Some(new_key) = hm.get(key) {
-                                                new_fields.insert(new_key.clone(), (val.0.clone(), val.1.clone()));
+                        if let Ok(method) = find_struct_method(&s, None, "op_as", &[s.get_type(), Type::new_simple("type")], &Type::new_simple("any")) {
+                            let mut var = Variable::new_pt(s.name().to_string(), Value::Struct(s.clone()), s.get_type(), false, false, false);
+                            if method.is_static() {
+                                return self.raise("TypeError", "Cannot call static method 'op_as' on struct instance");
+                            }
+                            let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, Some(&mut var))));
+                            if self.err.is_some() {
+                                let err = self.err.clone().expect("Error should be present");
+                                return self.raise(to_static(err.error_type), to_static(err.msg));
+                            }
+                            return result;
+                        } else {
+                            let s_ty = s.get_type();
+                            let t_ty = target_type_type;
+                            match (&s_ty, &t_ty) {
+                                (Type::Struct { fields: s_fields, .. }, Type::Struct { fields: t_fields, .. }) => {
+                                    match diff_fields(&s_ty.display_simple(), &t_ty.display_simple(), &s_fields, &t_fields) {
+                                        Ok(hm) => {
+                                            let field_values = s.get_fields();
+                                            let mut new_fields = HashMap::with_capacity(t_fields.len());
+                                            for (key, val) in field_values {
+                                                if let Some(new_key) = hm.get(key) {
+                                                    new_fields.insert(new_key.clone(), (val.0.clone(), val.1.clone()));
+                                                }
                                             }
+                                            return Value::Struct(Struct::new_with_fields(t_ty.clone(), new_fields))
                                         }
-                                        return Value::Struct(Struct::new_with_fields(t_ty.clone(), new_fields))
-                                    }
-                                    Err(e) => {
-                                        return self.raise_with_help("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()), &e);
+                                        Err(e) => {
+                                            return self.raise_with_help("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()), &e);
+                                        }
                                     }
                                 }
-                            }
-                            _ => {
-                                self.raise("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()));
-                                return NULL;
+                                _ => {
+                                    self.raise("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()));
+                                    return NULL;
+                                }
                             }
                         }
                     }
                     _ => {
-                        return self.raise("TypeError", &format!("Cannot convert '{}' to struct", value.get_type().display_simple()));
+                        return self.raise("TypeError", &format!("Cannot convert '{}' to struct type '{}'", value.get_type().display_simple(), target_type_type.display_simple()));
                     }
                 }
             }
@@ -3783,6 +3814,7 @@ impl Interpreter {
             }
 
             match module_name.as_str() {
+                #[cfg(feature = "math")]
                 "math" => {
                     use crate::env::libs::math::__init__ as math;
                     let math_module_props = math::register();
@@ -3790,6 +3822,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "os")]
                 "os" => {
                     use crate::env::libs::os::__init__ as os;
                     let os_module_props = os::register(&self.config.clone());
@@ -3797,6 +3830,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "time")]
                 "time" => {
                     use crate::env::libs::time::__init__ as time;
                     let time_module_props = time::register();
@@ -3804,6 +3838,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "json")]
                 "json" => {
                     use crate::env::libs::json::__init__ as json;
                     let json_module_props = json::register();
@@ -3811,6 +3846,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "clib")]
                 #[cfg(target_arch = "wasm32")]
                 "clib" => {
                     self.stack.pop();
@@ -3819,6 +3855,7 @@ impl Interpreter {
                         "The 'clib' module is not supported in WebAssembly builds",
                     );
                 }
+                #[cfg(feature = "clib")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "clib" => {
                     use crate::env::libs::clib::__init__ as clib;
@@ -3838,6 +3875,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "regex")]
                 "regex" => {
                     use crate::env::libs::regex::__init__ as regex;
                     let regex_module_props = regex::register();
@@ -3845,6 +3883,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "collections")]
                 "collections" => {
                     use crate::env::libs::collections::__init__ as collections;
                     let collections_module_props = collections::register();
@@ -3852,6 +3891,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "random")]
                 "random" => {
                     use crate::env::libs::random::__init__ as random;
                     let random_module_props = random::register();
@@ -3859,6 +3899,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "lasm")]
                 "lasm" => {
                     use crate::env::libs::lasm::__init__ as lasm;
                     let lasm_module_props = lasm::register();
@@ -3866,6 +3907,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "fs")]
                 #[cfg(target_arch = "wasm32")]
                 "fs" => {
                     self.stack.pop();
@@ -3874,6 +3916,7 @@ impl Interpreter {
                         "The 'fs' module is not supported in WebAssembly builds",
                     );
                 }
+                #[cfg(feature = "fs")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "fs" => {
                     use crate::env::libs::fs::__init__ as fs;
@@ -3882,6 +3925,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "nest")]
                 "nest" => {
                     use crate::env::libs::nest::__init__ as nest;
                     let arc_config = Arc::new(self.config.clone());
@@ -3901,6 +3945,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "libload")]
                 #[cfg(target_arch = "wasm32")]
                 "libload" => {
                     self.stack.pop();
@@ -3909,6 +3954,7 @@ impl Interpreter {
                         "The 'libload' module is not supported in WebAssembly builds",
                     );
                 }
+                #[cfg(feature = "libload")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "libload" => {
                     use crate::env::libs::libload::__init__ as libload;
@@ -3928,6 +3974,7 @@ impl Interpreter {
                         properties.insert(name, var);
                     }
                 }
+                #[cfg(feature = "elevator")]
                 #[cfg(target_arch = "wasm32")]
                 "elevator" => {
                     self.stack.pop();
@@ -3936,6 +3983,7 @@ impl Interpreter {
                         "The 'elevator' module is not supported in WebAssembly builds",
                     );
                 }
+                #[cfg(feature = "elevator")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "elevator" => {
                     use crate::env::libs::elevator::__init__ as elevator;
@@ -4783,6 +4831,18 @@ impl Interpreter {
                     self.err.clone().unwrap(),
                 );
             }
+        }
+
+        if self.config.debug {
+            debug_log(
+                &format!(
+                    "<Throwing error: '{}: {}'>",
+                    error_type_val.to_string(),
+                    error_msg_val.to_string()
+                ),
+                &self.config,
+                Some(self.use_colors.clone())
+            );
         }
         
         self.raise(
@@ -6418,12 +6478,17 @@ impl Interpreter {
                 }
                 keys.len()
             }
+            Value::Struct(s) => if let Ok(_) = find_struct_method(&s, None, "op_index", &[s.get_type(), Type::new_simple("int")], &Type::new_simple("any")) {
+                usize::MAX
+            } else {
+                return self.raise("TypeError", "Struct not indexable");
+            }
             Value::Type(t) => if let Type::Enum { variants, ..} = t {
                 variants.iter().max_by_key(|x| x.2).map(|x| x.2).unwrap_or(variants.len())
             }  else {
-                return self.raise("TypeError", "Object not indexable");
+                return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
             }
-            _ => return self.raise("TypeError", "Object not indexable"),
+            _ => return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
         };
     
         let start_eval_opt = start_val_opt
@@ -6431,7 +6496,7 @@ impl Interpreter {
             .and_then(|val| if val == NULL { Some(Value::Int(0.into())) } else { Some(val) });
         let end_eval_opt = end_val_opt
             .map(|v| self.evaluate(&v.convert_to_statement()))
-            .and_then(|val| if val == NULL { Some(Value::Int(len.into())) } else { Some(val) });
+            .and_then(|val| Some(val));
 
         if self.err.is_some() {
             return NULL;
@@ -6467,7 +6532,7 @@ impl Interpreter {
         let mut to_index = |val: &Value| -> Result<usize, Value> {
             match val {
                 Value::Int(i) => {
-                    let idx = i.to_i64().map_err(|_| self.raise("ConversionError", "Failed to convert Int to isize"))? as isize;
+                    let idx = i.to_i64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
                     if adjusted >= 0 && (adjusted as usize) <= len {
                         Ok(adjusted as usize)
@@ -6476,7 +6541,7 @@ impl Interpreter {
                     }
                 }
                 Value::String(s) => {
-                    let idx: isize = s.parse().map_err(|_| self.raise("ConversionError", "Failed to parse string to int"))?;
+                    let idx: isize = s.parse().map_err(|_| self.raise("IndexError", "Index out of range"))?;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
                     if adjusted >= 0 && (adjusted as usize) <= len {
                         Ok(adjusted as usize)
@@ -6488,7 +6553,7 @@ impl Interpreter {
                     if !f.is_integer_like() {
                         return Err(self.raise("ConversionError", "Float index must have zero fractional part"));
                     }
-                    let idx = f.to_f64().map_err(|_| self.raise("ConversionError", "Failed to convert Float to isize"))? as isize;
+                    let idx = f.to_f64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
                     if adjusted >= 0 && (adjusted as usize) <= len {
                         Ok(adjusted as usize)
@@ -6496,7 +6561,7 @@ impl Interpreter {
                         Err(self.raise("IndexError", "Index out of range"))
                     }
                 }
-                _ => Err(self.raise("TypeError", "Index must be Int, String or Float with no fraction")),
+                _ => Err(self.raise("TypeError", "Index must be 'int', 'str' or 'float' with no fraction")),
             }
         };
     
@@ -6525,6 +6590,21 @@ impl Interpreter {
                     }
                     return self.raise("KeyError", &format!("'{}' not found in map", format_value(&key_val)));
                 }
+                Value::Struct(s) => {
+                    let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
+                    if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), start_val.get_type()], &Type::new_simple("any")) {
+                        if method.is_static() {
+                            return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
+                        }
+                        let result = self.call_function(&method, vec![start_val.clone()], HashMap::new(), Some((None, Some(&mut var))));
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        return result;
+                    } else {
+                        return self.raise("TypeError", "Struct not indexable");
+                    }
+                }
                 _ => return self.raise("TypeError", "Start must be int or string"),
             },
             (start_opt, end_opt) => {
@@ -6535,8 +6615,36 @@ impl Interpreter {
                     },
                     None => 0,
                 };
-            
+
                 let end_idx = match end_opt {
+                    Some(Value::Null) => {
+                        return match &object_val {
+                            Value::String(s) => {
+                                let result = s.chars().skip(start_idx).collect::<String>();
+                                Value::String(result)
+                            }
+
+                            Value::List(l) => l
+                                .get(start_idx..)
+                                .map(|slice| Value::List(slice.to_vec()))
+                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+
+                            Value::Bytes(b) => b
+                                .get(start_idx..)
+                                .map(|slice| Value::Bytes(slice.to_vec()))
+                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+
+                            Value::Tuple(t) => t
+                                .get(start_idx..)
+                                .map(|slice| Value::Tuple(slice.to_vec()))
+                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
+
+                            _ => self.raise(
+                                "TypeError",
+                                &format!("'{}' not indexable", object_val.get_type().display_simple()),
+                            ),
+                        };
+                    }
                     Some(ref v) => match to_index(v) {
                         Ok(i) => i,
                         Err(e) => return e,
@@ -6575,10 +6683,26 @@ impl Interpreter {
                                 }
                                 return self.raise("ValueError", &format!("No enum variant with value {}", start_idx));
                             } else {
-                                return self.raise("TypeError", "Object not indexable");
+                                return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
                             }
                         }
-                        _ => return self.raise("TypeError", "Object not indexable"),
+                        Value::Struct(s) => {
+                            let start_val = Value::Int((start_idx as i64).into());
+                            let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
+                            if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), start_val.get_type()], &Type::new_simple("any")) {
+                                if method.is_static() {
+                                    return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
+                                }
+                                let result = self.call_function(&method, vec![start_val.clone()], HashMap::new(), Some((None, Some(&mut var))));
+                                if self.err.is_some() {
+                                    return NULL;
+                                }
+                                return result;
+                            } else {
+                                return self.raise("TypeError", "Struct not indexable");
+                            }
+                        }
+                        _ => return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
                     };
                 }                
             
@@ -10406,7 +10530,7 @@ impl Interpreter {
     }
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
-        let s = to_static(match map.get(&Value::String("value".to_string())) {
+        let mut s = to_static(match map.get(&Value::String("value".to_string())) {
             Some(Value::String(s)) if !s.is_empty() => s.as_str(),
             Some(Value::String(_)) => return self.raise("RuntimeError", "Empty string provided for number"),
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
@@ -10424,6 +10548,13 @@ impl Interpreter {
             );
             return cached.clone();
         }
+
+        let is_imaginary = if s.ends_with('i') {
+            s = &s[..s.len() - 1];
+            true
+        } else {
+            false
+        };
 
         fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
             use std::ops::{Add, Mul};
@@ -10476,21 +10607,22 @@ impl Interpreter {
             .unwrap_or_else(|_| self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)))        
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
             if is_number_parentheses(s) {
-                return Value::Float(imagnum::create_float(s));
-            }
+                Value::Float(imagnum::create_float(s))
+            } else {
+                let f = match Float::from_str(s) {
+                    Ok(f) => f,
+                    Err(_) => return self.raise("RuntimeError", "Invalid float format"),
+                };
 
-            let f = match Float::from_str(s) {
-                Ok(f) => f,
-                Err(_) => return self.raise("RuntimeError", "Invalid float format"),
-            };            
-    
-            if s.to_ascii_lowercase().contains('e') && f.is_integer_like() {
-                return f.to_int()
-                    .map(Value::Int)
-                    .unwrap_or_else(|_| self.raise("RuntimeError", "Failed to convert float to int"));
-            }            
-    
-            Value::Float(f)
+                if s.to_ascii_lowercase().contains('e') && f.is_integer_like() {
+                    match f.to_int() {
+                        Ok(i) => Value::Int(i),
+                        Err(_) => return self.raise("RuntimeError", "Failed to convert float to int"),
+                    }
+                } else {
+                    Value::Float(f)
+                }
+            }
         } else {
             let mut s = s.trim().trim_start_matches('0').trim_start_matches('+');
             if s.is_empty() {
@@ -10519,6 +10651,17 @@ impl Interpreter {
             self.cache.constants.insert(s.to_string(), result.clone());
         }
     
+        if is_imaginary {
+            return match result {
+                Value::Int(i) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(Float::from_int(&i).unwrap_or_else(|_| {
+                    self.raise("RuntimeError", "Failed to convert Int to Float");
+                    Float::from(0.0)
+                })))),
+                Value::Float(f) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(f))),
+                _ => return self.raise("RuntimeError", "Invalid imaginary number format"),
+            }
+        }
+
         result
     }
     

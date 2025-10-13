@@ -523,6 +523,21 @@ fn main() {
         .and_then(Value::as_str)
         .unwrap_or("unknown");
 
+    let lib_static = std::env::var("CARGO_FEATURE_LIB_LUCIA_STATIC").is_ok();
+    let lib_rlib   = std::env::var("CARGO_FEATURE_LIB_LUCIA_RLIB").is_ok();
+    let lib_dynamic = std::env::var("CARGO_FEATURE_LIB_LUCIA").is_ok();
+
+    if lib_static {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,--whole-archive");
+        println!("cargo:rustc-cfg=lib_lucia_static");
+        println!("cargo:rustc-link-lib=static=liblucia2.0.0");
+    } else if lib_rlib {
+        println!("cargo:rustc-cfg=lib_lucia_rlib");
+    } else if lib_dynamic {
+        println!("cargo:rustc-cfg=lib_lucia_dynamic");
+        println!("cargo:rustc-link-lib=dylib=liblucia2.0.0");
+    }
+
     println!("cargo:rustc-env=VERSION={VERSION}");
     println!("cargo:rustc-env=BUILD_UUID={build_uuid}");
     println!("cargo:rustc-env=RUSTC_VERSION={rustc_version}");

@@ -43,23 +43,6 @@ fn create_float_constant(name: &str, value: &str) -> Variable {
     )
 }
 
-fn log_base(args: &HashMap<String, Value>) -> Value {
-    let x_val = args.get("x");
-    let base_val = args.get("base");
-
-    match (x_val, base_val) {
-        (Some(Value::Float(x)), Some(Value::Float(b))) => {
-            match (x.to_f64(), b.to_f64()) {
-                (Ok(xf), Ok(bf)) if xf > 0.0 && bf > 0.0 && bf != 1.0 => {
-                    Value::Float(Float::from_f64(xf.log(bf)))
-                }
-                _ => Value::Error("MathError", "Invalid base or x for log", None),
-            }
-        }
-        _ => Value::Error("TypeError", "log(x, base) expects float args", None),
-    }
-}
-
 macro_rules! define_unary {
     ($name:ident, $int_fn:path, $float_fn:path, $return_int:path, $return_float:path) => {
         fn $name(args: &HashMap<String, Value>) -> Value {
@@ -91,7 +74,49 @@ define_unary!(abs, int_abs, float_abs, Value::Int, Value::Float);
 define_unary!(exp, Int::exp, Float::exp, Value::Float, Value::Float);
 define_unary!(floor, Int::floor, Float::floor, Value::Int, Value::Float);
 define_unary!(ceil, Int::ceil, Float::ceil, Value::Int, Value::Float);
-define_unary!(log, int_log, Float::log, Value::Float, Value::Float);
+define_unary!(log10, int_log, Float::log10, Value::Float, Value::Float);
+
+fn log(args: &HashMap<String, Value>) -> Value {
+    let x = match args.get("x") {
+        Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let base = match args.get("base") {
+        Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let x_float = match x {
+        Value::Int(i) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        Value::Float(f) => f.clone(),
+        _ => unreachable!(),
+    };
+    let base_float = match base {
+        Value::Int(i) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        Value::Float(f) => f.clone(),
+        _ => unreachable!(),
+    };
+    match Float::log(&x_float, &base_float) {
+        Ok(v) => Value::Float(v),
+        Err(e) => math_error(e),
+    }
+}
+
+fn conj(args: &HashMap<String, Value>) -> Value {
+    match args.get("x") {
+        Some(Value::Int(i)) => Value::Float(match Int::to_float(i) {
+            Ok(f) => f.clone(),
+            Err(e) => return math_error(e), 
+        }),
+        Some(Value::Float(f)) => Value::Float(f.conj()),
+        _ => Value::Error("TypeError", "expected int or float", None),
+    }
+}
 
 fn round(args: &HashMap<String, Value>) -> Value {
     let x = match args.get("x") {
@@ -176,7 +201,7 @@ pub fn register() -> HashMap<String, Variable> {
         ("cos", cos),
         ("tan", tan),
         ("ln", ln),
-        ("log", log),
+        ("log10", log10),
         ("abs", abs),
         ("exp", exp),
         ("floor", floor),
@@ -199,9 +224,17 @@ pub fn register() -> HashMap<String, Variable> {
 
     insert_native_fn!(
         map,
-        "log_base",
-        log_base,
-        vec![Parameter::positional("x", "float"), Parameter::positional("base", "float")],
+        "log",
+        log,
+        vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_optional_pt("base", &int_float_type, Value::Float(Float::from_f64(10.0)))],
+        "float",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "conj",
+        conj,
+        vec![Parameter::positional_pt("x", &int_float_type)],
         "float",
         EffectFlags::PURE
     );

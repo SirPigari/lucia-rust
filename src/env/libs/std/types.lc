@@ -47,6 +47,61 @@ public typedef enum Result<T, E> = {
     Err(E),
 }
 
+public typedef enum Either<L, R> = {
+    Left(L),
+    Right(R),
+}
+
+private static final LUA_TABLE_PTR: &str = &"fucking luatic"
+
+public typedef struct LuaTable<T> = {
+    private mutable table: list[T],
+}
+
+for LuaTable:
+    static fun new() -> Self:
+        return LuaTable { table = [ LUA_TABLE_PTR ] }
+    end
+
+    static fun from_list(data: list[any]) -> Self:
+        return LuaTable { table = [ LUA_TABLE_PTR ].append(data) }
+    end
+
+    fun op_index(self, index: int) -> any:
+        if (index < 0 || index >= len(self.table)):
+            throw "Index out of bounds" from "IndexError"
+        end
+        return self.table[index]
+    end
+
+    // TODO: Implement 'op_index_set'
+    fun op_index_set(mutable self, index: int, value: any):
+        if (index < 0 || index >= len(self.table)):
+            throw "Index out of bounds" from "IndexError"
+        end
+        self.table[index] = value
+    end
+
+    fun op_as(self, target_type: type) -> any:
+        match (target_type.base_type()):
+            list: self.table[1..],
+            tuple: tuple(self.table[1..]),
+            str: "".join(self.table[1..].map((v) => v.to_string()).collect()),
+            any: self,
+            bytes: "".join(self.table[1..].map((v) => v.to_string()).collect()) as bytes,
+            _ -> throw "Cannot convert LuaTable to " + target_type from "TypeError",
+        end
+    end
+
+    fun op_len(self) -> int:
+        return (len(self.table) - 1)
+    end
+
+    fun push(mutable self, value: any):
+        self.table = self.table.append(value)
+    end
+end
+
 null
 
 #endif

@@ -1955,6 +1955,63 @@ impl Variable {
                     ),
                 );
             }
+            Value::Type(_) => {
+                let base_type = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "base_type",
+                        move |_| {
+                            if let Value::Type(t) = &val_clone {
+                                return Value::Type(t.base_type());
+                            }
+                            Value::Error("TypeError", "Expected a type", None)
+                        },
+                        vec![],
+                        "type",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let name = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "name",
+                        move |_| {
+                            if let Value::Type(t) = &val_clone {
+                                return Value::String(t.display_simple());
+                            }
+                            Value::Error("TypeError", "Expected a type", None)
+                        },
+                        vec![],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
+
+                self.properties.insert(
+                    "base_type".to_string(),
+                    Variable::new(
+                        "base_type".to_string(),
+                        base_type,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "name".to_string(),
+                    Variable::new(
+                        "name".to_string(),
+                        name,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+            }
             _ => {}
         };
     }

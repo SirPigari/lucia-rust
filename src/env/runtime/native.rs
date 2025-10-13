@@ -1,9 +1,11 @@
-use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type};
+use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
-use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
+use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
 use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
 use crate::env::runtime::internal_structs::{EffectFlags};
+use crate::interpreter::Interpreter;
+use crate::env::runtime::variables::Variable;
 use serde_json::json;
 use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
@@ -136,7 +138,7 @@ fn input(args: &HashMap<String, Value>) -> Value {
     }
 }
 
-fn len(args: &HashMap<String, Value>) -> Value {
+fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     match args.get("v") {
         Some(Value::List(list)) => Value::Int(list.len().into()),
         Some(Value::String(s)) => Value::Int(s.chars().count().into()),
@@ -147,6 +149,23 @@ fn len(args: &HashMap<String, Value>) -> Value {
         Some(Value::Tuple(t)) => Value::Int(t.len().into()),
         Some(Value::Boolean(_)) => Value::Int(1.into()),
         Some(Value::Null) => Value::Int(0.into()),
+        Some(Value::Bytes(b)) => Value::Int(b.len().into()),
+        Some(Value::Struct(s)) => {
+            let mut var = Variable::new_pt(s.name().to_string(), Value::Struct(s.clone()), s.get_type(), false, false, false);
+            if let Ok(method) = find_struct_method(&s, None, "op_len", &[s.get_type()], &Type::new_simple("int")) {
+                if method.is_static() {
+                    return Value::Error("TypeError", "Cannot call static method 'op_len' on struct instance", None);
+                }
+                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, Some(&mut var))));
+                if interpreter.err.is_some() {
+                    let err = interpreter.err.clone().expect("Error should be present");
+                    return Value::Error(to_static(err.error_type), to_static(err.msg), None);
+                }
+                return result;
+            } else {
+                return Value::Error("TypeError", "Struct not indexable", None);
+            }
+        }
         Some(v) => {
             let msg = format!(
                 "Function 'len()' doesn't support type '{}'",
@@ -550,6 +569,28 @@ fn range(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn complex(args: &HashMap<String, Value>) -> Value {
+    let real = match args.get("real") {
+        Some(Value::Int(i)) => match i.to_float() {
+            Ok(f) => f,
+            Err(_) => return Value::Error("TypeError", "failed to convert int to float for real part", None),
+        },
+        Some(Value::Float(f)) => f.clone(),
+        Some(_) => return Value::Error("TypeError", "real part must be int or float", None),
+        None => return Value::Error("TypeError", "real part is required", None),
+    };
+    let imag = match args.get("imaginary") {
+        Some(Value::Int(i)) => match i.to_float() {
+            Ok(f) => f,
+            Err(_) => return Value::Error("TypeError", "failed to convert int to float for imaginary part", None),
+        },
+        Some(Value::Float(f)) => f.clone(),
+        Some(_) => return Value::Error("TypeError", "imaginary part must be int or float", None),
+        None => return Value::Error("TypeError", "imaginary part is required", None),
+    };
+    Value::Float(Float::complex(real, imag))
+}
+
 fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
     Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
@@ -674,7 +715,7 @@ pub fn input_fn() -> Function {
 }
 
 pub fn len_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
         "len",
         len,
         vec![
@@ -826,6 +867,21 @@ pub fn range_fn() -> Function {
             Parameter::keyword_optional("as", "type", Value::Type(Type::new_simple("generator"))),
         ],
         &LIST_OR_GEN,
+        true, true, true,
+        None,
+        EffectFlags::PURE,
+    )))
+}
+
+pub fn complex_fn() -> Function {
+    Function::Native(Arc::new(NativeFunction::new(
+        "complex",
+        complex,
+        vec![
+            Parameter::positional_pt("real", &INT_OR_FLOAT),
+            Parameter::positional_pt("imaginary", &INT_OR_FLOAT),
+        ],
+        "float",
         true, true, true,
         None,
         EffectFlags::PURE,

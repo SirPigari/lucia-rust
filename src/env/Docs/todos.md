@@ -5,16 +5,16 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 6_
+_Total TODOs found: 7_
 ---
 
-### [`src/interpreter.rs:3578:1`](../../../src/interpreter.rs#L3578) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3609:1`](../../../src/interpreter.rs#L3609) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
 - fix this later
 
-### [`src/env/bundler/bundle.rs:14:1`](../../../src/env/bundler/bundle.rs#L14) _(added by **SirPigari** on **2025-08-27**)_
+### [`src/env/bundler/bundle.rs:13:1`](../../../src/env/bundler/bundle.rs#L13) _(added by **SirPigari** on **2025-08-27**)_
 - fix it
 
 ### [`src/env/libs/std/macros.lc:38:36`](../../../src/env/libs/std/macros.lc#L38) _(added by **SirPigari** on **2025-07-22**)_
@@ -23,8 +23,11 @@ _Total TODOs found: 6_
 ### [`src/env/libs/nest/__init__.rs:1:1`](../../../src/env/libs/nest/__init__.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
 
-### [`src/interpreter.rs:5899:1`](../../../src/interpreter.rs#L5899) _(added by **SirPigari** on **2025-07-15**)_
+### [`src/interpreter.rs:5959:1`](../../../src/interpreter.rs#L5959) _(added by **SirPigari** on **2025-07-15**)_
 - Fix nested index assignment and map index assign
+
+### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) **(TODO not committed yet)**
+- Implement 'op_index_set'
 
 ---
 *Report generated automatically.*

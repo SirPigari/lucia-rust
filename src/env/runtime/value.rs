@@ -4,7 +4,7 @@ use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::utils::{format_float, format_int, fix_path};
+use crate::env::runtime::utils::{format_float, format_int, fix_path, MAX_PTR};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::collections::HashMap;
@@ -360,7 +360,7 @@ impl<C> Decode<C> for Value {
             11 => Ok(Value::Struct(Struct::decode(decoder)?)),
             12 => {
                 let ptr_usize = usize::decode(decoder)?;
-                if ptr_usize < 0x1000 || ptr_usize > crate::env::libs::os::__init__::MAX_PTR {
+                if ptr_usize < 0x1000 || ptr_usize > MAX_PTR {
                     return Err(DecodeError::Other("Pointer value out of range".into()));
                 }
 

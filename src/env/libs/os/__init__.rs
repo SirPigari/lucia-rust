@@ -6,6 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
+use crate::env::runtime::utils::MAX_PTR;
 use crate::{insert_native_fn, insert_native_var};
 use std::sync::Mutex;
 
@@ -13,12 +14,6 @@ use std::sync::Mutex;
 use std::env::consts;
 #[cfg(not(target_arch = "wasm32"))]
 use sys_info;
-
-#[cfg(target_pointer_width = "64")]
-pub const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
-
-#[cfg(target_pointer_width = "32")]
-const MAX_PTR: usize = 0xFFFF_FFFF; // max for 32-bit usize
 
 // ==== Helpers ====
 

@@ -117,4 +117,12 @@ impl Error {
     pub fn location(&self) -> Option<&Location> {
         self.loc.as_ref()
     }
+
+    pub fn location_string(&self) -> String {
+        if let Some(loc) = &self.loc {
+            format!("{}:{}:{}", loc.file, loc.line_number, loc.range.0)
+        } else {
+            "<unknown location>".to_string()
+        }
+    }
 }

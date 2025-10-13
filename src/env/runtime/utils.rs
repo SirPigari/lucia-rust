@@ -2313,6 +2313,12 @@ pub const CAN_BE_UNINITIALIZED: &[&str] = &[
     "int", "float", "bool", "str", "map", "list", "function", "bytes", "tuple", "any", "void"
 ];
 
+#[cfg(target_pointer_width = "64")]
+pub const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
+
+#[cfg(target_pointer_width = "32")]
+pub const MAX_PTR: usize = 0xFFFF_FFFF;
+
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);
 pub const FALSE: Value = Value::Boolean(false);

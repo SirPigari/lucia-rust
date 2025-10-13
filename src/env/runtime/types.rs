@@ -1,6 +1,7 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::functions::Function;
+use crate::env::runtime::utils::get_inner_type;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use serde::{Serialize, Deserialize};
@@ -217,6 +218,14 @@ impl Type {
 
     pub fn new_union(types: Vec<Type>) -> Self {
         Type::Union(types)
+    }
+
+    pub fn base_type(&self) -> Type {
+        match get_inner_type(self) {
+            Ok((_, Type::Indexed { base_type, .. })) => *base_type.clone(),
+            Ok((_, Type::Alias { base_type, .. })) => *base_type.clone(),
+            _ => self.clone(),
+        }
     }
 }
 

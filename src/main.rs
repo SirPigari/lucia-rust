@@ -37,45 +37,70 @@ mod env {
         pub mod static_checker;
     }
     pub mod libs {
+        #[cfg(feature = "math")]
         pub mod math {
             pub mod __init__;
         }
+
+        #[cfg(feature = "os")]
         pub mod os {
             pub mod __init__;
         }
+
+        #[cfg(feature = "time")]
         pub mod time {
             pub mod __init__;
         }
+
+        #[cfg(feature = "json")]
         pub mod json {
             pub mod __init__;
         }
+
+        #[cfg(feature = "clib")]
         pub mod clib {
             pub mod __init__;
         }
+
+        #[cfg(feature = "regex")]
         pub mod regex {
             pub mod __init__;
             pub mod regex_engine;
         }
+
+        #[cfg(feature = "collections")]
         pub mod collections {
             pub mod __init__;
         }
+
+        #[cfg(feature = "random")]
         pub mod random {
             pub mod __init__;
         }
+
+        #[cfg(feature = "lasm")]
         pub mod lasm {
             pub mod __init__;
             pub mod cpu;
         }
+
+        #[cfg(feature = "fs")]
         pub mod fs {
             pub mod __init__;
         }
+
+        #[cfg(feature = "nest")]
         pub mod nest {
             pub mod __init__;
         }
+
+        #[cfg(feature = "libload")]
         pub mod libload {
             pub mod __init__;
             pub mod ffi;
         }
+
+        #[cfg(feature = "elevator")]
         pub mod elevator {
             pub mod __init__;
         }

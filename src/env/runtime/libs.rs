@@ -31,83 +31,97 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         "2.0.0",
         &EXPECTED_VERSION,
     ));
+    #[cfg(feature = "request")]
     m.insert("request", LibInfo::new(
         "This module provides HTTP request functionality.",
         "0.11.14",
         &EXPECTED_VERSION,
     ));
+    #[cfg(feature = "math")]
     m.insert("math", LibInfo::new(
         "Provides mathematical functions and constants.",
         "1.0.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "os")]
     m.insert("os", LibInfo::new(
         "Interfaces with the operating system.",
         "1.0.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "time")]
     m.insert("time", LibInfo::new(
         "Handles time and date functionality.",
         "0.3.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "json")]
     m.insert("json", LibInfo::new(
         "JSON parsing and serialization.",
         "1.0.82",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "regex")]
     m.insert("regex", LibInfo::new(
         "Regular expressions for pattern matching.",
         "0.9.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "collections")]
     m.insert("collections", LibInfo::new(
         "Collection of utilities.",
         "1.0.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "random")]
     m.insert("random", LibInfo::new(
         "Random number generation utilities.",
         "0.7.42",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "fs")]
     m.insert("fs", LibInfo::new(
         "File system operations and utilities.",
         "0.4.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "clib")]
     m.insert("clib", LibInfo::new(
         "C standard library bindings for Lucia.",
         "0.1.69",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "lasm")]
     m.insert("lasm", LibInfo::new(
         "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
         "1.0.3",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "nest")]
     m.insert("nest", LibInfo::new(
         "HTTP client and server utilities.",
         "1.1.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "libload")]
     m.insert("libload", LibInfo::new(
         "Dynamic library loading and function invocation.",
         "1.0.0",
         &EXPECTED_VERSION,
     ));
 
+    #[cfg(feature = "elevator")]
     m.insert("elevator", LibInfo::new(
         "Random stuff from markofwitch.",
         "42.0.0",

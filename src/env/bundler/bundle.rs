@@ -8,8 +8,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
-
-const VERSION: &str = env!("VERSION");
+use crate::VERSION;
 
 // TODO: fix it
 pub fn bundle_to_exe(

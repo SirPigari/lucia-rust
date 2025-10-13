@@ -56,3 +56,41 @@ assert_eq!(0.(9), 1.0)
 assert_eq!(1/3*3, 1.0)
 
 assert_eq!(2(3), 6)  // 2 * 3, its an int not an float so its a multiplication
+
+// complex numbers
+assert_eq!(1i, complex(0, 1))
+assert_eq!(3 + 4i, complex(3, 4))
+assert_eq!(0 + 0i, complex(0, 0))
+assert_eq!(-5 + 2i, complex(-5, 2))
+assert_eq!(7 - 3i, complex(7, -3))
+assert_eq!(-2 - 6i, complex(-2, -6))
+
+assert_eq!(1 + 2i + 3 + 4i, 4 + 6i)
+assert_eq!(3 + 5i + -1 + 2i, 2 + 7i)
+
+assert_eq!(4 + 5i - 1 + 2i, 3 + 7i)
+assert_eq!(3 + 3i - 3 + 3i, 6i)
+
+assert_eq!((1 + 2i) * (3 + 4i), -5 + 10i)
+assert_eq!((2 - 3i) * (1 + 1i), 5 - 1i)
+
+assert_approx_eq!((3 + 2i) / (1 - 1i), 0.5 + 2.5i)
+assert_eq!((1 + 1i) / (1 + 1i), 1 + 0i)
+
+assert_approx_eq!(|3 + 4i|, 5.0)
+assert_approx_eq!(|1 - 1i|, math.sqrt(2))
+
+assert_eq!(math.conj(3 + 4i), 3 - 4i)
+assert_eq!(math.conj(1 - 2i), 1 + 2i)
+
+assert_eq!(3 * (2 + 5i), 6 + 15i)
+assert_eq!((2 + 5i) * 3, 6 + 15i)
+assert_eq!(10 + (2 + 3i), 12 + 3i)
+assert_eq!((2 + 3i) + 10, 12 + 3i)
+
+assert_eq!(complex(3, 4), 3 + 4i)
+assert_eq!(complex(-2, 5), -2 + 5i)
+assert_eq!(complex(0, -1), -1i)
+
+assert_approx_eq!(math.sqrt(4 + 0i), 2 + 0i)
+assert_approx_eq!(math.sqrt(0 + 4i), 1.41421356237 + 1.41421356237i) // approximate

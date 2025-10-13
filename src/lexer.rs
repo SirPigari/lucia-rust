@@ -315,6 +315,15 @@ impl<'a> Lexer<'a> {
             }
 
             if has_digits {
+                let mut tmp = chars.clone();
+
+                if let Some(&(i2, 'i')) = tmp.peek() {
+                    let tmp_rel_end;
+                    tmp_rel_end = i2 + 1;
+                    tmp.next();
+                    rel_end = tmp_rel_end;
+                }
+
                 let end = start + rel_end;
                 tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
                 pos = end;
