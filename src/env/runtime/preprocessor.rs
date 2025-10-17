@@ -8,9 +8,41 @@ use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path, escape_string, g
 use crate::env::runtime::precompile::precompile;
 use crate::env::runtime::types::Float;
 use std::ops::{Add, Sub, Mul, Div, Rem};
+#[cfg(feature = "preprocessor_include_std")]
+use once_cell::sync::Lazy;
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
+
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_IMPORT: &str = include_str!("../libs/std/_import.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_ASSERT: &str = include_str!("../libs/std/assert.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_IO: &str = include_str!("../libs/std/io.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_LAZY: &str = include_str!("../libs/std/lazy.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_MACROS: &str = include_str!("../libs/std/macros.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_MATH: &str = include_str!("../libs/std/math.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_OPS: &str = include_str!("../libs/std/ops.lc");
+#[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_TYPES: &str = include_str!("../libs/std/types.lc");
+#[cfg(feature = "preprocessor_include_std")]
+static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    m.insert("_import", STD_LIB_IMPORT);
+    m.insert("assert", STD_LIB_ASSERT);
+    m.insert("io", STD_LIB_IO);
+    m.insert("lazy", STD_LIB_LAZY);
+    m.insert("macros", STD_LIB_MACROS);
+    m.insert("math", STD_LIB_MATH);
+    m.insert("ops", STD_LIB_OPS);
+    m.insert("types", STD_LIB_TYPES);
+    m
+});
 
 struct MangleContext {
     mangled_names: Vec<HashMap<String, String>>, // ORIGINAL_NAME -> MANGLED_NAME
@@ -666,6 +698,7 @@ impl Preprocessor {
 
                             let try_paths = [
                                 lib_base.clone(),
+                                lib_base.with_extension(""),
                                 lib_base.with_extension("lc"),
                                 lib_base.with_extension("lucia"),
                             ];
@@ -673,6 +706,30 @@ impl Preprocessor {
                             let mut found_path = None;
                             for p in try_paths.iter() {
                                 if p.exists() {
+                                    #[cfg(feature = "preprocessor_include_std")] {
+                                        #[cfg(target_arch = "wasm32")]
+                                        if STD_LIBS.contains_key(p.file_stem().and_then(|s| s.to_str()).unwrap_or("")) {
+                                            found_path = Some(p.clone());
+                                            break;
+                                        }
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        if let Some(content) = STD_LIBS.get(p.file_stem().and_then(|s| s.to_str()).unwrap_or("")) {
+                                            let temp_dir = std::env::temp_dir().join("lucia_std");
+                                            let path = temp_dir.join(p.file_stem().with_extension("lc"));
+                                            fs::create_dir_all(&temp_dir).map_err(|e| Error::new(
+                                                "PreprocessorIOError",
+                                                &format!("Failed to create temp dir for std lib: {}", e),
+                                                &self.file_path,
+                                            ))?;
+                                            fs::write(&path, content).map_err(|e| Error::new(
+                                                "PreprocessorIOError",
+                                                &format!("Failed to write std lib to temp file: {}", e),
+                                                &self.file_path,
+                                            ))?;
+                                            found_path = Some(path);
+                                            break;
+                                        }
+                                    }
                                     found_path = Some(p.clone());
                                     break;
                                 }
@@ -683,13 +740,19 @@ impl Preprocessor {
                                 None => lib_base,
                             }
                         } else if tokens[i].0 == "STRING" {
-                            let raw = &tokens[i].1;
-                            i += 1;
-                            current_dir.join(raw.trim_matches('"'))
+                            #[cfg(target_arch = "wasm32")]
+                            return Err(create_err("#include with relative paths is not supported in WebAssembly builds", &tokens[i]));
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let raw = &tokens[i].1;
+                                i += 1;
+                                current_dir.join(raw.trim_matches('"'))
+                            }
                         } else {
                             return Err(create_err("Invalid include path format", &tokens[i]));
                         };
 
+                        #[cfg(not(target_arch = "wasm32"))]
                         if !included_path.exists() {
                             return Err(create_err(&format!("Included file does not exist: {}", included_path.display()), &tokens[i]));
                         }
@@ -706,7 +769,7 @@ impl Preprocessor {
                             Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
                         ];
 
-                        if included_path.is_dir() {
+                        if cfg!(not(target_arch = "wasm32")) && included_path.is_dir() {
                             let mut entries: Vec<_> = fs::read_dir(&included_path)
                                 .map_err(|e| Error::new(
                                     "PreprocessorIOError",
@@ -753,26 +816,49 @@ impl Preprocessor {
                                 result.extend(self._process(included_out.clone(), included_path.parent().unwrap_or(current_dir))?);
                             }
                         } else {
-                            let content = fs::read_to_string(&included_path).map_err(|e| Error::new(
-                                "PreprocessorIOError",
-                                &format!("Failed to read included file '{}': {}", included_path.display(), e),
-                                &self.file_path,
-                            ))?;
+                            #[cfg(target_arch = "wasm32")] {
+                                if let Some(content) = STD_LIBS.get(included_path.file_stem().and_then(|s| s.to_str()).unwrap_or("")) {
+                                    let lexer = Lexer::new(content, to_static(fix_path(included_path.display().to_string())));
+                                    let mut toks = lexer.tokenize()
+                                        .into_iter()
+                                        .filter(|tok| tok.0 != "WHITESPACE")
+                                        .collect::<Vec<_>>();
+                                        
+                                    if toks.last().map_or(false, |t| t.0 == "EOF") {
+                                        toks.pop();
+                                    }
 
-                            let lexer = Lexer::new(&content, to_static(fix_path(included_path.display().to_string())));
-                            let mut toks = lexer.tokenize()
-                                .into_iter()
-                                .filter(|tok| tok.0 != "WHITESPACE")
-                                .collect::<Vec<_>>();
-                                
-                            if toks.last().map_or(false, |t| t.0 == "EOF") {
-                                toks.pop();
+                                    result.extend(included_in);
+                                    let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
+                                    result.extend(included);
+                                    result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
+                                } else {
+                                    return Err(create_err(&format!("Included file does not exist in std libs: {}", included_path.display()), &tokens[i]));
+                                }
                             }
 
-                            result.extend(included_in);
-                            let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
-                            result.extend(included);
-                            result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
+                            #[cfg(not(target_arch = "wasm32"))] {
+                                let content = fs::read_to_string(&included_path).map_err(|e| Error::new(
+                                    "PreprocessorIOError",
+                                    &format!("Failed to read included file '{}': {}", included_path.display(), e),
+                                    &self.file_path,
+                                ))?;
+
+                                let lexer = Lexer::new(&content, to_static(fix_path(included_path.display().to_string())));
+                                let mut toks = lexer.tokenize()
+                                    .into_iter()
+                                    .filter(|tok| tok.0 != "WHITESPACE")
+                                    .collect::<Vec<_>>();
+                                    
+                                if toks.last().map_or(false, |t| t.0 == "EOF") {
+                                    toks.pop();
+                                }
+
+                                result.extend(included_in);
+                                let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
+                                result.extend(included);
+                                result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
+                            }
                         }
                         continue;
                     }

@@ -39,70 +39,70 @@ mod env {
     pub mod libs {
         #[cfg(feature = "math")]
         pub mod math {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "os")]
         pub mod os {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "time")]
         pub mod time {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "json")]
         pub mod json {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "clib")]
         pub mod clib {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "regex")]
         pub mod regex {
-            pub mod __init__;
+            pub mod main;
             pub mod regex_engine;
         }
 
         #[cfg(feature = "collections")]
         pub mod collections {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "random")]
         pub mod random {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "lasm")]
         pub mod lasm {
-            pub mod __init__;
+            pub mod main;
             pub mod cpu;
         }
 
         #[cfg(feature = "fs")]
         pub mod fs {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "nest")]
         pub mod nest {
-            pub mod __init__;
+            pub mod main;
         }
 
         #[cfg(feature = "libload")]
         pub mod libload {
-            pub mod __init__;
+            pub mod main;
             pub mod ffi;
         }
 
         #[cfg(feature = "elevator")]
         pub mod elevator {
-            pub mod __init__;
+            pub mod main;
         }
     }
     pub mod bundler {

@@ -3816,7 +3816,7 @@ impl Interpreter {
             match module_name.as_str() {
                 #[cfg(feature = "math")]
                 "math" => {
-                    use crate::env::libs::math::__init__ as math;
+                    use crate::env::libs::math::main as math;
                     let math_module_props = math::register();
                     for (name, var) in math_module_props {
                         properties.insert(name, var);
@@ -3824,7 +3824,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "os")]
                 "os" => {
-                    use crate::env::libs::os::__init__ as os;
+                    use crate::env::libs::os::main as os;
                     let os_module_props = os::register(&self.config.clone());
                     for (name, var) in os_module_props {
                         properties.insert(name, var);
@@ -3832,7 +3832,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "time")]
                 "time" => {
-                    use crate::env::libs::time::__init__ as time;
+                    use crate::env::libs::time::main as time;
                     let time_module_props = time::register();
                     for (name, var) in time_module_props {
                         properties.insert(name, var);
@@ -3840,7 +3840,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "json")]
                 "json" => {
-                    use crate::env::libs::json::__init__ as json;
+                    use crate::env::libs::json::main as json;
                     let json_module_props = json::register();
                     for (name, var) in json_module_props {
                         properties.insert(name, var);
@@ -3858,9 +3858,9 @@ impl Interpreter {
                 #[cfg(feature = "clib")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "clib" => {
-                    use crate::env::libs::clib::__init__ as clib;
+                    use crate::env::libs::clib::main as clib;
                     let arc_config = Arc::new(self.config.clone());
-                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("clib").join("__init__.rs").display().to_string();
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("clib").join("main.rs").display().to_string();
                     let result = clib::init_clib(arc_config, module_path);
                     if let Err(e) = result {
                         self.stack.pop();
@@ -3877,7 +3877,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "regex")]
                 "regex" => {
-                    use crate::env::libs::regex::__init__ as regex;
+                    use crate::env::libs::regex::main as regex;
                     let regex_module_props = regex::register();
                     for (name, var) in regex_module_props {
                         properties.insert(name, var);
@@ -3885,7 +3885,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "collections")]
                 "collections" => {
-                    use crate::env::libs::collections::__init__ as collections;
+                    use crate::env::libs::collections::main as collections;
                     let collections_module_props = collections::register();
                     for (name, var) in collections_module_props {
                         properties.insert(name, var);
@@ -3893,7 +3893,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "random")]
                 "random" => {
-                    use crate::env::libs::random::__init__ as random;
+                    use crate::env::libs::random::main as random;
                     let random_module_props = random::register();
                     for (name, var) in random_module_props {
                         properties.insert(name, var);
@@ -3901,7 +3901,7 @@ impl Interpreter {
                 }
                 #[cfg(feature = "lasm")]
                 "lasm" => {
-                    use crate::env::libs::lasm::__init__ as lasm;
+                    use crate::env::libs::lasm::main as lasm;
                     let lasm_module_props = lasm::register();
                     for (name, var) in lasm_module_props {
                         properties.insert(name, var);
@@ -3919,7 +3919,7 @@ impl Interpreter {
                 #[cfg(feature = "fs")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "fs" => {
-                    use crate::env::libs::fs::__init__ as fs;
+                    use crate::env::libs::fs::main as fs;
                     let fs_module_props = fs::register();
                     for (name, var) in fs_module_props {
                         properties.insert(name, var);
@@ -3927,9 +3927,9 @@ impl Interpreter {
                 }
                 #[cfg(feature = "nest")]
                 "nest" => {
-                    use crate::env::libs::nest::__init__ as nest;
+                    use crate::env::libs::nest::main as nest;
                     let arc_config = Arc::new(self.config.clone());
-                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("nest").join("__init__.rs").display().to_string();
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("nest").join("main.rs").display().to_string();
                     let result = nest::init_nest(arc_config, module_path);
                     if let Err(e) = result {
                         self.stack.pop();
@@ -3957,9 +3957,9 @@ impl Interpreter {
                 #[cfg(feature = "libload")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "libload" => {
-                    use crate::env::libs::libload::__init__ as libload;
+                    use crate::env::libs::libload::main as libload;
                     let arc_config = Arc::new(self.config.clone());
-                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("libload").join("__init__.rs").display().to_string();
+                    let module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join("libload").join("main.rs").display().to_string();
                     let result = libload::init_libload(arc_config, module_path);
                     if let Err(e) = result {
                         self.stack.pop();
@@ -3986,7 +3986,7 @@ impl Interpreter {
                 #[cfg(feature = "elevator")]
                 #[cfg(not(target_arch = "wasm32"))]
                 "elevator" => {
-                    use crate::env::libs::elevator::__init__ as elevator;
+                    use crate::env::libs::elevator::main as elevator;
                     let elevator_module_props = elevator::register(&self.config);
                     for (name, var) in elevator_module_props {
                         properties.insert(name, var);
@@ -4144,6 +4144,13 @@ impl Interpreter {
                 }
             } else if module_path.is_dir() {
                 let manifest_path = module_path.join("manifest.json");
+                let mut entry_point: Option<PathBuf> = if module_path.join("main.lc").exists() && module_path.join("main.lc").is_file() {
+                    Some(module_path.join("main.lc"))
+                } else if module_path.join("main.lucia").exists() && module_path.join("main.lucia").is_file() {
+                    Some(module_path.join("main.lucia"))
+                } else {
+                    None
+                };
                 if manifest_path.exists() {
                     let manifest_file = fs::File::open(&manifest_path);
                     if let Ok(file) = manifest_file {
@@ -4162,6 +4169,18 @@ impl Interpreter {
                         let description = manifest_json.get("description").and_then(|v| v.as_str()).unwrap_or("");
                         let authors = manifest_json.get("authors").and_then(|v| v.as_array()).map_or(vec![], |arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>());
                         let license = manifest_json.get("license").and_then(|v| v.as_str()).unwrap_or("GPLv3");
+                        if let Some(entry_point_path_str) = manifest_json.get("entry_point").and_then(|v| v.as_str()) {
+                            let entry_point_path = module_path.join(entry_point_path_str);
+                            if entry_point_path.exists() && entry_point_path.is_file() {
+                                entry_point = Some(entry_point_path);
+                            } else {
+                                self.stack.pop();
+                                return self.raise("ImportError", &format!(
+                                    "Entry point file '{}' specified in manifest not found",
+                                    fix_path(entry_point_path.display().to_string())
+                                ));
+                            }
+                        }
                         
                         debug_log(
                             &format!(
@@ -4316,43 +4335,36 @@ impl Interpreter {
                     debug_log(&format!("<Importing module '{}'>", module_name), &self.config, Some(self.use_colors));
                 }                
                 
-                let init_path_lc = module_path.join("__init__.lc");
-                let init_path_lucia = module_path.join("__init__.lucia");
-
-                let has_init = (init_path_lc.exists() && init_path_lc.is_file()) || (init_path_lucia.exists() && init_path_lucia.is_file());
-
-                if init_path_lc.exists() && init_path_lc.is_file() {
-                    let props = self.get_properties_from_file(&init_path_lc);
-                    if self.err.is_some() {
-                        self.stack.pop();
-                        return NULL;
-                    }
-                    properties.extend(props);
-                } else if init_path_lucia.exists() && init_path_lucia.is_file() {
-                    let props = self.get_properties_from_file(&init_path_lucia);
+                if let Some(ref entry_point_path) = entry_point {
+                    let props = self.get_properties_from_file(entry_point_path);
                     if self.err.is_some() {
                         self.stack.pop();
                         return NULL;
                     }
                     properties.extend(props);
                 }
-    
+
                 if let Ok(entries) = fs::read_dir(&module_path) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if path.is_file() {
                             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                                if (ext == "lc" || ext == "lucia") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lc") && path.file_name().and_then(|n| n.to_str()) != Some("__init__.lucia") {
+                                if (ext == "lc" || ext == "lucia")
+                                    && Some(path.clone()) != entry_point
+                                {
                                     let properties_result = self.get_properties_from_file(&path);
                                     if self.err.is_some() {
                                         self.stack.pop();
                                         return NULL;
                                     }
                                     properties.extend(properties_result);
-                                } else if !has_init {
+                                } else if entry_point.is_none() {
                                     if ext != "lc" && ext != "lucia" {
                                         self.stack.pop();
-                                        return self.raise("ImportError", &format!("Unsupported file extension '{}'", ext));
+                                        return self.raise(
+                                            "ImportError",
+                                            &format!("Unsupported file extension '{}'", ext)
+                                        );
                                     }
                                 } else {
                                     continue;
@@ -6074,35 +6086,64 @@ impl Interpreter {
                 var.value.clone()
             }
             "INDEX_ACCESS" => {
-                fn assign_index(
-                    interpreter: &mut Interpreter,
-                    variable_name: &str,
-                    index_access: Value,
-                    right_value: Value,
-                ) -> Value {
+                fn value_to_usize(val: &Value) -> Result<usize, Value> {
+                    match val {
+                        Value::Int(i) => {
+                            let v = i.to_i64().map_err(|_| Value::Error("TypeError", "Index must be integer", None))?;
+                            if v >= 0 { Ok(v as usize) } 
+                            else { Err(Value::Error("TypeError", "Index must be non-negative", None)) }
+                        }
+                        Value::Float(f) => {
+                            let v = f.to_f64().map_err(|_| Value::Error("TypeError", "Index must be number", None))?;
+                            if v.fract() == 0.0 && v >= 0.0 { Ok(v as usize) } 
+                            else { Err(Value::Error("TypeError", "Index must be non-negative whole number", None)) }
+                        }
+                        _ => Err(Value::Error("TypeError", "Index must be integer or whole float", None)),
+                    }
+                }
+
+                fn get_single_index_from_map(interpreter: &mut Interpreter, index_map: &Value) -> Result<Value, (String, String)> {
+                    if let Value::Map { keys, values } = index_map {
+                        let mut start_val = None;
+                        let mut end_val = None;
+
+                        for (k, v) in keys.iter().zip(values.iter()) {
+                            if let Value::String(s) = k {
+                                if s == "start" { start_val = Some(v.clone()); }
+                                else if s == "end" { end_val = Some(v.clone()); }
+                            }
+                        }
+
+                        match (start_val, end_val) {
+                            (Some(start), Some(end)) => {
+                                if start == end {
+                                    Ok(interpreter.evaluate(&start.convert_to_statement()))
+                                } else {
+                                    Err(("IndexError".to_string(), "Slice assignment requires 'start' and 'end' to be equal".to_string()))
+                                }
+                            }
+                            _ => Err(("RuntimeError".to_string(), "Missing 'start' or 'end' in index access assignment".to_string())),
+                        }
+                    } else {
+                        Err(("TypeError".to_string(), "Index access must be a map with 'start' and 'end' keys".to_string()))
+                    }
+                }
+
+                fn assign_index(interpreter: &mut Interpreter, variable_name: &str, index_access: Value, right_value: Value) -> Value {
                     let var = match interpreter.variables.get_mut(variable_name) {
                         Some(v) => v,
                         None => return interpreter.raise("NameError", &format!("Variable '{}' not found for index assignment", variable_name)),
                     };
-                
+
                     if var.is_final() {
                         return interpreter.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", variable_name));
                     }
-                
+
                     match &mut var.value {
                         Value::List(l) => {
-                            let index = match index_access {
-                                Value::Int(i) => match i.to_i64() {
-                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
-                                    _ => return interpreter.raise("TypeError", "List index must be a non-negative integer"),
-                                },
-                                Value::Float(f) => {
-                                    match f.to_f64() {
-                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
-                                        _ => return interpreter.raise("TypeError", "List index must be a non-negative whole number"),
-                                    }
-                                },
-                                _ => return interpreter.raise("TypeError", "List index must be an integer or whole float"),
+                            let index = match value_to_usize(&index_access) {
+                                Ok(i) => i,
+                                Err(v) => return v,
                             };
                             if index >= l.len() {
                                 return interpreter.raise("IndexError", "List index out of range");
@@ -6110,51 +6151,38 @@ impl Interpreter {
                             l[index] = right_value;
                             var.value.clone()
                         }
+                        Value::Tuple(t) => {
+                            let index = match value_to_usize(&index_access) {
+                                Ok(i) => i,
+                                Err(v) => return v,
+                            };
+                            if index >= t.len() {
+                                return interpreter.raise("IndexError", "Tuple index out of range");
+                            }
+                            t[index] = right_value;
+                            var.value.clone()
+                        }
                         Value::Bytes(b) => {
-                            let index = match index_access {
-                                Value::Int(i) => match i.to_i64() {
-                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
-                                    _ => return interpreter.raise("TypeError", "Bytes index must be a non-negative integer"),
-                                },
-                                Value::Float(f) => {
-                                    match f.to_f64() {
-                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
-                                        _ => return interpreter.raise("TypeError", "Bytes index must be a non-negative whole number"),
-                                    }
-                                },
-                                _ => return interpreter.raise("TypeError", "Bytes index must be an integer or whole float"),
+                            let index = match value_to_usize(&index_access) {
+                                Ok(i) => i,
+                                Err(v) => return v,
                             };
                             if index >= b.len() {
                                 return interpreter.raise("IndexError", "Bytes index out of range");
                             }
                             let val_as_u8 = match right_value {
-                                Value::Int(i) => match i.to_i64() {
-                                    Ok(i64_val) => i64_val as u8,
-                                    Err(_) => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
-                                },
-                                Value::Float(f) => match f.to_f64() {
-                                    Ok(f64_val) => f64_val as u8,
-                                    Err(_) => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
-                                },
+                                Value::Int(i) => i.to_i64().unwrap_or(0) as u8,
+                                Value::Float(f) => f.to_f64().unwrap_or(0.0) as u8,
                                 Value::String(s) => s.parse::<u8>().unwrap_or(0),
-                                _ => return interpreter.raise("TypeError", "Expected a numeric value for byte assignment"),
+                                _ => return interpreter.raise("TypeError", "Expected numeric value for byte assignment"),
                             };
                             b[index] = val_as_u8;
                             var.value.clone()
                         }
                         Value::String(s) => {
-                            let index = match index_access {
-                                Value::Int(i) => match i.to_i64() {
-                                    Ok(i64_val) if i64_val >= 0 => i64_val as usize,
-                                    _ => return interpreter.raise("TypeError", "String index must be a non-negative integer"),
-                                },
-                                Value::Float(f) => {
-                                    match f.to_f64() {
-                                        Ok(f64_val) if f64_val.fract() == 0.0 && f64_val >= 0.0 => f64_val as usize,
-                                        _ => return interpreter.raise("TypeError", "String index must be a non-negative whole number"),
-                                    }
-                                },
-                                _ => return interpreter.raise("TypeError", "String index must be an integer or whole float"),
+                            let index = match value_to_usize(&index_access) {
+                                Ok(i) => i,
+                                Err(v) => return v,
                             };
                             if index >= s.len() {
                                 return interpreter.raise("IndexError", "String index out of range");
@@ -6169,7 +6197,7 @@ impl Interpreter {
                             var.value.clone()
                         }
                         Value::Map { keys, values } => {
-                            let key = index_access;
+                            let key = index_access.clone();
                             match keys.iter().position(|k| k == &key) {
                                 Some(idx) => values[idx] = right_value,
                                 None => {
@@ -6182,92 +6210,42 @@ impl Interpreter {
                         _ => interpreter.raise("TypeError", "Object not indexable for index assignment"),
                     }
                 }
-                let mut get_single_index_from_map = |index_map: &Value| -> Result<Value, (String, String)> {
-                    if let Value::Map { keys, values } = index_map {
-                        let mut start_val = None;
-                        let mut end_val = None;
-                
-                        for (k, v) in keys.iter().zip(values.iter()) {
-                            if let Value::String(s) = k {
-                                if s == "start" {
-                                    start_val = Some(v.clone());
-                                } else if s == "end" {
-                                    end_val = Some(v.clone());
-                                }
-                            }
-                        }
-                
-                        match (start_val, end_val) {
-                            (Some(start), Some(end)) => {
-                                if start == end {
-                                    Ok(self.evaluate(&start.convert_to_statement()))
-                                } else {
-                                    Err((
-                                        "IndexError".to_string(),
-                                        "Slice assignment requires 'start' and 'end' to be equal".to_string(),
-                                    ))
-                                }
-                            }
-                            _ => Err((
-                                "RuntimeError".to_string(),
-                                "Missing 'start' or 'end' in index access assignment".to_string(),
-                            )),
-                        }
-                    } else {
-                        Err((
-                            "TypeError".to_string(),
-                            "Index access must be a map with 'start' and 'end' keys".to_string(),
-                        ))
-                    }
-                };           
 
-                let mut object_val = match left_hashmap.get(&Value::String("object".to_string())) {
-                    Some(v) => v,
+                let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
+                    Some(v) => v.clone(),
                     None => return self.raise("RuntimeError", "Missing 'object' in index access assignment"),
                 };
 
                 let access_val = match left_hashmap.get(&Value::String("access".to_string())) {
-                    Some(v) => v,
+                    Some(v) => v.clone(),
                     None => return self.raise("RuntimeError", "Missing 'access' in index access assignment"),
                 };
 
-                let index_access = match get_single_index_from_map(&access_val) {
+                let index_access = match get_single_index_from_map(self, &access_val) {
                     Ok(idx) => idx,
-                    Err((kind, msg)) => return self.raise(&kind, &msg),
+                    Err((k, msg)) => return self.raise(&k, &msg),
                 };
 
+                let current_obj = object_val;
+
                 loop {
-                    let object_type = match object_val {
+                    let object_type = match &current_obj {
                         Value::Map { keys, values } => {
                             let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                    
                             match obj_map.get(&Value::String("type".to_string())) {
-                                Some(t) => match t {
-                                    Value::String(s) => s.clone(),
-                                    _ => {
-                                        self.raise("RuntimeError", "Expected 'type' to be a String");
-                                        "".to_string()
-                                    }
-                                },
-                                None => {
-                                    self.raise("RuntimeError", "Missing 'type' field");
-                                    "".to_string()
-                                }
+                                Some(Value::String(s)) => s.clone(),
+                                Some(_) => { self.raise("RuntimeError", "Expected 'type' to be a String"); "".to_string() }
+                                None => { self.raise("RuntimeError", "Missing 'type' field"); "".to_string() }
                             }
                         }
-                        _ => {
-                            self.raise("RuntimeError", "Expected a Map value");
-                            "".to_string()
-                        }
+                        _ => { self.raise("RuntimeError", "Expected a Map value"); "".to_string() }
                     };
 
-                    if self.err.is_some() {
-                        return NULL;
-                    };
+                    if self.err.is_some() { return NULL; }
 
                     match object_type.as_str() {
                         "VARIABLE" => {
-                            let variable_name = match object_val {
+                            let var_name = match &current_obj {
                                 Value::Map { keys, values } => {
                                     let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
                                     match obj_map.get(&Value::String("name".to_string())) {
@@ -6277,34 +6255,43 @@ impl Interpreter {
                                 }
                                 _ => return self.raise("RuntimeError", "Expected a Map value for variable assignment"),
                             };
-
-                            if self.err.is_some() {
-                                return NULL;
-                            }
-
-                            return assign_index(self, &variable_name, index_access, right_value);
+                            return assign_index(self, &var_name, index_access, right_value);
                         }
                         "INDEX_ACCESS" => {
-                            object_val = match object_val {
-                                Value::Map { keys, values } => {
-                                    if let Some(pos) = keys.iter().position(|k| *k == Value::String("object".to_string())) {
-                                        &values[pos]
-                                    } else {
-                                        return self.raise("RuntimeError", "Missing 'object' in nested index access assignment");
-                                    }
-                                }
-                                _ => return self.raise("RuntimeError", "Expected a Map value for nested index access assignment"),
+                            // recursively resolve inner index
+                            let obj_map: HashMap<_, _> = match &current_obj {
+                                Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect(),
+                                _ => return self.raise("RuntimeError", "Expected a Map for nested index access assignment"),
                             };
-                            continue;     
-                        }
-                        "LIST" | "BYTES" | "STRING" | "TUPLE" => {
-                            return assign_index(self, &object_val.to_string(), index_access, right_value);
+
+                            let inner_obj = match obj_map.get(&Value::String("object".to_string())) {
+                                Some(v) => v.clone(),
+                                None => return self.raise("RuntimeError", "Missing 'object' in nested index access assignment"),
+                            };
+
+                            let inner_access = match obj_map.get(&Value::String("access".to_string())) {
+                                Some(v) => v.clone(),
+                                None => return self.raise("RuntimeError", "Missing 'access' in nested index access assignment"),
+                            };
+
+                            let inner_index = match get_single_index_from_map(self, &inner_access) {
+                                Ok(v) => v,
+                                Err((k, msg)) => return self.raise(&k, &msg),
+                            };
+
+                            let inner_name = match inner_obj.convert_to_statement().get_value("name") {
+                                Some(Value::String(n)) => n.clone(),
+                                _ => return self.raise("RuntimeError", "Cannot determine variable name from nested object"),
+                            };
+
+                            let updated_container = assign_index(self, &inner_name, inner_index, right_value.clone());
+                            return assign_index(self, &inner_name, index_access, updated_container);
                         }
                         _ => {
                             self.raise("TypeError", &format!("Unsupported object type for index assignment: {}", object_type));
                             return NULL;
                         }
-                    };
+                    }
                 }
             }
             "PROPERTY_ACCESS" => {

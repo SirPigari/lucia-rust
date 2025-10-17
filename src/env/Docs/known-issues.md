@@ -93,7 +93,7 @@ Each issue should follow this structure:
 ### Nested index assignment  
 - **ID**: `lucia-0001`  
 - **Severity**: Medium  
-- **Status**: Open  
+- **Status**: Resolved  
 - **Component**: Interpreter  
 - **Discovered in**: `v2.0.0`
 

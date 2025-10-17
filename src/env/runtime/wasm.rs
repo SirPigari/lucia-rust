@@ -498,7 +498,7 @@ pub fn execute_code_string_wasm(
     if static_check_flag {
         let static_check_start = now_ms();
         let mut checker = Checker::new(config.clone(), "<-c>".to_string());
-        let errors = checker.check(statements.clone());
+        let errors = checker.check(statements.clone(), false);
         if !errors.is_empty() {
             for err in &errors { handle_error(err, &code, &config); }
             if !static_check_flag_force_run && (!run_flag || !errors.is_empty()) {

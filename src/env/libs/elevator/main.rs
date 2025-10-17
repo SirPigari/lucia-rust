@@ -5,7 +5,7 @@ use std::{thread, io::{Write}};
 use once_cell::sync::OnceCell;
 
 use crate::env::runtime::functions::{Function, Parameter};
-use crate::env::runtime::types::{Int};
+use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config};
@@ -55,6 +55,78 @@ fn goto(args: &HashMap<String, Value>) -> Value {
     Value::Null
 }
 
+fn nth_prime_native(n: u64) -> u64 {
+    if n < 6 {
+        return [0, 2, 3, 5, 7, 11][n as usize];
+    }
+    let limit = (n as f64 * (n as f64).ln() * 1.2) as usize;
+    let mut sieve = vec![true; limit];
+    sieve[0] = false;
+    sieve[1] = false;
+
+    for i in 2..((limit as f64).sqrt() as usize + 1) {
+        if sieve[i] {
+            for j in ((i * i)..limit).step_by(i) {
+                sieve[j] = false;
+            }
+        }
+    }
+
+    let mut count = 0;
+    for (i, &is_prime) in sieve.iter().enumerate() {
+        if is_prime {
+            count += 1;
+            if count == n {
+                return i as u64;
+            }
+        }
+    }
+    0
+}
+
+fn nth_prime_f64(n: f64) -> u64 {
+    if n < 6.0 {
+        return [0.0, 2.0, 3.0, 5.0, 7.0, 11.0][n as usize] as u64;
+    }
+    let est = n * (n.ln() + n.ln().ln() - 1.0 + ((n.ln().ln() - 2.0) / n.ln()));
+    est.round() as u64
+}
+
+fn nth_prime_big(n: &Int) -> Int {
+    if *n < Int::from(6) {
+        match n {
+            x if *x == Int::from(1) => Int::from(2),
+            x if *x == Int::from(2) => Int::from(3),
+            x if *x == Int::from(3) => Int::from(5),
+            x if *x == Int::from(4) => Int::from(7),
+            x if *x == Int::from(5) => Int::from(11),
+            _ => unreachable!(),
+        }
+    } else {
+        let n_f = Float::from(n.clone());
+        let ln_n = n_f.ln().expect("Failed to compute ln(n)");
+        let ln_ln_n = ln_n.ln().expect("Failed to compute ln(ln(n))");
+        let correction = ((&ln_ln_n - Float::from(2.0)).expect("Failed to compute correction") / &ln_n).expect("Failed to compute correction term");
+        let est =(&n_f * ((((&ln_n + &ln_ln_n).expect("Failed to compute ln(n) + ln(ln(n))") - &*Float::ONE).expect("Failed to compute ln(n) + ln(ln(n)) - 1") + correction).expect("Failed to compute final estimate"))).expect("Failed to compute estimate");
+        est.round(0).to_int().unwrap()
+    }
+}
+
+fn nth_prime(args: &HashMap<String, Value>) -> Value {
+    let n = match args.get("n") {
+        Some(Value::Int(i)) => i.clone(),
+        _ => return Value::Error("TypeError", "n must be an integer.", None),
+    };
+    if let Ok(n_u64) = n.clone().to_u64() {
+        if n_u64 <= 1_000_000 {
+            return Value::Int(Int::from(nth_prime_native(n_u64)));
+        } else if n_u64 <= 1_000_000_000 {
+            return Value::Int(Int::from(nth_prime_f64(n_u64 as f64)));
+        }
+    }
+    Value::Int(nth_prime_big(&n))
+}
+
 pub fn register(_config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -84,6 +156,16 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
         ],
         "str",
         EffectFlags::IO
+    );
+    insert_native_fn!(
+        map,
+        "nth_prime",
+        nth_prime,
+        vec![
+            Parameter::positional("n", "int"),
+        ],
+        "int",
+        EffectFlags::PURE
     );
 
     // you wont be able to access this variable lol

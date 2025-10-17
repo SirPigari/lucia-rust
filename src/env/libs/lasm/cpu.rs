@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 // This file is a part of the LASM (Lucia Assembly) module.
 // It provides a simple CPU simulator that can execute a limited set of assembly-like instructions.
@@ -6,28 +6,28 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct CPU {
-    regs: HashMap<String, i32>,
-    memory: HashMap<u32, u8>,
+    regs: FxHashMap<String, i32>,
+    memory: FxHashMap<u32, u8>,
     pc: usize,
     program: Vec<String>,
     zero: bool,
     negative: bool,
-    labels: HashMap<String, usize>,
+    labels: FxHashMap<String, usize>,
 
-    config: HashMap<String, String>,
+    config: FxHashMap<String, String>,
 }
 
 impl CPU {
     pub fn new() -> Self {
         CPU {
-            regs: HashMap::new(),
-            memory: HashMap::new(),
+            regs: FxHashMap::default(),
+            memory: FxHashMap::default(),
             pc: 0,
             program: Vec::new(),
             zero: false,
             negative: false,
-            labels: HashMap::new(),
-            config: HashMap::new(),
+            labels: FxHashMap::default(),
+            config: FxHashMap::default(),
         }
     }
 

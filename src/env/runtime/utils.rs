@@ -101,6 +101,11 @@ pub fn supports_color() -> bool {
     false
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn supports_color() -> bool {
+    true
+}
+
 #[cfg(windows)]
 pub fn get_remaining_stack_size() -> Option<usize> {
     #[allow(non_camel_case_types)]
