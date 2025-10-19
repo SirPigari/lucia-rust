@@ -16,10 +16,10 @@ pub fn extract_seed_end(
         let f = match v {
             Value::Float(f) => f
                 .to_f64()
-                .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
+                .map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))?,
             Value::Int(i) => i
                 .to_i64()
-                .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
+                .map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))? as f64,
             _ => return Err(("TypeError", "value is not a Float or Int", "")),
         };
         seed_f64.push(f);
@@ -28,10 +28,10 @@ pub fn extract_seed_end(
     let end_f64 = match &end {
         Value::Float(f) => f
             .to_f64()
-            .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
+            .map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))?,
         Value::Int(i) => i
             .to_i64()
-            .map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
+            .map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))? as f64,
         _ => return Err(("TypeError", "end value is not a Float or Int", "")),
     };       
 
@@ -326,8 +326,8 @@ pub fn predict_sequence_until_length(
 
     for v in &seed {
         let f = match v {
-            Value::Float(f) => f.to_f64().map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))?,
-            Value::Int(i) => i.to_i64().map_err(|c| ("ConversionError", to_static(get_imagnum_error_message(c)), ""))? as f64,
+            Value::Float(f) => f.to_f64().map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))?,
+            Value::Int(i) => i.to_i64().map_err(|c| ("ConversionError", get_imagnum_error_message(c), ""))? as f64,
             _ => return Err(("TypeError", "Seed values must be Float or Int", "")),
         };
         seed_f64.push(f);

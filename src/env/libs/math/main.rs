@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{get_imagnum_error_message, to_static, parse_type};
+use crate::env::runtime::utils::{get_imagnum_error_message, parse_type};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::variables::Variable;
 
@@ -24,9 +24,8 @@ const _LN2: &str =              "0.693147180559945309417232121458176568075500134
 const _ZETA2: &str =            "1.64493406684822643647241516664602518921894990120679843773555822937000747040320087383362890061975870530400431896233719067962872468700500779";
 const _CATALAN: &str =          "0.91596559417721901505460351493238411077414937428167213426649811962176301977625476947935651292611510624857442261919619957903589880332585905";
 
-fn math_error(err_id: i16) -> Value {
-    let msg = get_imagnum_error_message(err_id);
-    Value::Error("MathError", to_static(msg), None)
+fn math_error(err_id: i8) -> Value {
+    Value::Error("MathError", get_imagnum_error_message(err_id), None)
 }
 
 fn create_float_constant(name: &str, value: &str) -> Variable {
@@ -61,9 +60,9 @@ macro_rules! define_unary {
     };
 }
 
-fn int_abs(i: &Int) -> Result<Int, i16> { Ok(Int::abs(i)) }
-fn float_abs(f: &Float) -> Result<Float, i16> { Ok(Float::abs(f)) }
-fn int_log(i: &Int) -> Result<Float, i16> { Float::from_int(i).and_then(|f| Float::ln(&f)) }
+fn int_abs(i: &Int) -> Result<Int, i8> { Ok(Int::abs(i)) }
+fn float_abs(f: &Float) -> Result<Float, i8> { Ok(Float::abs(f)) }
+fn int_log(i: &Int) -> Result<Float, i8> { Float::from_int(i).and_then(|f| Float::ln(&f)) }
 
 define_unary!(sqrt, Int::sqrt, Float::sqrt, Value::Float, Value::Float);
 define_unary!(sin, Int::sin, Float::sin, Value::Float, Value::Float);

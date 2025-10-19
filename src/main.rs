@@ -393,7 +393,7 @@ pub fn handle_error(
 fn debug_log(message: &str, config: &Config) {
     let use_colors = config.supports_color;
     if config.debug {
-        print_colored(message, &config.color_scheme.debug, Some(use_colors));
+        print_colored(message, &config.color_scheme.debug, use_colors);
     }
 }
 
@@ -451,7 +451,7 @@ fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config)
             base_path
         ),
         &config.color_scheme.debug,
-        Some(use_colors),
+        use_colors,
     );
 }
 
@@ -537,7 +537,7 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
                     e
                 ),
                 &config.color_scheme.exception,
-                Some(use_colors),
+                use_colors,
             );
             return;
         }
@@ -553,7 +553,7 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
                     e
                 ),
                 &config.color_scheme.exception,
-                Some(use_colors),
+                use_colors,
             );
             return;
         }
@@ -569,7 +569,7 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
                         path
                     ),
                     &config.color_scheme.debug,
-                    Some(use_colors),
+                    use_colors,
                 );
             }
             Err(e) => {
@@ -581,7 +581,7 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
                         e
                     ),
                     &config.color_scheme.exception,
-                    Some(use_colors),
+                    use_colors,
                 );
             }
         }
@@ -1177,7 +1177,6 @@ fn execute_file(
         let creating_interpreter_time = Instant::now();
         let mut interpreter = Interpreter::new(
             config.clone(),
-            config.supports_color,
             file_path.as_str(),
             &parent_dir,
             (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
@@ -1372,7 +1371,6 @@ fn execute_code_string(
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut interpreter = Interpreter::new(
         config.clone(),
-        config.supports_color,
         "<-c>",
         &current_dir,
         (
@@ -1427,7 +1425,6 @@ fn repl(
 
     let mut interpreter = Interpreter::new(
         config.clone(),
-        config.supports_color,
         "<stdin>",
         &cwd,
         (
@@ -2626,7 +2623,7 @@ fn main() {
                 print_colored(
                     &format!("Warning: Standard libraries mismatch for {}. Running in moded mode.", n),
                     &config.color_scheme.warning,
-                    Some(config.supports_color),
+                    config.supports_color,
                 );
             }
         }
@@ -2758,7 +2755,7 @@ fn main() {
                     VERSION, config.version
                 ),
                 &config.color_scheme.warning,
-                Some(config.supports_color),
+                config.supports_color,
             );
         }
     }

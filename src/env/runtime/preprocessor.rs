@@ -1083,7 +1083,7 @@ impl Preprocessor {
                                     _ => None,
                                 }
                             } else if let (Some(lf), Some(rf)) = (lf, rf) {
-                                let res: Result<Float, i16> = match op.as_str() {
+                                let res: Result<Float, i8> = match op.as_str() {
                                     "+" => lf.add(rf),
                                     "-" => lf.sub(rf),
                                     "*" => lf.mul(rf),

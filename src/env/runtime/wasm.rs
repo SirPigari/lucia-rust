@@ -137,33 +137,33 @@ mod env {
     }
     pub mod libs {
         pub mod math {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod os {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod time {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod json {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod regex {
-            pub mod __init__;
+            pub mod main;
             pub mod regex_engine;
         }
         pub mod collections {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod random {
-            pub mod __init__;
+            pub mod main;
         }
         pub mod lasm {
-            pub mod __init__;
+            pub mod main;
             pub mod cpu;
         }
         pub mod nest {
-            pub mod __init__;
+            pub mod main;
         }
     }
 }
@@ -515,7 +515,6 @@ pub fn execute_code_string_wasm(
     let interpreter_start = now_ms();
     let mut interpreter = Interpreter::new(
         config.clone(),
-        config.supports_color,
         "<-c>",
         &PathBuf::from("."),
         (PathBuf::from("libs"), PathBuf::from("."), !disable_preprocessor),

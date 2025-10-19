@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.42"
 colored = "3.0.0"
-imagnum = "0.2.24"
+imagnum = "0.2.28"
 once_cell = { version = "1.21.3", default-features = false }
 regex = "1.12.2"
 rand = { version = "0.9.2", default-features = false, features = [ "small_rng" ] }
@@ -25,7 +25,7 @@ rustc-hash = "2.1.1"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 crossterm = "0.29.0"
 sys-info = "0.9.1"
-libffi = { version = "4.1.2", optional = true }
+libffi = { version = "4.1.2", optional = true }  # DO NOT UPDATE TO 5.x.x IT BREAKS EVERYTHING
 libloading = { version = "0.8.9", optional = true }
 libc = "0.2.177"
 tar = "0.4.44"
@@ -96,14 +96,14 @@ math = []
 os = []
 time = []
 json = []
-regex = ["fancy-regex"]
+regex = ["dep:fancy-regex"]
 collections = []
-random = []
-fs = ["symphonia", "hound"]
+random = ["imagnum/random"]
+fs = ["dep:symphonia", "dep:hound"]
 clib = []
 lasm = []
 nest = []
-libload = ["libloading", "libffi"]
+libload = ["dep:libloading", "dep:libffi"]
 elevator = []
 
 preprocessor_include_std = []

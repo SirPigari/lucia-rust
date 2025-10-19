@@ -10,6 +10,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{Config};
 use crate::env::runtime::internal_structs::{EffectFlags};
+use crate::env::runtime::utils::parse_type;
 
 use crate::{insert_native_fn, insert_native_var};
 
@@ -127,8 +128,67 @@ fn nth_prime(args: &HashMap<String, Value>) -> Value {
     Value::Int(nth_prime_big(&n))
 }
 
+fn decode_rle(args: &HashMap<String, Value>) -> Value {
+    let rle = match args.get("rle") {
+        Some(v) => v,
+        _ => return Value::Error("TypeError", "rle must be a string.", None),
+    };
+
+    match rle {
+        Value::String(s) => {
+            let mut decoded = String::new();
+            let mut count_str = String::new();
+
+            for c in s.chars() {
+                if c.is_digit(10) {
+                    count_str.push(c);
+                } else {
+                    let count: usize = if count_str.is_empty() {
+                        1
+                    } else {
+                        count_str.parse().unwrap_or(1)
+                    };
+                    decoded.push_str(&c.to_string().repeat(count));
+                    count_str.clear();
+                }
+            }
+
+            Value::String(decoded)
+        }
+        Value::List(lst) => {
+            let mut decoded = Vec::with_capacity(lst.len() * 2);
+
+            for item in lst {
+                match item {
+                    Value::Int(_) => {
+                        decoded.push(item.clone());
+                    },
+                    Value::List(inner_lst) => {
+                        if inner_lst.len() != 2 {
+                            return Value::Error("ValueError", "Each RLE pair must have exactly two elements.", None);
+                        }
+                        let count = match &inner_lst[0] {
+                            Value::Int(c) => c.to_usize().unwrap_or(0),
+                            _ => return Value::Error("TypeError", "RLE count must be an integer.", None),
+                        };
+                        let value = inner_lst[1].clone();
+                        for _ in 0..count {
+                            decoded.push(value.clone());
+                        }
+                    },
+                    _ => return Value::Error("TypeError", "All items in rle list must be int.", None),
+                }
+            }         
+            Value::List(decoded)
+        }
+        _ => Value::Error("TypeError", "rle must be a string or list.", None),
+    }
+}
+
 pub fn register(_config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
+
+    let str_or_list = parse_type("str | list");
 
     insert_native_fn!(
         map,
@@ -165,6 +225,16 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
             Parameter::positional("n", "int"),
         ],
         "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "decode_rle",
+        decode_rle,
+        vec![
+            Parameter::positional_pt("rle", &str_or_list),
+        ],
+        "any",
         EffectFlags::PURE
     );
 

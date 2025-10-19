@@ -21,7 +21,6 @@ pub fn interpret(input: &str) -> Result<Value, Error> {
     
     let interpreter_mutex = INTERPRETER.get_or_init(|| Mutex::new(Interpreter::new(
         Config::default(),
-        true,
         "<internal>",
         &PathBuf::from("<internal>"),
         (PathBuf::from("<internal>"), PathBuf::from("<internal>"), true),
@@ -64,7 +63,6 @@ pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
     let result = {
         let interpreter_mutex = INTERPRETER.get_or_init(|| Mutex::new(Interpreter::new(
             Config::default(),
-            true,
             "<internal>",
             internal_path_ref,
             (internal_path_ref.clone(), internal_path_ref.clone(), true),

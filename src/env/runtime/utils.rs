@@ -22,6 +22,8 @@ use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
 use crate::env::runtime::internal_structs::EffectFlags;
 
+pub use imagnum::errors::get_error_message as get_imagnum_error_message;
+
 #[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
     execute,
@@ -29,17 +31,6 @@ use crossterm::{
     cursor::MoveTo,
     event,
 };
-
-use imagnum::math::{
-    ERR_UNIMPLEMENTED,
-    ERR_INVALID_FORMAT,
-    ERR_DIV_BY_ZERO,
-    ERR_NEGATIVE_RESULT,
-    ERR_NEGATIVE_SQRT,
-    ERR_NUMBER_TOO_LARGE,
-    ERR_INFINITE_RESULT,
-};
-
 
 static STATIC_STORAGE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::default()));
 
@@ -325,8 +316,7 @@ pub fn hex_to_ansi(hex_color: &str, use_colors: bool) -> String {
     "\x1b[0m".to_string()
 }
 
-pub fn print_colored(message: &str, color: &str, use_colors: Option<bool>) {
-    let use_colors = use_colors.unwrap_or(true);
+pub fn print_colored(message: &str, color: &str, use_colors: bool) {
     let colored_message = format!("{}{}{}", hex_to_ansi(color, use_colors), message, hex_to_ansi("reset", use_colors));
     println!("{}", colored_message);
 }
@@ -445,8 +435,7 @@ pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
     }
 }
 
-pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
-    let use_colors = use_colors.unwrap_or(true);
+pub fn debug_log(message: &str, config: &Config) {
     if config.debug && (config.debug_mode == "full" || config.debug_mode == "normal") {
         let single_line_message = message
             .replace('\n', "\\n")
@@ -455,7 +444,7 @@ pub fn debug_log(message: &str, config: &Config, use_colors: Option<bool>) {
             .replace('\0', "\\0")
             .replace('\x1b', "\\e")
             .replace(r"\A", "\n");
-        print_colored(&single_line_message, &config.color_scheme.debug, Some(use_colors));
+        print_colored(&single_line_message, &config.color_scheme.debug, config.supports_color);
     }
 }
 
@@ -849,19 +838,6 @@ pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statem
     match type_name {
         Value::String(type_str) => get_type_default_as_statement(&type_str),
         _ => get_type_default_as_statement("any"),
-    }
-}
-
-pub fn get_imagnum_error_message(err: i16) -> String {
-    match err {
-        ERR_DIV_BY_ZERO => "Division by zero.".to_string(),
-        ERR_NEGATIVE_RESULT => "Negative result.".to_string(),
-        ERR_NEGATIVE_SQRT => "Square root of a negative number.".to_string(),
-        ERR_NUMBER_TOO_LARGE => "Number too large to convert.".to_string(),
-        ERR_INFINITE_RESULT => "Result is infinite.".to_string(),
-        ERR_UNIMPLEMENTED => "This operation is not implemented.".to_string(),
-        ERR_INVALID_FORMAT => "Invalid format.".to_string(),
-        _ => "Unknown error.".to_string(),
     }
 }
 
@@ -1434,12 +1410,12 @@ pub fn ctrl_t_pressed() -> bool {
     false
 }
 
-pub fn wrap_in_help(text: &str, use_colors: bool, config: &Config) -> String {
+pub fn wrap_in_help(text: &str, config: &Config) -> String {
     format!(
         "{}{}{}",
-        hex_to_ansi(&config.color_scheme.note, use_colors),
+        hex_to_ansi(&config.color_scheme.note, config.supports_color),
         text,
-        hex_to_ansi(&config.color_scheme.help, use_colors)
+        hex_to_ansi(&config.color_scheme.help, config.supports_color)
     )
 }
 
@@ -2296,6 +2272,32 @@ pub fn diff_fields(
     }
 
     Ok(map)
+}
+
+pub fn convert_json_value_to_lucia_value(json_value: &serde_json::Value) -> Value {
+    match json_value {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Boolean(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(Int::from(i))
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(Float::from(f))
+            } else {
+                Value::Null
+            }
+        }
+        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::Array(arr) => {
+            let list = arr.iter().map(convert_json_value_to_lucia_value).collect();
+            Value::List(list)
+        }
+        serde_json::Value::Object(obj) => {
+            let keys: Vec<Value> = obj.keys().map(|k| Value::String(k.clone())).collect();
+            let values: Vec<Value> = obj.values().map(convert_json_value_to_lucia_value).collect();
+            Value::Map { keys, values }
+        }
+    }
 }
 
 pub const KEYWORDS: &[&str] = &[

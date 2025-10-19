@@ -64,7 +64,7 @@ for LuaTable:
     end
 
     static fun from_list(data: list[any]) -> Self:
-        return LuaTable { table = [ LUA_TABLE_PTR ].append(data) }
+        return LuaTable { table = [ LUA_TABLE_PTR ].extend(data) }
     end
 
     fun op_index(self, index: int) -> any:

@@ -15,6 +15,7 @@ use crate::env::runtime::utils::{
     get_type_default,
     replace_accented,
     sanitize_alias,
+    convert_json_value_to_lucia_value,
     TRUE, FALSE, NULL,
 };
 use crate::env::runtime::variables::Variable;
@@ -271,6 +272,17 @@ fn sanitize_alias_handler(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn str_to_json(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::String(s)) = args.get("s") {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(json_value) => convert_json_value_to_lucia_value(&json_value),
+            Err(e) => Value::Error("JSONError", to_static(format!("failed to parse JSON: {}", e)), None),
+        }
+    } else {
+        Value::Error("TypeError", "expected a string", None)
+    }
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -404,6 +416,14 @@ pub fn register() -> HashMap<String, Variable> {
         ],
         "list",
         "deprecated: 'range' was added to builins in v2.0.0, use 'range' from there instead.",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "str_to_json",
+        str_to_json,
+        vec![Parameter::positional("s", "str")],
+        "any",
         EffectFlags::PURE
     );
 

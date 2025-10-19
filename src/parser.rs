@@ -13,6 +13,7 @@ pub struct Parser {
     statements: Vec<Statement>,
     err: Option<Error>,
     ignore_pipe_count: usize,
+    parse_var_decl: bool,
 }
 
 impl Parser {
@@ -23,6 +24,7 @@ impl Parser {
             statements: vec![],
             err: None,
             ignore_pipe_count: 0,
+            parse_var_decl: true,
         }
     }
 
@@ -1914,7 +1916,9 @@ impl Parser {
                         return Statement::Null;
                     }
 
+                    self.parse_var_decl = false;
                     let iterable = self.parse_expression();
+                    self.parse_var_decl = true;
                     if self.err.is_some() {
                         return Statement::Null;
                     }
@@ -2117,7 +2121,9 @@ impl Parser {
                         self.raise("SyntaxError", "Unexpected 'else' after 'if'");
                         return Statement::Null;
                     }
+                    self.parse_var_decl = false;
                     let condition = self.parse_expression();
+                    self.parse_var_decl = true;
                     if self.err.is_some() {
                         return Statement::Null;
                     }
@@ -3960,6 +3966,7 @@ impl Parser {
                         }
                     }
 
+                    self.parse_var_decl = true;
                     let first_expr = self.parse_expression();
                     values.push(first_expr);
 
@@ -4111,10 +4118,10 @@ impl Parser {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.parse_function_call()
                         } else {
-                            self.parse_operand(true)
+                            self.parse_operand(self.parse_var_decl)
                         }
                     } else {
-                        self.parse_operand(true)
+                        self.parse_operand(self.parse_var_decl)
                     }
                 }
 
@@ -4150,7 +4157,7 @@ impl Parser {
                                             loc: self.get_loc(),
                                         }
                                     } else {
-                                        let left = self.parse_operand(true);
+                                        let left = self.parse_operand(self.parse_var_decl);
                                         if self.err.is_some() {
                                             Statement::Null
                                         } else {
@@ -4186,10 +4193,10 @@ impl Parser {
                                         }
                                     }
                                 } else {
-                                    self.parse_operand(true)
+                                    self.parse_operand(self.parse_var_decl)
                                 }
                             } else {
-                                let left = self.parse_operand(true);
+                                let left = self.parse_operand(self.parse_var_decl);
                                 if self.err.is_some() {
                                     Statement::Null
                                 } else {
@@ -4225,15 +4232,15 @@ impl Parser {
                                 }
                             }
                         } else {
-                            self.parse_operand(true)
+                            self.parse_operand(self.parse_var_decl)
                         }
                     } else {
-                        self.parse_operand(true)
+                        self.parse_operand(self.parse_var_decl)
                     }
                 }
 
                 "STRING" | "BOOLEAN" | "RAW_STRING" => {
-                    self.parse_operand(true)
+                    self.parse_operand(self.parse_var_decl)
                 }
 
                 "EOF" => {

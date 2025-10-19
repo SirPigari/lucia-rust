@@ -68,6 +68,8 @@ else
 	cd $(LUCIA_DIR) && [ -f src/main_wasm.rs ] && rm src/main_wasm.rs || true
 endif
 
+wasm: build-wasm
+
 run-wasm: build-wasm
 	@wasmtime $(LUCIA_DIR)/target/wasm32-unknown-unknown/debug/lucia_wasm.wasm
 

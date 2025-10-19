@@ -86,7 +86,6 @@ pub struct Interpreter {
     pub return_value: Value,
     pub state: State,
     stack: Stack,
-    use_colors: bool,
     pub current_statement: Option<Statement>,
     pub variables: FxHashMap<String, Variable>,
     file_path: String,
@@ -103,7 +102,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(config: Config, use_colors: bool, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool), argv: &[String]) -> Self {
+    pub fn new(config: Config, file_path: &str, cwd: &PathBuf, preprocessor_info: (PathBuf, PathBuf, bool), argv: &[String]) -> Self {
         let mut this = Self {
             config: config.clone(),
             og_cfg: config.clone(),
@@ -112,7 +111,6 @@ impl Interpreter {
             is_returning: false,
             state: State::Normal,
             stack: Stack::new(),
-            use_colors,
             current_statement: None,
             variables: FxHashMap::default(),
             file_path: file_path.to_owned(),
@@ -330,7 +328,6 @@ impl Interpreter {
         debug_log(
             &format!("<Exit with code: {}>", format_value(&self.return_value)),
             &self.config,
-            Some(self.use_colors),
         );
     }
 
@@ -549,7 +546,6 @@ impl Interpreter {
                 }
                 let mut new_interpreter = Interpreter::new(
                     self.config.clone(),
-                    self.use_colors,
                     &self.file_path,
                     &self.cwd,
                     self.preprocessor_info.clone(),
@@ -752,7 +748,7 @@ impl Interpreter {
             method,
             parsed_url.as_str(),
             body.as_deref().unwrap_or("null")
-        ), &self.config.clone(), Some(self.use_colors));
+        ), &self.config.clone());
     
         let req = client
             .request(method, parsed_url)
@@ -766,7 +762,7 @@ impl Interpreter {
     
         let resp = req.send().await?;
     
-        debug_log(&format!("<Response status: {}>", resp.status()), &self.config.clone(), Some(self.use_colors));
+        debug_log(&format!("<Response status: {}>", resp.status()), &self.config.clone());
     
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
@@ -1037,7 +1033,6 @@ impl Interpreter {
 
         let shared_interpreter = Arc::new(Mutex::new(Interpreter::new(
             self.config.clone(),
-            self.use_colors,
             path.display().to_string().as_str(),
             &parent_dir,
             self.preprocessor_info.clone(),
@@ -1970,7 +1965,6 @@ impl Interpreter {
                     None => vec![],
                 };
 
-                // New: check if the parameter is variadic
                 let is_variadic = match keys.iter().position(|k| k == &Value::String("variadic".to_string())) {
                     Some(pos) => matches!(values[pos], Value::Boolean(true)),
                     None => false,
@@ -2056,7 +2050,6 @@ impl Interpreter {
         }
 
         let config = self.config.clone();
-        let use_colors = self.use_colors;
         let file_path = self.file_path.clone();
         let cwd = self.cwd.clone();
         let preprocessor_info = self.preprocessor_info.clone();
@@ -2073,7 +2066,6 @@ impl Interpreter {
         let generate_gen = move |args: &HashMap<String, Value>| -> Value {
             let mut gen_interpreter = Interpreter::new(
                 config.clone(),
-                use_colors,
                 &file_path,
                 &cwd,
                 preprocessor_info.clone(),
@@ -2368,7 +2360,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
-                debug_log(&format!("<Enum '{}' registered>", name), &self.config.clone(), Some(self.use_colors));
+                debug_log(&format!("<Enum '{}' registered>", name), &self.config.clone());
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -2458,7 +2450,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
-                debug_log(&format!("<Struct '{}' registered>", name), &self.config.clone(), Some(self.use_colors));
+                debug_log(&format!("<Struct '{}' registered>", name), &self.config.clone());
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -2567,7 +2559,6 @@ impl Interpreter {
                             if guard != &Value::Null {
                                 let mut guard_interp = Interpreter::new(
                                     self.config.clone(),
-                                    self.use_colors,
                                     &self.file_path,
                                     &self.cwd,
                                     self.preprocessor_info.clone(),
@@ -2587,7 +2578,6 @@ impl Interpreter {
                             }
                             let mut interp = Interpreter::new(
                                 self.config.clone(),
-                                self.use_colors,
                                 &self.file_path,
                                 &self.cwd,
                                 self.preprocessor_info.clone(),
@@ -2780,12 +2770,10 @@ impl Interpreter {
         debug_log(
             &format!("<Entering scope '{}'>", name),
             &self.config.clone(),
-            Some(self.use_colors),
         );
 
         let mut scope_interpreter = Interpreter::new(
             self.config.clone(),
-            self.use_colors,
             &new_file_path,
             &self.cwd.clone(),
             self.preprocessor_info.clone(),
@@ -2813,7 +2801,6 @@ impl Interpreter {
             debug_log(
                 &format!("<Exiting scope '{}'>", name),
                 &self.config.clone(),
-                Some(self.use_colors),
             );
             return NULL;
         }
@@ -2833,7 +2820,6 @@ impl Interpreter {
         debug_log(
             &format!("<Exiting scope '{}'>", name),
             &self.config.clone(),
-            Some(self.use_colors),
         );
 
         self.stack.pop();
@@ -2908,7 +2894,7 @@ impl Interpreter {
                 self.raise("SyntaxError", "Missing 'condition' in while loop");
                 return NULL;
             }
-        };
+        }.convert_to_statement();
 
         let body = match statement.get(&Value::String(BODY_KEY.to_string())) {
             Some(Value::List(b)) => b,
@@ -2920,7 +2906,7 @@ impl Interpreter {
 
         let body_statements: Vec<_> = body.iter().map(|stmt| stmt.convert_to_statement()).collect();
 
-        while self.evaluate(&condition.convert_to_statement()).is_truthy() {
+        while self.evaluate(&condition).is_truthy() {
             for stmt in &body_statements {
                 let result = self.evaluate(&stmt);
                 if self.err.is_some() {
@@ -3800,7 +3786,7 @@ impl Interpreter {
         let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
 
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
-            debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config, Some(self.use_colors));
+            debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config);
 
             let expected_lucia_version = lib_info.expected_lucia_version;
 
@@ -4102,9 +4088,9 @@ impl Interpreter {
                         "ImportError",
                         &format!("Module '{}' not found at path '{}'", &module_name, base_module_path.display()),
                         &format!("Did you mean '{}{}{}'?",
-                            check_ansi("\x1b[4m", &self.use_colors),
+                            check_ansi("\x1b[4m", &self.config.supports_color),
                             closest,
-                            check_ansi("\x1b[24m", &self.use_colors),
+                            check_ansi("\x1b[24m", &self.config.supports_color),
                         ),
                     );
                 }
@@ -4188,7 +4174,6 @@ impl Interpreter {
                                 print_name, version, description, authors, license
                             ),
                             &self.config,
-                            Some(self.use_colors)
                         );
 
                         for (field, _) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
@@ -4215,7 +4200,6 @@ impl Interpreter {
                                 if description.is_empty() { "".to_string() } else { format!(", description: {}", description) }
                             ),
                             &self.config,
-                            Some(self.use_colors)
                         );
                         
                         if let Some(deps) = manifest_json.get("dependencies").and_then(|v| v.as_object()) {
@@ -4332,7 +4316,7 @@ impl Interpreter {
                         return self.raise("MalformedManifest", &format!("Could not open manifest file '{}'", fix_path(manifest_path.display().to_string())));
                     }
                 } else {
-                    debug_log(&format!("<Importing module '{}'>", module_name), &self.config, Some(self.use_colors));
+                    debug_log(&format!("<Importing module '{}'>", module_name), &self.config);
                 }                
                 
                 if let Some(ref entry_point_path) = entry_point {
@@ -4406,7 +4390,7 @@ impl Interpreter {
                 for &category in &order {
                     if let Some(names) = categorized.get(category) {
                         for name in names {
-                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
                         }
                     }
                 }
@@ -4453,9 +4437,9 @@ impl Interpreter {
                                 continue;
                             }
                             if let Some(alias) = names.get(name.as_str()) {
-                                debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config, Some(self.use_colors.clone()));
+                                debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config);
                             } else {
-                                debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                                debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
                             }
                         }
                     }
@@ -4471,7 +4455,7 @@ impl Interpreter {
                 for &category in &order {
                     if let Some(names) = categorized.get(category) {
                         for name in names {
-                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config, Some(self.use_colors.clone()));
+                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
                         }
                     }
                 }
@@ -4481,7 +4465,7 @@ impl Interpreter {
                 return NULL;
             }
         
-            debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config, Some(self.use_colors.clone()));
+            debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config);
 
             let module = Value::Module(Module {
                 name: module_name.clone(),
@@ -4775,7 +4759,6 @@ impl Interpreter {
         debug_log(
             &format!("<Defining function '{}'>", name),
             &self.config,
-            Some(self.use_colors.clone())
         );
 
         let function = if name.starts_with("<") && name.ends_with(">") {
@@ -4853,7 +4836,6 @@ impl Interpreter {
                     error_msg_val.to_string()
                 ),
                 &self.config,
-                Some(self.use_colors.clone())
             );
         }
         
@@ -4891,7 +4873,6 @@ impl Interpreter {
                         debug_log(
                             &format!("<Variable '{}' forgotten>", name),
                             &self.config,
-                            Some(self.use_colors.clone())
                         );
 
                         let dropped_value = value.get_value().clone();
@@ -5448,7 +5429,6 @@ impl Interpreter {
                         let mut built_fields = Vec::new();
                         let mut interp = Interpreter::new(
                             self.config.clone(),
-                            self.use_colors,
                             &self.file_path.clone(),
                             &self.cwd.clone(),
                             self.preprocessor_info.clone(),
@@ -5545,7 +5525,6 @@ impl Interpreter {
                         let mut built_fields = Vec::new();
                         let mut interp = Interpreter::new(
                             self.config.clone(),
-                            self.use_colors,
                             &self.file_path.clone(),
                             &self.cwd.clone(),
                             self.preprocessor_info.clone(),
@@ -5825,8 +5804,8 @@ impl Interpreter {
                     "No exception variables provided",
                     &format!(
                         "Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'",
-                        hex_to_ansi(&self.config.color_scheme.note, self.use_colors),
-                        hex_to_ansi(&self.config.color_scheme.help, self.use_colors),
+                        hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color),
+                        hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color),
                     ),
                 );
             }
@@ -6024,16 +6003,16 @@ impl Interpreter {
                             let suggestion = if let Value::Null = right_value {
                                 format!(
                                     "Did you mean to use '{}' instead of '='?",
-                                    wrap_in_help(":=", self.use_colors.clone(), &self.config)
+                                    wrap_in_help(":=", &self.config)
                                 )
                             } else {
                                 format!(
                                     "Use this instead: '{}{}: {} = {}{}'",
-                                    check_ansi("\x1b[4m", &self.use_colors),
+                                    check_ansi("\x1b[4m", &self.config.supports_color),
                                     name,
                                     right_value.get_type().display_simple(),
                                     format_value(&right_value),
-                                    check_ansi("\x1b[24m", &self.use_colors),
+                                    check_ansi("\x1b[24m", &self.config.supports_color),
                                 )
                             };
 
@@ -6258,7 +6237,6 @@ impl Interpreter {
                             return assign_index(self, &var_name, index_access, right_value);
                         }
                         "INDEX_ACCESS" => {
-                            // recursively resolve inner index
                             let obj_map: HashMap<_, _> = match &current_obj {
                                 Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect(),
                                 _ => return self.raise("RuntimeError", "Expected a Map for nested index access assignment"),
@@ -6284,8 +6262,84 @@ impl Interpreter {
                                 _ => return self.raise("RuntimeError", "Cannot determine variable name from nested object"),
                             };
 
-                            let updated_container = assign_index(self, &inner_name, inner_index, right_value.clone());
-                            return assign_index(self, &inner_name, index_access, updated_container);
+                            let var = match self.variables.get(&inner_name) {
+                                Some(v) => v,
+                                None => return self.raise("NameError", &format!("Variable '{}' not found for nested index assignment", inner_name)),
+                            };
+
+                            if var.is_final() {
+                                return self.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", inner_name));
+                            }
+
+                            let mut container_at_outer_index = match &var.value {
+                                Value::List(l) => {
+                                    let outer_index = match value_to_usize(&inner_index) {
+                                        Ok(i) => i,
+                                        Err(v) => return v,
+                                    };
+                                    if outer_index >= l.len() {
+                                        return self.raise("IndexError", "List index out of range");
+                                    }
+                                    l[outer_index].clone()
+                                }
+                                Value::Tuple(t) => {
+                                    let outer_index = match value_to_usize(&inner_index) {
+                                        Ok(i) => i,
+                                        Err(v) => return v,
+                                    };
+                                    if outer_index >= t.len() {
+                                        return self.raise("IndexError", "Tuple index out of range");
+                                    }
+                                    t[outer_index].clone()
+                                }
+                                Value::Map { keys, values } => {
+                                    match keys.iter().position(|k| k == &inner_index) {
+                                        Some(idx) => {
+                                            let container = values[idx].clone();
+                                            container
+                                        },
+                                        None => return self.raise("KeyError", &format!("Key '{}' not found in map", inner_index.to_string())),
+                                    }
+                                }
+                                _ => return self.raise("TypeError", "Object not indexable for nested index assignment"),
+                            };
+
+                            match &mut container_at_outer_index {
+                                Value::List(inner_list) => {
+                                    let inner_idx = match value_to_usize(&inner_index) {
+                                        Ok(i) => i,
+                                        Err(v) => return v,
+                                    };
+                                    if inner_idx >= inner_list.len() {
+                                        return self.raise("IndexError", "Inner list index out of range");
+                                    }
+                                    inner_list[inner_idx] = right_value;
+                                }
+                                Value::Tuple(inner_tuple) => {
+                                    let inner_idx = match value_to_usize(&inner_index) {
+                                        Ok(i) => i,
+                                        Err(v) => return v,
+                                    };
+                                    if inner_idx >= inner_tuple.len() {
+                                        return self.raise("IndexError", "Inner tuple index out of range");
+                                    }
+                                    inner_tuple[inner_idx] = right_value;
+                                }
+                                Value::Map { keys, values } => {
+                                    match keys.iter().position(|k| k == &index_access) {
+                                        Some(idx) => {
+                                            values[idx] = right_value
+                                        },
+                                        None => {
+                                            keys.push(index_access);
+                                            values.push(right_value);
+                                        }
+                                    }
+                                }
+                                _ => return self.raise("TypeError", "Inner object not indexable for nested assignment"),
+                            }
+
+                            return assign_index(self, &inner_name, inner_index, container_at_outer_index);
                         }
                         _ => {
                             self.raise("TypeError", &format!("Unsupported object type for index assignment: {}", object_type));
@@ -6790,7 +6844,7 @@ impl Interpreter {
 
         debug_log(
             &format!("<Declared variable '{}': {} = {}>", name, value.get_type().display_simple(), format_value(&value)),
-            &self.config, Some(self.use_colors),
+            &self.config,
         );
     
         value   
@@ -6914,10 +6968,10 @@ impl Interpreter {
                         &format!(
                             "Maybe you forgot to import '{}'? Use '{}import {} from \"{}\"{}'.",
                             name,
-                            check_ansi("\x1b[4m", &self.use_colors),
+                            check_ansi("\x1b[4m", &self.config.supports_color),
                             name,
                             candidate.display(),
-                            check_ansi("\x1b[24m", &self.use_colors),
+                            check_ansi("\x1b[24m", &self.config.supports_color),
                         ),
                     );
                 }
@@ -6930,9 +6984,9 @@ impl Interpreter {
                     &format!("Variable '{}' is not defined.", name),
                     &format!(
                         "Did you mean '{}{}{}'?",
-                        check_ansi("\x1b[4m", &self.use_colors),
+                        check_ansi("\x1b[4m", &self.config.supports_color),
                         closest,
-                        check_ansi("\x1b[24m", &self.use_colors),
+                        check_ansi("\x1b[24m", &self.config.supports_color),
                     ),
                 );
             } else {
@@ -7167,7 +7221,6 @@ impl Interpreter {
                                     r"\A  pattern: " +
                                     &pattern_flag_bool.to_string()),
                                     &self.config,
-                                    Some(self.use_colors),
                                 );
                                 return cached_value.clone();
                             } else {
@@ -7551,7 +7604,7 @@ impl Interpreter {
                     pattern_method_str
                 );
 
-                debug_log(log_message.as_str(), &self.config, Some(self.use_colors));
+                debug_log(log_message.as_str(), &self.config);
 
                 return result;
             }
@@ -7919,9 +7972,9 @@ impl Interpreter {
                                     "NameError",
                                     &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
                                     &format!("Did you mean '{}{}{}'?",
-                                        check_ansi("\x1b[4m", &self.use_colors),
+                                        check_ansi("\x1b[4m", &self.config.supports_color),
                                         closest,
-                                        check_ansi("\x1b[24m", &self.use_colors),
+                                        check_ansi("\x1b[24m", &self.config.supports_color),
                                     ),
                                 );
                             } else {
@@ -7936,9 +7989,9 @@ impl Interpreter {
                             "NameError",
                             &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
                             &format!("Did you mean '{}{}{}'?",
-                                check_ansi("\x1b[4m", &self.use_colors),
+                                check_ansi("\x1b[4m", &self.config.supports_color),
                                 closest,
-                                check_ansi("\x1b[24m", &self.use_colors),
+                                check_ansi("\x1b[24m", &self.config.supports_color),
                             ),
                         );
                     } else {
@@ -8065,9 +8118,9 @@ impl Interpreter {
                         "NameError",
                         &format!("No property '{}' in '{}'", property_name, object_variable.get_name()),
                         &format!("Did you mean '{}{}{}'?",
-                            check_ansi("\x1b[4m", &self.use_colors),
+                            check_ansi("\x1b[4m", &self.config.supports_color),
                             closest,
-                            check_ansi("\x1b[24m", &self.use_colors),
+                            check_ansi("\x1b[24m", &self.config.supports_color),
                         ),
                     );
                 } else {
@@ -8255,9 +8308,9 @@ impl Interpreter {
                             "NameError",
                             &format!("Function '{}' is not defined", function_name),
                             &format!("Did you mean '{}{}{}'?",
-                                check_ansi("\x1b[4m", &self.use_colors),
+                                check_ansi("\x1b[4m", &self.config.supports_color),
                                 closest,
-                                check_ansi("\x1b[24m", &self.use_colors),
+                                check_ansi("\x1b[24m", &self.config.supports_color),
                             ),
                         );
                     } else {
@@ -8312,9 +8365,9 @@ impl Interpreter {
                         ),
                         &format!(
                             "Try using: '{}{}{}'",
-                            check_ansi("\x1b[4m", &self.use_colors),
+                            check_ansi("\x1b[4m", &self.config.supports_color),
                             alt_name,
-                            check_ansi("\x1b[24m", &self.use_colors)
+                            check_ansi("\x1b[24m", &self.config.supports_color)
                         ),
                     );
                 } else if let Some(alt_info) = state.strip_prefix("deprecated: ") {
@@ -8339,9 +8392,9 @@ impl Interpreter {
                         ),
                         &format!(
                             "Use '{}{}{}' instead.",
-                            check_ansi("\x1b[4m", &self.use_colors),
+                            check_ansi("\x1b[4m", &self.config.supports_color),
                             alt_name,
-                            check_ansi("\x1b[24m", &self.use_colors)
+                            check_ansi("\x1b[24m", &self.config.supports_color)
                         ),
                     );                
                 } else if let Some(alt_name) = state.strip_prefix("removed_in: ") {
@@ -8361,7 +8414,7 @@ impl Interpreter {
                         ),
                         &format!(
                             "Use '{}{}{}' instead.",
-                            check_ansi("\x1b[4m", &self.use_colors), alt_name, check_ansi("\x1b[24m", &self.use_colors)
+                            check_ansi("\x1b[4m", &self.config.supports_color), alt_name, check_ansi("\x1b[24m", &self.config.supports_color)
                         ),
                     );
                 }
@@ -8457,11 +8510,11 @@ impl Interpreter {
                                     &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type.display_simple(), arg_value.get_type().display_simple()),
                                     &format!(
                                         "Try using: '{}{}={}({}){}'",
-                                        check_ansi("\x1b[4m", &self.use_colors),
+                                        check_ansi("\x1b[4m", &self.config.supports_color),
                                         param_name,
                                         param_type.display_simple(),
                                         format_value(&positional[pos_index.saturating_sub(1)]).to_string(),
-                                        check_ansi("\x1b[24m", &self.use_colors)
+                                        check_ansi("\x1b[24m", &self.config.supports_color)
                                     ),
                                 );
                             } else {
@@ -8482,11 +8535,11 @@ impl Interpreter {
                                     &format!("Argument '{}' does not match expected type '{}', got '{}'", param_name, param_type.display_simple(), named_value.get_type().display_simple()),
                                     &format!(
                                         "Try using: '{}{}={}({}){}'",
-                                        check_ansi("\x1b[4m", &self.use_colors),
+                                        check_ansi("\x1b[4m", &self.config.supports_color),
                                         param_name,
                                         param_type.display_simple(),
                                         format_value(&positional[pos_index - 1]).to_string(),
-                                        check_ansi("\x1b[24m", &self.use_colors)
+                                        check_ansi("\x1b[24m", &self.config.supports_color)
                                     ),
                                 );
                             } else {
@@ -8631,7 +8684,6 @@ impl Interpreter {
                         .join(", ")
                 ),
                 &self.config,
-                Some(self.use_colors.clone()),
             );
         } else {
             debug_log(
@@ -8645,7 +8697,6 @@ impl Interpreter {
                         .join(", ")
                 ),
                 &self.config,
-                Some(self.use_colors.clone()),
             );
         }
 
@@ -8730,7 +8781,6 @@ impl Interpreter {
                         debug_log(
                             &format!("<Exec script: '{}'>", script_str),
                             &self.config,
-                            Some(self.use_colors.clone()),
                         );
                         let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                         let tokens = lexer.tokenize();
@@ -8741,7 +8791,6 @@ impl Interpreter {
                         let statements = parser.parse();
                         let mut new_interpreter = Interpreter::new(
                             self.config.clone(),
-                            self.use_colors.clone(),
                             &self.file_path.clone(),
                             &self.cwd.clone(),
                             self.preprocessor_info.clone(),
@@ -8763,8 +8812,7 @@ impl Interpreter {
                     if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
                         debug_log(
                             &format!("<Eval script: '{}'>", script_str),
-                            &self.config,
-                            Some(self.use_colors.clone()),
+                            &self.config
                         );
                         let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                         let tokens = lexer.tokenize();
@@ -8775,7 +8823,6 @@ impl Interpreter {
                         let statements = parser.parse();
                         let mut new_interpreter = Interpreter::new(
                             self.config.clone(),
-                            self.use_colors.clone(),
                             &self.file_path.clone(),
                             &self.cwd.clone(),
                             self.preprocessor_info.clone(),
@@ -8879,7 +8926,6 @@ impl Interpreter {
                                         debug_log(
                                             &format!("<Reset config: {} to default>", key),
                                             &self.config,
-                                            Some(self.use_colors.clone()),
                                         );
                                         return NULL;
                                     } else if num == 0x6767 {
@@ -8887,7 +8933,6 @@ impl Interpreter {
                                         debug_log(
                                             &format!("<Get config: {} = {}>", key, format_value(&val)),
                                             &self.config,
-                                            Some(self.use_colors.clone()),
                                         );
                                         return val;
                                     }
@@ -8903,7 +8948,6 @@ impl Interpreter {
                             debug_log(
                                 &format!("<Set config: {} = {}>", key, format_value(value)),
                                 &self.config,
-                                Some(self.use_colors.clone()),
                             );
                             return NULL;
                         } else {
@@ -8948,7 +8992,6 @@ impl Interpreter {
         if let Function::Lambda(_, closure_vars) = func {
             let mut new_interpreter = Interpreter::new(
                 self.config.clone(),
-                self.use_colors.clone(),
                 &self.file_path.clone(),
                 &self.cwd.clone(),
                 self.preprocessor_info.clone(),
@@ -9006,7 +9049,7 @@ impl Interpreter {
                         return self.raise_with_help(
                             "EffectError",
                             &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
-                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
                         );
                     }
                     Some((true, missing_bits)) => {
@@ -9099,7 +9142,7 @@ impl Interpreter {
                         return self.raise_with_help(
                             "EffectError",
                             &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
-                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                            &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
                         );
                     }
                     Some((true, missing_bits)) => {
@@ -9132,7 +9175,6 @@ impl Interpreter {
                 
                 let mut new_interpreter = Interpreter::new(
                     self.config.clone(),
-                    self.use_colors.clone(),
                     &self.file_path.clone(),
                     &self.cwd.clone(),
                     self.preprocessor_info.clone(),
@@ -9165,7 +9207,7 @@ impl Interpreter {
                             return self.raise_with_help(
                                 "EffectError",
                                 &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
-                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
                             );
                         }
                         Some((true, missing_bits)) => {
@@ -9243,7 +9285,6 @@ impl Interpreter {
                 };
                 let mut new_interpreter = Interpreter::new(
                     self.config.clone(),
-                    self.use_colors.clone(),
                     to_static(module_file_path.display().to_string()),
                     &self.cwd.clone(),
                     self.preprocessor_info.clone(),
@@ -9304,7 +9345,7 @@ impl Interpreter {
                             return self.raise_with_help(
                                 "EffectError",
                                 &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
-                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.use_colors), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.use_colors)),
+                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
                             );
                         }
                         Some((false, missing_bits)) => {
@@ -9335,7 +9376,6 @@ impl Interpreter {
         debug_log(
             &format!("<Function '{}' returned {}>", function_name, format_value(&result)),
             &self.config,
-            Some(self.use_colors.clone()),
         );
         if let Value::Error(err_type, err_msg, referr) = &result {
             if let Some(err) = referr {
@@ -9457,7 +9497,6 @@ impl Interpreter {
                     debug_log(
                         "<Operation: 6 * 9 -> 42>",
                         &self.config,
-                        Some(self.use_colors.clone()),
                     );
                     return Value::Int(Int::from(42));
                 }
@@ -9491,7 +9530,6 @@ impl Interpreter {
                     format_value(cached)
                 ),
                 &self.config,
-                Some(self.use_colors.clone()),
             );
             return cached.clone();
         }
@@ -9505,7 +9543,6 @@ impl Interpreter {
                 log_str
             ),
             &self.config,
-            Some(self.use_colors.clone()),
         );
         stdout.flush().unwrap();
 
@@ -9530,7 +9567,6 @@ impl Interpreter {
                 format_value(&result)
             ),
             &self.config,
-            Some(self.use_colors.clone()),
         );
 
         self.cache.operations.insert(cache_key, result.clone());
@@ -9567,7 +9603,6 @@ impl Interpreter {
             debug_log(
                 &format!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand)),
                 &self.config,
-                Some(self.use_colors.clone()),
             );
             return cached.clone();
         }
@@ -9575,7 +9610,6 @@ impl Interpreter {
         debug_log(
             &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
             &self.config,
-            Some(self.use_colors.clone()),
         );
 
         let result = match operator {
@@ -10531,7 +10565,6 @@ impl Interpreter {
             debug_log(
                 &format!("<CachedConstantNumber: {}>", s),
                 &self.config,
-                Some(self.use_colors.clone()),
             );
             return cached.clone();
         }
@@ -10748,7 +10781,6 @@ impl Interpreter {
                                         debug_log(
                                             &format!("Generated f-string tokens: {:?}", formatted_toks),
                                             &self.config,
-                                            Some(self.use_colors),
                                         );
 
                                         let tokens_no_loc: Vec<Token> = tokens
@@ -10774,14 +10806,12 @@ impl Interpreter {
                                                     format_value(&cleaned)
                                                 }).collect::<Vec<String>>().join(", ")
                                             ),
-                                            &self.config,
-                                            Some(self.use_colors),
+                                            &self.config
                                         );
 
                                         debug_log(
                                             &format!("<FString: {}>", expr.clone().trim()),
                                             &self.config,
-                                            Some(self.use_colors),
                                         );
 
                                         let result_val = self.evaluate(&parsed[0]);
