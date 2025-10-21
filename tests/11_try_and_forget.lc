@@ -55,3 +55,38 @@ assert_eq!(may_fail()?? 137, 137)
 assert_eq!((69??????????????????????????????????????????????????), 69)
 // maybe dont do that
 // kristof
+
+// also, throw takes a iterable of 1 to 3 elements
+try:
+    throw ("OnlyMessage")
+catch (err_type, err_msg):
+    assert_eq!(err_type, "LuciaError")  // default type
+    assert_eq!(err_msg, "OnlyMessage")
+end
+
+try:
+    throw ("TypeError", "OnlyTypeAndMessage")
+catch (err_type, err_msg):
+    assert_eq!(err_type, "TypeError")
+    assert_eq!(err_msg, "OnlyTypeAndMessage")
+end
+
+try:
+    throw ("CustomError", "This is a custom error message", "Here is some help text")
+catch (err_type, err_msg, err_help):
+    assert_eq!(err_type, "CustomError")
+    assert_eq!(err_msg, "This is a custom error message")
+    assert_eq!(err_help, "Here is some help text")
+end
+
+try:
+    1 / 0
+catch (err): end
+
+try:
+    // must be in ()
+    throw (err)
+catch (err_type, err_msg):
+    assert_eq!(err_type, "ZeroDivisionError")
+    assert_eq!(err_msg, "Division by zero.")
+end

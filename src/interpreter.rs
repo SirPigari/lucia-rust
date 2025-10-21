@@ -4791,58 +4791,214 @@ impl Interpreter {
     fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
         let mut prev_err = None;
 
-        let error_type_val = match statement.get(&Value::String("from".to_string())) {
-            Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-            None => return self.raise("RuntimeError", "Missing 'from' in throw statement"),
+        let throw_type = match statement.get(&Value::String("throw_type".to_string())) {
+            Some(Value::String(t)) => t,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'throw_type' in throw statement"),
         };
 
-        if self.err.is_some() {
-            prev_err = self.err.clone();
-            self.err = None;
-        }
-        
-        let error_msg_val = match statement.get(&Value::String("message".to_string())) {
-            Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-            None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
-        };
+        match throw_type.as_str() {
+            "string" => {
+                let error_type_val = match statement.get(&Value::String("from".to_string())) {
+                    Some(v) => self.evaluate(&Value::convert_to_statement(v)),
+                    None => return self.raise("RuntimeError", "Missing 'from' in throw statement"),
+                };
 
-        if self.err.is_some() {
-            if prev_err.is_some() {
-                self.raise_with_ref(
-                    &self.err.clone().unwrap().error_type,
-                    &self.err.clone().unwrap().msg,
-                    prev_err.clone().unwrap(),
-                );
-                prev_err = self.err.clone();
-                return self.raise_with_ref(
+                if self.err.is_some() {
+                    prev_err = self.err.clone();
+                    self.err = None;
+                }
+                
+                let error_msg_val = match statement.get(&Value::String("message".to_string())) {
+                    Some(v) => self.evaluate(&Value::convert_to_statement(v)),
+                    None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
+                };
+
+                if self.config.debug {
+                    debug_log(
+                        &format!(
+                            "<Throwing error: '{}: {}'>",
+                            error_type_val.to_string(),
+                            error_msg_val.to_string()
+                        ),
+                        &self.config,
+                    );
+                }
+
+                if self.err.is_some() {
+                    if prev_err.is_some() {
+                        self.raise_with_ref(
+                            &self.err.clone().unwrap().error_type,
+                            &self.err.clone().unwrap().msg,
+                            prev_err.clone().unwrap(),
+                        );
+                        prev_err = self.err.clone();
+                        return self.raise_with_ref(
+                            to_static(error_type_val.to_string()),
+                            to_static(error_msg_val.to_string()),
+                            prev_err.clone().unwrap(),
+                        );
+                    } else {
+                        return self.raise_with_ref(
+                            to_static(error_type_val.to_string()),
+                            to_static(error_msg_val.to_string()),
+                            self.err.clone().unwrap(),
+                        );
+                    }
+                }
+                
+                self.raise(
                     to_static(error_type_val.to_string()),
                     to_static(error_msg_val.to_string()),
-                    prev_err.clone().unwrap(),
-                );
-            } else {
-                return self.raise_with_ref(
-                    to_static(error_type_val.to_string()),
-                    to_static(error_msg_val.to_string()),
-                    self.err.clone().unwrap(),
-                );
+                )
+            }
+            "tuple" => {
+                let value = match statement.get(&Value::String("value".to_string())) {
+                    Some(v) => v,
+                    None => return self.raise("RuntimeError", "Missing 'value' in tuple throw statement"),
+                };
+                let val_evaluated = self.evaluate(&Value::convert_to_statement(value));
+                if self.err.is_some() {
+                    prev_err = self.err.clone();
+                    self.err = None;
+                }
+                let items = if matches!(val_evaluated, Value::String(_) | Value::Bytes(_)) {
+                    vec![val_evaluated.clone()]
+                } else if val_evaluated.is_iterable() {
+                    val_evaluated.iter().collect::<Vec<Value>>()
+                } else {
+                    return self.raise_with_help("TypeError", "Thrown tuple value must be iterable", &format!("It tried to throw from '{}'", format_value(&val_evaluated)));
+                };
+                match items.len() {
+                    1 => {
+                        let error_msg = items[0].to_string();
+                        let error_type = "LuciaError";
+                        if self.config.debug {
+                            debug_log(
+                                &format!(
+                                    "<Throwing error: '{}: {}'>",
+                                    error_type,
+                                    error_msg
+                                ),
+                                &self.config,
+                            );
+                        }
+                        if self.err.is_some() {
+                            if prev_err.is_some() {
+                                self.raise_with_ref(
+                                    &self.err.clone().unwrap().error_type,
+                                    &self.err.clone().unwrap().msg,
+                                    prev_err.clone().unwrap(),
+                                );
+                                prev_err = self.err.clone();
+                                return self.raise_with_ref(
+                                    error_type,
+                                    to_static(error_msg),
+                                    prev_err.clone().unwrap(),
+                                );
+                            } else {
+                                return self.raise_with_ref(
+                                    error_type,
+                                    to_static(error_msg),
+                                    self.err.clone().unwrap(),
+                                );
+                            }
+                        }
+                        
+                        self.raise(
+                            error_type,
+                            to_static(error_msg),
+                        )
+                    }
+                    2 => {
+                        let error_type = items[0].to_string();
+                        let error_msg = items[1].to_string();
+                        if self.config.debug {
+                            debug_log(
+                                &format!(
+                                    "<Throwing error: '{}: {}'>",
+                                    error_type,
+                                    error_msg
+                                ),
+                                &self.config,
+                            );
+                        }
+                        if self.err.is_some() {
+                            if prev_err.is_some() {
+                                self.raise_with_ref(
+                                    &self.err.clone().unwrap().error_type,
+                                    &self.err.clone().unwrap().msg,
+                                    prev_err.clone().unwrap(),
+                                );
+                                prev_err = self.err.clone();
+                                return self.raise_with_ref(
+                                    to_static(error_type),
+                                    to_static(error_msg),
+                                    prev_err.clone().unwrap(),
+                                );
+                            } else {
+                                return self.raise_with_ref(
+                                    to_static(error_type),
+                                    to_static(error_msg),
+                                    self.err.clone().unwrap(),
+                                );
+                            }
+                        }
+                        
+                        self.raise(
+                            to_static(error_type),
+                            to_static(error_msg),
+                        )
+                    }
+                    3 => {
+                        let error_type = items[0].to_string();
+                        let error_msg = items[1].to_string();
+                        let help_msg = items[2].to_string();
+                        if self.config.debug {
+                            debug_log(
+                                &format!(
+                                    "<Throwing error: '{}: {}'>",
+                                    error_type,
+                                    error_msg
+                                ),
+                                &self.config,
+                            );
+                        }
+                        if self.err.is_some() {
+                            if prev_err.is_some() {
+                                self.raise_with_ref(
+                                    &self.err.clone().unwrap().error_type,
+                                    &self.err.clone().unwrap().msg,
+                                    prev_err.clone().unwrap(),
+                                );
+                                prev_err = self.err.clone();
+                                return self.raise_with_ref(
+                                    to_static(error_type),
+                                    to_static(error_msg),
+                                    prev_err.clone().unwrap(),
+                                );
+                            } else {
+                                return self.raise_with_ref(
+                                    to_static(error_type),
+                                    to_static(error_msg),
+                                    self.err.clone().unwrap(),
+                                );
+                            }
+                        }
+                        self.raise_with_help(
+                            to_static(error_type),
+                            to_static(error_msg),
+                            &help_msg,
+                        )
+                    }
+                    _ => {
+                        return self.raise_with_help("ValueError", "Thrown tuple must have 1 to 3 elements", &format!("It tried to throw from '{}'", format_value(&val_evaluated)));
+                    }
+                }
+            }
+            _ => {
+                self.raise("RuntimeError", "Invalid 'throw_type' in throw statement")
             }
         }
-
-        if self.config.debug {
-            debug_log(
-                &format!(
-                    "<Throwing error: '{}: {}'>",
-                    error_type_val.to_string(),
-                    error_msg_val.to_string()
-                ),
-                &self.config,
-            );
-        }
-        
-        self.raise(
-            to_static(error_type_val.to_string()),
-            to_static(error_msg_val.to_string()),
-        )
     }
 
     fn handle_forget(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -9959,20 +10115,10 @@ impl Interpreter {
                 _ => {
                     match (&left, &right) {
                         (Value::Int(l), Value::Int(r)) => {
-                            if (l % r).unwrap_or(Int::from(0)) == Int::from(0) {
-                                Value::Int((l / r).unwrap_or_else(|_| {
-                                    self.raise("TypeError", "Integer division failed");
-                                    Int::from(0)
-                                }))
-                            } else {
-                                match (Float::from_int(l), Float::from_int(r)) {
-                                    (Ok(f1), Ok(f2)) => match f1 / f2 {
-                                        Ok(result) => Value::Float(result),
-                                        Err(_) => self.raise("TypeError", "Failed to perform division"),
-                                    },
-                                    _ => self.raise("TypeError", "Failed to convert Int to Float"),
-                                }
-                            }
+                            Value::Int((l / r).unwrap_or_else(|_| {
+                                self.raise("TypeError", "Integer division failed");
+                                return Int::new();
+                            }))
                         }
                         (Value::Int(i), Value::Float(f)) => match Float::from_int(i) {
                             Ok(left_f) => match &left_f / f {

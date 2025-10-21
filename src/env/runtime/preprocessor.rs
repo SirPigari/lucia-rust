@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
@@ -10,6 +10,10 @@ use crate::env::runtime::types::Float;
 use std::ops::{Add, Sub, Mul, Div, Rem};
 #[cfg(feature = "preprocessor_include_std")]
 use once_cell::sync::Lazy;
+
+#[cfg(feature = "preprocessor_linking")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::env::runtime::precompile::{get_defs_from_c_header, generate_lsign_from_c_sign, generate_library_definition, CHeaderSignature};
 
 // u not getting more
 const MAX_MACRO_RECURSION_DEPTH: usize = 16;
@@ -32,7 +36,7 @@ const STD_LIB_OPS: &str = include_str!("../libs/std/ops.lc");
 const STD_LIB_TYPES: &str = include_str!("../libs/std/types.lc");
 #[cfg(feature = "preprocessor_include_std")]
 static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::new();
+    let mut m = HashMap::default();
     m.insert("_import", STD_LIB_IMPORT);
     m.insert("assert", STD_LIB_ASSERT);
     m.insert("io", STD_LIB_IO);
@@ -954,6 +958,77 @@ impl Preprocessor {
                         continue;
                     }
 
+                    #[cfg(feature = "preprocessor_linking")]
+                    #[cfg(not(target_arch = "wasm32"))]
+                    "link" => {
+                        if i >= tokens.len() {
+                            return Err(create_err("#link missing path", &tokens[i]));
+                        }
+
+                        let link_header: PathBuf = if tokens[i].0 == "STRING" {
+                            let raw = &tokens[i].1;
+                            i += 1;
+                            let raw_path = PathBuf::from(raw.trim_matches('"'));
+                            if raw_path.is_absolute() {
+                                raw_path
+                            } else {
+                                current_dir.join(raw_path)
+                            }
+                        } else {
+                            return Err(create_err("Invalid link header path format", &tokens[i]));
+                        };
+
+                        if !link_header.exists() {
+                            return Err(create_err(&format!("Linked header file does not exist: {}", link_header.display()), &tokens[i - 1]));
+                        }
+
+                        let link_lib: PathBuf = if tokens[i].0 == "STRING" {
+                            let raw = &tokens[i].1;
+                            i += 1;
+                            let raw_path = PathBuf::from(raw.trim_matches('"'));
+                            if raw_path.is_absolute() {
+                                raw_path
+                            } else {
+                                current_dir.join(raw_path)
+                            }
+                        } else {
+                            return Err(create_err("Invalid link library path format", &tokens[i]));
+                        };
+
+                        if !link_lib.exists() {
+                            return Err(create_err(&format!("Linked library file does not exist: {}", link_lib.display()), &tokens[i]));
+                        }
+
+                        i -= 1; // adjust for idk what it just works with -= 1
+
+                        let loc = last_normal_token_location.clone();
+                        let defs: Vec<CHeaderSignature> = get_defs_from_c_header(&link_header, &link_lib).map_err(|e| create_err(&format!("Failed to parse C header '{}': {}", link_header.display(), e), &tokens[i - 1]))?;
+                        result.push(Token("IDENTIFIER".to_string(), "import".to_string(), loc.clone()));
+                        result.push(Token("IDENTIFIER".to_string(), "libload".to_string(), loc.clone()));
+                        let mut loaded_libs = HashSet::default();
+                        for def in defs {
+                            if !loaded_libs.contains(&def.library_name) {
+                                for t in generate_library_definition(&def.library_name, &link_lib, &loc) {
+                                    result.push(Token(t.0, t.1, loc.clone()));
+                                }
+                                loaded_libs.insert(def.library_name.clone());
+                            }
+                            let (get_fn_tokens, final_fn_tokens) = generate_lsign_from_c_sign(&def);
+                            for t in get_fn_tokens {
+                                result.push(Token(t.0, t.1, loc.clone()));
+                            }
+                            for t in final_fn_tokens {
+                                result.push(Token(t.0, t.1, loc.clone()));
+                            }
+                        }
+                    }
+
+                    #[cfg(feature = "preprocessor_linking")]
+                    #[cfg(target_arch = "wasm32")]
+                    "link" => {
+                        return Err(create_err("#link is not supported in WebAssembly builds", &tokens[i]));
+                    }
+
                     "[" | "!" => {
                         let is_negated = tokens[i - 1].1 == "!";
 
@@ -1560,7 +1635,7 @@ impl Preprocessor {
     }
 
     fn mangle_tokens(&mut self, tokens: &[Token]) -> Vec<Token> {
-        let mut declared = HashSet::new();
+        let mut declared = HashSet::default();
         let mut i = 0;
 
         while i < tokens.len() {

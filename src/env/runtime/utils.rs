@@ -1194,19 +1194,15 @@ pub fn fix_path(raw_path: String) -> String {
         return String::new();
     }
     if path.starts_with('/') {
-        return path.to_string();
+        return path.to_string().replace('\\', "/");
     }
     if path.starts_with("./") {
-        return path[2..].to_string();
+        return path[2..].to_string().replace('\\', "/");
     }
     if path.starts_with(r"\\?\") {
-        return path[4..].to_string();
+        return path[4..].to_string().replace('\\', "/");
     }
-    path.to_string().replace("\\", "/")
-        .replace("\\\\", "/")
-        .replace("//", "/")
-        .replace(":/", "://")
-        .to_string()
+    path.replace('\\', "/")
 }
 
 pub fn remove_loc_keys(value: &Value) -> Value {

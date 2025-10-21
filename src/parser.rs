@@ -2076,43 +2076,67 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "throw" => {
                     self.next();
-                    let message = self.parse_expression();
-                    if self.err.is_some() {
-                        return Statement::Null;
-                    }
-                    let mut from = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("value".to_string()),
-                            Value::String("mods".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("STRING".to_string()),
-                            Value::String("\"LuciaError\"".to_string()),
-                            Value::List(vec![]),
-                        ],
-                        loc: self.get_loc(),
-                    };
-                    if self.token_is("IDENTIFIER", "from") {
-                        self.next();
-                        from = self.parse_expression();
+
+                    if self.token_is("SEPARATOR", "(") {
+                        let loc = self.get_loc();
+                        let val = self.parse_expression();
                         if self.err.is_some() {
                             return Statement::Null;
                         }
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("value".to_string()),
+                                Value::String("throw_type".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("THROW".to_string()),
+                                val.convert_to_map(),
+                                Value::String("tuple".to_string()),
+                            ],
+                            loc,
+                        }
+                    } else {
+                        let message = self.parse_expression();
+                        if self.err.is_some() {
+                            return Statement::Null;
+                        }
+                        let mut from = Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("value".to_string()),
+                                Value::String("mods".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("STRING".to_string()),
+                                Value::String("\"LuciaError\"".to_string()),
+                                Value::List(vec![]),
+                            ],
+                            loc: self.get_loc(),
+                        };
+                        if self.token_is("IDENTIFIER", "from") {
+                            self.next();
+                            from = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                        }
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("message".to_string()),
+                                Value::String("from".to_string()),
+                                Value::String("throw_type".to_string())
+                            ],
+                            values: vec![
+                                Value::String("THROW".to_string()),
+                                message.convert_to_map(),
+                                from.convert_to_map(),
+                                Value::String("string".to_string())
+                            ],
+                            loc: self.get_loc(),
+                        }
                     }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("message".to_string()),
-                            Value::String("from".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("THROW".to_string()),
-                            message.convert_to_map(),
-                            from.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
-                    }                    
                 }
 
                 "IDENTIFIER" if token.1 == "if" => {

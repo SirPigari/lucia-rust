@@ -2288,7 +2288,11 @@ fn main() {
                     file_args.push(arg.to_string());
                     continue;
                 }
-                eprintln!("Unknown argument: {}", arg);
+                if arg.starts_with('-') {
+                    eprintln!("Unknown argument: {}", arg);
+                } else {
+                    eprintln!("File does not exist: {}", arg);
+                }
 
                 let flag_vec: Vec<String> = commands.iter().map(|(flag, _)| flag.to_string()).collect();
 

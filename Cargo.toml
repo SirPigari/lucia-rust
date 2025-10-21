@@ -107,8 +107,9 @@ libload = ["dep:libloading", "dep:libffi"]
 elevator = []
 
 preprocessor_include_std = []
+preprocessor_linking = []
 
-default = ["lucia_std"]
+default = ["lucia_std", "preprocessor_linking"]
 
 [profile.dev]
 opt-level = 0

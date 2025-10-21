@@ -44,3 +44,10 @@ assert_eq!(i, 3)
 for (i in precompile!([0...100])):
     print(i)  // precompile is evaluated at preprocessor time
 end
+
+// link preprocessor
+// automatically generates FFI bindings and wrappers for C libraries, only supports some primitive types for now (int, float, str, bool, void)
+// #link "header.h" "library.so"
+// you need to have header.h and library.so
+// i dont have it
+// thats why its commented out
