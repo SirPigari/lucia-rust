@@ -191,6 +191,48 @@ fn sign(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+pub fn approx_pi(precision: usize) -> Float {
+    let mut a = Float::from(1.0);
+    let mut b = (Float::from(1.0) / Float::from(2.0)).expect("Failed divide").sqrt().expect("Failed sqrt");
+    let mut t = (Float::from(1.0) / Float::from(4.0)).expect("Failed divide");
+    let mut p = Float::from(1.0);
+
+    let iterations = ((precision as f64) * 0.07).ceil() as usize + 10;
+
+    for _ in 0..iterations {
+        let a_next = ((&a + &b).expect("Failed add") / Float::from(2.0)).expect("Failed divide");
+        let b_next = (&a * &b).expect("Failed multiply").sqrt().expect("Failed sqrt");
+        let diff = (&a - &a_next).expect("Failed subtract");
+        let t_next = (&t - &(&p * diff.pow(&Float::from(2.0)).expect("Failed pow")).expect("Failed multiply")).expect("Failed subtract");
+
+        a = a_next;
+        b = b_next;
+        t = t_next;
+        p = (&p * Float::from(2.0)).expect("Failed multiply");
+    }
+
+    ((&a + &b).expect("Failed add").pow(&Float::from(2.0)).expect("Failed pow")
+        / (&t * Float::from(4.0)).expect("Failed multiply")).expect("Failed divide")
+}
+
+pub fn approx_e(precision: usize) -> Float {
+    let mut sum = Float::from(1.0);
+    let mut factorial = Float::from(1.0);
+
+    let terms = (precision as f64 * 2.5).ceil() as usize;
+
+    for n in 1..=terms {
+        factorial = (&factorial * Float::from(n as f64)).expect("Failed to multiply");
+        sum = (&sum + (Float::from(1.0) / &factorial).expect("Failed to divide")).expect("Failed to add");
+    }
+
+    sum
+}
+
+pub fn approx_phi() -> Float {
+    ((Float::from(1.0) + Float::from(5.0).sqrt().expect("Square root failed")).expect("Failed to add") / Float::from(2.0)).expect("Failed to divide")
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -280,6 +322,49 @@ pub fn register() -> HashMap<String, Variable> {
             insert_native_var!($map, $name, var.value, "float");
         }};
     }
+
+    insert_native_fn!(
+        map,
+        "pi_approx",
+        |args: &HashMap<String, Value>| {
+            let precision = match args.get("precision") {
+                Some(Value::Int(i)) => i.to_usize().unwrap_or(53),
+                Some(Value::Float(f)) => f.to_int().unwrap_or(Int::new()).to_usize().unwrap_or(53),
+                _ => 53,
+            };
+            Value::Float(approx_pi(precision))
+        },
+        vec![Parameter::positional_optional_pt("precision", &parse_type("int"), Value::Int(Int::from(53)))],
+        "float",
+        EffectFlags::PURE
+    );
+
+    insert_native_fn!(
+        map,
+        "e_approx",
+        |args: &HashMap<String, Value>| {
+            let precision = match args.get("precision") {
+                Some(Value::Int(i)) => i.to_usize().unwrap_or(53),
+                Some(Value::Float(f)) => f.to_int().unwrap_or(Int::new()).to_usize().unwrap_or(53),
+                _ => 53,
+            };
+            Value::Float(approx_e(precision))
+        },
+        vec![Parameter::positional_optional_pt("precision", &parse_type("int"), Value::Int(Int::from(53)))],
+        "float",
+        EffectFlags::PURE
+    );
+
+    insert_native_fn!(
+        map,
+        "phi_approx",
+        |_: &HashMap<String, Value>| {
+            Value::Float(approx_phi())
+        },
+        vec![],
+        "float",
+        EffectFlags::PURE
+    );
 
     insert_irrational!(map, "E", _E);
     insert_irrational!(map, "PI", _PI);
