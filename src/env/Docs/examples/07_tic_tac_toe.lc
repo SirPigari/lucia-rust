@@ -3,13 +3,17 @@
 // simple tic-tac-toe in Lucia
 // made by Markofwitch 2025, the developer of Lucia
 
+// btw the whole reason to make lucia was for simple stuff like this
+// its not supposed to be fast or anything just easy to prototype simple stuff
+// (or as a calculator)
+
 fun printBoard(board: list) -> void:
     print("╔═══════════╗")
 
-    for (i in [0...2]):
+    for (i in [0..2]):
         print("║ ", end="")
 
-        for (j in [0...2]):
+        for (j in [0..2]):
             idx: int = i * 3 + j
             cell: str = board[idx]
 
@@ -67,14 +71,13 @@ fun getPlayerString(player: str) -> str:
 end
 
 fun ticTacToe() -> void:
-    board: list = [" ", " ", " ", " ", " ", " ", " ", " ", " "]
+    board: list = array(9, " ")
     currentPlayer: str = "X"
 
     while (true):
         printBoard(board)
-        print(f"Player {currentPlayer}, enter your move (1-9): ", end="")
 
-        moveStr: str = input()
+        moveStr: str = input(f"Player {currentPlayer}, enter your move (1-9): ")
 
         if (len(moveStr) != 1):
             print("Invalid input, please enter a number from 1 to 9.")

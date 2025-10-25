@@ -1,4 +1,4 @@
-fun bubbleSort(arr: list) -> list:
+fun bubble_sort(arr: list) -> list:
     n: int = len(arr)
 
     for (i in [0..n - 2]):
@@ -16,4 +16,4 @@ fun bubbleSort(arr: list) -> list:
 end
 
 arr: list = [64, 34, 25, 12, 22, 11, 90]
-print(bubbleSort(arr))
+print(bubble_sort(arr))
