@@ -21,6 +21,7 @@ use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
 use crate::env::runtime::internal_structs::EffectFlags;
+use crate::interpreter::Interpreter;
 
 pub use imagnum::errors::get_error_message as get_imagnum_error_message;
 
@@ -1863,8 +1864,8 @@ pub fn format_with_dynamic_fill(s: &str, fill: char, width: usize, align: char) 
     }
 }
 
-pub fn apply_format_spec(value: &Value, spec: &str) -> Result<String, String> {
-    let mut s = escape_string(&native::format_value(&value))?;
+pub fn apply_format_spec(value: &Value, spec: &str, interpreter: &mut Interpreter) -> Result<String, String> {
+    let mut s = escape_string(&native::format_value(&value, interpreter))?;
 
     if spec.trim() == "?" {
         s = escape_string(&format_value(&value))?;

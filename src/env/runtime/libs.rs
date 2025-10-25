@@ -405,3 +405,41 @@ macro_rules! insert_native_var {
         );
     }};
 }
+
+#[macro_export]
+macro_rules! make_native_fn_pt {
+    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            false,
+            true,
+            None,
+            $effects,
+        );
+
+        Function::Native(Arc::new(native_fn))
+    }};
+}
+
+#[macro_export]
+macro_rules! make_native_static_fn_pt {
+    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            true,
+            true,
+            None,
+            $effects,
+        );
+
+        Function::Native(Arc::new(native_fn))
+    }};
+}

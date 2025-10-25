@@ -6,6 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::Type;
 use crate::env::runtime::variables::Variable;
+use crate::env::runtime::utils::format_value;
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
 use std::sync::Mutex;
@@ -594,6 +595,20 @@ impl Function {
 
     pub fn is_final(&self) -> bool {
         self.metadata().is_final
+    }
+
+    pub fn help_string(&self) -> String {
+        format!("Function: {}\nParameters: {}\nReturn Type: {}\nPublic: {}\nStatic: {}\nFinal: {}\nNative: {}\nState: {}\nEffects: {:?}",
+            self.get_name(),
+            self.get_parameters().iter().map(|p| if let Some(default) = &p.default {format!("{}: {} = {}", p.name, p.ty.display_simple(), format_value(default))} else {format!("{}: {}", p.name, p.ty.display_simple())}).collect::<Vec<_>>().join(", "),
+            self.get_return_type().display_simple(),
+            self.metadata().is_public,
+            self.metadata().is_static,
+            self.metadata().is_final,
+            self.metadata().is_native,
+            self.metadata().state.as_deref().unwrap_or("None"),
+            self.metadata().effects.get_names().iter().map(|s| s.to_lowercase()).collect::<Vec<_>>().join(", ")
+        )
     }
 }
 

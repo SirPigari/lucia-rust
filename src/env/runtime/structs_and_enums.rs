@@ -55,6 +55,16 @@ impl Enum {
     pub fn ptr(&self) -> *const Self {
         self as *const Self
     }
+
+    pub fn help_string(&self) -> String {
+        let mut result = format!("Enum: {}\n", self.ty.display_simple());
+        if let Type::Enum { variants, .. } = &self.ty {
+            let (variant_name, _, _) = &variants.iter().find(|(_, _, idx)| *idx == self.variant.0).unwrap();
+            result.push_str(&format!("Variant: {}\n", variant_name));
+            result.push_str(&format!("Value: {}\n", format_value(&self.variant.1)));
+        }
+        result
+    }
 }
 
 impl PartialOrd for Enum {
@@ -199,5 +209,14 @@ impl Struct {
     }
     pub fn fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
         &self.fields
+    }
+
+    pub fn help_string(&self) -> String {
+        let mut result = format!("Struct: {}\n", self.ty.display_simple());
+        result.push_str("Fields:\n");
+        for (field_name, (field_value, field_type)) in &self.fields {
+            result.push_str(&format!("  {}: {} = {}\n", field_name, field_type.display_simple(), format_value(field_value)));
+        }
+        result
     }
 }

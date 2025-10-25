@@ -3746,194 +3746,283 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    if !self.token_is("SEPARATOR", ":") {
+                    if self.token_is("IDENTIFIER", "from") {
+                        self.next();
+                        let pat_expr = match self.parse_path() {
+                            Some(p) => p.to_value(),
+                            None => {
+                                return Statement::Null;
+                            }
+                        };
+                        let guard = if self.token_is("IDENTIFIER", "if") {
+                            self.next();
+                            let cond_expr = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+                            Some(cond_expr)
+                        } else {
+                            None
+                        };
+                        let cases = vec![
+                            Value::Map {
+                                keys: vec![
+                                    Value::String("style".to_string()),
+                                    Value::String("pattern".to_string()),
+                                    Value::String("guard".to_string()),
+                                    Value::String("body".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("pattern".to_string()),
+                                    pat_expr,
+                                    guard.map_or(Value::Null, |g| g.convert_to_map()),
+                                    Value::List(vec![
+                                        Statement::Statement {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("value".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String("BOOLEAN".to_string()),
+                                                Value::String("true".to_string()),
+                                            ],
+                                            loc: self.get_loc(),
+                                        }.convert_to_map()
+                                    ]),
+                                ],
+                            },
+                            Value::Map {
+                                keys: vec![
+                                    Value::String("style".to_string()),
+                                    Value::String("pattern".to_string()),
+                                    Value::String("guard".to_string()),
+                                    Value::String("body".to_string()),
+                                ],
+                                values: vec![
+                                    Value::String("pattern".to_string()),
+                                    Value::Map {
+                                        keys: vec![Value::String("segments".into()), Value::String("args".into())],
+                                        values: vec![Value::List(vec![Value::String("_".to_string())]), Value::List(vec![])],
+                                    },
+                                    Value::Null,
+                                    Value::List(vec![
+                                        Statement::Statement {
+                                            keys: vec![
+                                                Value::String("type".to_string()),
+                                                Value::String("value".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String("BOOLEAN".to_string()),
+                                                Value::String("false".to_string()),
+                                            ],
+                                            loc: self.get_loc(),
+                                        }.convert_to_map()
+                                    ]),
+                                ],
+                            }
+                        ];
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("cases".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("MATCH".to_string()),
+                                condition.convert_to_map(),
+                                Value::List(cases),
+                            ],
+                            loc: self.get_loc(),
+                        }
+                    } else if self.token_is("SEPARATOR", ":") {
+                        self.next();
+
+                        let mut cases = vec![];
+
+                        loop {
+                            if !is_valid_token(&self.token().cloned()) {
+                                self.raise("SyntaxError", "Expected 'end' or a valid case body");
+                                return Statement::Null;
+                            }
+                            match self.token().cloned() {
+                                Some(Token(_, ref tok_val, _)) if tok_val == "end" => {
+                                    self.next();
+                                    break;
+                                }
+
+                                Some(Token(..)) => {
+                                    let (style, pattern, guard);
+
+                                    let saved_pos = self.pos;
+                                    while !(self.token_is("SEPARATOR", ":") || self.token_is("OPERATOR", "->") || self.token_is("IDENTIFIER", "if")) {
+                                        self.next();
+                                    }
+                                    match self.token().cloned() {
+                                        Some(Token(_, ref tok_val, _)) if tok_val == "->" || tok_val == "if" => {
+                                            self.pos = saved_pos;
+                                            style = "pattern".to_string();
+                                        }
+                                        Some(Token(_, ref tok_val, _)) if tok_val == ":" => {
+                                            self.pos = saved_pos;
+                                            style = "literal".to_string();
+                                        }
+                                        _ => {
+                                            self.pos = saved_pos;
+                                            self.raise(
+                                                "SyntaxError",
+                                                "Expected ':' or '->' or 'if' in match case",
+                                            );
+                                            return Statement::Null;
+                                        }
+                                    }
+
+                                    if &style == "pattern" {
+                                        let pat_expr = match self.parse_path() {
+                                            Some(p) => p.to_value(),
+                                            None => {
+                                                return Statement::Null;
+                                            }
+                                        };
+
+                                        guard = if self.token_is("IDENTIFIER", "if") {
+                                            self.next();
+                                            let cond_expr = self.parse_expression();
+                                            if self.err.is_some() {
+                                                return Statement::Null;
+                                            }
+                                            Some(cond_expr)
+                                        } else {
+                                            None
+                                        };
+
+                                        if !self.token_is("OPERATOR", "->") {
+                                            self.raise(
+                                                "SyntaxError",
+                                                "Expected '->' after pattern (and optional if guard)",
+                                            );
+                                            return Statement::Null;
+                                        }
+                                        self.next();
+
+                                        pattern = pat_expr;
+                                    } else {
+                                        let tok_val = self.token().unwrap().1.clone();
+                                        pattern = if tok_val == "_" {
+                                            self.next();
+                                            return self.raise_with_help("SyntaxError", "'_' is not allowed in 'match' literal case", "Did you mean to use pattern case? ('->' instead of ':')");
+                                        } else {
+                                            let p = self.parse_operand(false);
+                                            if self.err.is_some() {
+                                                return Statement::Null;
+                                            }
+                                            p.convert_to_map()
+                                        };
+
+                                        if !self.token_is("SEPARATOR", ":") {
+                                            self.raise(
+                                                "SyntaxError",
+                                                "Expected ':' after literal pattern",
+                                            );
+                                            return Statement::Null;
+                                        }
+                                        self.next();
+
+                                        guard = None;
+                                    }
+
+                                    let mut body = vec![];
+                                    loop {
+                                        match self.token() {
+                                            Some(&Token(ref t, ref v, _)) if t == "IDENTIFIER" && v == "end" => {
+                                                self.next();
+                                                break;
+                                            }
+                                            Some(&Token(ref t, ref v, _)) if t == "SEPARATOR" && v == "," && body.len() == 1 => {
+                                                self.next();
+                                                break;
+                                            }
+                                            Some(_) => {
+                                                let stmt = self.parse_expression();
+                                                if self.err.is_some() {
+                                                    return Statement::Null;
+                                                }
+                                                body.push(stmt);
+                                            }
+                                            None => {
+                                                self.raise("SyntaxError", "Unexpected end of input inside case body");
+                                                return Statement::Null;
+                                            }
+                                        }
+                                    }
+
+                                    let case_map = if style == "literal" {
+                                        Value::Map {
+                                            keys: vec![
+                                                Value::String("style".to_string()),
+                                                Value::String("value".to_string()),
+                                                Value::String("body".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String(style),
+                                                pattern,
+                                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                            ],
+                                        }
+                                    } else {
+                                        Value::Map {
+                                            keys: vec![
+                                                Value::String("style".to_string()),
+                                                Value::String("pattern".to_string()),
+                                                Value::String("guard".to_string()),
+                                                Value::String("body".to_string()),
+                                            ],
+                                            values: vec![
+                                                Value::String(style),
+                                                pattern,
+                                                guard.map_or(Value::Null, |g| g.convert_to_map()),
+                                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
+                                            ],
+                                        }
+                                    };
+
+                                    cases.push(case_map);
+                                }
+
+                                None => {
+                                    self.raise("SyntaxError", "Unexpected end of input inside match block");
+                                    return Statement::Null;
+                                }
+                            }
+                        }
+
+                        if cases.is_empty() {
+                            self.raise_with_help(
+                                "SyntaxError",
+                                "Match statement must have at least one case",
+                                "Add '_ -> null'",
+                            );
+                            return Statement::Null;
+                        }
+
+                        Statement::Statement {
+                            keys: vec![
+                                Value::String("type".to_string()),
+                                Value::String("condition".to_string()),
+                                Value::String("cases".to_string()),
+                            ],
+                            values: vec![
+                                Value::String("MATCH".to_string()),
+                                condition.convert_to_map(),
+                                Value::List(cases),
+                            ],
+                            loc: self.get_loc(),
+                        }
+                    } else {
                         self.raise(
                             "SyntaxError",
                             "Expected ':' after match condition",
                         );
                         return Statement::Null;
-                    }
-                    self.next();
-
-                    let mut cases = vec![];
-
-                    loop {
-                        if !is_valid_token(&self.token().cloned()) {
-                            self.raise("SyntaxError", "Expected 'end' or a valid case body");
-                            return Statement::Null;
-                        }
-                        match self.token().cloned() {
-                            Some(Token(_, ref tok_val, _)) if tok_val == "end" => {
-                                self.next();
-                                break;
-                            }
-
-                            Some(Token(..)) => {
-                                let (style, pattern, guard);
-
-                                let saved_pos = self.pos;
-                                while !(self.token_is("SEPARATOR", ":") || self.token_is("OPERATOR", "->") || self.token_is("IDENTIFIER", "if")) {
-                                    self.next();
-                                }
-                                match self.token().cloned() {
-                                    Some(Token(_, ref tok_val, _)) if tok_val == "->" || tok_val == "if" => {
-                                        self.pos = saved_pos;
-                                        style = "pattern".to_string();
-                                    }
-                                    Some(Token(_, ref tok_val, _)) if tok_val == ":" => {
-                                        self.pos = saved_pos;
-                                        style = "literal".to_string();
-                                    }
-                                    _ => {
-                                        self.pos = saved_pos;
-                                        self.raise(
-                                            "SyntaxError",
-                                            "Expected ':' or '->' or 'if' in match case",
-                                        );
-                                        return Statement::Null;
-                                    }
-                                }
-
-                                if &style == "pattern" {
-                                    let pat_expr = match self.parse_path() {
-                                        Some(p) => p.to_value(),
-                                        None => {
-                                            return Statement::Null;
-                                        }
-                                    };
-
-                                    guard = if self.token_is("IDENTIFIER", "if") {
-                                        self.next();
-                                        let cond_expr = self.parse_expression();
-                                        if self.err.is_some() {
-                                            return Statement::Null;
-                                        }
-                                        Some(cond_expr)
-                                    } else {
-                                        None
-                                    };
-
-                                    if !self.token_is("OPERATOR", "->") {
-                                        self.raise(
-                                            "SyntaxError",
-                                            "Expected '->' after pattern (and optional if guard)",
-                                        );
-                                        return Statement::Null;
-                                    }
-                                    self.next();
-
-                                    pattern = pat_expr;
-                                } else {
-                                    let tok_val = self.token().unwrap().1.clone();
-                                    pattern = if tok_val == "_" {
-                                        self.next();
-                                        return self.raise_with_help("SyntaxError", "'_' is not allowed in 'match' literal case", "Did you mean to use pattern case? ('->' instead of ':')");
-                                    } else {
-                                        let p = self.parse_operand(false);
-                                        if self.err.is_some() {
-                                            return Statement::Null;
-                                        }
-                                        p.convert_to_map()
-                                    };
-
-                                    if !self.token_is("SEPARATOR", ":") {
-                                        self.raise(
-                                            "SyntaxError",
-                                            "Expected ':' after literal pattern",
-                                        );
-                                        return Statement::Null;
-                                    }
-                                    self.next();
-
-                                    guard = None;
-                                }
-
-                                let mut body = vec![];
-                                loop {
-                                    match self.token() {
-                                        Some(&Token(ref t, ref v, _)) if t == "IDENTIFIER" && v == "end" => {
-                                            self.next();
-                                            break;
-                                        }
-                                        Some(&Token(ref t, ref v, _)) if t == "SEPARATOR" && v == "," && body.len() == 1 => {
-                                            self.next();
-                                            break;
-                                        }
-                                        Some(_) => {
-                                            let stmt = self.parse_expression();
-                                            if self.err.is_some() {
-                                                return Statement::Null;
-                                            }
-                                            body.push(stmt);
-                                        }
-                                        None => {
-                                            self.raise("SyntaxError", "Unexpected end of input inside case body");
-                                            return Statement::Null;
-                                        }
-                                    }
-                                }
-
-                                let case_map = if style == "literal" {
-                                    Value::Map {
-                                        keys: vec![
-                                            Value::String("style".to_string()),
-                                            Value::String("value".to_string()),
-                                            Value::String("body".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String(style),
-                                            pattern,
-                                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                        ],
-                                    }
-                                } else {
-                                    Value::Map {
-                                        keys: vec![
-                                            Value::String("style".to_string()),
-                                            Value::String("pattern".to_string()),
-                                            Value::String("guard".to_string()),
-                                            Value::String("body".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String(style),
-                                            pattern,
-                                            guard.map_or(Value::Null, |g| g.convert_to_map()),
-                                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                        ],
-                                    }
-                                };
-
-                                cases.push(case_map);
-                            }
-
-                            None => {
-                                self.raise("SyntaxError", "Unexpected end of input inside match block");
-                                return Statement::Null;
-                            }
-                        }
-                    }
-
-                    if cases.is_empty() {
-                        self.raise_with_help(
-                            "SyntaxError",
-                            "Match statement must have at least one case",
-                            "Add '_ -> null'",
-                        );
-                        return Statement::Null;
-                    }
-
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("condition".to_string()),
-                            Value::String("cases".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("MATCH".to_string()),
-                            condition.convert_to_map(),
-                            Value::List(cases),
-                        ],
-                        loc: self.get_loc(),
                     }
                 }
 

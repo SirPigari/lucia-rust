@@ -6,7 +6,6 @@ use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator,
 use crate::env::runtime::internal_structs::{EffectFlags};
 use crate::interpreter::Interpreter;
 use crate::env::runtime::variables::Variable;
-use serde_json::json;
 use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,16 +14,16 @@ use once_cell::sync::Lazy;
 
 // -------------------------------
 // Function Implementations
-fn print(args: &HashMap<String, Value>) -> Value {
+fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let sep = match args.get("sep") {
         Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other),
+        Some(other) => format_value(other, interpreter),
         None => " ".to_string(),
     };
 
     let end = match args.get("end") {
         Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other),
+        Some(other) => format_value(other, interpreter),
         None => "\n".to_string(),
     };
 
@@ -38,7 +37,7 @@ fn print(args: &HashMap<String, Value>) -> Value {
         if i > 0 {
             out.push_str(&sep);
         }
-        out.push_str(&format_value(val));
+        out.push_str(&format_value(val, interpreter));
     }
 
     out.push_str(&end);
@@ -48,7 +47,7 @@ fn print(args: &HashMap<String, Value>) -> Value {
     Value::Null
 }
 
-fn styled_print(args: &HashMap<String, Value>) -> Value {
+fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let values = match args.get("args") {
         Some(Value::List(list)) => list,
         _ => &vec![],
@@ -56,13 +55,13 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
 
     let sep = match args.get("sep") {
         Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other),
+        Some(other) => format_value(other, interpreter),
         None => " ".to_string(),
     };
 
     let mut text = values
         .iter()
-        .map(|v| format_value(v))
+        .map(|v| format_value(v, interpreter))
         .collect::<Vec<_>>()
         .join(sep.as_str());
 
@@ -117,14 +116,14 @@ fn styled_print(args: &HashMap<String, Value>) -> Value {
         print_args.insert("end".to_string(), end_val.clone());
     }
 
-    print(&print_args);
+    print(&print_args, interpreter);
     return Value::Null;
 }
 
-fn input(args: &HashMap<String, Value>) -> Value {
+fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let prompt = match args.get("prompt") {
         Some(Value::String(s)) => s,
-        Some(v) => &format_value(v),
+        Some(v) => &format_value(v, interpreter),
         None => "",
     };
 
@@ -144,7 +143,7 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
         Some(Value::String(s)) => Value::Int(s.chars().count().into()),
         Some(Value::Map { keys, .. }) => Value::Int(keys.len().into()),
         Some(v @ Value::Int(_) | v @ Value::Float(_)) => {
-            Value::Int(format_value(v).len().into())
+            Value::Int(format_value(v, interpreter).len().into())
         }
         Some(Value::Tuple(t)) => Value::Int(t.len().into()),
         Some(Value::Boolean(_)) => Value::Int(1.into()),
@@ -179,64 +178,8 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
 
 // i need that rn 
 fn help(args: &HashMap<String, Value>) -> Value {
-    let info = json!({
-        "print": {
-            "type": "function",
-            "description": "Prints the given values to the standard output.",
-            "args": {
-                "args": {
-                    "type": "*any",
-                    "description": "Values to print."
-                },
-                "end": {
-                    "type": "str",
-                    "description": "String to append after printing (default: '\\n')."
-                },
-                "sep": {
-                    "type": "str",
-                    "description": "String to separate values (default: ' ')."
-                }
-            }
-        },
-        "exit": {
-            "type": "function",
-            "description": "Exits the program.",
-            "example": "exit()"
-        }
-    });
-
-    if let Some(Value::String(obj)) = args.get("object") {
-        let obj_name = obj.trim_end_matches("()");
-        if let Some(obj_info) = info.get(obj_name) {
-            if let Some(obj_type) = obj_info.get("type").and_then(|v| v.as_str()) {
-                println!("Help for '{}':", obj_name);
-                println!("  Type: {}", obj_type);
-            }
-
-            if let Some(desc) = obj_info.get("description").and_then(|v| v.as_str()) {
-                println!("  Description: {}", desc);
-            }
-
-            if let Some(example) = obj_info.get("example").and_then(|v| v.as_str()) {
-                println!("  Example: {}", example);
-            }
-
-            if let Some(args) = obj_info.get("args").and_then(|v| v.as_object()) {
-                println!("  Arguments:");
-                for (arg_name, arg_info) in args {
-                    if let Some(arg_map) = arg_info.as_object() {
-                        let ty = arg_map.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let desc = arg_map.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                        println!("    - {}: {} ({})", arg_name, ty, desc);
-                    }
-                }
-            }
-        } else {
-            println!("No help available for '{}'", obj_name);
-            println!("This object may not exist or is not documented.");
-            return Value::Null;
-        }
-
+    if let Some(val) = args.get("object") {
+        println!("{}", val.help_string());
         return Value::Null;
     }
 
@@ -324,7 +267,7 @@ fn char(args: &HashMap<String, Value>) -> Value {
     Value::Error("TypeError", "Expected an integer representing a Unicode code point", None)
 }
 
-fn styledstr(args: &HashMap<String, Value>) -> Value {
+fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let values = match args.get("args") {
         Some(Value::List(list)) => list,
         _ => &vec![],
@@ -332,13 +275,13 @@ fn styledstr(args: &HashMap<String, Value>) -> Value {
 
     let sep = match args.get("sep") {
         Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other),
+        Some(other) => format_value(other, interpreter),
         None => " ".to_string(),
     };
 
     let mut text = values
         .iter()
-        .map(|v| format_value(v))
+        .map(|v| format_value(v, interpreter))
         .collect::<Vec<_>>()
         .join(sep.as_str());
 
@@ -388,7 +331,7 @@ fn styledstr(args: &HashMap<String, Value>) -> Value {
     let styled_text = format!("{}{}{}", style, text, reset);
     let end = match args.get("end") {
         Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other),
+        Some(other) => format_value(other, interpreter),
         None => "".to_string(),
     };
 
@@ -597,7 +540,7 @@ fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
 
 // -------------------------------
 // Utility Functions
-pub fn format_value(value: &Value) -> String {
+pub fn format_value(value: &Value, interpreter: &mut Interpreter) -> String {
     match value {
         Value::Float(n) => n.to_str(),
         Value::Int(n) => format_int(&n.clone()),
@@ -647,11 +590,29 @@ pub fn format_value(value: &Value) -> String {
         Value::Function(func) => {
             format!("<function '{}' at {:p}>", func.get_name(), func)
         }
+        Value::Generator(gener) => {
+            format!("<generator '{}' at {:p}>", gener.name().unwrap_or("<unnamed>"), gener)
+        }
         Value::Error(err_type, err_msg, _) => {
             format!("<{}: {}>", err_type, err_msg)
         }
         Value::Module(obj) => {
             format!("<module '{}' from '{}' at {:p}>", obj.name(), fix_path(obj.path().display().to_string()), obj.ptr())
+        }
+        Value::Struct(s) => {
+            let mut var = Variable::new_pt(s.name().to_string(), Value::Struct(s.clone()), s.get_type(), false, false, false);
+            if let Ok(method) = find_struct_method(&s, None, "op_display", &[s.get_type()], &Type::new_simple("str")) {
+                if method.is_static() {
+                    return format_value_dbg(value);
+                }
+                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, Some(&mut var))));
+                if interpreter.err.is_some() {
+                    return format_value_dbg(value);
+                }
+                return result.to_string();
+            } else {
+                return format_value_dbg(value);
+            }
         }
         _ => format_value_dbg(value),
     }
@@ -660,7 +621,7 @@ pub fn format_value(value: &Value) -> String {
 // -------------------------------
 // Function Definitions
 pub fn print_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
         "print",
         print,
         vec![  
@@ -676,7 +637,7 @@ pub fn print_fn() -> Function {
 }
 
 pub fn styled_print_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
         "styled_print",
         styled_print,
         vec![
@@ -701,7 +662,7 @@ pub fn styled_print_fn() -> Function {
 }
 
 pub fn input_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
         "input",
         input,
         vec![
@@ -814,7 +775,7 @@ pub fn char_fn() -> Function {
 }
 
 pub fn styledstr_fn() -> Function {
-    Function::Native(Arc::new(NativeFunction::new(
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
         "styledstr",
         styledstr,
         vec![

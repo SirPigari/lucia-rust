@@ -63,4 +63,14 @@ impl Module {
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
+
+    pub fn help_string(&self) -> String {
+        let mut result = format!("Module: {}\n", self.name());
+        result.push_str(&format!("Path: {:?}\n", self.path()));
+        result.push_str("Properties:\n");
+        for (key, var) in self.get_properties() {
+            result.push_str(&format!("  {}: Type: '{}'\n", key, var.get_type().display_simple()));
+        }
+        result
+    }
 }

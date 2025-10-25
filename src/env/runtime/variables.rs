@@ -1,7 +1,7 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type};
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, SortIter};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
 use crate::env::runtime::precompile::interpret;
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Int, Type};
@@ -1040,6 +1040,74 @@ impl Variable {
                         None,
                     )
                 };
+
+                let sort = {
+                    let function_signature = parse_type("function[any] -> any | null");
+                    let value_clone = self.value.clone();
+                    let interpreter_arc = Arc::new(Mutex::new(interpreter.clone()));
+
+                    make_native_method(
+                        "sort",
+                        {
+                            let interpreter_arc = interpreter_arc.clone();
+
+                            move |args| {
+                                let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
+
+                                let function = match args.get("f") {
+                                    Some(Value::Function(func)) => func.clone(),
+                                    Some(Value::Null) | None => match interpret("k => k") {
+                                        Ok(Value::Function(f)) => f,
+                                        _ => return Value::Error("RuntimeError", "Failed to create identity function", None),
+                                    },
+                                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                                };
+
+                                let items = match &value_clone {
+                                    Value::List(list) => list.clone(),
+                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                };
+
+                                let mut keys = Vec::with_capacity(items.len());
+
+                                let mut interp_guard = interpreter_arc.lock().unwrap();
+                                for item in &items {
+                                    let key_res = interp_guard.call_function(
+                                        &function,
+                                        vec![item.clone()],
+                                        std::collections::HashMap::default(),
+                                        None,
+                                    );
+
+                                    if interp_guard.err.is_some() {
+                                        return interp_guard.err.take().unwrap().to_value();
+                                    }
+
+                                    keys.push(key_res);
+                                }
+                                drop(interp_guard);
+
+                                let mut indices: Vec<usize> = (0..items.len()).collect();
+                                indices.sort_by(|&i, &j| {
+                                    let ord = keys[i]
+                                        .partial_cmp(&keys[j])
+                                        .unwrap_or(std::cmp::Ordering::Equal);
+                                    if reverse { ord.reverse() } else { ord }
+                                });
+
+                                let sorted_items: Vec<Value> = indices.into_iter().map(|i| items[i].clone()).collect();
+                                Value::List(sorted_items)
+                            }
+                        },
+                        vec![
+                            Parameter::positional_optional_pt("f", &function_signature, Value::Null),
+                            Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
+                        ],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -1123,6 +1191,17 @@ impl Variable {
                     Variable::new(
                         "filter".to_string(),
                         filter,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "sort".to_string(),
+                    Variable::new(
+                        "sort".to_string(),
+                        sort,
                         "function".to_string(),
                         false,
                         true,
@@ -1478,57 +1557,6 @@ impl Variable {
                     )
                 };
 
-                let sort = {
-                    let val_clone = self.value.clone();
-                    let interpreter_clone = interpreter.clone();
-                    let func_type = parse_type("function[any] -> any | null");
-
-                    make_native_method(
-                        "sort",
-                        move |args| {
-                            let generator = match &val_clone {
-                                Value::Generator(g) => g,
-                                _ => return Value::Null,
-                            };
-
-                            if generator.is_infinite() {
-                                return Value::Error("TypeError", "Cannot sort an infinite generator", None);
-                            }
-
-                            let reversed = matches!(args.get("reverse"), Some(Value::Boolean(true)));
-
-                            let func = match args.get("key") {
-                                Some(Value::Function(f)) => f.clone(),
-                                Some(Value::Null) | None => {
-                                    match interpret("k => k") {
-                                        Ok(Value::Function(f)) => f,
-                                        _ => return Value::Error("TypeError", "Failed to create identity function", None),
-                                    }
-                                }
-                                _ => return Value::Error("TypeError", "Expected 'key' to be a function", None),
-                            };
-
-                            let sort_iter = SortIter::new(generator, func, reversed, &interpreter_clone);
-                            let generator = Generator::new_anonymous(
-                                GeneratorType::Native(NativeGenerator {
-                                    iter: Box::new(sort_iter),
-                                    iteration: 0,
-                                }),
-                                false,
-                            );
-
-                            Value::Generator(generator)
-                        },
-                        vec![
-                            Parameter::positional_optional_pt("key", &func_type, Value::Null),
-                            Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
-                        ],
-                        "generator",
-                        false, true, true,
-                        None,
-                    )
-                };
-
                 self.properties.insert(
                     "collect".to_string(),
                     Variable::new(
@@ -1622,17 +1650,6 @@ impl Variable {
                     Variable::new(
                         "take".to_string(),
                         take,
-                        "function".to_string(),
-                        false,
-                        true,
-                        true,
-                    ),
-                );
-                self.properties.insert(
-                    "sort".to_string(),
-                    Variable::new(
-                        "sort".to_string(),
-                        sort,
                         "function".to_string(),
                         false,
                         true,

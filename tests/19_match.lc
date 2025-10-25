@@ -161,3 +161,8 @@ end
 
 assert!(hit_13, "hit_13 branch (first union continue) did not execute")
 assert!(hit_14, "hit_14 branch (second union after continue) did not execute")
+
+b: int = 42
+assert_eq!(match (b) from 42 | 30, true) 
+
+assert_eq!(match (b) from 10 | 20, false)

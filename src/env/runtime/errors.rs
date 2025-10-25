@@ -1,5 +1,6 @@
 use crate::env::runtime::utils::{to_static};
 use crate::env::runtime::tokens::Location;
+use crate::env::runtime::value::Value;
 
 use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
@@ -124,5 +125,9 @@ impl Error {
         } else {
             "<unknown location>".to_string()
         }
+    }
+
+    pub fn to_value(&self) -> Value {
+        Value::Error(to_static(self.error_type.clone()), to_static(self.msg.clone()), None)
     }
 }

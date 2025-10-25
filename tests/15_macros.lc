@@ -40,15 +40,13 @@ assert_type!(i, int)
 
 assert_err!(assert_type!(i, str, "Expected i to be a string"))
 
-// time_it macro runs the code and then returns a tuple with the result and the elapsed time in apollo time
-// this macro is in development and may not work as expected
-// this is just test if macros can run complex code inside them
+// time_it macro runs the code and then returns a tuple with the result and the elapsed time in apollo time (nanoseconds from apollo epoch)
 (_, elapsed: int) = time_it!(
     for (i in [0..69]):
         i * i
     end
 )
-formatted_time: float = _time.format_apollo_time_ms(elapsed)
+formatted_time: str = elapsed.format("%S.%ms")
 
 print(formatted_time, elapsed)
 

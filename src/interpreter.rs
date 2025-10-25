@@ -10966,12 +10966,12 @@ impl Interpreter {
                                         }
                                         let result;
                                         if let Some(spec) = format_spec {
-                                            result = match apply_format_spec(&result_val, &spec) {
+                                            result = match apply_format_spec(&result_val, &spec, self) {
                                                 Ok(res) => res,
                                                 Err(e) => return self.raise("SyntaxError", &e),
                                             };
                                         } else {
-                                            result = match escape_string(&native::format_value(&result_val)) {
+                                            result = match escape_string(&native::format_value(&result_val, self)) {
                                                 Ok(res) => res,
                                                 Err(e) => return self.raise("UnicodeError", &e),
                                             };

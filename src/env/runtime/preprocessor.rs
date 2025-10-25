@@ -761,12 +761,12 @@ impl Preprocessor {
                             return Err(create_err(&format!("Included file does not exist: {}", included_path.display()), &tokens[i]));
                         }
 
-                        let included_in = self._process(vec![
+                        let included_in = vec![
                             Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
                             Token("IDENTIFIER".to_string(), "define".to_string(), last_normal_token_location.clone()),
                             Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
                             Token("STRING".to_string(), included_path.display().to_string(), last_normal_token_location.clone()),
-                        ], included_path.parent().unwrap_or(current_dir))?;
+                        ];
                         let included_out = vec![
                             Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
                             Token("IDENTIFIER".to_string(), "undef".to_string(), last_normal_token_location.clone()),
@@ -800,7 +800,7 @@ impl Preprocessor {
                                     &self.file_path,
                                 ))?;
 
-                                let lexer = Lexer::new(&content, to_static(included_path.display().to_string()));
+                                let lexer = Lexer::new(&content, to_static(file_path.display().to_string()));
                                 let mut toks = lexer.tokenize()
                                     .into_iter()
                                     .filter(|tok| tok.0 != "WHITESPACE")
@@ -814,10 +814,10 @@ impl Preprocessor {
                                     }
                                 }
 
-                                result.extend(included_in.clone());
-                                let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
+                                result.extend(self._process(included_in.clone(), &included_path)?);
+                                let included = self._process(toks, &included_path)?;
                                 result.extend(included);
-                                result.extend(self._process(included_out.clone(), included_path.parent().unwrap_or(current_dir))?);
+                                result.extend(self._process(included_out.clone(), &included_path)?);
                             }
                         } else {
                             #[cfg(target_arch = "wasm32")] {
@@ -832,10 +832,10 @@ impl Preprocessor {
                                         toks.pop();
                                     }
 
-                                    result.extend(included_in);
-                                    let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
+                                    result.extend(self._process(included_in.clone(), &included_path.parent().unwrap_or(current_dir))?);
+                                    let included = self._process(toks, &included_path.parent().unwrap_or(current_dir))?;
                                     result.extend(included);
-                                    result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
+                                    result.extend(self._process(included_out, &included_path.parent().unwrap_or(current_dir))?);
                                 } else {
                                     return Err(create_err(&format!("Included file does not exist in std libs: {}", included_path.display()), &tokens[i]));
                                 }
@@ -858,10 +858,10 @@ impl Preprocessor {
                                     toks.pop();
                                 }
 
-                                result.extend(included_in);
-                                let included = self._process(toks, included_path.parent().unwrap_or(current_dir))?;
+                                result.extend(self._process(included_in.clone(), &included_path.parent().unwrap_or(current_dir))?);
+                                let included = self._process(toks, &included_path.parent().unwrap_or(current_dir))?;
                                 result.extend(included);
-                                result.extend(self._process(included_out, included_path.parent().unwrap_or(current_dir))?);
+                                result.extend(self._process(included_out, &included_path.parent().unwrap_or(current_dir))?);
                             }
                         }
                         continue;

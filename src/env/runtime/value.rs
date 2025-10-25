@@ -4,7 +4,7 @@ use crate::env::runtime::generators::Generator;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::utils::{format_float, format_int, fix_path, MAX_PTR};
+use crate::env::runtime::utils::{format_float, format_int, fix_path, format_value, MAX_PTR};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::collections::HashMap;
@@ -876,6 +876,36 @@ impl Value {
             Value::Map { keys, values } => keys.iter().zip(values.iter()).map(|(k, v)| Value::Map { keys: vec![k.clone()], values: vec![v.clone()] }).collect(),
             Value::Generator(generator) => generator.make_iter().collect(),
             _ => vec![],
+        }
+    }
+    pub fn help_string(&self) -> String {
+        match self {
+            Value::Function(func) => func.help_string(),
+            Value::Generator(generator) => generator.help_string(),
+            Value::Module(module) => module.help_string(),
+            Value::Enum(enm) => enm.help_string(),
+            Value::Struct(strct) => strct.help_string(),
+            Value::Int(_) | Value::Float(_) | Value::String(_) | Value::Boolean(_) | Value::Null| Value::List(_) | Value::Tuple(_) | Value::Bytes(_) => {
+                format!("Value: {}\nType: '{}'\nFull type: '{}'", format_value(self), self.get_type().display_simple(), self.get_type().display())
+            }
+            Value::Pointer(arc) => {
+                let inner = arc.lock().unwrap();
+                format!("Type: '{}'\nPointer to:\n{}", self.get_type().display_simple(), format_value(&*inner))
+            }
+            Value::Error(..) => {
+                panic!("how the fuck")
+            }
+            Value::Type(t) => {
+                format!("Type: 'type'\nInner type: '{}'", t.display())
+            }
+            Value::Map { keys, values } => {
+                let mut s = String::new();
+                s.push_str(&format!("Value: Map with {} entries\nType: '{}'\nFull type: '{}'\nEntries:\n", keys.len(), self.get_type().display_simple(), self.get_type().display()));
+                for (k, v) in keys.iter().zip(values.iter()) {
+                    s.push_str(&format!("  {}: {}\n", k.to_string(), v.to_string()));
+                }
+                s
+            }
         }
     }
 }

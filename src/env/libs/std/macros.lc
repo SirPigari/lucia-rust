@@ -11,7 +11,7 @@
     throw $msg from "UnreachableError"
 #endmacro
 
-#macro todo!($msg=("Not implemented yet")):
+#macro todo!($msg=("Feature not implemented yet")):
     throw $msg from "NotImplemented"
 #endmacro
 
@@ -35,12 +35,12 @@
     styledprint($value, fg_color=#config.color_scheme["debug"])
 #endmacro
 
-// TODO: Fix apollo time in time module (src/env/libs/time/__init__.rs)
+// uses ApolloTime from time module
 #macro time_it!($expr):
     scope time_it_scope (_time): 
-        start_time: int = _time.current_apollo_time()
+        start_time: int = _time.ApolloTime.now()
         result: any = ($expr)
-        end_time: int = _time.current_apollo_time()
+        end_time: int = _time.ApolloTime.now()
         elapsed: int = end_time - start_time
         return ((result, elapsed))
     end
@@ -60,10 +60,7 @@
 
 // pattern must be a valid pattern (path) not a value
 #macro matches!($value, $pattern):
-    match $value:
-        $pattern -> true,
-        _ -> false,
-    end
+    match $value from $pattern
 #endmacro
 
 #macro #no-mangle get_matched!($value, $pattern, $vars):
@@ -72,6 +69,11 @@
         _ -> false,
     end
     $vars
+#endmacro
+
+#macro sort![$val, $reverse=(false), $f=(null)]:
+    lst: list = $val as list
+    return lst.sort(reverse=$reverse, f=$f)
 #endmacro
 
 // return null
