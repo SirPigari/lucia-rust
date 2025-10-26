@@ -34,7 +34,7 @@ It's designed for speed and safety, without sacrificing elegance.
 
 ## Documentation
 
-- [ ] [Getting started](src/env/Docs/getting-started.md)
+- [x] [Introduction](src/env/Docs/introduction.md)
 - [x] [Installation guide](src/env/Docs/installation-guide.md)
 - [x] [Config guide](src/env/Docs/config-guide.md)
 - [ ] [Syntax](src/env/Docs/language-syntax.md)

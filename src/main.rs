@@ -1510,7 +1510,7 @@ fn repl(
 
         if input.starts_with(':') {
             let new_input = match &*input {
-                ":exit" => Some("exit()".into()),
+                ":exit" | ":quit" | ":q" | ":q!" => Some("exit()".into()),
                 ":clear" | ":cls" => {
                     if let Err(_) = clear_terminal() {
                         handle_error(

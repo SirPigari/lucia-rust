@@ -5,7 +5,7 @@ use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::Statement;
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, parse_type};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::structs_and_enums::Struct;
 use std::time::{Duration, SystemTime};
@@ -13,13 +13,24 @@ use std::time::{Duration, SystemTime};
 use std::thread;
 use once_cell::sync::Lazy;
 use crate::{insert_native_fn, make_native_fn_pt, make_native_static_fn_pt, insert_native_var};
-use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, DateTime, FixedOffset};
+use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, DateTime, FixedOffset, TimeZone, LocalResult};
+
+static APOLLO_EPOCH_DATETIME: Lazy<DateTime<Utc>> = Lazy::new(|| {
+    "1969-07-19T21:44:00Z"
+        .parse::<DateTime<Utc>>()
+        .expect("invalid date")
+});
 
 static APOLLO_EPOCH: Lazy<SystemTime> = Lazy::new(|| {
-    let dt: DateTime<Utc> = "1969-07-19T21:44:00Z".parse().expect("invalid date");
+    let dt: DateTime<Utc> = *APOLLO_EPOCH_DATETIME;
     let ts = dt.timestamp();
     let nanos = dt.timestamp_subsec_nanos();
-    SystemTime::UNIX_EPOCH + Duration::new(ts.unsigned_abs(), nanos)
+
+    if ts >= 0 {
+        SystemTime::UNIX_EPOCH + Duration::new(ts as u64, nanos)
+    } else {
+        SystemTime::UNIX_EPOCH - Duration::new((-ts) as u64, nanos)
+    }
 });
 
 // This module handles time and date functionality.
@@ -243,11 +254,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                                 .and_then(|(v, _)| if let Value::String(s) = &**v { Some(s.clone()) } else { None })
                                 .unwrap_or_else(|| "Z".to_string());
 
-                            let offset = if tz_str == "Z" {
-                                FixedOffset::east_opt(0).unwrap()
-                            } else {
-                                parse_offset(&tz_str)
-                            };
+                            let offset = parse_offset(&tz_str);
 
                             let apollo_epoch = *APOLLO_EPOCH;
                             let duration = if nanos_i128 >= 0 {
@@ -544,7 +551,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                 let dt_utc: DateTime<Utc> = ts.into();
                 let dt_local = dt_utc.with_timezone(&offset);
 
-                Value::String(dt_local.format("%Y-%m-%dT%H:%M:%S%.f").to_string())
+                Value::String(dt_local.format("%Y-%m-%dT%H:%M:%S%.f%:z").to_string())
             },
             vec![Parameter::instance("self", &ty, vec![])],
             &Type::new_simple("str"),
@@ -554,6 +561,112 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
 
     new_methods.push(from_iso_method);
     new_methods.push(to_iso_method);
+
+    let from_unix_method = ("from_unix".to_string(),
+        make_native_static_fn_pt!(
+            "from_unix",
+            |args: &HashMap<String, Value>| -> Value {
+                let ts_secs = match args.get("ts") {
+                    Some(Value::Int(i)) => match i.to_i128() {
+                        Ok(v) => v,
+                        Err(_) => return Value::Error("ConversionError", "failed to convert Int to i128", None),
+                    },
+                    _ => return Value::Error("TypeError", "expected int argument 'ts'", None),
+                };
+
+                let unix_time = std::time::UNIX_EPOCH
+                    .checked_add(std::time::Duration::from_secs(ts_secs as u64))
+                    .unwrap_or(std::time::UNIX_EPOCH);
+
+                let apollo_offset = match unix_time.duration_since(*APOLLO_EPOCH) {
+                    Ok(dur) => dur.as_nanos() as i128,
+                    Err(e) => -(e.duration().as_nanos() as i128),
+                };
+
+                let mut map: HashMap<String, (Box<Value>, Type)> = HashMap::new();
+                map.insert("nanos".to_string(), (
+                    Box::new(Value::Int(Int::from_i128(apollo_offset))),
+                    Type::new_simple("int")
+                ));
+                map.insert("tz".to_string(), (
+                    Box::new(Value::String(Local::now().offset().to_string())),
+                    Type::new_simple("str")
+                ));
+
+                Value::Struct(Struct {
+                    ty: APOLLO_TIME_STRUCT.clone(),
+                    fields: map,
+                })
+            },
+            vec![Parameter::positional("ts", "int")],
+            &ty,
+            EffectFlags::PURE
+        )
+    );
+
+    let to_unix_method = ("to_unix".to_string(),
+        make_native_fn_pt!(
+            "to_unix",
+            |args: &HashMap<String, Value>| -> Value {
+                let s = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                };
+
+                let nanos_i128 = match s.fields.get("nanos") {
+                    Some((v, _)) => match &**v {
+                        Value::Int(n) => n.to_i128().unwrap_or(0),
+                        _ => return Value::Error("ValueError", "nanos not Int", None),
+                    },
+                    None => return Value::Error("ValueError", "Missing nanos", None),
+                };
+
+                let apollo_time = if nanos_i128 >= 0 {
+                    (*APOLLO_EPOCH)
+                        .checked_add(std::time::Duration::from_nanos(nanos_i128 as u64))
+                        .unwrap_or(*APOLLO_EPOCH)
+                } else {
+                    (*APOLLO_EPOCH)
+                        .checked_sub(std::time::Duration::from_nanos((-nanos_i128) as u64))
+                        .unwrap_or(*APOLLO_EPOCH)
+                };
+
+                let unix_ts = match apollo_time.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(dur) => dur.as_secs() as i128,
+                    Err(e) => -(e.duration().as_secs() as i128),
+                };
+
+                Value::Int(Int::from_i128(unix_ts))
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("int"),
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(from_unix_method);
+    new_methods.push(to_unix_method);
+
+    let epoch_method = ("epoch".to_string(),
+        make_native_static_fn_pt!(
+            "epoch",
+            |_args: &HashMap<String, Value>| -> Value {
+                let mut map: HashMap<String, (Box<Value>, Type)> = HashMap::new();
+                map.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(0))), Type::new_simple("int")));
+                map.insert("tz".to_string(), (Box::new(Value::String("Z".to_string())), Type::new_simple("str")));
+
+                Value::Struct(Struct {
+                    ty: APOLLO_TIME_STRUCT.clone(),
+                    fields: map,
+                })
+            },
+            vec![],
+            &ty,
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(epoch_method);
 
     let to_timezone_method = ("to_timezone".to_string(),
         make_native_fn_pt!(
@@ -587,6 +700,61 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
     );
     new_methods.push(to_timezone_method);
 
+    let from_method = ("from".to_string(),
+        make_native_static_fn_pt!(
+            "from",
+            |args: &HashMap<String, Value>| -> Value {
+                let datetime_str = match args.get("datetime") {
+                    Some(Value::String(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected string argument 'datetime'", None),
+                };
+                let format_str = match args.get("format") {
+                    Some(Value::String(s)) => s.as_str(),
+                    Some(Value::Null) | None => "%Y-%m-%dT%H:%M:%S%.f",
+                    _ => return Value::Error("TypeError", "Expected string or null for 'format'", None),
+                };
+                let tz_str = match args.get("tz") {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Value::Error("TypeError", "Expected string or null for 'tz'", None),
+                };
+
+                let offset = parse_offset(tz_str);
+                match NaiveDateTime::parse_from_str(datetime_str, format_str) {
+                    Ok(naive_dt) => {
+                        let dt_fixed = match offset.from_local_datetime(&naive_dt) {
+                            LocalResult::Single(dt) => dt,
+                            LocalResult::Ambiguous(..) => return Value::Error("ValueError", "The specified local time is ambiguous in the given timezone", None),
+                            LocalResult::None => return Value::Error("ValueError", "The specified local time does not exist in the given timezone", None),
+                        };
+
+                        let dt_utc: DateTime<Utc> = dt_fixed.with_timezone(&Utc);
+                        let epoch_utc: DateTime<Utc> = (*APOLLO_EPOCH_DATETIME).into();
+                        let duration = dt_utc.signed_duration_since(epoch_utc);
+                        let nanos = match duration.num_nanoseconds() {
+                            Some(n) => n as i128,
+                            None => return Value::Error("OverflowError", "Duration overflowed", None),
+                        };
+
+                        let mut fields: HashMap<String, (Box<Value>, Type)> = HashMap::new();
+                        fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(nanos))), Type::new_simple("int")));
+                        fields.insert("tz".to_string(), (Box::new(Value::String(tz_str.to_string())), Type::new_simple("str")));
+
+                        Value::Struct(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields })
+                    }
+                    Err(e) => Value::Error("ParseError", to_static(format!("Failed to parse datetime: {}", e)), None),
+                }
+            },
+            vec![
+                Parameter::positional("datetime", "str"),
+                Parameter::positional_optional_pt("format", &parse_type("?str"), Value::Null),
+                Parameter::positional_optional("tz", "str", Value::String("Z".to_string()))
+            ],
+            &ty,
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(from_method);
 
     let get_nanos = ("get_nanos".to_string(), make_native_fn_pt!(
         "get_nanos",
@@ -839,8 +1007,12 @@ pub fn register() -> HashMap<String, Variable> {
     );
 
     insert_native_var!(map, "ApolloTime", Value::Type(APOLLO_TIME_STRUCT.clone()), "type");
-    let epoch_dt: DateTime<Utc> = (*APOLLO_EPOCH).into();
-    insert_native_var!(map, "APOLLO_EPOCH", Value::String(epoch_dt.to_rfc3339()), "str");
+    insert_native_var!(
+        map,
+        "APOLLO_EPOCH",
+        Value::String(APOLLO_EPOCH_DATETIME.format("%Y-%m-%dT%H:%M:%S Z").to_string()),
+        "str"
+    );
 
     map
 }

@@ -178,9 +178,11 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
 
 // i need that rn 
 fn help(args: &HashMap<String, Value>) -> Value {
-    if let Some(val) = args.get("object") {
-        println!("{}", val.help_string());
-        return Value::Null;
+    if let Some(val) = args.get("value") {
+        if !matches!(val, Value::Null) {
+            println!("{}", val.help_string());
+            return Value::Null;
+        }
     }
 
     let version = get_version();
@@ -190,7 +192,7 @@ fn help(args: &HashMap<String, Value>) -> Value {
 If you're new to Lucia, start with the tutorial:
 https://github.com/SirPigari/lucia/tree/main/env/Docs/introduction.md
 
-- Need help? Enter help(object="object name") to get information about a function or object.
+- Need help? Enter help(value) to get information about a function or object.
 - Want to see available modules or keywords? Use modules() or keywords().
 - Ready to exit? Type exit() to leave the Lucia REPL.
 
@@ -694,7 +696,7 @@ pub fn help_fn() -> Function {
         "help",
         help,
         vec![
-            Parameter::positional_optional("object", "any", Value::Null),
+            Parameter::positional_optional("value", "any", Value::Null),
         ],
         "void",
         true, true, true,
