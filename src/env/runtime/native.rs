@@ -47,7 +47,7 @@ fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
     Value::Null
 }
 
-fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
+fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let values = match args.get("args") {
         Some(Value::List(list)) => list,
         _ => &vec![],
@@ -67,21 +67,22 @@ fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) ->
 
     let mut style = String::new();
 
-    if let Some(Value::String(fg)) = args.get("fg_color") {
-        style += &utils::hex_to_ansi(fg, true);
+    let fg = args.get("fg_color").and_then(|v| match v {
+        Value::String(s) => Some(s.as_str()),
+        _ => None,
+    }).unwrap_or("reset");
+
+    let bg = args.get("bg_color").and_then(|v| match v {
+        Value::String(s) => Some(s.as_str()),
+        _ => None,
+    }).unwrap_or("reset");
+
+    if bg != "reset" {
+        style += &utils::hex_to_ansi_bg(bg, true);
     }
 
-    if let Some(Value::String(bg)) = args.get("bg_color") {
-        let hex = if bg.starts_with('#') { &bg[1..] } else { bg };
-        if hex.len() == 6 {
-            if let (Ok(r), Ok(g), Ok(b)) = (
-                u8::from_str_radix(&hex[0..2], 16),
-                u8::from_str_radix(&hex[2..4], 16),
-                u8::from_str_radix(&hex[4..6], 16),
-            ) {
-                style.push_str(&format!("\x1b[48;2;{};{};{}m", r, g, b));
-            }
-        }
+    if fg != "reset" || bg == "reset" {
+        style += &utils::hex_to_ansi(fg, true);
     }
 
     if matches!(args.get("bold"), Some(Value::Boolean(true))) {
@@ -104,19 +105,32 @@ fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) ->
     }
 
     if let Some(Value::String(link)) = args.get("link") {
-        text = format!("[{}]({})", text, link);
+        // OSC 8: \x1b]8;;url\x1b\text\x1b]8;;\x1b\
+        text = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", link, text);
     }
 
     let reset = "\x1b[0m";
     let styled_text = format!("{}{}{}", style, text, reset);
+    let end = match args.get("end") {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => format_value(other, interpreter),
+        None => "".to_string(),
+    };
 
-    let mut print_args = HashMap::new();
-    print_args.insert("args".to_string(), Value::List(vec![Value::String(styled_text)]));
-    if let Some(end_val) = args.get("end") {
-        print_args.insert("end".to_string(), end_val.clone());
-    }
+    let mut output = String::new();
+    output.push_str(&styled_text);
+    output.push_str(&end);
 
-    print(&print_args, interpreter);
+    Value::String(output)
+}
+
+fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
+    let str_to_print = styledstr(args, interpreter);
+
+    print!("{}", match str_to_print {
+        Value::String(s) => s,
+        _ => return Value::Error("RuntimeError", "styledstr did not return a string", None),
+    });
     return Value::Null;
 }
 
@@ -267,81 +281,6 @@ fn char(args: &HashMap<String, Value>) -> Value {
         }
     }
     Value::Error("TypeError", "Expected an integer representing a Unicode code point", None)
-}
-
-fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
-    let values = match args.get("args") {
-        Some(Value::List(list)) => list,
-        _ => &vec![],
-    };
-
-    let sep = match args.get("sep") {
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other, interpreter),
-        None => " ".to_string(),
-    };
-
-    let mut text = values
-        .iter()
-        .map(|v| format_value(v, interpreter))
-        .collect::<Vec<_>>()
-        .join(sep.as_str());
-
-    let mut style = String::new();
-
-    if let Some(Value::String(fg)) = args.get("fg_color") {
-        style += &utils::hex_to_ansi(fg, true);
-    }
-
-    if let Some(Value::String(bg)) = args.get("bg_color") {
-        let hex = if bg.starts_with('#') { &bg[1..] } else { bg };
-        if hex.len() == 6 {
-            if let (Ok(r), Ok(g), Ok(b)) = (
-                u8::from_str_radix(&hex[0..2], 16),
-                u8::from_str_radix(&hex[2..4], 16),
-                u8::from_str_radix(&hex[4..6], 16),
-            ) {
-                style.push_str(&format!("\x1b[48;2;{};{};{}m", r, g, b));
-            }
-        }
-    }
-
-    if matches!(args.get("bold"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[1m");
-    }
-    if matches!(args.get("italic"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[3m");
-    }
-    if matches!(args.get("underline"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[4m");
-    }
-    if matches!(args.get("blink"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[5m");
-    }
-    if matches!(args.get("reverse"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[7m");
-    }
-    if matches!(args.get("strikethrough"), Some(Value::Boolean(true))) {
-        style.push_str("\x1b[9m");
-    }
-
-    if let Some(Value::String(link)) = args.get("link") {
-        text = format!("[{}]({})", text, link);
-    }
-
-    let reset = "\x1b[0m";
-    let styled_text = format!("{}{}{}", style, text, reset);
-    let end = match args.get("end") {
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => format_value(other, interpreter),
-        None => "".to_string(),
-    };
-
-    let mut output = String::new();
-    output.push_str(&styled_text);
-    output.push_str(&end);
-
-    Value::String(output)
 }
 
 fn array(args: &HashMap<String, Value>) -> Value {
@@ -783,7 +722,7 @@ pub fn styledstr_fn() -> Function {
         vec![
             Parameter::variadic_optional("args", "any", Value::String("".to_string())),
             Parameter::keyword_optional("sep", "str", Value::String(" ".to_string())),
-            Parameter::keyword_optional("end", "str", Value::String("\n".to_string())),
+            Parameter::keyword_optional("end", "str", Value::String("".to_string())),
             Parameter::keyword_optional("fg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bold", "bool", Value::Boolean(false)),

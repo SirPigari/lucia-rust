@@ -12,11 +12,11 @@ styledprint("hello", underline=true)
 styledprint("hello", blink=true)
 styledprint("hello", reverse=true)
 styledprint("hello", strikethrough=true)
-styledprint("hello", link="https://example.com")
+styledprint("hello", link="https://example.com")  // OSC 8
 styledprint("hello", fg_color="red")
 styledprint("hello", bg_color="blue")
 // ik end may be highlighted here but it is allowed
-styledprint("hello", end="✨")
+styledprint("hello", end="🌸")
 
 assert_eq!(type_of(123), int)
 assert_eq!(range(5).collect(), ([0, 1, 2, 3, 4]))

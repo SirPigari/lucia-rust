@@ -5,7 +5,7 @@ use crate::env::runtime::utils::{
     format_value,
     find_closest_match,
     TRUE, FALSE, NULL,
-    debug_log,
+    debug_log_internal,
     check_ansi,
     unescape_string,
     to_static,
@@ -238,6 +238,13 @@ impl Interpreter {
         this
     }
 
+    pub fn debug_log(&self, message: std::fmt::Arguments) {
+        if self.config.debug && (self.config.debug_mode == "full" || self.config.debug_mode == "normal") {
+            let message = format!("{}", message);
+            debug_log_internal(message, &self.config);
+        }
+    }
+
     pub fn set_scope(&mut self, scope: &str) {
         self.scope = scope.to_owned();
     }
@@ -325,9 +332,8 @@ impl Interpreter {
                 NULL
             }
         };
-        debug_log(
-            &format!("<Exit with code: {}>", format_value(&self.return_value)),
-            &self.config,
+        self.debug_log(
+            format_args!("<Exit with code: {}>", format_value(&self.return_value))
         );
     }
 
@@ -742,13 +748,13 @@ impl Interpreter {
                 reqwest::header::HeaderValue::from_static(ct),
             );
         }
-    
-        debug_log(&format!(
+
+        self.debug_log(format_args!(
             "<Fetching {} {} with data: {}>",
             method,
             parsed_url.as_str(),
             body.as_deref().unwrap_or("null")
-        ), &self.config.clone());
+        ));
     
         let req = client
             .request(method, parsed_url)
@@ -761,9 +767,9 @@ impl Interpreter {
         };
     
         let resp = req.send().await?;
-    
-        debug_log(&format!("<Response status: {}>", resp.status()), &self.config.clone());
-    
+
+        self.debug_log(format_args!("<Response status: {}>", resp.status()));
+
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
         let body = resp.text().await?;
@@ -2360,7 +2366,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
-                debug_log(&format!("<Enum '{}' registered>", name), &self.config.clone());
+                self.debug_log(format_args!("<Enum '{}' registered>", name));
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -2450,7 +2456,7 @@ impl Interpreter {
                         is_final,
                     ),
                 );
-                debug_log(&format!("<Struct '{}' registered>", name), &self.config.clone());
+                self.debug_log(format_args!("<Struct '{}' registered>", name));
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
@@ -2767,9 +2773,8 @@ impl Interpreter {
             StackType::Scope,
         ));
 
-        debug_log(
-            &format!("<Entering scope '{}'>", name),
-            &self.config.clone(),
+        self.debug_log(
+            format_args!("<Entering scope '{}'>", name),
         );
 
         let mut scope_interpreter = Interpreter::new(
@@ -2798,9 +2803,8 @@ impl Interpreter {
 
         if body.is_empty() {
             self.stack.pop();
-            debug_log(
-                &format!("<Exiting scope '{}'>", name),
-                &self.config.clone(),
+            self.debug_log(
+                format_args!("<Exiting scope '{}'>", name),
             );
             return NULL;
         }
@@ -2817,9 +2821,8 @@ impl Interpreter {
             return NULL;
         }
 
-        debug_log(
-            &format!("<Exiting scope '{}'>", name),
-            &self.config.clone(),
+        self.debug_log(
+            format_args!("<Exiting scope '{}'>", name),
         );
 
         self.stack.pop();
@@ -3786,7 +3789,7 @@ impl Interpreter {
         let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
 
         if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
-            debug_log(&format!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description), &self.config);
+            self.debug_log(format_args!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description));
 
             let expected_lucia_version = lib_info.expected_lucia_version;
 
@@ -4167,13 +4170,12 @@ impl Interpreter {
                                 ));
                             }
                         }
-                        
-                        debug_log(
-                            &format!(
+
+                        self.debug_log(
+                            format_args!(
                                 "<Manifest for module '{}': version {}, description: {}, authors: {:?}, license: {}>",
                                 print_name, version, description, authors, license
-                            ),
-                            &self.config,
+                            )
                         );
 
                         for (field, _) in [("name", &print_name), ("version", &version), ("required_lucia_version", &required_lucia_version)] {
@@ -4191,15 +4193,14 @@ impl Interpreter {
                                 &format!("Please update Lucia to match the required version: '{}'", required_lucia_version),
                             );
                         }
-                        
-                        debug_log(
-                            &format!(
+
+                        self.debug_log(
+                            format_args!(
                                 "<Importing module '{}', version: {}{}>",
                                 print_name,
                                 version,
                                 if description.is_empty() { "".to_string() } else { format!(", description: {}", description) }
-                            ),
-                            &self.config,
+                            )
                         );
                         
                         if let Some(deps) = manifest_json.get("dependencies").and_then(|v| v.as_object()) {
@@ -4316,7 +4317,7 @@ impl Interpreter {
                         return self.raise("MalformedManifest", &format!("Could not open manifest file '{}'", fix_path(manifest_path.display().to_string())));
                     }
                 } else {
-                    debug_log(&format!("<Importing module '{}'>", module_name), &self.config);
+                    self.debug_log(format_args!("<Importing module '{}'>", module_name));
                 }                
                 
                 if let Some(ref entry_point_path) = entry_point {
@@ -4390,7 +4391,7 @@ impl Interpreter {
                 for &category in &order {
                     if let Some(names) = categorized.get(category) {
                         for name in names {
-                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
+                            self.debug_log(format_args!("<Importing {} '{}' from module '{}'>", category, name, module_name));
                         }
                     }
                 }
@@ -4437,9 +4438,9 @@ impl Interpreter {
                                 continue;
                             }
                             if let Some(alias) = names.get(name.as_str()) {
-                                debug_log(&format!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias), &self.config);
+                                self.debug_log(format_args!("<Importing {} '{}' from '{}' as '{}'>", category, name, module_name, alias));
                             } else {
-                                debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
+                                self.debug_log(format_args!("<Importing {} '{}' from module '{}'>", category, name, module_name));
                             }
                         }
                     }
@@ -4455,7 +4456,7 @@ impl Interpreter {
                 for &category in &order {
                     if let Some(names) = categorized.get(category) {
                         for name in names {
-                            debug_log(&format!("<Importing {} '{}' from module '{}'>", category, name, module_name), &self.config);
+                            self.debug_log(format_args!("<Importing {} '{}' from module '{}'>", category, name, module_name));
                         }
                     }
                 }
@@ -4464,8 +4465,8 @@ impl Interpreter {
                 self.stack.pop();
                 return NULL;
             }
-        
-            debug_log(&format!("<Module '{}' imported successfully>", module_name), &self.config);
+
+            self.debug_log(format_args!("<Module '{}' imported successfully>", module_name));
 
             let module = Value::Module(Module {
                 name: module_name.clone(),
@@ -4756,9 +4757,8 @@ impl Interpreter {
             }
         }
 
-        debug_log(
-            &format!("<Defining function '{}'>", name),
-            &self.config,
+        self.debug_log(
+            format_args!("<Defining function '{}'>", name)
         );
 
         let function = if name.starts_with("<") && name.ends_with(">") {
@@ -4813,16 +4813,13 @@ impl Interpreter {
                     None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
                 };
 
-                if self.config.debug {
-                    debug_log(
-                        &format!(
-                            "<Throwing error: '{}: {}'>",
-                            error_type_val.to_string(),
-                            error_msg_val.to_string()
-                        ),
-                        &self.config,
-                    );
-                }
+                self.debug_log(
+                    format_args!(
+                        "<Throwing error: '{}: {}'>",
+                        error_type_val.to_string(),
+                        error_msg_val.to_string()
+                    )
+                );
 
                 if self.err.is_some() {
                     if prev_err.is_some() {
@@ -4872,16 +4869,13 @@ impl Interpreter {
                     1 => {
                         let error_msg = items[0].to_string();
                         let error_type = "LuciaError";
-                        if self.config.debug {
-                            debug_log(
-                                &format!(
-                                    "<Throwing error: '{}: {}'>",
-                                    error_type,
-                                    error_msg
-                                ),
-                                &self.config,
-                            );
-                        }
+                        self.debug_log(
+                            format_args!(
+                                "<Throwing error: '{}: {}'>",
+                                error_type,
+                                error_msg
+                            )
+                        );
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
@@ -4912,16 +4906,13 @@ impl Interpreter {
                     2 => {
                         let error_type = items[0].to_string();
                         let error_msg = items[1].to_string();
-                        if self.config.debug {
-                            debug_log(
-                                &format!(
-                                    "<Throwing error: '{}: {}'>",
-                                    error_type,
-                                    error_msg
-                                ),
-                                &self.config,
-                            );
-                        }
+                        self.debug_log(
+                            format_args!(
+                                "<Throwing error: '{}: {}'>",
+                                error_type,
+                                error_msg
+                            )
+                        );
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
@@ -4953,16 +4944,13 @@ impl Interpreter {
                         let error_type = items[0].to_string();
                         let error_msg = items[1].to_string();
                         let help_msg = items[2].to_string();
-                        if self.config.debug {
-                            debug_log(
-                                &format!(
-                                    "<Throwing error: '{}: {}'>",
-                                    error_type,
-                                    error_msg
-                                ),
-                                &self.config,
-                            );
-                        }
+                        self.debug_log(
+                            format_args!(
+                                "<Throwing error: '{}: {}'>",
+                                error_type,
+                                error_msg
+                            )
+                        );
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
@@ -5026,9 +5014,8 @@ impl Interpreter {
 
                 match self.variables.remove(name) {
                     Some(value) => {
-                        debug_log(
-                            &format!("<Variable '{}' forgotten>", name),
-                            &self.config,
+                        self.debug_log(
+                            format_args!("<Variable '{}' forgotten>", name)
                         );
 
                         let dropped_value = value.get_value().clone();
@@ -6998,9 +6985,8 @@ impl Interpreter {
         let variable = Variable::new_pt(name.to_string(), value.clone(), declared_type, is_static, is_public, is_final);
         self.variables.insert(name.to_string(), variable);
 
-        debug_log(
-            &format!("<Declared variable '{}': {} = {}>", name, value.get_type().display_simple(), format_value(&value)),
-            &self.config,
+        self.debug_log(
+            format_args!("<Declared variable '{}': {} = {}>", name, value.get_type().display_simple(), format_value(&value))
         );
     
         value   
@@ -7367,18 +7353,22 @@ impl Interpreter {
                     for (k_idx, key) in keys.iter().enumerate() {
                         if key == &cache_key {
                             if let Some(cached_value) = values.get(k_idx) {
-                                debug_log(
-                                    &(r"<CachedListCompletion>\A  seed: ".to_string() +
-                                    &format_value(&Value::List(evaluated_seed.clone())) +
-                                    r"\A  end: " +
-                                    &format_value(&evaluated_end) +
-                                    r"\A  range_mode: " +
-                                    &range_mode +
-                                    r"\A  pattern: " +
-                                    &pattern_flag_bool.to_string()),
-                                    &self.config,
-                                );
-                                return cached_value.clone();
+                                let cached_clone = cached_value.clone();
+
+                                if self.config.debug {
+                                    let seed_str = format_value(&Value::List(evaluated_seed.clone()));
+                                    let end_str = format_value(&evaluated_end);
+
+                                    self.debug_log(format_args!(
+                                        "<CachedListCompletion>\\A  seed: {}\\A  end: {}\\A  range_mode: {}\\A  pattern: {}",
+                                        seed_str,
+                                        end_str,
+                                        range_mode,
+                                        pattern_flag_bool
+                                    ));
+                                }
+
+                                return cached_clone;
                             } else {
                                 self.raise("RuntimeError", "Cache inconsistency detected");
                                 return NULL;
@@ -7386,6 +7376,7 @@ impl Interpreter {
                         }
                     }
                 }
+
 
                 let result: Value = match range_mode.as_str() {
                     "value" => {
@@ -7740,27 +7731,30 @@ impl Interpreter {
                 self.cache.iterables.insert(cache_key, result.clone());
 
                 let pattern_method_str = match pattern_method {
-                    Some(pm) => format!(r"\A  method used: {}", pm.full()),
+                    Some(pm) => format!("\\A  method used: {}", pm.full()),
                     None => "".to_string(),
                 };
 
                 let is_inf_str = if is_inf {
-                    r"\A  infinite: true".to_string()
+                    "\\A  infinite: true".to_string()
                 } else {
                     "".to_string()
                 };
 
-                let log_message = format!(
-                    r"<ListCompletion>\A  seed: {}\A  end: {}\A  range_mode: {}\A  pattern: {}{}{}",
-                    format_value(&Value::List(evaluated_seed.clone())),
-                    format_value(&evaluated_end),
-                    range_mode,
-                    pattern_flag_bool,
-                    is_inf_str,
-                    pattern_method_str
-                );
+                if self.config.debug {
+                    let seed_str = format_value(&Value::List(evaluated_seed.clone()));
+                    let end_str = format_value(&evaluated_end);
 
-                debug_log(log_message.as_str(), &self.config);
+                    self.debug_log(format_args!(
+                        "<ListCompletion>\\A  seed: {}\\A  end: {}\\A  range_mode: {}\\A  pattern: {}{}{}",
+                        seed_str,
+                        end_str,
+                        range_mode,
+                        pattern_flag_bool,
+                        is_inf_str,
+                        pattern_method_str
+                    ));
+                }
 
                 return result;
             }
@@ -8828,8 +8822,8 @@ impl Interpreter {
             .collect();   
 
         if let Some(ref obj_var) = object_variable {
-            debug_log(
-                &format!(
+            self.debug_log(
+                format_args!(
                     "<Call: {}.{}({})>",
                     obj_var.get_name(),
                     function_name,
@@ -8838,12 +8832,11 @@ impl Interpreter {
                         .map(|(k, v)| format!("{}: {}", k, format_value(v)))
                         .collect::<Vec<String>>()
                         .join(", ")
-                ),
-                &self.config,
+                )
             );
         } else {
-            debug_log(
-                &format!(
+            self.debug_log(
+                format_args!(
                     "<Call: {}({})>",
                     function_name,
                     final_args_no_mods
@@ -8851,8 +8844,7 @@ impl Interpreter {
                         .map(|(k, v)| format!("{}: {}", k, format_value(v)))
                         .collect::<Vec<String>>()
                         .join(", ")
-                ),
-                &self.config,
+                )
             );
         }
 
@@ -8934,9 +8926,8 @@ impl Interpreter {
                 "exec" => {
                     self.stack.pop();
                     if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
-                        debug_log(
-                            &format!("<Exec script: '{}'>", script_str),
-                            &self.config,
+                        self.debug_log(
+                            format_args!("<Exec script: '{}'>", script_str)
                         );
                         let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                         let tokens = lexer.tokenize();
@@ -8966,9 +8957,8 @@ impl Interpreter {
                 "eval" => {
                     self.stack.pop();
                     if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
-                        debug_log(
-                            &format!("<Eval script: '{}'>", script_str),
-                            &self.config
+                        self.debug_log(
+                            format_args!("<Eval script: '{}'>", script_str)
                         );
                         let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
                         let tokens = lexer.tokenize();
@@ -9079,16 +9069,14 @@ impl Interpreter {
                                                 return self.raise("KeyError", &err);
                                             }
                                         }
-                                        debug_log(
-                                            &format!("<Reset config: {} to default>", key),
-                                            &self.config,
+                                        self.debug_log(
+                                            format_args!("<Reset config: {} to default>", key)
                                         );
                                         return NULL;
                                     } else if num == 0x6767 {
                                         let val = get_from_config(&self.config.clone(), key);
-                                        debug_log(
-                                            &format!("<Get config: {} = {}>", key, format_value(&val)),
-                                            &self.config,
+                                        self.debug_log(
+                                            format_args!("<Get config: {} = {}>", key, format_value(&val))
                                         );
                                         return val;
                                     }
@@ -9101,9 +9089,8 @@ impl Interpreter {
                                     return self.raise("KeyError", &err);
                                 }
                             }
-                            debug_log(
-                                &format!("<Set config: {} = {}>", key, format_value(value)),
-                                &self.config,
+                            self.debug_log(
+                                format_args!("<Set config: {} = {}>", key, format_value(value))
                             );
                             return NULL;
                         } else {
@@ -9529,9 +9516,8 @@ impl Interpreter {
             }
         }
         self.stack.pop();
-        debug_log(
-            &format!("<Function '{}' returned {}>", function_name, format_value(&result)),
-            &self.config,
+        self.debug_log(
+            format_args!("<Function '{}' returned {}>", function_name, format_value(&result)),
         );
         if let Value::Error(err_type, err_msg, referr) = &result {
             if let Some(err) = referr {
@@ -9610,12 +9596,12 @@ impl Interpreter {
             }
         };
 
-        let left = if let Value::Boolean(b) = left {
+        let left = if let Value::Boolean(b) = left && !(["&" , "|", "xnor", "xor", "<<", "lshift", ">>", "rshift"].contains(&operator.as_str())) {
             Value::Int(if b { 1.into() } else { 0.into() })
         } else {
             left
         };
-        let right = if let Value::Boolean(b) = right {
+        let right = if let Value::Boolean(b) = right && !(["&" , "|", "xnor", "xor", "<<", "lshift", ">>", "rshift"].contains(&operator.as_str())) {
             Value::Int(if b { 1.into() } else { 0.into() })
         } else {
             right
@@ -9650,9 +9636,8 @@ impl Interpreter {
             if let (Value::Int(left_val), op, Value::Int(right_val)) = (&left, &operator, &right) {
                 if *left_val == Int::from(6) && *op == "*" && *right_val == Int::from(9) {
                     self.internal_storage.use_42.1 = true;
-                    debug_log(
-                        "<Operation: 6 * 9 -> 42>",
-                        &self.config,
+                    self.debug_log(
+                        format_args!("<Operation: 6 * 9 -> 42>")
                     );
                     return Value::Int(Int::from(42));
                 }
@@ -9679,13 +9664,12 @@ impl Interpreter {
         };
 
         if let Some(cached) = self.cache.operations.get(&cache_key) {
-            debug_log(
-                &format!(
+            self.debug_log(
+                format_args!(
                     "<CachedOperation: {} -> {}>",
                     log_str,
                     format_value(cached)
-                ),
-                &self.config,
+                )
             );
             return cached.clone();
         }
@@ -9693,12 +9677,11 @@ impl Interpreter {
         let mut stdout = stdout();
         
         #[cfg(not(target_arch = "wasm32"))]
-        debug_log(
-            &format!(
+        self.debug_log(
+            format_args!(
                 "<Operation: {} -> ...>",
                 log_str
-            ),
-            &self.config,
+            )
         );
         stdout.flush().unwrap();
 
@@ -9716,13 +9699,12 @@ impl Interpreter {
             stdout.flush().unwrap();
         }
 
-        debug_log(
-            &format!(
+        self.debug_log(
+            format_args!(
                 "<Operation: {} -> {}>",
                 log_str,
                 format_value(&result)
-            ),
-            &self.config,
+            )
         );
 
         self.cache.operations.insert(cache_key, result.clone());
@@ -9756,16 +9738,14 @@ impl Interpreter {
         let cache_key = format!("{}{}", operator, format_value(&operand));
 
         if let Some(cached) = self.cache.operations.get(&cache_key) {
-            debug_log(
-                &format!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand)),
-                &self.config,
+            self.debug_log(
+                format_args!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand))
             );
             return cached.clone();
         }
 
-        debug_log(
-            &format!("<UnaryOperation: {}{}>", operator, format_value(&operand)),
-            &self.config,
+        self.debug_log(
+            format_args!("<UnaryOperation: {}{}>", operator, format_value(&operand))
         );
 
         let result = match operator {
@@ -10534,31 +10514,41 @@ impl Interpreter {
             },
             "&" | "band" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    let a_i64 = match a.to_i64() {
+                    // let a_i64 = match a.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    // };
+                    // let b_i64 = match b.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    // };
+                    // let res = a_i64 & b_i64;
+                    // Value::Int(Int::from(res))
+                    let res = match a & b {
                         Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                        Err(_) => return self.raise("ValueError", "Bitwise AND failed"),
                     };
-                    let b_i64 = match b.to_i64() {
-                        Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    };
-                    let res = a_i64 & b_i64;
-                    Value::Int(Int::from(res))
+                    Value::Int(res)
                 }
                 _ => self.raise("TypeError", "Bitwise AND requires two integers"),
             },
             "|" | "bor" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    let a_i64 = match a.to_i64() {
+                    // let a_i64 = match a.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    // };
+                    // let b_i64 = match b.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    // };
+                    // let res = a_i64 | b_i64;
+                    // Value::Int(Int::from(res))
+                    let res = match a | b {
                         Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                        Err(_) => return self.raise("ValueError", "Bitwise OR failed"),
                     };
-                    let b_i64 = match b.to_i64() {
-                        Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    };
-                    let res = a_i64 | b_i64;
-                    Value::Int(Int::from(res))
+                    Value::Int(res)
                 }
                 _ => self.raise("TypeError", "Bitwise OR requires two integers"),
             },
@@ -10616,39 +10606,47 @@ impl Interpreter {
             },
             "<<" | "lshift" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    let a_i64 = match a.to_i64() {
+                    // let a_i64 = match a.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    // };
+                    // let b_i64 = match b.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    // };
+                    // let res = match a_i64.checked_shl(b_i64 as u32) {
+                    //     Some(val) => val,
+                    //     None => return self.raise("ValueError", "Shift amount too large"),
+                    // };
+                    // Value::Int(Int::from(res))
+                    let res = match a << b {
                         Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                        Err(_) => return self.raise("ValueError", "Left shift amount too large"),
                     };
-                    let b_i64 = match b.to_i64() {
-                        Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    };
-                    let res = match a_i64.checked_shl(b_i64 as u32) {
-                        Some(val) => val,
-                        None => return self.raise("ValueError", "Shift amount too large"),
-                    };
-                    Value::Int(Int::from(res))
-                    // Value::Int(a << b)
+                    Value::Int(res)
                 }
                 _ => self.raise("TypeError", "Left shift requires two integers"),
             },
             ">>" | "rshift" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    let a_i64 = match a.to_i64() {
+                    // let a_i64 = match a.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                    // };
+                    // let b_i64 = match b.to_i64() {
+                    //     Ok(val) => val,
+                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
+                    // };
+                    // let res = match a_i64.checked_shr(b_i64 as u32) {
+                    //     Some(val) => val,
+                    //     None => return self.raise("ValueError", "Shift amount too large"),
+                    // };
+                    // Value::Int(Int::from(res))
+                    let res = match a >> b {
                         Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
+                        Err(_) => return self.raise("ValueError", "Right shift amount too large"),
                     };
-                    let b_i64 = match b.to_i64() {
-                        Ok(val) => val,
-                        Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    };
-                    let res = match a_i64.checked_shr(b_i64 as u32) {
-                        Some(val) => val,
-                        None => return self.raise("ValueError", "Shift amount too large"),
-                    };
-                    Value::Int(Int::from(res))
-                    // Value::Int(a >> b)
+                    Value::Int(res)
                 }
                 _ => self.raise("TypeError", "Right shift requires two integers"),
             },
@@ -10660,10 +10658,22 @@ impl Interpreter {
             "xor" => {
                 match (left, right) {
                     (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(a ^ b),
-                    // (Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
-                    // (Value::Float(a), Value::Float(b)) => Value::Float(a ^ b),
-                    (Value::Int(a), Value::Int(b)) => Value::Boolean(a != b),
-                    (Value::Float(a), Value::Float(b)) => Value::Boolean(a != b),
+                    (Value::Int(a), Value::Int(b)) => {
+                        let res = match a ^ b {
+                            Ok(res) => res,
+                            Err(_) => return self.raise("TypeError", "Int xor failed"),
+                        };
+                        Value::Int(res)
+                    }
+                    (Value::Float(a), Value::Float(b)) => {
+                        let res = match a ^ b {
+                            Ok(res) => res,
+                            Err(_) => return self.raise("TypeError", "Float xor failed"),
+                        };
+                        Value::Float(res)
+                    },
+                    // (Value::Int(a), Value::Int(b)) => Value::Boolean(a != b),
+                    // (Value::Float(a), Value::Float(b)) => Value::Boolean(a != b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a != b),
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xor' to {} and {}", a.type_name(), b.type_name())),
                 }
@@ -10671,10 +10681,22 @@ impl Interpreter {
             "xnor" => {
                 match (left, right) {
                     (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(!(a ^ b)),
-                    // (Value::Int(a), Value::Int(b)) => Value::Int(!(a ^ b)),
-                    // (Value::Float(a), Value::Float(b)) => Value::Float(!(a ^ b)),
-                    (Value::Int(a), Value::Int(b)) => Value::Boolean(a == b),
-                    (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
+                    (Value::Int(a), Value::Int(b)) => {
+                        let xor = match a ^ b {
+                            Ok(res) => res,
+                            Err(_) => return self.raise("TypeError", "Int xnor failed"),
+                        };
+                        Value::Int(!xor)
+                    },
+                    (Value::Float(a), Value::Float(b)) => {
+                        let xor = match a ^ b {
+                            Ok(res) => res,
+                            Err(_) => return self.raise("TypeError", "Float xnor failed"),
+                        };
+                        Value::Float(!xor)
+                    },
+                    // (Value::Int(a), Value::Int(b)) => Value::Boolean(a == b),
+                    // (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a == b),
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xnor' to {} and {}", a.type_name(), b.type_name())),
                 }
@@ -10714,9 +10736,8 @@ impl Interpreter {
         }
     
         if let Some(cached) = self.cache.constants.get(s) {
-            debug_log(
-                &format!("<CachedConstantNumber: {}>", s),
-                &self.config,
+            self.debug_log(
+                format_args!("<CachedConstantNumber: {}>", s)
             );
             return cached.clone();
         }
@@ -10930,9 +10951,8 @@ impl Interpreter {
                                             .map(|token| (&token.0, &token.1))
                                             .collect::<Vec<_>>();
 
-                                        debug_log(
-                                            &format!("Generated f-string tokens: {:?}", formatted_toks),
-                                            &self.config,
+                                        self.debug_log(
+                                            format_args!("Generated f-string tokens: {:?}", formatted_toks)
                                         );
 
                                         let tokens_no_loc: Vec<Token> = tokens
@@ -10950,20 +10970,18 @@ impl Interpreter {
                                             }
                                         };
 
-                                        debug_log(
-                                            &format!(
+                                        self.debug_log(
+                                            format_args!(
                                                 "Generated f-string statement: {}",
                                                 parsed.iter().map(|stmt| {
                                                     let cleaned = remove_loc_keys(&stmt.convert_to_map());
                                                     format_value(&cleaned)
                                                 }).collect::<Vec<String>>().join(", ")
-                                            ),
-                                            &self.config
+                                            )
                                         );
 
-                                        debug_log(
-                                            &format!("<FString: {}>", expr.clone().trim()),
-                                            &self.config,
+                                        self.debug_log(
+                                            format_args!("<FString: {}>", expr.clone().trim())
                                         );
 
                                         let result_val = self.evaluate(&parsed[0]);

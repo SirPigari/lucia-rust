@@ -296,6 +296,27 @@ static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m
 });
 
+pub fn hex_to_ansi_bg(hex_color: &str, use_colors: bool) -> String {
+    if !use_colors {
+        return "".to_string();
+    }
+
+    if let Some(ansi) = COLOR_MAP.get(hex_color.to_lowercase().replace(' ', "_").as_str()) {
+        return ansi.to_string().replace("[3", "[4");
+    }
+
+    let hex = if hex_color.starts_with('#') { &hex_color[1..] } else if hex_color.starts_with("0x") { &hex_color[2..] } else { hex_color };
+
+    if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap();
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap();
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap();
+        return format!("\x1b[48;2;{};{};{}m", r, g, b);
+    }
+
+    "\x1b[0m".to_string()
+}
+
 pub fn hex_to_ansi(hex_color: &str, use_colors: bool) -> String {
     if !use_colors {
         return "".to_string();
@@ -436,17 +457,15 @@ pub fn check_ansi<'a>(ansi: &'a str, use_colors: &bool) -> &'a str {
     }
 }
 
-pub fn debug_log(message: &str, config: &Config) {
-    if config.debug && (config.debug_mode == "full" || config.debug_mode == "normal") {
-        let single_line_message = message
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-            .replace('\0', "\\0")
-            .replace('\x1b', "\\e")
-            .replace(r"\A", "\n");
-        print_colored(&single_line_message, &config.color_scheme.debug, config.supports_color);
-    }
+pub fn debug_log_internal(message: String, config: &Config) {
+    let single_line_message = message
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+        .replace('\0', "\\0")
+        .replace('\x1b', "\\e")
+        .replace(r"\A", "\n");
+    print_colored(&single_line_message, &config.color_scheme.debug, config.supports_color);
 }
 
 pub fn capitalize(s: &str) -> String {
