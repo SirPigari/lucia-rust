@@ -7,6 +7,10 @@
 !include LogicLib.nsh
 !include FileFunc.nsh
 
+!ifdef RELEASE_BUILD
+  SetCompressor /SOLID /FINAL lzma
+!endif
+
 ; -----------------------------
 ; Global Defines
 !define APPNAME "Lucia"
@@ -44,7 +48,7 @@ Var Msgbox_Check
 Var Sounds_Check
 Var Clipboard_Check
 Var Zip_Check
-Var GUI_Check
+Var RAYLIB_Check
 Var SQL_Check
 Var Img_Check
 
@@ -61,7 +65,7 @@ Var Msgbox_Enabled
 Var Sounds_Enabled
 Var Clipboard_Enabled
 Var Zip_Enabled
-Var GUI_Enabled
+Var RAYLIB_Enabled
 Var SQL_Enabled
 Var Img_Enabled
 
@@ -135,9 +139,9 @@ Function OptionsPage
     Pop $Zip_Check
     ${NSD_SetState} $Zip_Check $Zip_Enabled
 
-    ${NSD_CreateCheckbox} 260 110 200 18 "gui"
-    Pop $GUI_Check
-    ${NSD_SetState} $GUI_Check $GUI_Enabled
+    ${NSD_CreateCheckbox} 260 110 200 18 "raylib"
+    Pop $RAYLIB_Check
+    ${NSD_SetState} $RAYLIB_Check $RAYLIB_Enabled
 
     ${NSD_CreateCheckbox} 260 130 200 18 "sql"
     Pop $SQL_Check
@@ -151,7 +155,7 @@ Function OptionsPage
     ShowWindow $Sounds_Check ${SW_HIDE}
     ShowWindow $Clipboard_Check ${SW_HIDE}
     ShowWindow $Zip_Check ${SW_HIDE}
-    ShowWindow $GUI_Check ${SW_HIDE}
+    ShowWindow $RAYLIB_Check ${SW_HIDE}
     ShowWindow $SQL_Check ${SW_HIDE}
     ShowWindow $Img_Check ${SW_HIDE}
 
@@ -216,7 +220,7 @@ Function ToggleAddLib
         ShowWindow $Sounds_Check ${SW_SHOW}
         ShowWindow $Clipboard_Check ${SW_SHOW}
         ShowWindow $Zip_Check ${SW_SHOW}
-        ShowWindow $GUI_Check ${SW_SHOW}
+        ShowWindow $RAYLIB_Check ${SW_SHOW}
         ShowWindow $SQL_Check ${SW_SHOW}
         ShowWindow $Img_Check ${SW_SHOW}
         ShowWindow $WinLib_Header ${SW_HIDE}
@@ -225,7 +229,7 @@ Function ToggleAddLib
         ShowWindow $Sounds_Check ${SW_HIDE}
         ShowWindow $Clipboard_Check ${SW_HIDE}
         ShowWindow $Zip_Check ${SW_HIDE}
-        ShowWindow $GUI_Check ${SW_HIDE}
+        ShowWindow $RAYLIB_Check ${SW_HIDE}
         ShowWindow $SQL_Check ${SW_HIDE}
         ShowWindow $Img_Check ${SW_HIDE}
         ShowWindow $WinLib_Header ${SW_SHOW}
@@ -264,7 +268,7 @@ Function OptionsPageLeave
     ${NSD_GetState} $Sounds_Check $Sounds_Enabled
     ${NSD_GetState} $Clipboard_Check $Clipboard_Enabled
     ${NSD_GetState} $Zip_Check $Zip_Enabled
-    ${NSD_GetState} $GUI_Check $GUI_Enabled
+    ${NSD_GetState} $RAYLIB_Check $RAYLIB_Enabled
     ${NSD_GetState} $SQL_Check $SQL_Enabled
     ${NSD_GetState} $Img_Check $Img_Enabled
 
@@ -363,7 +367,7 @@ Function ConfirmPage
         StrCpy $TmpVar1 1
     ${EndIf}
 
-    ${If} $GUI_Enabled == ${BST_CHECKED}
+    ${If} $RAYLIB_Enabled == ${BST_CHECKED}
         StrCpy $TmpVar1 1
     ${EndIf}
 
@@ -394,8 +398,8 @@ Function ConfirmPage
             StrCpy $ConfirmText "$ConfirmText  - zip$\r$\n"
         ${EndIf}
 
-        ${If} $GUI_Enabled == ${BST_CHECKED}
-            StrCpy $ConfirmText "$ConfirmText  - gui$\r$\n"
+        ${If} $RAYLIB_Enabled == ${BST_CHECKED}
+            StrCpy $ConfirmText "$ConfirmText  - raylib$\r$\n"
         ${EndIf}
 
         ${If} $SQL_Enabled == ${BST_CHECKED}
@@ -652,8 +656,8 @@ Section "Install"
             Push "zip"
             Call InstallLibrary
         ${EndIf}
-        ${If} $GUI_Enabled == ${BST_CHECKED}
-            Push "gui"
+        ${If} $RAYLIB_Enabled == ${BST_CHECKED}
+            Push "raylib_lucia"
             Call InstallLibrary
         ${EndIf}
         ${If} $SQL_Enabled == ${BST_CHECKED}

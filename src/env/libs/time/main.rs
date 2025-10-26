@@ -811,6 +811,73 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
     new_methods.push(get_timezone_str);
     new_methods.push(get_timezone);
 
+    let elapsed_method = ("elapsed".to_string(),
+        make_native_fn_pt!(
+            "elapsed",
+            |args: &HashMap<String, Value>| -> Value {
+                let self_struct = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                };
+
+                let self_nanos = match self_struct.fields.get("nanos") {
+                    Some((v, _)) => match &**v {
+                        Value::Int(n) => match n.to_i128() {
+                            Ok(val) => val,
+                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                        },
+                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                    },
+                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                };
+
+                let self_tz = match self_struct.fields.get("tz") {
+                    Some((v, _)) => match &**v {
+                        Value::String(s) => s.clone(),
+                        _ => "Z".to_string(),
+                    },
+                    None => "Z".to_string(),
+                };
+
+                let now_nanos = {
+                    let now = Utc::now();
+                    let epoch_utc: DateTime<Utc> = (*APOLLO_EPOCH_DATETIME).into();
+                    let duration = now.signed_duration_since(epoch_utc);
+                    match duration.num_nanoseconds() {
+                        Some(n) => n as i128,
+                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                    }
+                };
+
+                let elapsed_nanos = match now_nanos.checked_sub(self_nanos) {
+                    Some(n) => n,
+                    None => return Value::Error("OverflowError", "Elapsed time calculation overflowed", None),
+                };
+
+                let mut fields = HashMap::new();
+                fields.insert(
+                    "nanos".to_string(),
+                    (Box::new(Value::Int(Int::from_i128(elapsed_nanos))), Type::new_simple("int"))
+                );
+
+                fields.insert(
+                    "tz".to_string(),
+                    (Box::new(Value::String(self_tz)), Type::new_simple("str"))
+                );
+
+                Value::Struct(Struct {
+                    ty: APOLLO_TIME_STRUCT.clone(),
+                    fields
+                })
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &ty,
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(elapsed_method);
+
     let op_gt = make_comparison_fn!("op_gt", |self_nanos, other_nanos| self_nanos > other_nanos, &ty);
     let op_lt = make_comparison_fn!("op_lt", |self_nanos, other_nanos| self_nanos < other_nanos, &ty);
     let op_ge = make_comparison_fn!("op_ge", |self_nanos, other_nanos| self_nanos >= other_nanos, &ty);
@@ -820,6 +887,164 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
     new_methods.push(op_lt);
     new_methods.push(op_ge);
     new_methods.push(op_le);
+
+    let to_nanos_method = ("to_nanos".to_string(),
+        make_native_fn_pt!(
+            "to_nanos",
+            |args: &HashMap<String, Value>| -> Value {
+                let s = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                };
+                match s.fields.get("nanos") {
+                    Some((v, _)) => (**v).clone(),
+                    None => Value::Int(Int::from_i128(0)),
+                }
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("int"),
+            EffectFlags::PURE
+        )
+    );
+
+    let to_ms_method = ("to_millis".to_string(),
+        make_native_fn_pt!(
+            "to_millis",
+            |args: &HashMap<String, Value>| -> Value {
+                let s = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                };
+                match s.fields.get("nanos") {
+                    Some((v, _)) => {
+                        if let Value::Int(nanos_int) = &**v {
+                            match nanos_int.to_i128() {
+                                Ok(nanos_i128) => Value::Int(Int::from_i128(nanos_i128 / 1_000_000)),
+                                Err(_) => Value::Error("ConversionError", "failed to convert Int to i128", None),
+                            }
+                        } else {
+                            Value::Error("TypeError", "nanos is not an Int", None)
+                        }
+                    }
+                    None => Value::Int(Int::from_i128(0)),
+                }
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("int"),
+            EffectFlags::PURE
+        )
+    );
+
+    let to_secs_method = ("to_seconds".to_string(),
+        make_native_fn_pt!(
+            "to_seconds",
+            |args: &HashMap<String, Value>| -> Value {
+                let s = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                };
+                match s.fields.get("nanos") {
+                    Some((v, _)) => {
+                        if let Value::Int(nanos_int) = &**v {
+                            match nanos_int.to_i128() {
+                                Ok(nanos_i128) => Value::Int(Int::from_i128(nanos_i128 / 1_000_000_000)),
+                                Err(_) => Value::Error("ConversionError", "failed to convert Int to i128", None),
+                            }
+                        } else {
+                            Value::Error("TypeError", "nanos is not an Int", None)
+                        }
+                    }
+                    None => Value::Int(Int::from_i128(0)),
+                }
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("int"),
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(to_nanos_method);
+    new_methods.push(to_ms_method);
+    new_methods.push(to_secs_method);
+
+    let is_past_method = ("is_past".to_string(),
+        make_native_fn_pt!(
+            "is_past",
+            |args: &HashMap<String, Value>| -> Value {
+                let self_struct = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                };
+
+                let self_nanos = match self_struct.fields.get("nanos") {
+                    Some((v, _)) => match &**v {
+                        Value::Int(n) => match n.to_i128() {
+                            Ok(val) => val,
+                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                        },
+                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                    },
+                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                };
+
+                let now_nanos = {
+                    let now = Utc::now();
+                    let epoch_utc: DateTime<Utc> = (*APOLLO_EPOCH_DATETIME).into();
+                    let duration = now.signed_duration_since(epoch_utc);
+                    match duration.num_nanoseconds() {
+                        Some(n) => n as i128,
+                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                    }
+                };
+
+                Value::Boolean(now_nanos > self_nanos)
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("bool"),
+            EffectFlags::PURE
+        )
+    );
+
+    let is_future_method = ("is_future".to_string(),
+        make_native_fn_pt!(
+            "is_future",
+            |args: &HashMap<String, Value>| -> Value {
+                let self_struct = match args.get("self") {
+                    Some(Value::Struct(s)) => s,
+                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                };
+
+                let self_nanos = match self_struct.fields.get("nanos") {
+                    Some((v, _)) => match &**v {
+                        Value::Int(n) => match n.to_i128() {
+                            Ok(val) => val,
+                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                        },
+                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                    },
+                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                };
+
+                let now_nanos = {
+                    let now = Utc::now();
+                    let epoch_utc: DateTime<Utc> = (*APOLLO_EPOCH_DATETIME).into();
+                    let duration = now.signed_duration_since(epoch_utc);
+                    match duration.num_nanoseconds() {
+                        Some(n) => n as i128,
+                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                    }
+                };
+
+                Value::Boolean(now_nanos < self_nanos)
+            },
+            vec![Parameter::instance("self", &ty, vec![])],
+            &Type::new_simple("bool"),
+            EffectFlags::PURE
+        )
+    );
+
+    new_methods.push(is_past_method);
+    new_methods.push(is_future_method);
 
     if let Type::Struct { methods, .. } = &mut ty {
         *methods = new_methods;

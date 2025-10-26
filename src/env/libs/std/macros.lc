@@ -40,9 +40,7 @@
     scope time_it_scope (_time): 
         start_time: int = _time.ApolloTime.now()
         result: any = ($expr)
-        end_time: int = _time.ApolloTime.now()
-        elapsed: int = end_time - start_time
-        return ((result, elapsed))
+        return ((result, start_time.elapsed()))
     end
 #endmacro
 
@@ -71,6 +69,7 @@
     $vars
 #endmacro
 
+// just a quick macro so you don't have to worry about turning it to list
 #macro sort![$val, $reverse=(false), $f=(null)]:
     lst: list = $val as list
     return lst.sort(reverse=$reverse, f=$f)

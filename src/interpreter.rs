@@ -10629,6 +10629,7 @@ impl Interpreter {
                         None => return self.raise("ValueError", "Shift amount too large"),
                     };
                     Value::Int(Int::from(res))
+                    // Value::Int(a << b)
                 }
                 _ => self.raise("TypeError", "Left shift requires two integers"),
             },
@@ -10647,6 +10648,7 @@ impl Interpreter {
                         None => return self.raise("ValueError", "Shift amount too large"),
                     };
                     Value::Int(Int::from(res))
+                    // Value::Int(a >> b)
                 }
                 _ => self.raise("TypeError", "Right shift requires two integers"),
             },
@@ -10658,6 +10660,8 @@ impl Interpreter {
             "xor" => {
                 match (left, right) {
                     (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(a ^ b),
+                    // (Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
+                    // (Value::Float(a), Value::Float(b)) => Value::Float(a ^ b),
                     (Value::Int(a), Value::Int(b)) => Value::Boolean(a != b),
                     (Value::Float(a), Value::Float(b)) => Value::Boolean(a != b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a != b),
@@ -10667,6 +10671,8 @@ impl Interpreter {
             "xnor" => {
                 match (left, right) {
                     (Value::Boolean(a), Value::Boolean(b)) => Value::Boolean(!(a ^ b)),
+                    // (Value::Int(a), Value::Int(b)) => Value::Int(!(a ^ b)),
+                    // (Value::Float(a), Value::Float(b)) => Value::Float(!(a ^ b)),
                     (Value::Int(a), Value::Int(b)) => Value::Boolean(a == b),
                     (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a == b),

@@ -1494,16 +1494,17 @@ fn repl(
 
     let stop_flag = Arc::new(AtomicBool::new(false));
 
+    let prompt = format!(
+        "{}{}{} ",
+        hex_to_ansi(&config.color_scheme.input_arrows, config.supports_color),
+        ">>>",
+        hex_to_ansi("reset", config.supports_color)
+    );
+
     loop {
         line_number += 1;
-        print!(
-            "{}{}{} ",
-            hex_to_ansi(&config.color_scheme.input_arrows, config.supports_color),
-            ">>>",
-            hex_to_ansi("reset", config.supports_color)
-        );
 
-        let mut input = read_input("");
+        let mut input = read_input(&prompt);
         if input.is_empty() {
             continue;
         }
@@ -1528,7 +1529,11 @@ fn repl(
                     None
                 }
                 ":help" | ":?" => {
-                    println!("{}", "Tip: Use ':macro-help' to see REPL macros.".cyan());
+                    println!(
+                        "{}Tip: Use ':macro-help' to see REPL macros.{}",
+                        hex_to_ansi(&config.color_scheme.help, config.supports_color),
+                        hex_to_ansi("reset", config.supports_color)
+                    );
                     Some("help()".into())
                 }
                 ":macro-help" | "::" => {

@@ -183,7 +183,7 @@ endif
 %:
 	@:
 
-installer:
+installer-dbg:
 	@$(MKDIR)
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(RM) "$(LUCIA_DIR)\src\env\assets\installer\LuciaInstaller.exe"
@@ -191,6 +191,16 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 else
 	@$(RM) "$(LUCIA_DIR)/src/env/assets/installer/LuciaInstaller.exe"
 	@cd $(LUCIA_DIR) && cd src/env/assets/installer && makensis LuciaInstaller.nsi
+endif
+
+installer:
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(RM) "$(LUCIA_DIR)\src\env\assets\installer\LuciaInstaller.exe"
+	@cd $(LUCIA_DIR) && cd src\env\assets\installer && "C:\Program Files (x86)\NSIS\makensis.exe" /DRELEASE_BUILD LuciaInstaller.nsi
+else
+	@$(RM) "$(LUCIA_DIR)/src/env/assets/installer/LuciaInstaller.exe"
+	@cd $(LUCIA_DIR) && cd src/env/assets/installer && makensis /DRELEASE_BUILD LuciaInstaller.nsi
 endif
 
 build-test: build-tests

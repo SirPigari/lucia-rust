@@ -2,6 +2,9 @@
 
 This document tracks known bugs, limitations, and problematic behavior in the Lucia language. Please update as new issues are discovered or resolved.
 
+First push a github issue for any new known issues/bugs, we will then track them here.
+This is because we want to separate long-term known issues from short-term bugs that will be fixed soon.
+
 ---
 
 ## Format  
