@@ -25,10 +25,10 @@ fun fibonacciBinet(n: int) -> int:
     psi: float = 1 - phi
     sqrt5: float = math.sqrt(5)
 
-    num: float = math.pow(phi, n) - math.pow(psi, n)
+    num: float = phi ^ n - psi ^ n
     result: float = num / sqrt5
 
-    return result.round() as int
+    return result as int
 end
 
 /*

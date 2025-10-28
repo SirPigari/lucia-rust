@@ -4158,6 +4158,29 @@ impl Interpreter {
                         let description = manifest_json.get("description").and_then(|v| v.as_str()).unwrap_or("");
                         let authors = manifest_json.get("authors").and_then(|v| v.as_array()).map_or(vec![], |arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>());
                         let license = manifest_json.get("license").and_then(|v| v.as_str()).unwrap_or("GPLv3");
+                        let package_type = manifest_json.get("package_type").and_then(|v| v.as_str()).unwrap_or("import");
+                        match package_type {
+                            "import" | "bindings" => {}
+                            "include" => {
+                                self.stack.pop();
+                                return self.raise_with_help(
+                                    "ImportError",
+                                    &format!("Module '{}' is an include and cannot be imported as a regular module", print_name),
+                                    &format!("Use '#include \"{}\"' to include it.", fix_path(module_path.display().to_string())),
+                                );
+                            }
+                            "plugin" => {
+                                self.stack.pop();
+                                return self.raise(
+                                    "ImportError",
+                                    &format!("Module '{}' is a plugin and cannot be imported as a regular module", print_name),
+                                );
+                            }
+                            _ => {
+                                self.stack.pop();
+                                return self.raise("MalformedManifest", &format!("Invalid 'package_type' '{}' in manifest '{}'", package_type, fix_path(manifest_path.display().to_string())));
+                            }
+                        }
                         if let Some(entry_point_path_str) = manifest_json.get("entry_point").and_then(|v| v.as_str()) {
                             let entry_point_path = module_path.join(entry_point_path_str);
                             if entry_point_path.exists() && entry_point_path.is_file() {
@@ -10496,34 +10519,15 @@ impl Interpreter {
             "&&" => Value::Boolean(left.is_truthy() && right.is_truthy()),
             "||" => Value::Boolean(left.is_truthy() || right.is_truthy()),
             "in" => {
-                if let Value::String(s) = &right {
-                    if let Value::String(sub) = &left {
-                        Value::Boolean(s.contains(sub))
-                    } else {
-                        self.raise("TypeError", "Left operand must be a string for 'in' operation");
-                        NULL
-                    }
-                } else if let Value::List(list) = &right {
-                    Value::Boolean(list.contains(&left))
-                } else if let Value::Map { keys, values: _ } = &right {
-                    Value::Boolean(keys.contains(&left))
+                if right.is_iterable() {
+                    Value::Boolean(right.iter().any(|item| item == left))
                 } else {
-                    self.raise("TypeError", "Right operand must be a string or list for 'in' operation");
+                    self.raise("TypeError", "Right operand must be iterable for 'in' operation");
                     NULL
                 }
             },
             "&" | "band" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    // let a_i64 = match a.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
-                    // };
-                    // let b_i64 = match b.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    // };
-                    // let res = a_i64 & b_i64;
-                    // Value::Int(Int::from(res))
                     let res = match a & b {
                         Ok(val) => val,
                         Err(_) => return self.raise("ValueError", "Bitwise AND failed"),
@@ -10534,16 +10538,6 @@ impl Interpreter {
             },
             "|" | "bor" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    // let a_i64 = match a.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
-                    // };
-                    // let b_i64 = match b.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    // };
-                    // let res = a_i64 | b_i64;
-                    // Value::Int(Int::from(res))
                     let res = match a | b {
                         Ok(val) => val,
                         Err(_) => return self.raise("ValueError", "Bitwise OR failed"),
@@ -10606,19 +10600,6 @@ impl Interpreter {
             },
             "<<" | "lshift" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    // let a_i64 = match a.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
-                    // };
-                    // let b_i64 = match b.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    // };
-                    // let res = match a_i64.checked_shl(b_i64 as u32) {
-                    //     Some(val) => val,
-                    //     None => return self.raise("ValueError", "Shift amount too large"),
-                    // };
-                    // Value::Int(Int::from(res))
                     let res = match a << b {
                         Ok(val) => val,
                         Err(_) => return self.raise("ValueError", "Left shift amount too large"),
@@ -10629,19 +10610,6 @@ impl Interpreter {
             },
             ">>" | "rshift" => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => {
-                    // let a_i64 = match a.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert left Int: {}", e)),
-                    // };
-                    // let b_i64 = match b.to_i64() {
-                    //     Ok(val) => val,
-                    //     Err(e) => return self.raise("ValueError", &format!("Failed to convert right Int: {}", e)),
-                    // };
-                    // let res = match a_i64.checked_shr(b_i64 as u32) {
-                    //     Some(val) => val,
-                    //     None => return self.raise("ValueError", "Shift amount too large"),
-                    // };
-                    // Value::Int(Int::from(res))
                     let res = match a >> b {
                         Ok(val) => val,
                         Err(_) => return self.raise("ValueError", "Right shift amount too large"),
@@ -10672,8 +10640,6 @@ impl Interpreter {
                         };
                         Value::Float(res)
                     },
-                    // (Value::Int(a), Value::Int(b)) => Value::Boolean(a != b),
-                    // (Value::Float(a), Value::Float(b)) => Value::Boolean(a != b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a != b),
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xor' to {} and {}", a.type_name(), b.type_name())),
                 }
@@ -10695,8 +10661,6 @@ impl Interpreter {
                         };
                         Value::Float(!xor)
                     },
-                    // (Value::Int(a), Value::Int(b)) => Value::Boolean(a == b),
-                    // (Value::Float(a), Value::Float(b)) => Value::Boolean(a == b),
                     (Value::String(a), Value::String(b)) => Value::Boolean(a == b),
                     (a, b) => self.raise("TypeError", &format!("Cannot apply 'xnor' to {} and {}", a.type_name(), b.type_name())),
                 }
