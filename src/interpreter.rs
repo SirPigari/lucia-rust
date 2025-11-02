@@ -32,6 +32,7 @@ use crate::env::runtime::utils::{
     escape_string,
     find_struct_method,
     diff_fields,
+    is_valid_alias,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,7 +58,6 @@ use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
 use std::fs;
-use regex::Regex;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::runtime::Runtime;
 #[cfg(not(target_arch = "wasm32"))]
@@ -3662,22 +3662,24 @@ impl Interpreter {
     }
 
     fn handle_import(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let module_name = match statement.get(&Value::String("module_name".to_string())) {
+        let (base_name, name_parts, module_name) = match statement.get(&Value::String("module_name".to_string())) {
             Some(Value::String(name)) => {
-                let parts: Vec<&str> = name.split('.').collect();
-                if parts.len() == 1 {
-                    name.clone()
+                let is_file_like = name.rsplit('.').next().map(|s| {
+                    matches!(s, "lc" | "lucia" | "rs")
+                }).unwrap_or(false);
+
+                if name.contains('/') || name.contains('\\') || is_file_like {
+                    let parts: Vec<&str> = vec![name.as_str()];
+                    let base = if let Some(idx) = name.rfind('.') { name[..idx].to_string() } else { name.clone() };
+                    (base, parts, name.clone())
                 } else {
-                    let mut new_name = parts[0].to_string();
-                    for part in &parts[1..] {
-                        if *part == "lc" || *part == "lucia" {
-                            new_name.push('.');
-                        } else {
-                            new_name.push('/');
-                        }
-                        new_name.push_str(part);
+                    let parts: Vec<&str> = name.split('.').collect();
+                    if parts.is_empty() {
+                        self.raise("RuntimeError", "Invalid 'module_name' in import statement");
+                        return NULL;
                     }
-                    new_name
+                    let base = parts[0].to_string();
+                    (base, parts.clone(), name.clone())
                 }
             }
             _ => return self.raise("RuntimeError", "Missing or invalid 'module_name' in import statement"),
@@ -3695,9 +3697,12 @@ impl Interpreter {
             return NULL;
         }
 
-        let alias = match statement.get(&Value::String("alias".to_string())) {
+        let alias: &str = match statement.get(&Value::String("alias".to_string())) {
             Some(Value::String(a)) => a,
-            Some(Value::Null) => &module_name,
+            Some(Value::Null) => {
+                let last_segment: &str = name_parts.last().map(|s| *s).unwrap_or(base_name.as_str());
+                last_segment
+            }
             _ => {
                 self.raise("RuntimeError", "Missing or invalid 'alias' in import statement");
                 return NULL;
@@ -3721,12 +3726,12 @@ impl Interpreter {
             },
         };
 
-        let valid_alias_re = Regex::new(r"^[a-zA-Z_]\w*$").unwrap();
-        if !valid_alias_re.is_match(alias) {
+        if !is_valid_alias(&alias) {
+            dbg!(&alias);
             return self.raise_with_help(
                 "ImportError",
                 &format!("'{}' is an invalid name. Please use a different alias.", alias),
-                &format!("Use 'import ... as <valid_alias>'. Suggested alias: '{}'", sanitize_alias(alias)),
+                &format!("Use 'import ... as <valid_alias>'. Suggested alias: '{}'", sanitize_alias(&alias)),
             );            
         }
 
@@ -3788,7 +3793,7 @@ impl Interpreter {
         let mut properties = HashMap::new();
         let mut module_path = PathBuf::from(self.config.home_dir.clone()).join("libs").join(&module_name);
 
-        if let Some(lib_info) = STD_LIBS.get(module_name.as_str()) {
+        if let Some(lib_info) = STD_LIBS.get(base_name.as_str()) {
             self.debug_log(format_args!("<Loading standard library module '{}', version {}, description: {}>", module_name, lib_info.version, lib_info.description));
 
             let expected_lucia_version = lib_info.expected_lucia_version;
@@ -3802,7 +3807,7 @@ impl Interpreter {
                 );
             }
 
-            match module_name.as_str() {
+            match base_name.as_str() {
                 #[cfg(feature = "math")]
                 "math" => {
                     use crate::env::libs::math::main as math;
@@ -4041,7 +4046,7 @@ impl Interpreter {
             };
     
             let mut resolved_module_path: Option<PathBuf> = None;
-            let module_variants = generate_name_variants(&module_name);
+            let module_variants = generate_name_variants(&base_name);
     
             for variant in module_variants {
                 let candidate_dir = base_module_path.join(&variant);
@@ -4085,7 +4090,7 @@ impl Interpreter {
                     }
                 }
     
-                if let Some(closest) = find_closest_match(&module_name, &candidates) {
+                if let Some(closest) = find_closest_match(&base_name, &candidates) {
                     self.stack.pop();
                     return self.raise_with_help(
                         "ImportError",
@@ -4386,7 +4391,30 @@ impl Interpreter {
                 return self.raise("ImportError", &format!("Module path '{}' is neither file nor directory", module_path.display()));
             }
         }
-    
+
+        if name_parts.len() > 1 {
+            let mut cur_props = properties.clone();
+            for seg in name_parts.iter().skip(1) {
+                let next = if let Some(var) = cur_props.get(*seg) {
+                    match &var.value {
+                        Value::Module(m) => Some((m.properties.clone(), m.path.clone())),
+                        _ => {
+                            self.stack.pop();
+                            return self.raise("ImportError", &format!("'{}' in '{}' is not a module", seg, name_parts[0]));
+                        }
+                    }
+                } else {
+                    self.stack.pop();
+                    return self.raise("ImportError", &format!("Module '{}' not found inside '{}'", seg, name_parts[0]));
+                };
+
+                let (p, ppath) = next.unwrap();
+                cur_props = p;
+                module_path = ppath;
+            }
+            properties = cur_props;
+        }
+
         let mut categorized: BTreeMap<&str, Vec<&String>> = BTreeMap::new();
     
         if self.config.debug {

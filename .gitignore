@@ -16,6 +16,9 @@ t.lc
 # Lym
 /src/env/assets/lym
 
+# Generated documentation
+/src/env/Docs/imagnum
+
 # Installer
 /src/env/assets/installer/LuciaInstaller.exe
 

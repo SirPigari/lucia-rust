@@ -46,7 +46,7 @@ assert_err!(assert_type!(i, str, "Expected i to be a string"))
         i * i
     end
 )
-formatted_time: str = elapsed.format("%S.%ms")
+formatted_time: str = elapsed.format("%S.%mss")
 
 print(formatted_time, elapsed)
 
@@ -101,10 +101,9 @@ assert_eq!(v_single, ([1]))
     // if foo is passed in the tokens are: [("IDENTIFIER", "foo")]
     tokens: list = [$?token]
     if len(tokens) == 1:
-        return tokens[0][0] == "IDENTIFIER"
-    else:
-        // must be in else because its a macro not a function
-        return false
+        tokens[0][0] == "IDENTIFIER"
+    else: // must be in else because its a macro not a function
+        false
     end
 #endmacro
 

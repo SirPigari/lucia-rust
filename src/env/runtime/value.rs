@@ -127,10 +127,22 @@ impl Serialize for Value {
     {
         match self {
             Value::Float(f) => {
-                format_float(f).serialize(serializer)
+                let v = f.to_f64().map_err(|_| {
+                    serde::ser::Error::custom(format!("couldn't serialize float: {}", format_float(f)))
+                })?;
+                serializer.serialize_f64(v)
             }
             Value::Int(i) => {
-                format_int(i).serialize(serializer)
+                if !i.is_negative() {
+                    let v = i.to_u64().map_err(|_| {
+                        serde::ser::Error::custom(format!("couldn't serialize int: {}", format_int(i)))
+                    })?;
+                    return serializer.serialize_u64(v);
+                }
+                let v = i.to_i64().map_err(|_| {
+                    serde::ser::Error::custom(format!("couldn't serialize int: {}", format_int(i)))
+                })?;
+                serializer.serialize_i64(v)
             }
             Value::String(s) => serializer.serialize_str(s),
             Value::Boolean(b) => serializer.serialize_bool(*b),
@@ -207,7 +219,7 @@ impl<'de> Deserialize<'de> for Value {
             }
 
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(Value::Int(Int::from(v as i64)))
+                Ok(Value::Int(Int::from(v)))
             }
 
             fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
@@ -257,7 +269,7 @@ impl<'de> Deserialize<'de> for Value {
             }
         }
 
-        deserializer.deserialize_any(ValueVisitor)
+        deserializer.deserialize_map(ValueVisitor)
     }
 }
 

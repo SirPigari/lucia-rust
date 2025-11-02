@@ -7,11 +7,15 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::utils::MAX_PTR;
+use crate::env::runtime::modules::Module;
 use crate::{insert_native_fn, insert_native_var};
 use std::sync::Mutex;
+use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::env::consts;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::env::runtime::utils::to_static;
 #[cfg(not(target_arch = "wasm32"))]
 use sys_info;
 
@@ -108,6 +112,143 @@ fn panic_handler(args: &HashMap<String, Value>) -> Value {
         panic!("{}", marked_message);
     }
     Value::Error("PanicError", "Panic called".into(), None)
+}
+
+#[cfg(unix)]
+fn create_signal_map() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
+    insert_native_var!(map, "SIGHUP",    Value::Int(Int::from_i64(1)),  "int");
+    insert_native_var!(map, "SIGINT",    Value::Int(Int::from_i64(2)),  "int");
+    insert_native_var!(map, "SIGQUIT",   Value::Int(Int::from_i64(3)),  "int");
+    insert_native_var!(map, "SIGILL",    Value::Int(Int::from_i64(4)),  "int");
+    insert_native_var!(map, "SIGTRAP",   Value::Int(Int::from_i64(5)),  "int");
+    insert_native_var!(map, "SIGABRT",   Value::Int(Int::from_i64(6)),  "int");
+    insert_native_var!(map, "SIGBUS",    Value::Int(Int::from_i64(7)),  "int");
+    insert_native_var!(map, "SIGFPE",    Value::Int(Int::from_i64(8)),  "int");
+    insert_native_var!(map, "SIGKILL",   Value::Int(Int::from_i64(9)),  "int");
+    insert_native_var!(map, "SIGUSR1",   Value::Int(Int::from_i64(10)), "int");
+    insert_native_var!(map, "SIGSEGV",   Value::Int(Int::from_i64(11)), "int");
+    insert_native_var!(map, "SIGUSR2",   Value::Int(Int::from_i64(12)), "int");
+    insert_native_var!(map, "SIGPIPE",   Value::Int(Int::from_i64(13)), "int");
+    insert_native_var!(map, "SIGALRM",   Value::Int(Int::from_i64(14)), "int");
+    insert_native_var!(map, "SIGTERM",   Value::Int(Int::from_i64(15)), "int");
+    insert_native_var!(map, "SIGCHLD",   Value::Int(Int::from_i64(17)), "int");
+    insert_native_var!(map, "SIGCONT",   Value::Int(Int::from_i64(18)), "int");
+    insert_native_var!(map, "SIGSTOP",   Value::Int(Int::from_i64(19)), "int");
+    insert_native_var!(map, "SIGTSTP",   Value::Int(Int::from_i64(20)), "int");
+    insert_native_var!(map, "SIGTTIN",   Value::Int(Int::from_i64(21)), "int");
+    insert_native_var!(map, "SIGTTOU",   Value::Int(Int::from_i64(22)), "int");
+
+    insert_native_fn!(map, "send", |args: &HashMap<String, Value>| -> Value {
+        let signum = match args.get("sig") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'sig' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'sig' to be an integer", None),
+        };
+        let pid = match args.get("pid") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'pid' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'pid' to be an integer", None),
+        };
+
+        let res = unsafe { libc::kill(pid as libc::pid_t, signum as libc::c_int) };
+        if res == 0 {
+            Value::Boolean(true)
+        } else {
+            Value::Error("OSError", &format!("Failed to send signal {} to pid {}", signum, pid), None)
+        }
+    }, vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], "bool", EffectFlags::IO);
+    map
+}
+
+#[cfg(windows)]
+fn create_signal_map() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
+    insert_native_var!(map, "SIGABRT", Value::Int(Int::from_i64(6)),  "int");
+    insert_native_var!(map, "SIGFPE",  Value::Int(Int::from_i64(8)),  "int");
+    insert_native_var!(map, "SIGILL",  Value::Int(Int::from_i64(4)),  "int");
+    insert_native_var!(map, "SIGINT",  Value::Int(Int::from_i64(2)),  "int");
+    insert_native_var!(map, "SIGSEGV", Value::Int(Int::from_i64(11)), "int");
+    insert_native_var!(map, "SIGTERM", Value::Int(Int::from_i64(15)), "int");
+
+    insert_native_fn!(map, "send", |args: &HashMap<String, Value>| -> Value {
+        use std::process;
+        use libc::raise;
+
+        let signum = match args.get("sig") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'sig' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'sig' to be an integer", None),
+        };
+
+        let pid = match args.get("pid") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'pid' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'pid' to be an integer", None),
+        };
+
+        let current_pid = process::id() as i64;
+
+        if pid == current_pid {
+            let res = unsafe { raise(signum as i32) };
+            if res == 0 {
+                Value::Boolean(true)
+            } else {
+                Value::Error("OSError", to_static(format!("Failed to raise signal {} on self", signum)), None)
+            }
+        } else {
+            if signum != 15 {
+                return Value::Error("OSError", "Only SIGTERM (15) can be sent to other processes", None);
+            }
+
+            match process::Command::new("taskkill")
+                .args(&["/PID", &pid.to_string(), "/F"])
+                .output()
+            {
+                Ok(output) if output.status.success() => Value::Boolean(true),
+                Ok(output) => {
+                    let err_msg = String::from_utf8_lossy(&output.stderr).trim().trim_start_matches("ERROR: ").to_string();
+                    Value::Error(
+                        "OSError",
+                        to_static(format!("Failed to terminate process {}: {}", pid, err_msg)),
+                        None,
+                    )
+                }
+                Err(e) => Value::Error(
+                    "OSError",
+                    to_static(format!("Failed to run taskkill for {}: {}", pid, e)),
+                    None,
+                ),
+            }
+        }
+    }, vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], "bool", EffectFlags::IO);
+    map
+}
+
+#[cfg(target_arch = "wasm32")]
+fn create_signal_map() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
+    insert_native_var!(map, "SIGABRT", Value::Int(Int::from_i64(6)),  "int");
+    insert_native_var!(map, "SIGFPE",  Value::Int(Int::from_i64(8)),  "int");
+    insert_native_var!(map, "SIGILL",  Value::Int(Int::from_i64(4)),  "int");
+    insert_native_var!(map, "SIGINT",  Value::Int(Int::from_i64(2)),  "int");
+    insert_native_var!(map, "SIGSEGV", Value::Int(Int::from_i64(11)), "int");
+    insert_native_var!(map, "SIGTERM", Value::Int(Int::from_i64(15)), "int");
+
+    insert_native_fn!(map, "send", |_args: &HashMap<String, Value>| -> Value {
+        Value::Error("OSError", "Signal handling is not supported in WebAssembly environment", None)
+    }, 
+    vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], 
+    "bool", EffectFlags::IO);
+    map
 }
 
 // ==== Registration ====
@@ -236,7 +377,40 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
 
     insert_native_fn!(map, "panic", panic_handler, vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())], "void", EffectFlags::IO);
 
-    // Common vars
+    insert_native_fn!(map, "is_unsafe_allowed", move |_: &HashMap<String, Value>| -> Value {
+        Value::Boolean(allow_unsafe)
+    }, vec![], "bool", EffectFlags::PURE);
+
+    insert_native_fn!(map, "get_max_ptr", |_: &HashMap<String, Value>| -> Value {
+        Value::Int(Int::from_i64(MAX_PTR as i64))
+    }, vec![], "int", EffectFlags::PURE);
+
+    // signals
+    let signal_module = Module {
+        name: "signal".to_string(),
+        properties: create_signal_map(),
+        parameters: Vec::new(),
+        is_public: true,
+        is_static: true,
+        is_final: true,
+        state: None,
+        path: PathBuf::from("os/signal"),
+    };
+
+    insert_native_var!(map, "signal", Value::Module(signal_module), "module");
+
+    insert_native_fn!(map, "pid", |_: &HashMap<String, Value>| -> Value {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use std::process;
+            Value::Int(Int::from_i64(process::id() as i64))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Value::Int(Int::from_i64(0))
+        }
+    }, vec![], "int", EffectFlags::PURE);
+    
     insert_native_var!(map, "word_size", Value::Int(Int::from_i64(std::mem::size_of::<usize>() as i64)), "int");
     insert_native_var!(map, "pointer_size", Value::Int(Int::from_i64(std::mem::size_of::<*const ()>() as i64)), "int");
     #[cfg(not(target_arch = "wasm32"))]

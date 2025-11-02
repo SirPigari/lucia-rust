@@ -22,6 +22,7 @@ use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::interpreter::Interpreter;
+use regex::Regex;
 
 pub use imagnum::errors::get_error_message as get_imagnum_error_message;
 
@@ -2314,6 +2315,14 @@ pub fn convert_json_value_to_lucia_value(json_value: &serde_json::Value) -> Valu
             Value::Map { keys, values }
         }
     }
+}
+
+static VALID_ALIAS_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^[A-Za-z0-9_]*$").unwrap()
+});
+
+pub fn is_valid_alias(name: &str) -> bool {
+    VALID_ALIAS_REGEX.is_match(name)
 }
 
 pub const KEYWORDS: &[&str] = &[

@@ -6,6 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{get_imagnum_error_message, parse_type};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::variables::Variable;
+use imagnum::ApproxEq;
 
 use crate::{insert_native_fn, insert_native_var};
 
@@ -23,6 +24,8 @@ const _SQRT2: &str =            "1.414213562373095048801688724209698078569671875
 const _LN2: &str =              "0.69314718055994530941723212145817656807550013436025525412068000949339362196969471560586332699641868754200148102057068573368552023575813055";
 const _ZETA2: &str =            "1.64493406684822643647241516664602518921894990120679843773555822937000747040320087383362890061975870530400431896233719067962872468700500779";
 const _CATALAN: &str =          "0.91596559417721901505460351493238411077414937428167213426649811962176301977625476947935651292611510624857442261919619957903589880332585905";
+
+const SMALL_PRIMES: &[i64] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541, 547, 557, 563, 569, 571, 577, 587, 593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659, 661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751, 757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997];
 
 fn math_error(err_id: i8) -> Value {
     Value::Error("MathError", get_imagnum_error_message(err_id), None)
@@ -191,6 +194,328 @@ fn sign(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn get_int_arg(args: &HashMap<String, Value>, name: &str) -> Result<Int, Value> {
+    match args.get(name) {
+        Some(Value::Int(i)) => Ok(i.clone()),
+        _ => Err(Value::Error("TypeError", "expected int", None)),
+    }
+}
+
+fn gcd_fn(args: &HashMap<String, Value>) -> Value {
+    let mut a = match get_int_arg(args, "a") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let mut b = match get_int_arg(args, "b") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    while !b.is_zero() {
+        match a._modulo(&b) {
+            Ok(r) => {
+                a = b;
+                b = r;
+            }
+            Err(e) => return math_error(e),
+        }
+    }
+    Value::Int(Int::abs(&a))
+}
+
+fn lcm_fn(args: &HashMap<String, Value>) -> Value {
+    let a = match get_int_arg(args, "a") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let b = match get_int_arg(args, "b") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if a.is_zero() || b.is_zero() {
+        return Value::Int(Int::from(0));
+    }
+
+    let mut aa = a.clone();
+    let mut bb = b.clone();
+    while !bb.is_zero() {
+        match aa._modulo(&bb) {
+            Ok(r) => { aa = bb; bb = r; }
+            Err(e) => return math_error(e),
+        }
+    }
+    let g = Int::abs(&aa);
+
+    match a._div(&g) {
+        Ok(adg) => match adg._mul(&b) {
+            Ok(l) => Value::Int(Int::abs(&l)),
+            Err(e) => math_error(e),
+        },
+        Err(e) => math_error(e),
+    }
+}
+
+fn divmod_fn(args: &HashMap<String, Value>) -> Value {
+    let a = match get_int_arg(args, "a") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let b = match get_int_arg(args, "b") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if b.is_zero() {
+        return Value::Error("ZeroDivisionError", "division by zero", None);
+    }
+
+    match a._div(&b) {
+        Ok(q) => match a._modulo(&b) {
+            Ok(r) => Value::Tuple(vec![Value::Int(q), Value::Int(r)]),
+            Err(e) => math_error(e),
+        },
+        Err(e) => math_error(e),
+    }
+}
+
+fn modpow_fn(args: &HashMap<String, Value>) -> Value {
+    let base = match get_int_arg(args, "base") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let exp = match get_int_arg(args, "exp") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let modu = match get_int_arg(args, "mod") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if modu.is_zero() {
+        return Value::Error("ZeroDivisionError", "modulo by zero", None);
+    }
+
+    let mut result = Int::from(1);
+    let mut base_acc = match base._modulo(&modu) {
+        Ok(v) => v,
+        Err(e) => return math_error(e),
+    };
+    let mut exponent = exp.clone();
+
+    if exponent.is_negative() {
+        return Value::Error("ValueError", "negative exponent", None);
+    }
+
+    let one = Int::from(1);
+    let zero = Int::from(0);
+
+    while !exponent.is_zero() {
+        match exponent._bitand(&one) {
+            Ok(rem) => {
+                if rem != zero {
+                    match result._mul(&base_acc) {
+                        Ok(r) => match r._modulo(&modu) {
+                            Ok(mr) => result = mr,
+                            Err(e) => return math_error(e),
+                        },
+                        Err(e) => return math_error(e),
+                    }
+                }
+            }
+            Err(e) => return math_error(e),
+        }
+
+        match base_acc._mul(&base_acc) {
+            Ok(sq) => match sq._modulo(&modu) {
+                Ok(m) => base_acc = m,
+                Err(e) => return math_error(e),
+            },
+            Err(e) => return math_error(e),
+        }
+
+        match exponent._shr(&one) {
+            Ok(nx) => exponent = nx,
+            Err(e) => return math_error(e),
+        }
+    }
+
+    Value::Int(result)
+}
+
+fn factorial_fn(args: &HashMap<String, Value>) -> Value {
+    let n = match get_int_arg(args, "n") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if n.is_negative() {
+        return Value::Error("ValueError", "factorial not defined for negative values", None);
+    }
+
+    let mut result = Int::from(1);
+    let mut i = Int::from(2);
+
+    while i <= n {
+        match result._mul(&i) {
+            Ok(r) => result = r,
+            Err(e) => return math_error(e),
+        }
+        match i._add(&Int::from(1)) {
+            Ok(nx) => i = nx,
+            Err(e) => return math_error(e),
+        }
+    }
+
+    Value::Int(result)
+}
+
+fn binom_fn(args: &HashMap<String, Value>) -> Value {
+    let n = match get_int_arg(args, "n") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let k = match get_int_arg(args, "k") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if n.is_negative() || k.is_negative() {
+        return Value::Error("ValueError", "binomial coefficients require non-negative integers", None);
+    }
+
+    if n < k {
+        return Value::Int(Int::from(0));
+    }
+
+    let nk = match n._sub(&k) {
+        Ok(v) => v,
+        Err(e) => return math_error(e),
+    };
+    let kk = if k > nk { nk } else { k };
+
+    if kk.is_zero() {
+        return Value::Int(Int::from(1));
+    }
+
+    let mut res = Int::from(1);
+    let mut i = Int::from(1);
+    while i <= kk {
+        match n._sub(&kk) {
+            Ok(tmp) => match tmp._add(&i) {
+                Ok(numer) => match res._mul(&numer) {
+                    Ok(prod) => match prod._div(&i) {
+                        Ok(divd) => res = divd,
+                        Err(e) => return math_error(e),
+                    },
+                    Err(e) => return math_error(e),
+                },
+                Err(e) => return math_error(e),
+            },
+            Err(e) => return math_error(e),
+        }
+
+        match i._add(&Int::from(1)) {
+            Ok(nx) => i = nx,
+            Err(e) => return math_error(e),
+        }
+    }
+
+    Value::Int(res)
+}
+
+fn is_prime_fn(args: &HashMap<String, Value>) -> Value {
+    let n = match get_int_arg(args, "n") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if n <= Int::from(1) {
+        return Value::Boolean(false);
+    }
+
+    for p in SMALL_PRIMES.iter() {
+        let pi = Int::from(*p);
+        if n == pi {
+            return Value::Boolean(true);
+        }
+        match n._modulo(&pi) {
+            Ok(r) => if r.is_zero() { return Value::Boolean(false); },
+            Err(e) => return math_error(e),
+        }
+    }
+
+    let bases = [2i64, 325, 9375, 28178, 450775, 9780504, 1795265022];
+
+    let one = Int::from(1);
+    let two = Int::from(2);
+    let mut d = match n._sub(&one) { Ok(v) => v, Err(e) => return math_error(e) };
+    let mut s: usize = 0;
+    loop {
+        match d._modulo(&two) {
+            Ok(rem) => {
+                if rem.is_zero() {
+                    match d._div(&two) {
+                        Ok(nd) => { d = nd; s += 1; }
+                        Err(e) => return math_error(e),
+                    }
+                } else { break; }
+            }
+            Err(e) => return math_error(e),
+        }
+    }
+
+    for a64 in bases.iter() {
+        let a = Int::from(*a64);
+        if a >= n { continue; }
+
+        let mut x = match modpow_int(&a, &d, &n) {
+            Ok(v) => v,
+            Err(e) => return math_error(e),
+        };
+        if x == one || x == match n._sub(&one) { Ok(v) => v, Err(e) => return math_error(e) } {
+            continue;
+        }
+
+        let mut composite = true;
+        for _ in 1..s {
+            match x._mul(&x) {
+                Ok(xx) => match xx._modulo(&n) {
+                    Ok(mx) => { x = mx; }
+                    Err(e) => return math_error(e),
+                },
+                Err(e) => return math_error(e),
+            }
+            if x == match n._sub(&one) { Ok(v) => v, Err(e) => return math_error(e) } {
+                composite = false;
+                break;
+            }
+        }
+
+        if composite { return Value::Boolean(false); }
+    }
+
+    Value::Boolean(true)
+}
+
+fn modpow_int(base: &Int, exp: &Int, modu: &Int) -> Result<Int, i8> {
+    let mut result = Int::from(1);
+    let mut b = base._modulo(modu)?;
+    let mut e = exp.clone();
+    let one = Int::from(1);
+    let zero = Int::from(0);
+    while !e.is_zero() {
+        let rem = e._bitand(&one)?;
+        if rem != zero {
+            result = result._mul(&b)?._modulo(modu)?;
+        }
+        b = b._mul(&b)?._modulo(modu)?;
+        e = e._shr(&one)?;
+    }
+    Ok(result)
+}
+
 pub fn approx_pi(precision: usize) -> Float {
     let mut a = Float::from(1.0);
     let mut b = (Float::from(1.0) / Float::from(2.0)).expect("Failed divide").sqrt().expect("Failed sqrt");
@@ -231,6 +556,53 @@ pub fn approx_e(precision: usize) -> Float {
 
 pub fn approx_phi() -> Float {
     ((Float::from(1.0) + Float::from(5.0).sqrt().expect("Square root failed")).expect("Failed to add") / Float::from(2.0)).expect("Failed to divide")
+}
+
+fn approx(args: &HashMap<String, Value>) -> Value {
+    let a = match args.get("a") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let b = match args.get("b") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let epsilon: f64 = match args.get("epsilon") {
+        Some(Value::Float(f)) => match f.clone().to_f64() {
+            Ok(v) => v,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    Value::Boolean(a.approx_eq(&b, epsilon))
+}
+
+fn delta(args: &HashMap<String, Value>) -> Value {
+    let a = match args.get("a") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let b = match args.get("b") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    Value::Boolean(a == b)
 }
 
 pub fn register() -> HashMap<String, Variable> {
@@ -312,6 +684,63 @@ pub fn register() -> HashMap<String, Variable> {
         EffectFlags::PURE
     );
 
+    insert_native_fn!(
+        map,
+        "gcd",
+        gcd_fn,
+        vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
+        "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "lcm",
+        lcm_fn,
+        vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
+        "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "divmod",
+        divmod_fn,
+        vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
+        "tuple",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "modpow",
+        modpow_fn,
+        vec![Parameter::positional("base", "int"), Parameter::positional("exp", "int"), Parameter::positional("mod", "int")],
+        "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "factorial",
+        factorial_fn,
+        vec![Parameter::positional("n", "int")],
+        "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "binom",
+        binom_fn,
+        vec![Parameter::positional("n", "int"), Parameter::positional("k", "int")],
+        "int",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "is_prime",
+        is_prime_fn,
+        vec![Parameter::positional("n", "int")],
+        "bool",
+        EffectFlags::PURE
+    );
+
     macro_rules! insert_irrational {
         ($map:expr, $name:expr, $val:expr) => {{
             let mut var = create_float_constant($name, $val);
@@ -366,6 +795,30 @@ pub fn register() -> HashMap<String, Variable> {
         EffectFlags::PURE
     );
 
+    insert_native_fn!(
+        map,
+        "approx",
+        approx,
+        vec![
+            Parameter::positional_pt("a", &int_float_type),
+            Parameter::positional_pt("b", &int_float_type),
+            Parameter::positional_optional_pt("epsilon", &int_float_type, Value::Float(Float::from_f64(1e-10))),
+        ],
+        "bool",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "delta",
+        delta,
+        vec![
+            Parameter::positional_pt("a", &int_float_type),
+            Parameter::positional_pt("b", &int_float_type),
+        ],
+        "bool",
+        EffectFlags::PURE
+    );
+    
     insert_irrational!(map, "E", _E);
     insert_irrational!(map, "PI", _PI);
     insert_irrational!(map, "GOLDEN_RATIO", _GOLDEN_RATIO);

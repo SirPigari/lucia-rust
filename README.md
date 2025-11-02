@@ -52,6 +52,12 @@ See [Lucia Docs reader](https://sirpigari.github.io/lucia-apl/docs/reader)
 
 ---
 
+## Benchmarks
+
+Lucia runs at `375` hello worlds per second in debug, or `712` in release.
+
+For more benchmarks refer to [benchmarks.md](src/env/Docs/benchmarks.md)
+
 ## Support the Project
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-Donate-pink?logo=buy-me-a-coffee&logoColor=pink)](https://coff.ee/sirpigari)

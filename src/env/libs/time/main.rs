@@ -129,7 +129,21 @@ fn validate_chrono_format(fmt: &str) -> Result<(), &'static str> {
     while let Some(c) = chars.next() {
         if c == '%' {
             match chars.next() {
+                Some('m') => {
+                    if chars.peek() == Some(&'s') {
+                        chars.next();
+                    }
+                    continue;
+                }
                 Some(next) if allowed.contains(&next) => continue,
+                Some('%') => continue,
+                Some(next) if next.is_ascii_digit() => {
+                    match chars.next() {
+                        Some('f') => continue,
+                        Some(c) => return Err(to_static(format!("Invalid format specifier (%{}{})", next, c))),
+                        None => return Err(to_static(format!("Invalid format specifier (%{})", next))),
+                    }
+                }
                 Some(cn) => return Err(to_static(format!("Invalid format specifier (%{})", cn))),
                 None => return Err("Stray '%' at end of format string"),
             }
@@ -217,6 +231,62 @@ fn apollo_nanos_to_system_time(nanos: i128) -> SystemTime {
     } else {
         *APOLLO_EPOCH - Duration::from_nanos((-nanos) as u64)
     }
+}
+
+fn process_custom_formats(fmt: &str, dt: &DateTime<FixedOffset>) -> String {
+    let mut out = String::new();
+    let mut chars = fmt.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let next_opt = chars.peek().cloned();
+
+            match next_opt {
+                Some('m') => {
+                    chars.next();
+                    if chars.peek() == Some(&'s') {
+                        chars.next();
+                        let ms = dt.timestamp_subsec_millis();
+                        out.push_str(&format!("{:03}", ms));
+                        continue;
+                    } else {
+                        out.push('%');
+                        out.push('m');
+                        continue;
+                    }
+                }
+                Some(d) if d.is_ascii_digit() => {
+                    let n = (d as u8 - b'0') as usize;
+                    chars.next();
+                    let next_after_digit = chars.peek().cloned();
+                    if next_after_digit == Some('f') {
+                        chars.next();
+                        let ns = dt.timestamp_subsec_nanos();
+                        let frac = format!("{:09}", ns);
+                        out.push_str(&frac[..n.min(9)]);
+                        continue;
+                    } else {
+                        out.push('%');
+                        out.push(d);
+                        continue;
+                    }
+                }
+                Some('%') => {
+                    chars.next();
+                    out.push_str("%%");
+                    continue;
+                }
+                _ => {
+                    out.push('%');
+                    continue;
+                }
+            }
+        }
+
+        out.push(c);
+    }
+
+    dt.format(&out).to_string()
 }
 
 static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
@@ -351,7 +421,10 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                 if let Err(e) = validate_chrono_format(&fmt_str) {
                     return Value::Error("ValueError", e, None);
                 }
-                let formatted = dt_local.format(&fmt_str).to_string();
+
+                let fmt_str = process_custom_formats(&fmt_str, &dt_local);
+
+                let formatted = fmt_str;
                 Value::String(formatted)
             },
             vec![
