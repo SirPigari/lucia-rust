@@ -1,3 +1,4 @@
+
 use std::collections::{HashMap, BTreeMap};
 use crate::env::runtime::config::{Config, get_from_config, set_in_config};
 use crate::env::runtime::utils::{
@@ -6141,7 +6142,6 @@ impl Interpreter {
         result
     }
 
-    // TODO: Fix nested index assignment and map index assign
     fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
         let left = match statement.get(&Value::String("left".to_string())) {
             Some(v) => v,

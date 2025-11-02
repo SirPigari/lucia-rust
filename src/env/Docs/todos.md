@@ -5,13 +5,13 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 6_
+_Total TODOs found: 5_
 ---
 
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3598:1`](../../../src/interpreter.rs#L3598) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3599:1`](../../../src/interpreter.rs#L3599) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
@@ -22,9 +22,6 @@ _Total TODOs found: 6_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/interpreter.rs:6144:1`](../../../src/interpreter.rs#L6144) _(added by **SirPigari** on **2025-07-15**)_
-- Fix nested index assignment and map index assign
 
 ---
 *Report generated automatically.*

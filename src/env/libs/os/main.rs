@@ -159,7 +159,7 @@ fn create_signal_map() -> HashMap<String, Variable> {
         if res == 0 {
             Value::Boolean(true)
         } else {
-            Value::Error("OSError", &format!("Failed to send signal {} to pid {}", signum, pid), None)
+            Value::Error("OSError", to_static(format!("Failed to send signal {} to pid {}", signum, pid)), None)
         }
     }, vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], "bool", EffectFlags::IO);
     map

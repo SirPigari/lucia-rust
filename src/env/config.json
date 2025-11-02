@@ -10,7 +10,7 @@
   "allow_unsafe": true,
   "allow_inline_config": true,
   "type_strict": true,
-  "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
+  "home_dir": "/home/markofwitch/Projects/lucia/src/env",
   "stack_size": 16777216,
   "version": "2.0.0",
   "type_checker": {
@@ -26,7 +26,7 @@
     "ignore_warnings": [],
     "ignore_errors": [],
     "ignore_modules": [],
-    "pointer_types": true,
+    "pointer_types": true,  
     "experimental_constant_folding": false,
     "check_imports": true,
     "allow_dynamic_casts": false,
