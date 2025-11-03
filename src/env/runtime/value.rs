@@ -22,8 +22,8 @@ use std::cmp::Ordering;
 
 #[derive(Clone)]
 pub enum Value {
-    Float(Float),
     Int(Int),
+    Float(Float),
     String(String),
     Boolean(bool),
     Null,

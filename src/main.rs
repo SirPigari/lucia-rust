@@ -864,7 +864,8 @@ fn lucia(
     timer_flag: bool,
     command_to_run: Option<String>,
     project_env_path: Option<PathBuf>,
-    static_check_args: (bool, bool, bool)
+    static_check_args: (bool, bool, bool),
+    create_lcx: bool,
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
 
@@ -891,7 +892,7 @@ fn lucia(
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, create_lcx);
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -919,10 +920,15 @@ fn execute_file(
     dump_ast_flag: &bool,
     timer_flag: bool,
     project_env_path: Option<&PathBuf>,
-    static_check_args: (bool, bool, bool)
+    static_check_args: (bool, bool, bool),
+    create_lcx: bool,
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
+
+        let is_lcx = path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("lcx")).unwrap_or(false);
+        let effective_disable_preprocessor = disable_preprocessor || is_lcx;
+        let effective_static_check_args = if is_lcx { (false, static_check_args.1, static_check_args.2) } else { static_check_args };
 
         let cache_dir = home_dir_path.join(".cache");
         if !cache_dir.exists() {
@@ -971,7 +977,7 @@ fn execute_file(
             println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
         }
 
-        let processed_tokens = if !disable_preprocessor {
+    let processed_tokens = if !effective_disable_preprocessor {
             if !config.cache_format.is_enabled() {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
                     debug_log("Cache disabled, reprocessing tokens", &config);
@@ -1052,7 +1058,7 @@ fn execute_file(
             raw_tokens
         };
 
-        if *dump_pp_flag && !processed_tokens.is_empty() {
+    if *dump_pp_flag && !processed_tokens.is_empty() {
             let p = if dump_dir.1 {
                 dump_dir.0.to_string()
             } else {
@@ -1084,7 +1090,7 @@ fn execute_file(
         }
 
         let parsing_time = Instant::now();
-        let tokens: Vec<Token> = processed_tokens;
+    let tokens: Vec<Token> = processed_tokens.clone();
         let mut parser = Parser::new(tokens.clone());
 
         let statements = match parser.parse_safe() {
@@ -1134,7 +1140,7 @@ fn execute_file(
         }
 
         // Static checker logic
-        let (static_check_flag, run_flag, static_check_flag_force_run) = static_check_args;
+        let (static_check_flag, run_flag, static_check_flag_force_run) = effective_static_check_args;
         let mut can_run = true;
         if static_check_flag {
             let static_check_time = Instant::now();
@@ -1161,6 +1167,30 @@ fn execute_file(
             return;
         }
 
+        if create_lcx && !is_lcx {
+            let token_refs: Vec<&Token> = processed_tokens.iter().collect();
+            let pp_buffer = fmt::format_tokens(&token_refs);
+            let header = "// -*- lcx: true -*-\n\n";
+            let out_content = format!("{}{}", header, pp_buffer.trim_end());
+            let out_path = path.with_extension("lcx");
+            match File::create(&out_path).and_then(|mut f| f.write_all(out_content.as_bytes())) {
+                Ok(_) => {
+                    print_colored(
+                        &format!("{}Created .lcx file: {}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), out_path.display()),
+                        &config.color_scheme.debug,
+                        config.supports_color,
+                    );
+                }
+                Err(e) => {
+                    print_colored(
+                        &format!("{}Failed to write .lcx file {}: {}", hex_to_ansi(&config.color_scheme.exception, config.supports_color), out_path.display(), e),
+                        &config.color_scheme.exception,
+                        config.supports_color,
+                    );
+                }
+            }
+        }
+
         let parent_dir = if file_path.is_empty() {
             std_env::current_dir()
                 .and_then(|p| p.canonicalize())
@@ -1179,7 +1209,7 @@ fn execute_file(
             config.clone(),
             file_path.as_str(),
             &parent_dir,
-            (home_dir_path.join("libs"), config_path.clone(), !disable_preprocessor),
+            (home_dir_path.join("libs"), config_path.clone(), !effective_disable_preprocessor),
             argv,
         );
 
@@ -2007,11 +2037,12 @@ fn main() {
         ("--dump-dir=<path>", "Specify the directory to dump preprocessed and AST files (default: current directory)"),
         ("--bundle, -b", "Bundle the script and its dependencies into a single executable (Windows only)"),
         ("--no-project-env", "Disable project environment (.lucia/) detection"),
-        ("-c=<code>, --code=<code>", "Execute code directly from command line"),
+        ("--code=<code>, -c=<code>", "Execute code directly from command line"),
         ("--check, -u", "Perform static code analysis without executing"),
         ("--check --run, -w", "Perform static code analysis and run if no issues are found"),
         ("-wf", "Perform static code analysis and always run, even if issues are found"),
         ("-wa", "Perform static code analysis and run, try to fix issues automatically"),
+        ("-x", "Execute the source file and convert it to .lcx format"),
         ("<file>", "The source file to execute"),
     ];
 
@@ -2026,6 +2057,7 @@ fn main() {
     let mut config_arg: Option<String> = None;
     let mut dump_pp_flag = false;
     let mut dump_ast_flag = false;
+    let mut create_lcx = false;
     let mut allow_unsafe = false;
     let mut debug_mode_flag = false;
     let mut stack_size: (usize, bool) = (16_777_216, false);
@@ -2210,6 +2242,7 @@ fn main() {
             "--dump" => { dump_pp_flag = true; dump_ast_flag = true; }
             "--allow-unsafe" => allow_unsafe = true,
             "--timer" | "-t" => timer_flag = true,
+            "-x" => create_lcx = true,
             "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
             "--no-project-env" => _no_project_env_flag = true,
             arg if arg.starts_with("--stack-size=") => {
@@ -2792,7 +2825,8 @@ fn main() {
                 timer_flag,
                 command_to_run,
                 if use_project_env { Some(project_env_path) } else { None },
-                static_check_args
+                static_check_args,
+                create_lcx
             );
         })
         .unwrap();

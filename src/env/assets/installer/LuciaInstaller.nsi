@@ -316,7 +316,7 @@ Function LYMDirPageLeave
     ${Else}
         StrCpy $LYM_PATH ""
     ${EndIf}
-    ${NSD_SetState} LYMAddToPath_Checkbox LYMAddToPath_Enabled
+    ${NSD_GetState} $LYMAddToPath_Checkbox $LYMAddToPath_Enabled
 FunctionEnd
 
 ; ======================================================
@@ -671,23 +671,23 @@ Section "Install"
 
         ; Windows specific
         ${If} $Windows_Enabled == ${BST_CHECKED}
-            Push "windows"
+            Push "Windows"
             Call InstallLibrary
         ${EndIf}
         ${If} $Win32_Enabled == ${BST_CHECKED}
-            Push "win32"
+            Push "Win32"
             Call InstallLibrary
         ${EndIf}
         ${If} $COM_Enabled == ${BST_CHECKED}
-            Push "com"
+            Push "COM"
             Call InstallLibrary
         ${EndIf}
         ${If} $DirectX_Enabled == ${BST_CHECKED}
-            Push "directx"
+            Push "DirectX"
             Call InstallLibrary
         ${EndIf}
         ${If} $Shell_Enabled == ${BST_CHECKED}
-            Push "shell"
+            Push "Shell"
             Call InstallLibrary
             ${If} $Shell_PS_Enabled == ${BST_CHECKED}
                 Push "shell-powershell"
@@ -695,11 +695,11 @@ Section "Install"
             ${EndIf}
         ${EndIf}
         ${If} $Hotkeys_Enabled == ${BST_CHECKED}
-            Push "hotkeys"
+            Push "Hotkeys"
             Call InstallLibrary
         ${EndIf}
         ${If} $Services_Enabled == ${BST_CHECKED}
-            Push "services"
+            Push "Services"
             Call InstallLibrary
         ${EndIf}
     ${EndIf}
