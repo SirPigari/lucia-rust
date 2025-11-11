@@ -166,6 +166,7 @@ impl<'a> Lexer<'a> {
                     while local_end < len {
                         let c = self.code[local_end..].chars().next().unwrap();
                         let c_len = c.len_utf8();
+
                         local_end += c_len;
 
                         if c == quote {
@@ -199,7 +200,18 @@ impl<'a> Lexer<'a> {
                             invalid_pos += c_len;
                         }
                     } else {
-                        tokens.push(self.make_token(token_kind, &self.code[pos..local_end], pos, local_end));
+                        let mut raw_text = String::new();
+                        for ch in self.code[pos..local_end].chars() {
+                            if ch == '\n' {
+                                raw_text.push_str("\\n");
+                            } else if ch == '\r' {
+                                raw_text.push_str("\\n");
+                            } else {
+                                raw_text.push(ch);
+                            }
+                        }
+
+                        tokens.push(self.make_token(token_kind, &raw_text, pos, local_end));
                     }
 
                     pos = local_end;

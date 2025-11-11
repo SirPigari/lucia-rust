@@ -507,15 +507,36 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
         let inner = &s[1..s.len() - 1];
 
-        let json_quoted = if first == '\'' {
-            format!("\"{}\"", inner)
+        if first == '"' {
+            serde_json::from_str::<String>(s)
+                .map_err(|e| format!("Failed to unescape string: {}", e))
         } else {
-            s.to_string()
-        };
+            // Handle single-quoted strings manually
+            let mut out = String::new();
+            let mut chars = inner.chars().peekable();
 
-        match serde_json::from_str::<String>(&json_quoted) {
-            Ok(unescaped) => Ok(unescaped),
-            Err(e) => Err(format!("Failed to unescape string: {}", e)),
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    match chars.next() {
+                        Some('n') => out.push('\n'),
+                        Some('r') => out.push('\r'),
+                        Some('t') => out.push('\t'),
+                        Some('\'') => out.push('\''),
+                        Some('"') => out.push('"'),
+                        Some('\\') => out.push('\\'),
+                        Some('0') => out.push('\0'),
+                        Some(other) => {
+                            out.push('\\');
+                            out.push(other);
+                        }
+                        None => out.push('\\'),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+
+            Ok(out)
         }
     } else {
         Err("String not properly quoted".into())
@@ -1708,7 +1729,7 @@ pub fn check_pattern(
                 if p_keys.len() != 2 || p_vals.len() != 2 { return Ok(false); }
 
                 let p_segments = match &p_vals[0] { Value::List(l) => l, _ => return Ok(false) };
-                let p_args = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
+                let p_args: &Vec<Value> = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
                 if p_segments.is_empty() { return Ok(false); }
 
                 let pat_variant_name = match &p_segments[p_segments.len() - 1] {
@@ -1720,7 +1741,24 @@ pub fn check_pattern(
                     Some(name) => name,
                     None => return Ok(false),
                 };
-                if variant_name != *pat_variant_name { return Ok(false); }
+                if variant_name != *pat_variant_name {
+                    if p_segments.len() == 1 && p_args.is_empty() {
+                        let val = Value::Enum(cond_enum.clone());
+                        if let Value::String(var_name) = &p_segments[0] {
+                            if var_name != "_" {
+                                if let Some(existing) = vars.get(var_name) {
+                                    if *existing != val {
+                                        return Ok(false);
+                                    }
+                                } else {
+                                    vars.insert(var_name.clone(), val);
+                                }
+                            }
+                            return Ok(true);
+                        }
+                    }
+                    return Ok(false);
+                }
 
                 match &*cond_enum.variant.1 {
                     Value::Tuple(payload_elems) => {
@@ -1749,6 +1787,9 @@ pub fn check_pattern(
                             }
                             if !inner(payload, arg_pat, vars)? { return Ok(false); }
                         }
+                        Ok(true)
+                    }
+                    Value::Null => {
                         Ok(true)
                     }
                     other_val => {

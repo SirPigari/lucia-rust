@@ -251,6 +251,44 @@ fn create_signal_map() -> HashMap<String, Variable> {
     map
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn create_subprocess_map() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
+
+    insert_native_fn!(map, "run", |args: &HashMap<String, Value>| -> Value {
+        use std::process::Command;
+
+        let command = match args.get("command") {
+            Some(Value::String(s)) => s,
+            _ => return Value::Error("TypeError", "Expected 'command' to be a string", None),
+        };
+
+        let (shell, flag) = if cfg!(target_os = "windows") {
+            ("cmd", "/C")
+        } else {
+            ("sh", "-c")
+        };
+
+        match Command::new(shell)
+            .arg(flag)
+            .arg(command)
+            .status()
+        {
+            Ok(status) => {
+                let code = status.code().unwrap_or(-1);
+                Value::Int(code.into())
+            }
+            Err(e) => Value::Error(
+                "RuntimeError",
+                to_static(format!("Failed to execute command: {}", e)),
+                None,
+            ),
+        }
+    }, vec![Parameter::positional("command", "str")], "int", EffectFlags::IO);
+
+    map
+}
+
 // ==== Registration ====
 
 pub fn register(config: &Config) -> HashMap<String, Variable> {
@@ -398,6 +436,23 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
     };
 
     insert_native_var!(map, "signal", Value::Module(signal_module), "module");
+
+    // subprocess
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let subprocess_module = Module {
+        name: "subprocess".to_string(),
+        properties: create_subprocess_map(),
+        parameters: Vec::new(),
+        is_public: true,
+        is_static: true,
+        is_final: true,
+        state: None,
+        path: PathBuf::from("os/subprocess"),
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    insert_native_var!(map, "subprocess", Value::Module(subprocess_module), "module");
 
     insert_native_fn!(map, "pid", |_: &HashMap<String, Value>| -> Value {
         #[cfg(not(target_arch = "wasm32"))]

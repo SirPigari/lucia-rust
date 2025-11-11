@@ -2787,7 +2787,7 @@ impl Parser {
                                         self.next();
                                         let mut elements = Vec::new();
                                         while !self.token_is("SEPARATOR", ")") {
-                                            let elem = self.parse_single_type();
+                                            let elem = self.parse_type();
                                             if self.err.is_some() {
                                                 return Statement::Null;
                                             }
@@ -2802,7 +2802,7 @@ impl Parser {
                                         }
                                         self.next();
                                         if elements.len() == 1 {
-                                            var_type = elements[0].as_ref().unwrap().1.convert_to_map();
+                                            var_type = elements[0].convert_to_map();
                                         } else {
                                             var_type =  Statement::Statement {
                                                 keys: vec![
@@ -2817,13 +2817,7 @@ impl Parser {
                                                     Value::String("TYPE".to_string()),
                                                     Value::String("generics".to_string()),
                                                     Value::String("tuple".to_string()),
-                                                    Value::List(elements.into_iter().map(|t| {
-                                                        if let Some((_, stmt)) = t {
-                                                            stmt.convert_to_map()
-                                                        } else {
-                                                            Value::Null
-                                                        }
-                                                    }).collect()),
+                                                    Value::List(elements.into_iter().map(|t| t.convert_to_map() ).collect()),
                                                     Value::Boolean(false),
                                                     Value::String("any".to_string()),
                                                 ],
@@ -3851,7 +3845,8 @@ impl Parser {
                                 }
 
                                 Some(Token(..)) => {
-                                    let (style, pattern, guard);
+                                    let (style, guard);
+                                    let mut patterns = vec![];
 
                                     let saved_pos = self.pos;
                                     while !(self.token_is("SEPARATOR", ":") || self.token_is("OPERATOR", "->") || self.token_is("IDENTIFIER", "if")) {
@@ -3870,7 +3865,7 @@ impl Parser {
                                             self.pos = saved_pos;
                                             self.raise(
                                                 "SyntaxError",
-                                                "Expected ':' or '->' or 'if' in match case",
+                                                "Expected ':', '->' or 'if' in match case",
                                             );
                                             return Statement::Null;
                                         }
@@ -3904,18 +3899,27 @@ impl Parser {
                                         }
                                         self.next();
 
-                                        pattern = pat_expr;
+                                        patterns.push(pat_expr);
                                     } else {
                                         let tok_val = self.token().unwrap().1.clone();
-                                        pattern = if tok_val == "_" {
+                                        patterns = if tok_val == "_" {
                                             self.next();
                                             return self.raise_with_help("SyntaxError", "'_' is not allowed in 'match' literal case", "Did you mean to use pattern case? ('->' instead of ':')");
                                         } else {
-                                            let p = self.parse_operand(false);
-                                            if self.err.is_some() {
-                                                return Statement::Null;
-                                            }
-                                            p.convert_to_map()
+                                            let mut pats = vec![];
+                                            while !self.token_is("SEPARATOR", ":") {
+                                                let p = self.parse_operand(false);
+                                                if self.err.is_some() {
+                                                    return Statement::Null;
+                                                }
+                                                pats.push(p.convert_to_map());
+                                                if self.token_is("OPERATOR", "|") {
+                                                    self.next();
+                                                } else {
+                                                    break;
+                                                }
+                                            };
+                                            pats
                                         };
 
                                         if !self.token_is("SEPARATOR", ":") {
@@ -3959,16 +3963,19 @@ impl Parser {
                                         Value::Map {
                                             keys: vec![
                                                 Value::String("style".to_string()),
-                                                Value::String("value".to_string()),
+                                                Value::String("patterns".to_string()),
                                                 Value::String("body".to_string()),
                                             ],
                                             values: vec![
                                                 Value::String(style),
-                                                pattern,
+                                                Value::List(patterns),
                                                 Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                             ],
                                         }
                                     } else {
+                                        if patterns.len() != 1 {
+                                            return self.raise_with_help("RuntimeError", "'patterns' is supposed to have lenght of 1", "This is not your issue, report this to https://github.com/SirPigari/lucia-rust/issues/new")
+                                        }
                                         Value::Map {
                                             keys: vec![
                                                 Value::String("style".to_string()),
@@ -3978,7 +3985,7 @@ impl Parser {
                                             ],
                                             values: vec![
                                                 Value::String(style),
-                                                pattern,
+                                                patterns[0].clone(),
                                                 guard.map_or(Value::Null, |g| g.convert_to_map()),
                                                 Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
                                             ],
@@ -4501,7 +4508,7 @@ impl Parser {
                         .replace("\\\\", "\\");
                     PathElement::Literal(Value::String(unescaped))
                 } else {
-                    self.raise("SyntaxError", "Invalid string format");
+                    self.raise("SyntaxError", &format!("Invalid string format {:?}", val));
                     return None;
                 }
             }
@@ -5197,14 +5204,37 @@ impl Parser {
         let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
         
         if token_type == "SEPARATOR" && token_value == "(" {
+            let mut values = Vec::new();
             self.next();
-            let expr = self.parse_expression();
-            if self.err.is_some() {
-                return Statement::Null;
+            while !self.token_is("SEPARATOR", ")") {
+                let expr = self.parse_expression();
+                if self.err.is_some() {
+                    return Statement::Null;
+                }
+                values.push(expr.convert_to_map());
+                if self.token_is("SEPARATOR", ",") {
+                    self.next();
+                } else {
+                    break;
+                }
             }
             self.check_for("SEPARATOR", ")");
             self.next();
-            return expr;
+            if values.len() == 1 {
+                return values[0].convert_to_statement();
+            }
+
+            return Statement::Statement {
+                keys: vec![
+                    Value::String("type".to_string()),
+                    Value::String("items".to_string()),
+                ],
+                values: vec![
+                    Value::String("TUPLE".to_string()),
+                    Value::List(values),
+                ],
+                loc
+            };
         }
 
         if token_type == "NUMBER" {

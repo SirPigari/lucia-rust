@@ -2513,7 +2513,7 @@ impl Interpreter {
                         let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
                             Some(pos) => values.get(pos).unwrap_or(&Value::Null),
                             None => {
-                                self.raise("RuntimeError", "Expected 'pattern' in match case");
+                                self.raise("RuntimeError", "Expected 'patterns' in match case");
                                 return NULL;
                             }
                         };
@@ -2623,10 +2623,13 @@ impl Interpreter {
                         }
                     }
                     "literal" => {
-                        let pattern = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
-                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
+                        let patterns = match keys.iter().position(|k| k == &Value::String("patterns".to_string())) {
+                            Some(pos) => match values.get(pos) {
+                                Some(Value::List(p)) => p.clone(),
+                                _ => return self.raise("RuntimeError", "Expected 'patterns' to be a list in match case"),
+                            },
                             None => {
-                                self.raise("RuntimeError", "Expected 'pattern' in match case");
+                                self.raise("RuntimeError", "Expected 'patterns' in match case");
                                 return NULL;
                             }
                         };
@@ -2645,9 +2648,13 @@ impl Interpreter {
                             }
                         };
 
-                        let matched = {
-                            self.evaluate(&condition.convert_to_statement()) == self.evaluate(&pattern.convert_to_statement())
-                        };
+                        let mut matched = false;
+                        for p in patterns {
+                            if self.evaluate(&condition.convert_to_statement()) == self.evaluate(&p.convert_to_statement()) {
+                                matched = true;
+                                break;
+                            }
+                        }
 
                         if self.err.is_some() {
                             return NULL;

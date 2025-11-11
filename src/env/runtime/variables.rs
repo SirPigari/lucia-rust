@@ -348,6 +348,124 @@ impl Variable {
                         None,
                     )
                 };
+                let isalpha = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "isalpha",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_alphabetic()));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let isdigit = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "isdigit",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_digit(10)));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let islower = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "islower",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_lowercase()));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let isupper = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "isupper",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_uppercase()));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let isalnum = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "isalnum",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_alphanumeric()));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let isspace = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "isspace",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                return Value::Boolean(s.chars().all(|c| c.is_whitespace()));
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let replace = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "replace",
+                        move |args| {
+                            if let (Some(Value::String(from)), Some(Value::String(to))) = (args.get("from"), args.get("to")) {
+                                if let Value::String(val) = &val_clone {
+                                    let replaced = val.replace(from, to);
+                                    return Value::String(replaced);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![
+                            Parameter::positional("from", "str"),
+                            Parameter::positional("to", "str"),
+                        ],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "to_bytes".to_string(),
@@ -442,6 +560,83 @@ impl Variable {
                     Variable::new(
                         "chars".to_string(),
                         chars,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "isalpha".to_string(),
+                    Variable::new(
+                        "isalpha".to_string(),
+                        isalpha,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "isdigit".to_string(),
+                    Variable::new(
+                        "isdigit".to_string(),
+                        isdigit,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "islower".to_string(),
+                    Variable::new(
+                        "islower".to_string(),
+                        islower,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "isupper".to_string(),
+                    Variable::new(
+                        "isupper".to_string(),
+                        isupper,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "isalnum".to_string(),
+                    Variable::new(
+                        "isalnum".to_string(),
+                        isalnum,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "isspace".to_string(),
+                    Variable::new(
+                        "isspace".to_string(),
+                        isspace,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "replace".to_string(),
+                    Variable::new(
+                        "replace".to_string(),
+                        replace,
                         "function".to_string(),
                         false,
                         true,
@@ -1808,6 +2003,42 @@ impl Variable {
                         None,
                     )
                 };
+                let contains_key = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "contains_key",
+                        move |args| {
+                            if let Some(key) = args.get("key") {
+                                if let Value::Map { keys: map_keys, .. } = &val_clone {
+                                    return Value::Boolean(map_keys.iter().any(|k| k == key));
+                                }
+                            }
+                            Value::Boolean(false)
+                        },
+                        vec![Parameter::positional("key", "any")],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let contains_value = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "contains_value",
+                        move |args| {
+                            if let Some(value) = args.get("value") {
+                                if let Value::Map { values: map_values, .. } = &val_clone {
+                                    return Value::Boolean(map_values.iter().any(|v| v == value));
+                                }
+                            }
+                            Value::Boolean(false)
+                        },
+                        vec![Parameter::positional("value", "any")],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "get".to_string(),
@@ -1869,6 +2100,28 @@ impl Variable {
                     Variable::new(
                         "zip".to_string(),
                         zip,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "contains_key".to_string(),
+                    Variable::new(
+                        "contains_key".to_string(),
+                        contains_key,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "contains_value".to_string(),
+                    Variable::new(
+                        "contains_value".to_string(),
+                        contains_value,
                         "function".to_string(),
                         false,
                         true,

@@ -594,7 +594,8 @@ fn main() {
         println!("cargo:rustc-link-arg=-mmacosx-version-min=14.5");
     }
 
-    if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    {
         use winres::WindowsResource;
         let mut res = WindowsResource::new();
         let icon_path = Path::new(&manifest_dir).join("src/env/assets/lucia_icon.ico");

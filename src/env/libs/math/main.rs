@@ -605,6 +605,54 @@ fn delta(args: &HashMap<String, Value>) -> Value {
     Value::Boolean(a == b)
 }
 
+fn max_handler(args: &HashMap<String, Value>) -> Value {
+    let a = match args.get("a") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let b = match args.get("b") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    if a > b {
+        Value::Float(a)
+    } else {
+        Value::Float(b)
+    }
+}
+
+fn min_handler(args: &HashMap<String, Value>) -> Value {
+    let a = match args.get("a") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    let b = match args.get("b") {
+        Some(Value::Float(f)) => f.clone(),
+        Some(Value::Int(i)) => match Int::to_float(i) {
+            Ok(f) => f,
+            Err(e) => return math_error(e),
+        },
+        _ => return Value::Error("TypeError", "expected int or float", None),
+    };
+    if a < b {
+        Value::Float(a)
+    } else {
+        Value::Float(b)
+    }
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -816,6 +864,28 @@ pub fn register() -> HashMap<String, Variable> {
             Parameter::positional_pt("b", &int_float_type),
         ],
         "bool",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "max",
+        max_handler,
+        vec![
+            Parameter::positional_pt("a", &int_float_type),
+            Parameter::positional_pt("b", &int_float_type),
+        ],
+        "float",
+        EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "min",
+        min_handler,
+        vec![
+            Parameter::positional_pt("a", &int_float_type),
+            Parameter::positional_pt("b", &int_float_type),
+        ],
+        "float",
         EffectFlags::PURE
     );
     
