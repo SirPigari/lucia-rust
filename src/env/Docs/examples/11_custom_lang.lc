@@ -697,15 +697,38 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
            asm
 end
 
-// TODO: Implement Linux x86_64 compilation
 fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
     strings: &list = &[]
     asm := ""
+    vars: &map = &{}
+    rsp_offset: &int = &0
+    label_count: &int = &0
+    stack_size_approximate: &int = &0
+
+    fun get_var_offset(name: str) -> int:
+        if (!(*vars).contains_key(name)):
+            throw f"Undefined variable: {name}" from "CompileError"
+        end
+        return (*vars)[name]
+    end
 
     fun add_string(s: str) -> str:
         id := len(*strings)
+        if (s in *strings):
+            for ((i, existing) in (*strings).enumerate()):
+                if existing == s:
+                    return f"str_{i}"
+                end
+            end
+        end
         (*strings) = (*strings).append(s)
         return f"str_{id}"
+    end
+
+    fun gen_label() -> str:
+        label := f"label_{*label_count}"
+        (*label_count) += 1
+        return label
     end
 
     fun compile_node(node: ASTNode) -> str:
@@ -723,69 +746,340 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                         "    sete al\n" +
                         "    movzx rax, al\n",
                     "+": return inner,
-                    "-": return inner +
-                        "    neg rax\n",
-                    _  -> throw f"Unknown unary operator: {op}" from "CompileError",
+                    "-": return inner + "    neg rax\n",
+                    _ -> throw f"Unknown unary operator: {op}" from "CompileError",
                 end
             end
             ASTNode.Print(expr) ->
                 expr_asm := compile_node(expr)
-                fmt := match (expr):
-                    ASTNode.String(_) -> "fmt_str",
-                    _ -> "fmt_int",
+                match (expr):
+                    ASTNode.String(_) ->
+                        len_label := gen_label()
+                        len_done := gen_label()
+                        return expr_asm +
+                            "    mov rdi, rax\n" +
+                            "    xor rcx, rcx\n" +
+                            f"{len_label}:\n" +
+                            "    cmp byte [rdi + rcx], 0\n" +
+                            f"    je {len_done}\n" +
+                            "    inc rcx\n" +
+                            f"    jmp {len_label}\n" +
+                            f"{len_done}:\n" +
+                            "    mov rsi, rdi\n" +
+                            "    mov rdx, rcx\n" +
+                            "    mov rax, 1\n" +
+                            "    mov rdi, 1\n" +
+                            "    syscall\n"
+                    end
+                    _ ->
+                        conv_loop := gen_label()
+                        conv_done := gen_label()
+                        conv_zero := gen_label()
+                        return expr_asm +
+                            "    sub rsp, 64\n" +
+                            "    mov rbx, rax\n" +
+                            "    lea rsi, [rsp + 56]\n" +
+                            "    cmp rbx, 0\n" +
+                            f"    jne {conv_loop}\n" +
+                            "    dec rsi\n" +
+                            "    mov byte [rsi], '0'\n" +
+                            f"    jmp {conv_done}\n" +
+                            f"{conv_loop}:\n" +
+                            "    xor rdx, rdx\n" +
+                            "    mov rax, rbx\n" +
+                            "    mov rcx, 10\n" +
+                            "    div rcx\n" +
+                            "    add dl, '0'\n" +
+                            "    dec rsi\n" +
+                            "    mov [rsi], dl\n" +
+                            "    mov rbx, rax\n" +
+                            "    cmp rbx, 0\n" +
+                            f"    jne {conv_loop}\n" +
+                            f"{conv_done}:\n" +
+                            "    lea rax, [rsp + 56]\n" +
+                            "    mov rdx, rax\n" +
+                            "    sub rdx, rsi\n" +
+                            "    mov rax, 1\n" +
+                            "    mov rdi, 1\n" +
+                            "    mov rsi, rsi\n" +
+                            "    syscall\n" +
+                            "    add rsp, 64\n"
+                    end
                 end
-                return expr_asm +
-                    "    mov rsi, rax\n" +
-                    f"    lea rdi, [rel {fmt}]\n" +
-                    "    xor eax, eax\n" +
-                    "    call printf\n"
             end
             ASTNode.BinOp(left, op, right) ->
                 left_asm := compile_node(left)
                 right_asm := compile_node(right)
                 return left_asm +
-                       "    push rax\n" +
+                       "    mov r10, rax\n" +
                        right_asm +
-                       "    pop rbx\n" +
+                       "    mov r11, rax\n" +
                        match (op):
-                           "+": "    add rax, rbx\n",
-                           "-": "    sub rax, rbx\n",
-                           "*": "    imul rax, rbx\n",
-                           "/": "    xor rdx, rdx\n    div rbx\n",
-                           "%": "    xor rdx, rdx\n    div rbx\n    mov rax, rdx\n",
-                           "==": "    cmp rbx, rax\n    sete al\n    movzx rax, al\n",
-                           "!=": "    cmp rbx, rax\n    setne al\n    movzx rax, al\n",
-                           ">":  "    cmp rbx, rax\n    setg al\n    movzx rax, al\n",
-                           "<":  "    cmp rbx, rax\n    setl al\n    movzx rax, al\n",
-                           ">=": "    cmp rbx, rax\n    setge al\n    movzx rax, al\n",
-                           "<=": "    cmp rbx, rax\n    setle al\n    movzx rax, al\n",
-                           "&&": "    and rax, rbx\n",
-                           "||": "    or rax, rbx\n",
+                           "+": "    mov rax, r10\n    add rax, r11\n",
+                           "-": "    mov rax, r10\n    sub rax, r11\n",
+                           "*": "    mov rax, r10\n    imul rax, r11\n",
+                           "/": "    xor rdx, rdx\n    mov rax, r10\n    div r11\n",
+                           "%": "    xor rdx, rdx\n    mov rax, r10\n    div r11\n    mov rax, rdx\n",
+                           "==": "    mov rax, r10\n    cmp rax, r11\n    sete al\n    movzx rax, al\n",
+                           "!=": "    mov rax, r10\n    cmp rax, r11\n    setne al\n    movzx rax, al\n",
+                           ">":  "    mov rax, r10\n    cmp rax, r11\n    setg al\n    movzx rax, al\n",
+                           "<":  "    mov rax, r10\n    cmp rax, r11\n    setl al\n    movzx rax, al\n",
+                           ">=": "    mov rax, r10\n    cmp rax, r11\n    setge al\n    movzx rax, al\n",
+                           "<=": "    mov rax, r10\n    cmp rax, r11\n    setle al\n    movzx rax, al\n",
+                           "&&": "    mov rax, r10\n    and rax, r11\n",
+                           "||": "    mov rax, r10\n    or rax, r11\n",
+                           "<<": "    mov rcx, r11\n    mov rax, r10\n    shl rax, cl\n",
+                           ">>": "    mov rcx, r11\n    mov rax, r10\n    shr rax, cl\n",
+                           "|":  "    mov rax, r10\n    or rax, r11\n",
+                           "&":  "    mov rax, r10\n    and rax, r11\n",
                            _   -> throw f"Unknown operator: {op}" from "CompileError",
                        end
             end
+            ASTNode.VarDecl(name, expr) ->
+                expr_asm := compile_node(expr)
+
+                (*rsp_offset) += 8
+                v := *vars
+                v[name] = *rsp_offset,
+                (*vars) = v,
+                (*stack_size_approximate) = max(*stack_size_approximate, *rsp_offset)
+
+                return expr_asm + f"    mov [rbp - {(*rsp_offset)}], rax    ; var {name} @ rbp - {(*rsp_offset)}\n"
+            end
+            ASTNode.Variable(name) ->
+                if (!(*vars).contains_key(name)):
+                    throw f"Undefined variable: {name}" from "CompileError"
+                end
+                offset := get_var_offset(name)
+                return f"    mov rax, [rbp - {offset}]\n"
+            end
+            ASTNode.VarAssign(name, expr) ->
+                if (!(*vars).contains_key(name)):
+                    throw f"Undefined variable: {name}" from "CompileError"
+                end
+                expr_asm := compile_node(expr)
+                offset := get_var_offset(name)
+                return expr_asm + f"    mov [rbp - {offset}], rax\n"
+            end
+            ASTNode.Block(nodes) ->
+                out := ""
+                for n in nodes:
+                    out += compile_node(n)
+                end
+                return out
+            end
+            ASTNode.If(cond, then_branch, else_branch) ->
+                cond_asm := compile_node(cond)
+                else_label := gen_label()
+                end_label := gen_label()
+                then_asm := compile_node(then_branch)
+                else_asm := compile_node(else_branch)
+                return cond_asm +
+                       "    cmp rax, 0\n" +
+                       f"    je {else_label}\n" +
+                       then_asm +
+                       f"    jmp {end_label}\n" +
+                       f"{else_label}:\n" +
+                       else_asm +
+                       f"{end_label}:\n"
+            end
+            ASTNode.While(cond, body) ->
+                start_label := gen_label()
+                end_label := gen_label()
+                return f"{start_label}:\n" +
+                       compile_node(cond) +
+                       "    cmp rax, 0\n" +
+                       f"    je {end_label}\n" +
+                       compile_node(body) +
+                       f"    jmp {start_label}\n" +
+                       f"{end_label}:\n"
+            end
+            ASTNode.ArrayLiteral(elements) ->
+                count := len(elements)
+                size := (count + 1) * 8
+
+                inner := "    sub rsp, 32\n"
+                inner += f"    mov rdi, 0\n"
+                inner += f"    mov rsi, {size}\n"
+                inner += "    mov rdx, 3\n"          // PROT_READ|PROT_WRITE
+                inner += "    mov r10, 34\n"         // MAP_PRIVATE|MAP_ANONYMOUS (0x22)
+                inner += "    mov r8, -1\n"
+                inner += "    mov r9, 0\n"
+                inner += "    mov rax, 9\n"
+                inner += "    syscall\n"
+                inner += "    add rsp, 32\n"
+
+                inner += f"    mov qword [rax], {count}\n"
+                inner += "    lea rsi, [rax + 8]\n"
+
+                inner += "    mov rbx, rax\n"
+
+                for ((i, elem) in elements.enumerate()):
+                    inner += "    push rsi\n"
+                    inner += compile_node(elem)
+                    inner += "    pop rsi\n"
+                    inner += f"    mov [rsi + {8*i}], rax\n"
+                end
+
+                inner += "    mov rax, rbx\n"
+                return inner
+            end
+            ASTNode.IndexAccess(array_expr, index_expr) ->
+                oob_label := gen_label()
+                cont_label := gen_label()
+
+                asm := ""
+                match (array_expr):
+                    ASTNode.Variable(name) ->
+                        offset := get_var_offset(name)
+                        asm += f"    mov r9, [rbp - {offset}]     ; var {name} @ rbp - {offset}\n"
+                    end
+                    _ ->
+                        asm += compile_node(array_expr)
+                        asm += "    mov r9, rax\n"
+                    end
+                end
+
+                asm += compile_node(index_expr)
+                asm += "    mov r8, rax\n"
+
+                asm += "    mov rdx, [r9]\n"
+                asm += "    cmp r8, 0\n"
+                asm += f"    jl {oob_label}\n"
+                asm += "    cmp r8, rdx\n"
+                asm += f"    jae {oob_label}\n"
+
+                asm += "    lea rax, [r9 + 8 + r8*8]\n"
+                asm += "    mov rax, [rax]\n"
+                asm += f"    jmp {cont_label}\n"
+
+                asm += f"{oob_label}:\n"
+                asm += "    lea rsi, [rel oob_str]\n"
+                asm += "    mov rdx, 19\n"  // length of "Index out of bounds"
+                asm += "    mov rax, 1\n"
+                asm += "    mov rdi, 1\n"
+                asm += "    syscall\n"
+                asm += "    mov rdi, 1\n"
+                asm += "    mov rax, 60\n"
+                asm += "    syscall\n"
+
+                asm += f"{cont_label}:\n"
+                return asm
+            end
+
+            ASTNode.IndexWrite(array_expr, index_expr, value_expr) ->
+                oob_label := gen_label()
+                cont_label := gen_label()
+
+                asm := ""
+                array_is_var := false
+                offset2 := 0
+                match (array_expr):
+                    ASTNode.Variable(name) ->
+                        offset2 = get_var_offset(name)
+                        array_is_var = true
+                        asm += f"    mov r9, [rbp - {offset2}]    ; var {name} @ rbp - {offset2}\n"
+                    end
+                    _ ->
+                        asm += compile_node(array_expr)
+                        asm += "    mov r9, rax\n"
+                    end
+                end
+
+                asm += compile_node(index_expr)
+                asm += "    mov r8, rax\n"
+
+                asm += "    mov rdx, [r9]\n"
+                asm += "    cmp r8, 0\n"
+                asm += f"    jl {oob_label}\n"
+                asm += "    cmp r8, rdx\n"
+                asm += f"    jae {oob_label}\n"
+
+                if (array_is_var):
+                    asm += "    push r8\n"
+                    asm += compile_node(value_expr)
+                    asm += "    pop r8\n"
+                    asm += f"    mov rdx, [rbp - {offset2}]\n"
+                    asm += "    lea rdi, [rdx + 8 + r8*8]\n"
+                else:
+                    asm += "    push r9\n"
+                    asm += "    push r8\n"
+                    asm += compile_node(value_expr)
+                    asm += "    pop r8\n"
+                    asm += "    pop r9\n"
+                    asm += "    lea rdi, [r9 + 8 + r8*8]\n"
+                end
+                asm += "    mov [rdi], rax\n"
+                asm += f"    jmp {cont_label}\n"
+
+                asm += f"{oob_label}:\n"
+                asm += "    lea rsi, [rel oob_str]\n"
+                asm += "    mov rdx, 19\n"
+                asm += "    mov rax, 1\n"
+                asm += "    mov rdi, 1\n"
+                asm += "    syscall\n"
+                asm += "    mov rdi, 1\n"
+                asm += "    mov rax, 60\n"
+                asm += "    syscall\n"
+
+                asm += f"{cont_label}:\n"
+                return asm
+            end
+
+
             _ -> throw f"Unknown AST node: {node}" from "CompileError",
         end
     end
 
+    gen_asm := ""
     for a in ast:
-        asm += compile_node(a)
+        gen_asm += compile_node(a)
     end
+
+    stack_alloc := max((((*stack_size_approximate + 15) * 2) / 16) * 16, 1024)
+
+    asm +=  "    push rbp\n"
+    asm +=  "    mov rbp, rsp\n"
+    asm += f"    sub rsp, {stack_alloc}\n"
+
+    asm += gen_asm
+
+    asm += "    sub rsp, 32\n"
+    asm += "    mov rdi, 0\n"
+    asm += "    mov rax, 60\n"
+    asm += "    syscall\n"
 
     data_section := "section .data\n" +
-                    "fmt_str db \"%s\", 10, 0\n" +
-                    "fmt_int db \"%lld\", 10, 0\n"
+                    "oob_str db \"Index out of bounds\", 0\n"
 
     for ((i, s) in (*strings).enumerate()):
-        data_section += f"str_{i} db \"{s}\", 0\n"
+        asm_repr := ""
+        current_run := ""
+
+        for ch in s:
+            if (ch < ' ' or ch == 127):
+                if current_run != "":
+                    asm_repr += f"\"{current_run}\", "
+                    current_run = ""
+                end
+                asm_repr += f"{ord(ch)}, "
+            else:
+                current_run += ch
+            end
+        end
+
+        if current_run != "":
+            asm_repr += f"\"{current_run}\", "
+        end
+
+        asm_repr += "0"
+
+        data_section += f"str_{i} db {asm_repr}\n"
     end
 
-    return "extern printf\n" +
-           data_section +
+    return data_section +
            "section .text\nglobal main\nmain:\n" +
-           asm +
-           "    xor eax, eax\n" +
-           "    ret\n"
+           asm
 end
 
 fun compile(ast: list[ASTNode], platform: SupportedPlatform) -> str:
@@ -853,6 +1147,22 @@ while (steps > 0) {
     end
 
     print(f"{info_str} Detected platform: {platform}")
+
+    // if !subprocess.run("nasm --version"):
+    //     match (platform):
+    //         SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'nasm' is not installed."),
+    //         SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'nasm' is not installed or not in PATH. Download from https://www.nasm.us/ and follow installation instructions."),
+    //     end
+    //     return
+    // end
+
+    // if !subprocess.run("gcc --version"):
+    //     match (platform):
+    //         SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'gcc' is not installed."),
+    //         SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'gcc' is not installed or not in PATH. Install MinGW-w64 from https://mingw-w64.org/doku.php and follow installation instructions."),
+    //     end
+    //     return
+    // end
 
     try:
         tokens := tokenize(input)

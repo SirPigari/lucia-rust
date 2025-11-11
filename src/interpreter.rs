@@ -6040,8 +6040,12 @@ impl Interpreter {
                     return self.err.take().map_or(NULL, |_| NULL);
                 }
     
-                let err = self.err.take().unwrap();
+                let mut err = self.err.take().unwrap();
                 self.err = None;
+
+                while err.ref_err.is_some() {
+                    err = *err.ref_err.unwrap();
+                }
     
                 match exception_vars.len() {
                     1 => {
