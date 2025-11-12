@@ -527,14 +527,30 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
 
                 inner += "    mov rbx, rax\n"
 
+                all_zero := true
                 for ((i, elem) in elements.enumerate()):
-                    inner += "    push rsi\n"
-                    inner += compile_node(elem)
-                    inner += "    pop rsi\n"
-                    inner += f"    mov [rsi + {8*i}], rax\n"
+                    match (elem):
+                        ASTNode.Number(n) if n == "0" -> end
+                        _ -> all_zero = false,
+                    end
                 end
 
-                inner += "    mov rax, rbx\n"
+                if (all_zero):
+                    inner += "    lea rdi, [rax + 8]    ; zero-initialized array\n"
+                    inner += f"    mov rcx, {count}\n"
+                    inner += "    xor rax, rax\n"
+                    inner += "    rep stosq\n"
+                    inner += "    mov rax, rbx\n"
+                else:
+                    for ((i, elem) in elements.enumerate()):
+                        inner += "    push rsi\n"
+                        inner += compile_node(elem)
+                        inner += "    pop rsi\n"
+                        inner += f"    mov [rsi + {8*i}], rax\n"
+                    end
+
+                    inner += "    mov rax, rbx\n"
+                end
                 return inner
             end
             ASTNode.IndexAccess(array_expr, index_expr) ->
@@ -578,7 +594,6 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                 asm += f"{cont_label}:\n"
                 return asm
             end
-
             ASTNode.IndexWrite(array_expr, index_expr, value_expr) ->
                 oob_label := gen_label()
                 cont_label := gen_label()
@@ -590,7 +605,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                     ASTNode.Variable(name) ->
                         offset2 = get_var_offset(name)
                         array_is_var = true
-                        asm += f"    mov r9, [rbp - {offset2}]    ; var {name} @ rbp - {offset2}\n"
+                        asm += f"    mov r9, [rbp - {offset2}]     ; var {name} @ rbp - {offset2}\n"
                     end
                     _ ->
                         asm += compile_node(array_expr)
@@ -636,8 +651,6 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                 asm += f"{cont_label}:\n"
                 return asm
             end
-
-
             _ -> throw f"Unknown AST node: {node}" from "CompileError",
         end
     end
@@ -913,15 +926,26 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                 inner += "    lea rsi, [rax + 8]\n"
 
                 inner += "    mov rbx, rax\n"
-
+                all_zero := true
                 for ((i, elem) in elements.enumerate()):
-                    inner += "    push rsi\n"
-                    inner += compile_node(elem)
-                    inner += "    pop rsi\n"
-                    inner += f"    mov [rsi + {8*i}], rax\n"
+                    match (elem):
+                        ASTNode.Number(n) if n == "0" -> end
+                        _ -> all_zero = false,
+                    end
                 end
 
-                inner += "    mov rax, rbx\n"
+                if (all_zero):
+                    inner += "    mov rax, rbx           ; zero-initialized array\n"
+                else:
+                    for ((i, elem) in elements.enumerate()):
+                        inner += "    push rsi\n"
+                        inner += compile_node(elem)
+                        inner += "    pop rsi\n"
+                        inner += f"    mov [rsi + {8*i}], rax\n"
+                    end
+
+                    inner += "    mov rax, rbx\n"
+                end
                 return inner
             end
             ASTNode.IndexAccess(array_expr, index_expr) ->
@@ -978,7 +1002,7 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                     ASTNode.Variable(name) ->
                         offset2 = get_var_offset(name)
                         array_is_var = true
-                        asm += f"    mov r9, [rbp - {offset2}]    ; var {name} @ rbp - {offset2}\n"
+                        asm += f"    mov r9, [rbp - {offset2}]     ; var {name} @ rbp - {offset2}\n"
                     end
                     _ ->
                         asm += compile_node(array_expr)
@@ -1099,7 +1123,7 @@ fun main() -> void:
 
 let steps = 100
 let cells = [0; 100]
-cells[98] = 1  // start at -2
+cells[99] = 1  // start at -1
 
 while (steps > 0) {
     let i = 0
@@ -1141,28 +1165,28 @@ while (steps > 0) {
         ("Linux", "x86_64"): SupportedPlatform.Linux_x86_64,
         ("Windows", "x86_64"): SupportedPlatform.Windows_x86_64,
         _ -> 
-            print(f"{error_str} Unsupported platform: {os_name()} {os_arch()}")
+            print(f"{error_str} Sorry, unsupported platform: {os_name()} {os_arch()}")
             return 1
         end
     end
 
     print(f"{info_str} Detected platform: {platform}")
 
-    // if !subprocess.run("nasm --version"):
-    //     match (platform):
-    //         SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'nasm' is not installed."),
-    //         SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'nasm' is not installed or not in PATH. Download from https://www.nasm.us/ and follow installation instructions."),
-    //     end
-    //     return
-    // end
+    if !subprocess.popen(["nasm", "--version"], capture_output=true).runned():
+        match (platform):
+            SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'nasm' is not installed."),
+            SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'nasm' is not installed or not in PATH. Download from https://www.nasm.us/ and follow installation instructions."),
+        end
+        return
+    end
 
-    // if !subprocess.run("gcc --version"):
-    //     match (platform):
-    //         SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'gcc' is not installed."),
-    //         SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'gcc' is not installed or not in PATH. Install MinGW-w64 from https://mingw-w64.org/doku.php and follow installation instructions."),
-    //     end
-    //     return
-    // end
+    if !subprocess.popen(["gcc", "--version"], capture_output=true).runned():
+        match (platform):
+            SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'gcc' is not installed."),
+            SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'gcc' is not installed or not in PATH. Install MinGW-w64 from https://www.mingw-w64.org/downloads/ and follow installation instructions."),
+        end
+        return
+    end
 
     try:
         tokens := tokenize(input)

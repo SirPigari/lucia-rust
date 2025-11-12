@@ -1,8 +1,7 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type};
+use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type, timsort_by};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
-use crate::env::runtime::precompile::interpret;
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
@@ -1249,12 +1248,9 @@ impl Variable {
                             move |args| {
                                 let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
 
-                                let function = match args.get("f") {
-                                    Some(Value::Function(func)) => func.clone(),
-                                    Some(Value::Null) | None => match interpret("k => k") {
-                                        Ok(Value::Function(f)) => f,
-                                        _ => return Value::Error("RuntimeError", "Failed to create identity function", None),
-                                    },
+                                let function: Option<_> = match args.get("f") {
+                                    Some(Value::Function(func)) => Some(func.clone()),
+                                    Some(Value::Null) | None => None,
                                     _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
                                 };
 
@@ -1265,25 +1261,29 @@ impl Variable {
 
                                 let mut keys = Vec::with_capacity(items.len());
 
-                                let mut interp_guard = interpreter_arc.lock().unwrap();
-                                for item in &items {
-                                    let key_res = interp_guard.call_function(
-                                        &function,
-                                        vec![item.clone()],
-                                        std::collections::HashMap::default(),
-                                        None,
-                                    );
+                                if let Some(function) = function {
+                                    let mut interp_guard = interpreter_arc.lock().unwrap();
+                                    for item in &items {
+                                        let key_res = interp_guard.call_function(
+                                            &function,
+                                            vec![item.clone()],
+                                            std::collections::HashMap::default(),
+                                            None,
+                                        );
 
-                                    if interp_guard.err.is_some() {
-                                        return interp_guard.err.take().unwrap().to_value();
+                                        if interp_guard.err.is_some() {
+                                            return interp_guard.err.take().unwrap().to_value();
+                                        }
+
+                                        keys.push(key_res);
                                     }
-
-                                    keys.push(key_res);
+                                    drop(interp_guard);
+                                } else {
+                                    keys = items.clone();
                                 }
-                                drop(interp_guard);
 
                                 let mut indices: Vec<usize> = (0..items.len()).collect();
-                                indices.sort_by(|&i, &j| {
+                                timsort_by(&mut indices, |&i, &j| {
                                     let ord = keys[i]
                                         .partial_cmp(&keys[j])
                                         .unwrap_or(std::cmp::Ordering::Equal);
