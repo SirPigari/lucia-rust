@@ -738,8 +738,8 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
         return f"str_{id}"
     end
 
-    fun gen_label() -> str:
-        label := f"label_{*label_count}"
+    fun gen_label(name: str = "label") -> str:
+        label := f"{name}_{*label_count}"
         (*label_count) += 1
         return label
     end
@@ -949,7 +949,6 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                 return inner
             end
             ASTNode.IndexAccess(array_expr, index_expr) ->
-                oob_label := gen_label()
                 cont_label := gen_label()
 
                 asm := ""
@@ -969,30 +968,28 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
 
                 asm += "    mov rdx, [r9]\n"
                 asm += "    cmp r8, 0\n"
-                asm += f"    jl {oob_label}\n"
+                asm += f"    jl OOB\n"
                 asm += "    cmp r8, rdx\n"
-                asm += f"    jae {oob_label}\n"
+                asm += f"    jae OOB\n"
 
                 asm += "    lea rax, [r9 + 8 + r8*8]\n"
                 asm += "    mov rax, [rax]\n"
                 asm += f"    jmp {cont_label}\n"
 
-                asm += f"{oob_label}:\n"
-                asm += "    lea rsi, [rel oob_str]\n"
-                asm += "    mov rdx, 19\n"  // length of "Index out of bounds"
-                asm += "    mov rax, 1\n"
-                asm += "    mov rdi, 1\n"
-                asm += "    syscall\n"
-                asm += "    mov rdi, 1\n"
-                asm += "    mov rax, 60\n"
-                asm += "    syscall\n"
+                // asm += f"{oob_label}:\n"
+                // asm += "    lea rsi, [rel oob_str]\n"
+                // asm += "    mov rdx, 19\n"  // length of "Index out of bounds"
+                // asm += "    mov rax, 1\n"
+                // asm += "    mov rdi, 1\n"
+                // asm += "    syscall\n"
+                // asm += "    mov rdi, 1\n"
+                // asm += "    mov rax, 60\n"
+                // asm += "    syscall\n"
 
                 asm += f"{cont_label}:\n"
                 return asm
             end
-
             ASTNode.IndexWrite(array_expr, index_expr, value_expr) ->
-                oob_label := gen_label()
                 cont_label := gen_label()
 
                 asm := ""
@@ -1015,9 +1012,9 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
 
                 asm += "    mov rdx, [r9]\n"
                 asm += "    cmp r8, 0\n"
-                asm += f"    jl {oob_label}\n"
+                asm += f"    jl OOB\n"
                 asm += "    cmp r8, rdx\n"
-                asm += f"    jae {oob_label}\n"
+                asm += f"    jae OOB\n"
 
                 if (array_is_var):
                     asm += "    push r8\n"
@@ -1036,21 +1033,19 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                 asm += "    mov [rdi], rax\n"
                 asm += f"    jmp {cont_label}\n"
 
-                asm += f"{oob_label}:\n"
-                asm += "    lea rsi, [rel oob_str]\n"
-                asm += "    mov rdx, 19\n"
-                asm += "    mov rax, 1\n"
-                asm += "    mov rdi, 1\n"
-                asm += "    syscall\n"
-                asm += "    mov rdi, 1\n"
-                asm += "    mov rax, 60\n"
-                asm += "    syscall\n"
+                // asm += f"{oob_label}:\n"
+                // asm += "    lea rsi, [rel oob_str]\n"
+                // asm += "    mov rdx, 19\n"
+                // asm += "    mov rax, 1\n"
+                // asm += "    mov rdi, 1\n"
+                // asm += "    syscall\n"
+                // asm += "    mov rdi, 1\n"
+                // asm += "    mov rax, 60\n"
+                // asm += "    syscall\n"
 
                 asm += f"{cont_label}:\n"
                 return asm
             end
-
-
             _ -> throw f"Unknown AST node: {node}" from "CompileError",
         end
     end
@@ -1068,6 +1063,20 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
 
     asm += gen_asm
 
+    asm += "    jmp OOB_SKIP\n"
+    asm += f"OOB:                       ; Out Of Bounds label\n"
+    asm += "    lea rsi, [rel oob_str]\n"
+    asm += "    mov rdx, 19\n"  // length of "Index out of bounds"
+    asm += "    mov rax, 1\n"
+    asm += "    mov rdi, 1\n"
+    asm += "    syscall\n"
+    asm += "    mov rdi, 1\n"
+    asm += "    mov rax, 60\n"
+    asm += "    syscall\n"
+    asm += "OOB_SKIP:                   ; Skip OOB if not called directly\n"
+    asm += "    ; do nothing here\n\n"
+
+    asm += "    ; Exit program\n"
     asm += "    sub rsp, 32\n"
     asm += "    mov rdi, 0\n"
     asm += "    mov rax, 60\n"
@@ -1180,12 +1189,15 @@ while (steps > 0) {
         return
     end
 
-    if !subprocess.popen(["gcc", "--version"], capture_output=true).runned():
-        match (platform):
-            SupportedPlatform.Linux_x86_64 -> print(f"{error_str} 'gcc' is not installed."),
-            SupportedPlatform.Windows_x86_64 -> print(f"{error_str} 'gcc' is not installed or not in PATH. Install MinGW-w64 from https://www.mingw-w64.org/downloads/ and follow installation instructions."),
-        end
-        return
+    match (platform):
+        SupportedPlatform.Linux_x86_64 -> if !subprocess.popen(["ld", "--version"], capture_output=true).runned():
+            print(f"{error_str} 'ld' is not installed.")
+            return
+        end,
+        SupportedPlatform.Windows_x86_64 -> if !subprocess.popen(["gcc", "--version"], capture_output=true).runned():
+            print(f"{error_str} 'gcc' is not installed or not in PATH. Install MinGW-w64 from https://www.mingw-w64.org/downloads/ and follow installation instructions."),
+            return
+        end,
     end
 
     try:
@@ -1196,12 +1208,11 @@ while (steps > 0) {
         print(f"{info_str} Parsing complete, {len(ast)} AST nodes generated.")
 
         asm := compile(ast, platform)
+        print(f"{info_str} Compilation complete, generated assembly code.")
     catch (em, er):
         print(f"{error_str} {em} ({er})")
         return
     end
-    
-    print(f"{info_str} Compilation complete, generated assembly code.")
 
     // print(f"Tokens: {tokens}")
     // print(f"AST: {ast}")
@@ -1214,10 +1225,21 @@ while (steps > 0) {
         print(f"{error_str} Failed to assemble")
         return
     end
-    print(f"{cmd_str} Running gcc to link...")
-    if subprocess.run("gcc output.o -o output"):
-        print(f"{error_str} Failed to link executable")
-        return
+    match (platform):
+        SupportedPlatform.Linux_x86_64 -> 
+            print(f"{cmd_str} Running ld to link...")
+            if subprocess.run("ld -o output output.o -nostdlib -static -e main"):
+                print(f"{error_str} Failed to link executable")
+                return
+            end
+        end
+        SupportedPlatform.Windows_x86_64 -> 
+            print(f"{cmd_str} Running gcc to link...")
+            if subprocess.run("gcc output.o -o output"):
+                print(f"{error_str} Failed to link executable")
+                return
+            end
+        end
     end
     print(f"{info_str} Executable written to output")
 end

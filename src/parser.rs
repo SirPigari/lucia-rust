@@ -3735,7 +3735,9 @@ impl Parser {
                 "IDENTIFIER" if token.1 == "match" => {
                     self.next();
 
+                    self.parse_var_decl = false;
                     let condition = self.parse_expression();
+                    self.parse_var_decl = true;
                     if self.err.is_some() {
                         return Statement::Null;
                     }
@@ -3908,7 +3910,9 @@ impl Parser {
                                         } else {
                                             let mut pats = vec![];
                                             while !self.token_is("SEPARATOR", ":") {
-                                                let p = self.parse_operand(false);
+                                                self.parse_var_decl = false;
+                                                let p = self.parse_operand();
+                                                self.parse_var_decl = true;
                                                 if self.err.is_some() {
                                                     return Statement::Null;
                                                 }
@@ -4238,10 +4242,10 @@ impl Parser {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.parse_function_call()
                         } else {
-                            self.parse_operand(self.parse_var_decl)
+                            self.parse_operand()
                         }
                     } else {
-                        self.parse_operand(self.parse_var_decl)
+                        self.parse_operand()
                     }
                 }
 
@@ -4277,7 +4281,7 @@ impl Parser {
                                             loc: self.get_loc(),
                                         }
                                     } else {
-                                        let left = self.parse_operand(self.parse_var_decl);
+                                        let left = self.parse_operand();
                                         if self.err.is_some() {
                                             Statement::Null
                                         } else {
@@ -4313,10 +4317,10 @@ impl Parser {
                                         }
                                     }
                                 } else {
-                                    self.parse_operand(self.parse_var_decl)
+                                    self.parse_operand()
                                 }
                             } else {
-                                let left = self.parse_operand(self.parse_var_decl);
+                                let left = self.parse_operand();
                                 if self.err.is_some() {
                                     Statement::Null
                                 } else {
@@ -4352,15 +4356,15 @@ impl Parser {
                                 }
                             }
                         } else {
-                            self.parse_operand(self.parse_var_decl)
+                            self.parse_operand()
                         }
                     } else {
-                        self.parse_operand(self.parse_var_decl)
+                        self.parse_operand()
                     }
                 }
 
                 "STRING" | "BOOLEAN" | "RAW_STRING" => {
-                    self.parse_operand(self.parse_var_decl)
+                    self.parse_operand()
                 }
 
                 "EOF" => {
@@ -5081,7 +5085,7 @@ impl Parser {
         base_stmt
     }
 
-    fn parse_variable(&mut self, parse_variable_decl: bool) -> Statement {
+    fn parse_variable(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
         let loc = self.get_loc();
 
@@ -5092,7 +5096,7 @@ impl Parser {
                 return Statement::Null;
             }
             self.next();
-            if self.token_is("SEPARATOR", ":") && parse_variable_decl {
+            if self.token_is("SEPARATOR", ":") && self.parse_var_decl {
                 self.next();
                 let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
                 if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR" || (type_token.0 == "SEPARATOR" && ["(", "<", "["].contains(&type_token.1.as_str()))) {
@@ -5131,7 +5135,7 @@ impl Parser {
                     ],
                     loc
                 };
-            } else if self.token_is("OPERATOR", ":=") && parse_variable_decl {
+            } else if self.token_is("OPERATOR", ":=") && self.parse_var_decl {
                 let name = token.1.clone();
                 self.next();
                 let type_ = Statement::Statement {
@@ -5194,7 +5198,7 @@ impl Parser {
         Statement::Null
     }
 
-    fn parse_operand(&mut self, parse_variable_decl: bool) -> Statement {
+    fn parse_operand(&mut self) -> Statement {
         let token = self.token().cloned().unwrap_or_else(|| DEFAULT_TOKEN.clone());
         let loc = self.get_loc();
         let token_type = token.0.clone();
@@ -5346,7 +5350,7 @@ impl Parser {
             if next_token_type == "SEPARATOR" && next_token_value == "(" {
                 return self.parse_function_call();
             }
-            return self.parse_variable(parse_variable_decl);
+            return self.parse_variable();
         }
     
         if token_type == "BOOLEAN" {

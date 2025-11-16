@@ -15,7 +15,8 @@ use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use std::path::PathBuf;
 use std::panic::Location as PanicLocation;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
+use rustc_hash::FxHashSet as HashSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValueType {
@@ -212,9 +213,9 @@ impl Checker {
             return_value: Value::Null,
             state: CheckerState {
                 defined_vars: HashMap::new(),
-                used_vars: HashSet::new(),
-                assigned_vars: HashSet::new(),
-                loop_vars: HashSet::new(),
+                used_vars: HashSet::default(),
+                assigned_vars: HashSet::default(),
+                loop_vars: HashSet::default(),
             },
             code_state: State::Normal,
             file_path,
@@ -888,7 +889,7 @@ impl Checker {
             return var.value_type.clone();
         } else {
             let mut candidates: Vec<(String, Type, Statement)> = vec![];
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = HashSet::default();
 
             for (k, v) in &self.state.defined_vars {
                 if k == "_" { continue; }

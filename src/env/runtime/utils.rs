@@ -61,6 +61,7 @@ pub fn supports_color() -> bool {
         let handle = GetStdHandle(STD_OUTPUT_HANDLE);
         if handle == null_mut() || handle == INVALID_HANDLE_VALUE {
             return false;
+            return false;
         }
 
         let file_type = GetFileType(handle);
@@ -70,7 +71,6 @@ pub fn supports_color() -> bool {
 
         let mut mode: DWORD = 0;
         if GetConsoleMode(handle, &mut mode as *mut DWORD) == 0 {
-            return false;
         }
 
         (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
@@ -344,15 +344,6 @@ pub fn print_colored(message: &str, color: &str, use_colors: bool) {
     println!("{}", colored_message);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn read_input(prompt: &str) -> String {
-    print!("{}", prompt);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input.trim().to_string()
-}
-
 pub fn format_value(value: &Value) -> String {
     match value {
         Value::Float(n) => format_float(&n),
@@ -511,7 +502,6 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
             serde_json::from_str::<String>(s)
                 .map_err(|e| format!("Failed to unescape string: {}", e))
         } else {
-            // Handle single-quoted strings manually
             let mut out = String::new();
             let mut chars = inner.chars().peekable();
 
@@ -599,7 +589,6 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
             continue;
         }
 
-        // We have a backslash
         let next_c = chars.next().ok_or("Trailing backslash in string literal")?;
         match next_c {
             '\\' => result.push('\\'),
@@ -614,7 +603,6 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
             'f' => result.push('\x0c'),
             'v' => result.push('\x0b'),
             'x' => {
-                // Hex escape \xNN
                 let hex: String = chars.by_ref().take(2).collect();
                 if hex.len() != 2 { return Err(format!("Invalid hex escape: \\x{}", hex)); }
                 let val = u8::from_str_radix(&hex, 16)
@@ -622,7 +610,6 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
                 result.push(val as char);
             }
             'u' => {
-                // Unicode escape \uNNNN
                 let hex: String = chars.by_ref().take(4).collect();
                 if hex.len() != 4 { return Err(format!("Invalid unicode escape: \\u{}", hex)); }
                 let val = u32::from_str_radix(&hex, 16)
@@ -630,7 +617,6 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
                 result.push(std::char::from_u32(val).ok_or("Invalid unicode codepoint")?);
             }
             'U' => {
-                // Unicode escape \UNNNNNNNN
                 let hex: String = chars.by_ref().take(8).collect();
                 if hex.len() != 8 { return Err(format!("Invalid unicode escape: \\U{}", hex)); }
                 let val = u32::from_str_radix(&hex, 16)
@@ -638,7 +624,6 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
                 result.push(std::char::from_u32(val).ok_or("Invalid unicode codepoint")?);
             }
             '0'..='7' => {
-                // Octal escape \NNN (up to 3 digits)
                 let mut oct = next_c.to_string();
                 for _ in 0..2 {
                     if let Some(&next_digit) = chars.peek() {

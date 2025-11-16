@@ -35,6 +35,7 @@ mod env {
         pub mod cache;
         pub mod fmt;
         pub mod static_checker;
+        pub mod repl;
     }
     pub mod libs {
         #[cfg(feature = "math")]
@@ -115,7 +116,8 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme, TypeCheckerConfig, Libs};
-use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, read_input, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys};
+use crate::env::runtime::repl::read_input;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
@@ -866,6 +868,7 @@ fn lucia(
     project_env_path: Option<PathBuf>,
     static_check_args: (bool, bool, bool),
     create_lcx: bool,
+    cache_dir: PathBuf,
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
 
@@ -902,7 +905,7 @@ fn lucia(
         };
 
         std_env::set_current_dir(&cwd).ok();
-    repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
+    repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, cache_dir);
     }
 }
 
@@ -1444,7 +1447,8 @@ fn repl(
     dump_ast_flag: &bool,
     timer_flag: bool,
     project_env_path: Option<&PathBuf>,
-    static_check_args: (bool, bool, bool)
+    static_check_args: (bool, bool, bool),
+    cache_dir: PathBuf,
 ) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
@@ -1531,17 +1535,32 @@ fn repl(
         hex_to_ansi("reset", config.supports_color)
     );
 
+    let multiline_prompt = format!(
+        "{}{}{} ",
+        hex_to_ansi(&config.color_scheme.debug, config.supports_color),
+        "...",
+        hex_to_ansi("reset", config.supports_color)
+    );
+
+    let mut history: Vec<String> = Vec::new();
+    let mut completions: Vec<String>;
+    let history_path = cache_dir.join("repl.history");
+    
     loop {
         line_number += 1;
 
-        let mut input = read_input(&prompt);
+        completions = interpreter.get_repl_completions();
+
+        let mut input = read_input(&prompt, &multiline_prompt, &mut history, &completions, &history_path);
         if input.is_empty() {
             continue;
         }
+        
 
         if input.starts_with(':') {
             let new_input = match &*input {
-                ":exit" | ":quit" | ":q" | ":q!" => Some("exit()".into()),
+                ":exit" | ":quit" | ":q" => Some("exit()".into()),
+                ":q!" | ":Q" => std::process::exit(0),
                 ":clear" | ":cls" => {
                     if let Err(_) = clear_terminal() {
                         handle_error(
@@ -1566,12 +1585,27 @@ fn repl(
                     );
                     Some("help()".into())
                 }
+                ":clear-history" | ":clearhistory" | ":ch" => {
+                    history.clear();
+                    if let Err(e) = fs::remove_file(&history_path) {
+                        handle_error(
+                            &Error::new("IOError", &format!("Failed to clear history: {}", e), "<stdin>"),
+                            &input,
+                            &config,
+                        );
+                    } else {
+                        println!("{}", "REPL history cleared.".bold().green());
+                    }
+                    None
+                }
                 ":macro-help" | "::" => {
                     let macros = vec![
                         (":exit", "Exit the REPL"),
                         (":clear / :cls", "Clear the terminal screen"),
                         (":help / :?", "Show general help"),
-                        (":macro-help", "Show this help message for REPL macros"),
+                        (":macro-help / ::", "Show this help message for REPL macros"),
+                        (":clear-history / :ch", "Clear the REPL command history"),
+                        (":traceback / :t", "Show the last error traceback information"),
                     ];
 
                     let max_len = macros.iter().map(|(m, _)| m.len()).max().unwrap_or(0);
@@ -1588,7 +1622,7 @@ fn repl(
                     }
                     None
                 }
-                ":trace" | ":traceback" => {
+                ":trace" | ":traceback" | ":t" => {
                     println!("{}", "Traceback:".bold().underline().cyan());
                     if interpreter.get_traceback().is_empty() {
                         println!(" - No traceback available.");
@@ -2807,6 +2841,7 @@ fn main() {
     let handle_creation_time_start = Instant::now();
     let config_debug_color = config.color_scheme.debug.clone();
     let config_supports_color = config.supports_color;
+    let cache_dir = home_dir_path.join(".cache"); // replace with actual cache path
     let handle = thread::Builder::new()
         .stack_size(stack_size_lucia)
         .name(format!("Lucia-{}", VERSION))
@@ -2826,7 +2861,8 @@ fn main() {
                 command_to_run,
                 if use_project_env { Some(project_env_path) } else { None },
                 static_check_args,
-                create_lcx
+                create_lcx,
+                cache_dir,
             );
         })
         .unwrap();

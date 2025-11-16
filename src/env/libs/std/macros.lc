@@ -75,6 +75,16 @@
     return lst.sort(reverse=$reverse, f=$f)
 #endmacro
 
+#macro mod!{$code}:
+    import fs as _fs
+    module_code: str = $!code
+    tmp_file := _fs.temp_file()
+    _fs.write_file(tmp_file, module_code)
+    mod := module(tmp_file)
+    _fs.delete_file(tmp_file)
+    return mod
+#endmacro
+
 // return null
 null
 

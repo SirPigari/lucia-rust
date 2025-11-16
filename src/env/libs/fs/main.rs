@@ -114,6 +114,43 @@ fn fix_path_handler(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+fn temp_file() -> Result<String, String> {
+    let mut temp_dir = std_env::temp_dir();
+    let id = rand::random::<u64>();
+    let file_name = format!("tempfile_{}.tmp", id);
+    temp_dir.push(file_name);
+    let path_str = temp_dir.to_string_lossy().to_string();
+    match File::create(&temp_dir) {
+        Ok(_) => Ok(path_str),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn temp_dir() -> Result<String, String> {
+    let temp_dir = std_env::temp_dir();
+    if !temp_dir.exists() {
+        match fs::create_dir(&temp_dir) {
+            Err(e) => return Err(e.to_string()),
+            _ => {},
+        }
+    }
+    Ok(temp_dir.to_string_lossy().to_string())
+}
+
+fn temp_file_handler(_: &HashMap<String, Value>) -> Value {
+    match temp_file() {
+        Ok(path) => Value::String(path),
+        Err(e) => Value::Error("IOError", to_static(e), None),
+    }
+}
+
+fn temp_dir_handler(_: &HashMap<String, Value>) -> Value {
+    match temp_dir() {
+        Ok(path) => Value::String(path),
+        Err(e) => Value::Error("IOError", to_static(e), None),
+    }
+}
+
 fn basename_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         if let Some(name) = Path::new(path).file_name() {
@@ -545,6 +582,23 @@ pub fn register() -> HashMap<String, Variable> {
         vec![],
         "str",
         EffectFlags::PURE
+    );
+    insert_native_fn!(
+        map,
+        "temp_file",
+        temp_file_handler,
+        vec![],
+        "str",
+        EffectFlags::IO
+    );
+
+    insert_native_fn!(
+        map,
+        "temp_dir",
+        temp_dir_handler,
+        vec![],
+        "str",
+        EffectFlags::IO
     );
 
     map

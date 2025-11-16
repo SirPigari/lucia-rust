@@ -262,6 +262,15 @@ impl Interpreter {
         &self.cache
     }
 
+    pub fn get_repl_completions(&self) -> Vec<String> {
+        let mut owned_keys: Vec<String> = self.variables.keys().cloned().collect();
+        owned_keys.extend(STD_LIBS.keys());
+        owned_keys = owned_keys.into_iter().filter(|k| !k.starts_with("00__")).collect();
+        owned_keys.sort();
+        owned_keys.dedup();
+        owned_keys
+    }
+
     fn check_type_validity(&self, type_str: &str) -> bool {
         let trimmed = type_str.trim_start_matches('&').trim_start_matches('?');
         if let Some(t) = self.variables.get(trimmed) {

@@ -327,6 +327,14 @@ impl LibRegistry {
             *inner = new_libs;
         }
     }
+
+    pub fn keys(&self) -> Vec<String> {
+        if let Ok(inner) = self.inner.read() {
+            inner.keys().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
