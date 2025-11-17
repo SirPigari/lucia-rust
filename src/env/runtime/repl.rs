@@ -16,10 +16,12 @@ use nu_ansi_term::Style;
 use crate::env::runtime::utils::{KEYWORDS, supports_color};
 use crate::env::runtime::types::VALID_TYPES;
 
-const COLOR_KEYWORD_RGB: (u8, u8, u8) = (197, 134, 192);
-const COLOR_TYPE_RGB: (u8, u8, u8)    = (86, 156, 214);
-const COLOR_STRING_RGB: (u8, u8, u8)  = (106, 153, 85);
-const COLOR_NUMBER_RGB: (u8, u8, u8)  = (156, 220, 254);
+const COLOR_KEYWORD_RGB: (u8, u8, u8)       = (197, 134, 192);
+const COLOR_TYPE_RGB: (u8, u8, u8)          = (86 , 156, 214);
+const COLOR_STRING_RGB: (u8, u8, u8)        = (206, 145, 120);
+const COLOR_COMMENTS_RGB: (u8, u8, u8)      = (106, 153, 85 );
+const COLOR_NUMBER_RGB: (u8, u8, u8)        = (156, 220, 254);
+const COLOR_PREPROCESSOR_RGB: (u8, u8, u8)  = (245, 176, 239);
 
 const COLOR_RESET_ANSI: &str          = "\x1b[0m";
 
@@ -102,40 +104,57 @@ pub struct ReplValidator;
 impl Validator for ReplValidator {
     fn validate(&self, input: &str) -> ValidationResult {
         let trimmed = input.trim_end();
-        if trimmed.ends_with('\\') || trimmed.ends_with(':') {
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with(':') {
+            return ValidationResult::Complete;
+        }
+
+        if trimmed.ends_with('\\') || trimmed.ends_with(':') || trimmed.ends_with("/*") {
             return ValidationResult::Incomplete;
         }
 
         let mut single_quotes = 0;
         let mut double_quotes = 0;
         let mut escaped = false;
-
-        for ch in trimmed.chars() {
-            match ch {
-                '\\' if !escaped       => escaped = true,
-                '\'' if !escaped       => single_quotes += 1,
-                '"'  if !escaped       => double_quotes += 1,
-                _                      => escaped = false,
-            }
-        }
-        if single_quotes % 2 != 0 || double_quotes % 2 != 0 {
-            return ValidationResult::Incomplete;
-        }
-
-        let mut parens   = 0;
+        let mut parens = 0;
         let mut brackets = 0;
-        let mut braces   = 0;
+        let mut braces = 0;
+        let mut in_multiline_comment = false;
 
-        for ch in trimmed.chars() {
-            match ch {
-                '(' => parens += 1,
-                ')' => parens -= 1,
-                '[' => brackets += 1,
-                ']' => brackets -= 1,
-                '{' => braces += 1,
-                '}' => braces -= 1,
-                _   => {}
+        let mut chars = trimmed.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if in_multiline_comment {
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    in_multiline_comment = false;
+                }
+                continue;
+            } else if ch == '/' && chars.peek() == Some(&'*') {
+                chars.next();
+                in_multiline_comment = true;
+                continue;
             }
+
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => escaped = true,
+                '\'' => single_quotes += 1,
+                '"'  => double_quotes += 1,
+                '('  => parens += 1,
+                ')'  => parens -= 1,
+                '['  => brackets += 1,
+                ']'  => brackets -= 1,
+                '{'  => braces += 1,
+                '}'  => braces -= 1,
+                _    => {}
+            }
+        }
+
+        if in_multiline_comment || single_quotes % 2 != 0 || double_quotes % 2 != 0 {
+            return ValidationResult::Incomplete;
         }
 
         if parens > 0 || brackets > 0 || braces > 0 {
@@ -154,17 +173,107 @@ impl Highlighter for ReplHighlighter {
         let mut word = String::new();
         let mut in_str = false;
         let mut quote = '\0';
+        let mut in_multiline_comment = false;
+        let mut chars = line.chars().peekable();
 
-        for ch in line.chars() {
+        while let Some(ch) = chars.next() {
+            if in_multiline_comment {
+                word.push(ch);
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    word.push(chars.next().unwrap());
+                    let (r, g, b) = COLOR_COMMENTS_RGB;
+                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                    styled.push((s, word.clone()));
+                    word.clear();
+                    in_multiline_comment = false;
+                }
+                continue;
+            }
+
             if in_str {
                 word.push(ch);
                 if ch == quote {
-                    let (r,g,b) = COLOR_STRING_RGB;
-                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r,g,b));
+                    let (r, g, b) = COLOR_STRING_RGB;
+                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
                     styled.push((s, word.clone()));
                     word.clear();
                     in_str = false;
                 }
+                continue;
+            }
+
+            if ch == '#' {
+                if !word.is_empty() {
+                    push_highlighted_word(&mut styled, &word);
+                    word.clear();
+                }
+
+                word.push('#');
+
+                while let Some(ch) = chars.peek() {
+                    if !(ch.is_ascii_alphanumeric() || *ch == '-') {
+                        break;
+                    }
+                    word.push(chars.next().unwrap());
+                }
+                let (r,g,b) = COLOR_PREPROCESSOR_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r,g,b));
+                styled.push((s, word.clone()));
+                word.clear();
+                continue;
+            }
+
+            if ch == '/' && chars.peek() == Some(&'/') {
+                if !word.is_empty() {
+                    push_highlighted_word(&mut styled, &word);
+                    word.clear();
+                }
+                word.push_str("//");
+                chars.next();
+
+                while let Some(&c) = chars.peek() {
+                    word.push(chars.next().unwrap());
+                    if c == '\n' || c == '\r' {
+                        break;
+                    }
+                }
+
+                let (r, g, b) = COLOR_COMMENTS_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, word.clone()));
+                word.clear();
+                continue;
+            }
+
+            if ch == '/' && chars.peek() == Some(&'*') {
+                if !word.is_empty() {
+                    push_highlighted_word(&mut styled, &word);
+                    word.clear();
+                }
+                chars.next();
+                word.push_str("/*");
+                in_multiline_comment = true;
+                continue;
+            }
+
+            if ch == '<' && chars.peek() == Some(&'#') {
+                if !word.is_empty() {
+                    push_highlighted_word(&mut styled, &word);
+                    word.clear();
+                }
+                chars.next();
+                word.push_str("<#");
+                while let Some(c) = chars.next() {
+                    word.push(c);
+                    if c == '#' && chars.peek() == Some(&'>') {
+                        word.push(chars.next().unwrap());
+                        break;
+                    }
+                }
+                let (r, g, b) = COLOR_COMMENTS_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, word.clone()));
+                word.clear();
                 continue;
             }
 
@@ -191,7 +300,17 @@ impl Highlighter for ReplHighlighter {
         }
 
         if !word.is_empty() {
-            push_highlighted_word(&mut styled, &word);
+            let (r, g, b) = if in_str || in_multiline_comment { 
+                if in_str { COLOR_STRING_RGB } else { COLOR_COMMENTS_RGB } 
+            } else { 
+                (0, 0, 0)
+            };
+            if in_str || in_multiline_comment {
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, word));
+            } else {
+                push_highlighted_word(&mut styled, &word);
+            }
         }
 
         styled

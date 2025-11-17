@@ -115,12 +115,12 @@ mutable initialized_h: &bool = &false
 
 h: Lazy[int] = Lazy.new(() => (\
     *initialized_h = true
-    return 42
+    return 34 + 35
 \))
 
 assert!(!*initialized_h, "h should not be initialized yet")
-assert_eq!(h, 42)
+assert_eq!(h, 69)
 assert!(*initialized_h, "h should be initialized after access")
 (*initialized_h) = false
-assert_eq!(h, 42)
+assert_eq!(h, 69)
 assert!(!*initialized_h, "h should not re-initialize on second access")
