@@ -21,6 +21,8 @@ const COLOR_TYPE_RGB: (u8, u8, u8)    = (86, 156, 214);
 const COLOR_STRING_RGB: (u8, u8, u8)  = (106, 153, 85);
 const COLOR_NUMBER_RGB: (u8, u8, u8)  = (156, 220, 254);
 
+const COLOR_RESET_ANSI: &str          = "\x1b[0m";
+
 pub struct ReplCompleter {
     pub completions: Vec<String>,
 }
@@ -209,7 +211,7 @@ impl ReplPrompt {
 
 impl Prompt for ReplPrompt {
     fn render_prompt_left(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Owned(self.left.clone())
+        std::borrow::Cow::Owned(format!("{}{}{}", COLOR_RESET_ANSI, self.left, COLOR_RESET_ANSI))
     }
 
     fn render_prompt_right(&self) -> std::borrow::Cow<'_, str> {
@@ -221,7 +223,7 @@ impl Prompt for ReplPrompt {
     }
 
     fn render_prompt_multiline_indicator(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Owned(self.multiline.clone())
+        std::borrow::Cow::Owned(format!("{}{}{}", COLOR_RESET_ANSI, self.multiline, COLOR_RESET_ANSI))
     }
 
     fn render_prompt_history_search_indicator(
@@ -356,3 +358,4 @@ pub fn read_input(
     history.push(input.clone());
     input
 }
+

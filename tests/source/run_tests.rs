@@ -116,7 +116,8 @@ fn main() {
                 .arg(&path)
                 .arg("-q")
                 .arg("--no-color")
-                .arg("--stack-size=4194304") // 4MB stack size
+                .arg("--stack-size")
+                .arg("4194304") // 4MB stack size
                 .output();
 
             let mut test_stdout_file = stdout_dir.as_ref().and_then(|dir| {

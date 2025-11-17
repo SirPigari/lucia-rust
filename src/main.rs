@@ -1142,7 +1142,6 @@ fn execute_file(
             );
         }
 
-        // Static checker logic
         let (static_check_flag, run_flag, static_check_flag_force_run) = effective_static_check_args;
         let mut can_run = true;
         if static_check_flag {
@@ -1373,7 +1372,6 @@ fn execute_code_string(
         );
     }
 
-    // Static checker logic
     let (static_check_flag, run_flag, static_check_flag_force_run) = static_check_args;
     let mut can_run = true;
     if static_check_flag {
@@ -2094,6 +2092,7 @@ fn main() {
     let mut create_lcx = false;
     let mut allow_unsafe = false;
     let mut debug_mode_flag = false;
+    let mut debug_mode_value: Option<String> = None;
     let mut stack_size: (usize, bool) = (16_777_216, false);
     let mut dump_dir: (String, bool) = (".".to_string(), false);
     let mut cache: (CacheFormat, bool) = (CacheFormat::NoCache, false);
@@ -2118,25 +2117,75 @@ fn main() {
         additional_args = load_project_flags(&project_env_path);
     }
 
-    let mut processed_args = Vec::new();
-    let mut i = 0;
-    while i < vec_args.len() {
-        let arg = &vec_args[i];
-        if arg.starts_with("-c=") {
-            command_to_run = Some(arg[3..].to_string());
-        } else if arg.starts_with("--code=") {
-            command_to_run = Some(arg[7..].to_string());
-        } else {
-            processed_args.push(vec_args[i].clone());
+    let mut left_args: Vec<String> = Vec::new();
+    let mut right_argv: Vec<String> = Vec::new();
+    let mut seen_sep = false;
+    for a in vec_args.iter() {
+        if a == "--" {
+            seen_sep = true;
+            continue;
         }
-        i += 1;
+        if seen_sep {
+            right_argv.push(a.clone());
+        } else {
+            left_args.push(a.clone());
+        }
     }
 
-    let mut all_args = processed_args;
-    all_args.extend(additional_args);
+    if let Ok(current_exe) = std_env::current_exe().and_then(|p| p.canonicalize()) {
+        left_args.retain(|tok| {
+            if tok.starts_with('-') {
+                return true;
+            }
+
+            if let Ok(tok_path) = PathBuf::from(tok).canonicalize() {
+                if tok_path == current_exe {
+                    return false;
+                }
+            }
+
+            if let Some(fname) = current_exe.file_name().and_then(|s| s.to_str()) {
+                if tok == fname {
+                    return false;
+                }
+            }
+
+            true
+        });
+    }
+
+    let mut dash_file: Option<String> = None;
+    if let Some(pos) = left_args.iter().position(|s| s == "-") {
+        if pos + 1 >= left_args.len() {
+            eprintln!("'-' requires a file argument after it");
+            exit(1);
+        }
+        dash_file = Some(left_args[pos + 1].clone());
+        let mut new_right: Vec<String> = Vec::new();
+        for j in (pos + 2)..left_args.len() {
+            new_right.push(left_args[j].clone());
+        }
+        new_right.extend(right_argv.into_iter());
+        right_argv = new_right;
+        left_args.truncate(pos);
+    }
+
+    let mut normalized_additional_args: Vec<String> = Vec::new();
+    for a in additional_args.iter() {
+        if let Some(eq) = a.find('=') {
+            normalized_additional_args.push(a[..eq].to_string());
+            normalized_additional_args.push(a[eq + 1..].to_string());
+        } else {
+            normalized_additional_args.push(a.clone());
+        }
+    }
+
+    let mut all_args = left_args.clone();
+    all_args.extend(normalized_additional_args.clone());
     let args: HashSet<String> = all_args.into_iter().collect();
 
-    let (primary_config_path, primary_libs_path) = if use_project_env && !vec_args.iter().any(|arg| arg.starts_with("--config=")) {
+    let has_explicit_config = vec_args.iter().any(|arg| arg == "--config" || arg.starts_with("--config="));
+    let (primary_config_path, primary_libs_path) = if use_project_env && !has_explicit_config {
         (project_env_path.join("config.json"), project_env_path.join("libs.json"))
     } else {
         (config_path.clone(), libs_path.clone())
@@ -2242,48 +2291,51 @@ fn main() {
         exit(0);
     }
 
-    let mut arg_pos = 0;
-    if !vec_args.is_empty() {
-        if let Ok(first_arg_path) = PathBuf::from(&vec_args[0]).canonicalize() {
-            if let Ok(current_exe_path) = std_env::current_exe().and_then(|p| p.canonicalize()) {
-                if first_arg_path == current_exe_path {
-                    arg_pos += 1;
-                }
-            }
-        }
+    let mut file_args: Vec<String> = Vec::new();
+    if !left_args.is_empty() && !left_args[0].starts_with('-') {
+        file_args.push(left_args.remove(0));
     }
-    let mut file_args = Vec::new();
-    while arg_pos < vec_args.len() {
-        let arg = &vec_args[arg_pos];
-        arg_pos += 1;
+
+    let mut i = 0;
+    while i < left_args.len() {
+        let arg = &left_args[i];
         match arg.as_str() {
-            "--check" | "-u" => static_check_flag = true,
+            "--check" | "-u" => { static_check_flag = true; }
             "-wf" => { static_check_flag = true; static_check_flag_force_run = true; }
             "-wa" => { static_check_flag = true; static_check_flag_auto_fix = true; }
             "-w" => { static_check_flag = true; static_check_flag_auto_fix = true; }
-            "--run" | "-r" => run_flag = true,
-            "--activate" | "-a" => activate_flag = true,
-            "--no-color" => no_color_flag = true,
-            "--color" => no_color_flag = false,
-            "--quiet" | "-q" => quiet_flag = true,
-            "--debug" | "-d" => debug_flag = true,
-            "--exit" | "-e" => exit_flag = true,
-            "--help" | "-h" => help_flag = true,
-            "--version" | "-v" => version_flag = true,
-            "--disable-preprocessor" | "-dp" => disable_preprocessor = true,
-            "--dump-pp" => dump_pp_flag = true,
-            "--dump-ast" => dump_ast_flag = true,
+            "--run" | "-r" => { run_flag = true; }
+            "--activate" | "-a" => { activate_flag = true; }
+            "--no-color" => { no_color_flag = true; }
+            "--color" => { no_color_flag = false; }
+            "--quiet" | "-q" => { quiet_flag = true; }
+            "--debug" | "-d" => { debug_flag = true; }
+            "--exit" | "-e" => { exit_flag = true; }
+            "--help" | "-h" => { help_flag = true; }
+            "--version" | "-v" => { version_flag = true; }
+            "--disable-preprocessor" | "-dp" => { disable_preprocessor = true; }
+            "--dump-pp" => { dump_pp_flag = true; }
+            "--dump-ast" => { dump_ast_flag = true; }
             "--dump" => { dump_pp_flag = true; dump_ast_flag = true; }
-            "--allow-unsafe" => allow_unsafe = true,
-            "--timer" | "-t" => timer_flag = true,
-            "-x" => create_lcx = true,
-            "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => cls_cache_flag = true,
-            "--no-project-env" => _no_project_env_flag = true,
-            arg if arg.starts_with("--stack-size=") => {
-                if let Ok(size) = arg["--stack-size=".len()..].parse::<usize>() {
-                    stack_size = (size, true);
+            "--allow-unsafe" => { allow_unsafe = true; }
+            "--timer" | "-t" => { timer_flag = true; }
+            "-x" => { create_lcx = true; }
+            "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => { cls_cache_flag = true; }
+            "--no-project-env" => { _no_project_env_flag = true; }
+            "--stack-size" => {
+                if i + 1 < left_args.len() {
+                    if let Ok(size) = left_args[i + 1].parse::<usize>() {
+                        stack_size = (size, true);
+                        i += 1;
+                    } else {
+                        eprintln!("Invalid value for --stack-size: {}", left_args[i + 1]);
+                        exit(1);
+                    }
+                } else {
+                    eprintln!("--stack-size requires a value");
+                    exit(1);
                 }
-            },
+            }
             "--build-info" => {
                 let info = get_build_info();
 
@@ -2337,59 +2389,107 @@ fn main() {
                 exit(0);
             }
             "--" => {}
-            arg if arg.starts_with("--dump-dir=") => {
-                dump_dir = (arg["--dump-dir=".len()..].to_string(), true);
-            },
-            arg if arg.starts_with("--config=") => {
-                config_arg = Some(arg["--config=".len()..].to_string());
-            },
-            arg if arg.starts_with("--cache=") => {
-                let val_str = &arg["--cache=".len()..];
-                let format = CacheFormat::from_str(val_str).unwrap_or_else(|| {
-                    eprintln!("Invalid value for --cache, defaulting to 'bin_le'.");
-                    CacheFormat::BinLe
-                });
-                cache = (format, true);
-            },
-            arg if arg.starts_with("--argv=") => {
-                argv_arg = Some(arg["--argv=".len()..].to_string());
-            },
-            arg if arg.starts_with("--debug-mode=") => debug_mode_flag = true,
-            _ => {
-                if PathBuf::from(arg).exists() {
-                    file_args.push(arg.to_string());
-                    continue;
+            "--dump-dir" => {
+                if i + 1 < left_args.len() {
+                    dump_dir = (left_args[i + 1].clone(), true);
+                    i += 1;
+                } else {
+                    eprintln!("--dump-dir requires a path");
+                    exit(1);
                 }
+            }
+            "--config" => {
+                if i + 1 < left_args.len() {
+                    config_arg = Some(left_args[i + 1].clone());
+                    i += 1;
+                } else {
+                    eprintln!("--config requires a path");
+                    exit(1);
+                }
+            }
+            "--cache" => {
+                if i + 1 < left_args.len() {
+                    let val_str = &left_args[i + 1];
+                    let format = CacheFormat::from_str(val_str).unwrap_or_else(|| {
+                        eprintln!("Invalid value for --cache, defaulting to 'bin_le'.");
+                        CacheFormat::BinLe
+                    });
+                    cache = (format, true);
+                    i += 1;
+                } else {
+                    eprintln!("--cache requires a value");
+                    exit(1);
+                }
+            }
+            "--argv" => {
+                if i + 1 < left_args.len() {
+                    argv_arg = Some(left_args[i + 1].clone());
+                    i += 1;
+                } else {
+                    eprintln!("--argv requires a value (JSON-like array)");
+                    exit(1);
+                }
+            }
+            "--debug-mode" => {
+                debug_mode_flag = true;
+                if i + 1 < left_args.len() {
+                    debug_mode_value = Some(left_args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "-c" | "--code" => {
+                if i + 1 < left_args.len() {
+                    command_to_run = Some(left_args[i + 1].clone());
+                    i += 1;
+                } else {
+                    eprintln!("{} requires a value", arg);
+                    exit(1);
+                }
+            }
+            _ => {
                 if arg.starts_with('-') {
                     eprintln!("Unknown argument: {}", arg);
+                    let flag_vec: Vec<String> = commands.iter().map(|(flag, _)| flag.to_string()).collect();
+                    if let Some(suggestion) = find_closest_match(arg, &flag_vec) {
+                        eprintln!("Did you mean: {}", suggestion);
+                    }
+                    exit(1);
                 } else {
-                    eprintln!("File does not exist: {}", arg);
+                    if file_args.is_empty() {
+                        file_args.push(arg.to_string());
+                    } else {
+                        eprintln!("Only one source file is allowed. Found extra file argument: {}", arg);
+                        exit(1);
+                    }
                 }
-
-                let flag_vec: Vec<String> = commands.iter().map(|(flag, _)| flag.to_string()).collect();
-
-                if let Some(suggestion) = find_closest_match(arg, &flag_vec) {
-                    eprintln!("Did you mean: {}", suggestion);
-                }
-
-                exit(1);
             }
+        }
+        i += 1;
+    }
+    if let Some(dfile) = dash_file {
+        if file_args.is_empty() {
+            file_args.push(dfile);
+        } else {
+            eprintln!("Only one source file is allowed. Found extra file argument: {}", dfile);
+            exit(1);
         }
     }
 
-    let mut argv = if let Some(val) = argv_arg {
+    let mut argv = if !right_argv.is_empty() {
+        right_argv
+    } else if let Some(val) = argv_arg {
         val.trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
+            .trim_end_matches(']')
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
     } else {
         vec![]
     };
 
-    if let Some(exe_path) = args.iter().next() {
-        argv.insert(0, exe_path.clone());
+    if let Some(file0) = file_args.first() {
+        argv.insert(0, file0.clone());
     }
 
     if version_flag {
@@ -2414,7 +2514,7 @@ fn main() {
     if config_arg.is_some() {
         let config_path_str = config_arg.as_ref().unwrap();
         if config_path_str.is_empty() {
-            eprintln!("No config path provided. Use --config=<path> to specify a config file.");
+            eprintln!("No config path provided. Use --config <path> to specify a config file.");
             exit(1);
         }
         config_path = PathBuf::from(config_path_str);
@@ -2517,11 +2617,9 @@ fn main() {
     let home_dir_path = PathBuf::from(home_dir.clone());
 
     let debug_mode: String = if debug_flag || debug_mode_flag {
-        args.iter()
-            .find(|arg| arg.starts_with("--debug-mode="))
-            .and_then(|arg| arg.split('=').nth(1))
-            .map(|mode| match mode {
-                "full" | "normal" | "minimal" => mode.into(),
+        if let Some(mode) = debug_mode_value.clone() {
+            match mode.as_str() {
+                "full" | "normal" | "minimal" => mode,
                 "none" => {
                     config.debug = false;
                     "none".into()
@@ -2530,8 +2628,10 @@ fn main() {
                     eprintln!("Invalid debug mode: '{}'. Valid modes are 'full', 'normal', 'minimal' or 'none'.", mode);
                     exit(1);
                 }
-            })
-            .unwrap_or("normal".into())
+            }
+        } else {
+            "normal".into()
+        }
     } else {
         config.debug_mode.clone()
     };
