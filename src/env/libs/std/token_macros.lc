@@ -1,0 +1,29 @@
+#ifndef LUCIA_STD_TOKENS
+#define LUCIA_STD_TOKENS
+
+// this macro creates an IDENTIFIER token with the string given
+// and yes i know you can now access internal functions and variables with this
+// like elevator.13 using elevator.ident!("13")
+#macro #no-group ident!($v):
+    // #push evalutaes what is in the parentheses and pushes the resulting token onto the token stream
+    // at preprocessor time in a new scope so you cannot access variables from the outside scope (runtime variables)
+    #push ( ["IDENTIFIER", $v]  )
+#endmacro
+
+#macro #no-group token!($ty, $value):
+    #push ( [$ty, $value]  )
+#endmacro
+
+#macro get_token!($t):
+    $?t
+#endmacro
+
+#macro make_ident!($v):
+    #push ( v := $?t as list v[0] = "IDENTIFIER" )
+#endmacro
+
+#macro #no-group push!($ty, $value):
+    #push ( [$ty, $value]  )
+#endmacro
+
+#endif

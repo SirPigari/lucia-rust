@@ -21,24 +21,22 @@ Type your code and hit **Enter** to evaluate.
 ## Tokens and Statements
 
 - **Tokens** are the lexical tokens processed from your input.  
-- **Statements** are the Abstract Syntax Tree (AST) nodes parsed from the tokens, representing your code's structure.
+- **Statements** are the AST nodes describing the parsed structure of your code.
 
-The REPL shows both after you enter code, before output or errors.
+Both are shown before evaluation results when debug mode is enabled.
 
 ---
 
 ## Last result variables
 
-- `_` stores the **last evaluated value** (if not `null`).  
-- `_err` stores the **last error** encountered.
-
-You can use these to access previous results or errors easily.
+- `_` stores the last produced value (if not `null`).  
+- `_err` stores the last encountered error.
 
 ---
 
 ## Output behavior
 
-If your input evaluates to a value **other than `null`**, it will be printed automatically after tokens and statements.
+If your input evaluates to a value other than `null`, it prints automatically.
 
 Examples:
 
@@ -47,10 +45,12 @@ Examples:
 Tokens: [("NUMBER", "42")]
 Statements: [{"type": "NUMBER", "value": "42"}]
 42
+
 >>> "hello"
 Tokens: [("STRING", "\"hello\"")]
 Statements: [{"type": "STRING", "value": "\"hello\"", "mods": []}]
 "hello"
+
 >>> null
 Tokens: [("BOOLEAN", "null")]
 Statements: [{"type": "BOOLEAN", "value": "null"}]
@@ -74,7 +74,7 @@ hello, world
 ```lucia-repl
 >>> while true: print("looping") end
 Tokens: [("IDENTIFIER", "while"), ("BOOLEAN", "true"), ("SEPARATOR", ":"), ("IDENTIFIER", "print"), ("SEPARATOR", "("), ("STRING", "\"looping\""), ("SEPARATOR", ")"), ("IDENTIFIER", "end")]
-Statements: [{"type": "WHILE", "condition": {"type": "BOOLEAN", "value": "true"}, "body": [{"type": "CALL", "name": "print", "pos_arguments": [{"type": "STRING", "value": ""looping"", "mods": []}], "named_arguments": {}}]}]   
+Statements: [{"type": "WHILE", "condition": {"type": "BOOLEAN", "value": "true"}, "body": [{"type": "CALL", "name": "print", "pos_arguments": [{"type": "STRING", "value": ""looping"", "mods": []}], "named_arguments": {}}]}]
 looping
 looping
 ... (press Ctrl+T to stop)
@@ -84,51 +84,104 @@ looping
 
 ## Control commands
 
-- Press **Ctrl+T** anytime to stop running code (including infinite loops).
+Press **Ctrl+T** anytime to stop running code (including infinite loops).
 
 ---
 
 ## REPL Macros
 
-Start a line with `:` to use macros for quick actions.
-
-| Macro                     | Description                       |
-|---------------------------|-----------------------------------|
-| `:exit`                   | Exit the REPL (`exit()` called)   |
-| `:clear` / `:cls`         | Clear the terminal screen         |
-| `:help` / `:?`            | Show general help (runs `help()`) |
-| `:macro-help` / `::`      | Show the list of REPL macros      |
-| `:trace` / `:traceback`   | Show the last error traceback     |
-
-Example:
+Start a line with `:` to trigger a macro.
 
 ```lucia-repl
-:help
+>>> ::
+Available REPL macros:
+  :exit                - Exit the REPL
+  :clear / :cls        - Clear the terminal screen
+  :help / :?           - Show general help
+  :macro-help / ::     - Show this help message for REPL macros
+  :clear-history / :ch - Clear the REPL command history
+  :traceback / :t      - Show the last error traceback information
+>>>
 ```
-
-prints basic help info.
 
 ---
 
-## Note on Debug Output
+## Syntax Highlighting
 
-The displayed tokens (`Tokens:`), statements (`Statements:`), and messages inside `<>` (like `<Declared variable ...>`) are **debug features**.  
-They are only printed if the `debug` option is set to `true` in your `config.json`.  
-See [config-guide.md](config-guide.md) for details on configuring this.
+The REPL provides **hardcoded syntax highlighting** for:
 
-These debug outputs are printed in a **separate color**, which is defined in the config and used only if your terminal supports color output.
+- keywords/booleans  
+- strings  
+- comments  
+- numbers  
+- preprocessor directives  
+- types
+
+If the terminal **does not support color**, the REPL automatically falls back to plain stdin with **no highlighting or other special features**.
+
+---
+
+## Multiline Input
+
+The REPL supports multiline expressions:
+
+- **Alt+Enter** inserts a new line.  
+- Incomplete expressions automatically continue:
+  - unclosed quotes  
+  - trailing `:`  
+  - unclosed parentheses / brackets / braces  
+  - unfinished expressions
+
+The validator checks completeness before evaluation.
+
+---
+
+## Command History
+
+Your REPL history is automatically saved to:
+
+```lucia-repl
+<lucia>/env/.cache/repl.history
+```
+
+It is loaded on startup and updated as you execute each command.  
+You can navigate through your previous commands using **Up/Down arrows**, and edit them directly before re-executing.
+
+The macro `:clear-history` or `:ch` clears the saved history.  
+Since the file is **human-readable**, you can also open and edit it manually if needed.
+
+---
+
+## Additional Input Features
+
+- **Tab completions**: Press **Tab** to auto-complete variables and identifiers that are currently defined.  
+- **Indent insertion**: On a whitespace or empty line, double-pressing **Tab** inserts **4 spaces** to simulate a tab.
+
+---
+
+## Debug Output
+
+When debug mode is enabled, the REPL prints:
+
+- `Tokens:`  
+- `Statements:`  
+- internal messages inside `<>`
+
+These appear in color only when supported.
 
 ---
 
 ## Summary
 
-- **Tokens**: the list of recognized lexical units from your input  
-- **Statements**: the parsed structure (AST) representing your code  
-- **Errors** provide detailed location and hints to fix syntax issues  
-- **REPL Macros** let you control the REPL environment efficiently  
-- Special variables `_` and `_err` track last value and error  
+- Tokens show how input is lexed  
+- Statements show how input is parsed  
+- `_` stores the last value  
+- `_err` stores the last error  
+- Macros help control the REPL  
+- Multiline input and highlighting improve editing  
+- History persists between sessions  
 
-Type `help()` anytime in the REPL for more info.
+Type `help()` anytime in the REPL for general help.
 
 ---
 

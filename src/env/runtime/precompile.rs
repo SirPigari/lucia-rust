@@ -2,7 +2,7 @@
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::utils::{sanitize_alias, fix_path};
+use crate::env::runtime::utils::{sanitize_alias, fix_path, to_static};
 use crate::interpreter::Interpreter;
 use crate::parser::Parser;
 use crate::lexer::Lexer;
@@ -215,7 +215,7 @@ pub fn interpret(input: &str) -> Result<Value, Error> {
     interpreter.interpret(ast, false)
 }
 
-pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
+pub fn _precompile(tokens: Vec<Token>) -> Result<(Value, Option<Location>), Error> {
     if tokens.is_empty() {
         return Err(Error::new(
             "PrecompileError",
@@ -265,7 +265,16 @@ pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
             }
         }
     };
+    Ok((result, loc))
+}
 
+pub fn precompile_to_value(tokens: Vec<Token>) -> Result<Value, Error> {
+    let (result, _) = _precompile(tokens)?;
+    Ok(result)
+}
+
+pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
+    let (result, loc) = _precompile(tokens)?;
     fn get_token(value: &Value, loc: Option<Location>) -> Option<Token> {
         match value {
             Value::Int(n) => Some(Token("NUMBER".into(), n.to_string(), loc)),
@@ -298,7 +307,7 @@ pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
                 } else {
                     return Err(Error::new(
                         "PrecompileError",
-                        "precompile: unsupported value type in list",
+                        to_static(format!("precompile: unsupported value type in list ({})", item)),
                         "<internal>",
                     ));
                 }

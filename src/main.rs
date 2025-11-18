@@ -1547,7 +1547,9 @@ fn repl(
     loop {
         line_number += 1;
 
-        completions = interpreter.get_repl_completions();
+        completions = interpreter.get_repl_completions().into_iter().chain(preprocessor.get_repl_completions().into_iter()).collect::<Vec<_>>();
+        completions.sort();
+        completions.dedup();
 
         let mut input = read_input(&prompt, &multiline_prompt, &mut history, &completions, &history_path);
         if input.is_empty() {

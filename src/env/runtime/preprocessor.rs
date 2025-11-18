@@ -5,8 +5,9 @@ use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path, escape_string, get_inner_string};
-use crate::env::runtime::precompile::precompile;
+use crate::env::runtime::precompile::{precompile, precompile_to_value};
 use crate::env::runtime::types::Float;
+use crate::env::runtime::value::Value;
 use std::ops::{Add, Sub, Mul, Div, Rem};
 #[cfg(feature = "preprocessor_include_std")]
 use once_cell::sync::Lazy;
@@ -35,6 +36,8 @@ const STD_LIB_OPS: &str = include_str!("../libs/std/ops.lc");
 #[cfg(feature = "preprocessor_include_std")]
 const STD_LIB_TYPES: &str = include_str!("../libs/std/types.lc");
 #[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_TOKEN_MACROS: &str = include_str!("../libs/std/token_macros.lc");
+#[cfg(feature = "preprocessor_include_std")]
 static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::default();
     m.insert("_import", STD_LIB_IMPORT);
@@ -45,6 +48,7 @@ static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("math", STD_LIB_MATH);
     m.insert("ops", STD_LIB_OPS);
     m.insert("types", STD_LIB_TYPES);
+    m.insert("token_macros", STD_LIB_TOKEN_MACROS);
     m
 });
 
@@ -197,7 +201,21 @@ impl Preprocessor {
             .collect();
     
         self._process(filtered, current_dir)
-    }    
+    }
+
+    pub fn get_repl_completions(&self) -> Vec<String> {
+        let mut completions: HashSet<String> = HashSet::default();
+
+        for key in self.defines.keys() {
+            completions.insert(key.clone());
+        }
+
+        for key in self.macros.keys() {
+            completions.insert(key.clone());
+        }
+
+        completions.into_iter().collect()
+    }
 
     fn _process(
         &mut self,
@@ -1059,6 +1077,64 @@ impl Preprocessor {
                         result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
                         result.push(Token("BOOLEAN".to_string(), if is_negated { "false" } else { "true" }.to_string(), loc.clone()));
                         result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                        continue;
+                    }
+
+                    "push" => {
+                        if i >= tokens.len() {
+                            return Err(create_err("#push missing a value", &tokens[i]));
+                        }
+
+                        let loc = last_normal_token_location.clone();
+                        let mut value: Vec<Token> = Vec::new();
+
+                        if tokens[i].1 == "(" {
+                            let mut stack = vec!["(".to_string()];
+                            i += 1;
+
+                            while i < tokens.len() && !stack.is_empty() {
+                                if tokens[i].1 == "(" {
+                                    stack.push("(".to_string());
+                                } else if tokens[i].1 == ")" {
+                                    stack.pop();
+                                }
+                                value.push(tokens[i].clone());
+                                i += 1;
+                            }
+
+                            if !stack.is_empty() {
+                                return Err(create_err("Unclosed parentheses in #push value", &tokens[i - 1]));
+                            }
+
+                            value.pop();
+                        } else {
+                            value.push(tokens[i].clone());
+                            i += 1;
+                        }
+
+                        value = self._process(value, current_dir)?;
+
+                        let precompiled_val = precompile_to_value(value)?;
+
+                        let t = match precompiled_val {
+                            Value::List(v) | Value::Tuple(v) => {
+                                if v.len() != 2 {
+                                    return Err(create_err("#push value must have exactly two elements (token TYPE and token VALUE)", &tokens[i - 1]));
+                                }
+                                match (&v[0], &v[1]) {
+                                    (Value::String(t_type), Value::String(t_value)) => (t_type.to_owned(), t_value.to_owned()),
+                                    _ => {
+                                        return Err(create_err("#push value elements must be STRINGs representing token TYPE and token VALUE", &tokens[i - 1]));
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(create_err("#push value must evaluate to a list or tuple", &tokens[i - 1]));
+                            }
+                        };
+
+                        result.push(Token(t.0, t.1, loc.clone()));
+
                         continue;
                     }
 

@@ -61,7 +61,6 @@ pub fn supports_color() -> bool {
         let handle = GetStdHandle(STD_OUTPUT_HANDLE);
         if handle == null_mut() || handle == INVALID_HANDLE_VALUE {
             return false;
-            return false;
         }
 
         let file_type = GetFileType(handle);

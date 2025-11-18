@@ -9,6 +9,8 @@ import (max) from math
 
 // disable debug printing, faster
 #config debug = false
+// for pointers
+#config allow_unsafe = true
 
 typedef enum Token {
     Ident(str),
