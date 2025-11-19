@@ -1,13 +1,13 @@
 import math
 
-fun fibonacciRecursive(n: int) -> int:
+fun fibonacci_recursive(n: int) -> int:
     if (n <= 1):
         return n
     end
-    return fibonacciRecursive(n - 1) + fibonacciRecursive(n - 2)
+    return fibonacci_recursive(n - 1) + fibonacci_recursive(n - 2)
 end
 
-fun fibonacciIterative(n: int) -> int:
+fun fibonacci_iterative(n: int) -> int:
     if (n <= 1):
         return n
     end
@@ -20,7 +20,7 @@ fun fibonacciIterative(n: int) -> int:
     return b
 end
 
-fun fibonacciBinet(n: int) -> int:
+fun fibonacci_binet(n: int) -> int:
     phi: float = math.GOLDEN_RATIO
     psi: float = 1 - phi
     sqrt5: float = math.sqrt(5)
@@ -46,7 +46,7 @@ examples:
 
 (finally found a use to ';' in Lucia)
 */
-fun fibonacciPatternReg(n: int) -> int:
+fun fibonacci_pattern_reg(n: int) -> int:
     if (n <= 1):
         return n
     end
@@ -55,7 +55,7 @@ fun fibonacciPatternReg(n: int) -> int:
 end
 
 
-print(fibonacciRecursive(10))
-print(fibonacciIterative(10))
-print(fibonacciBinet(10))
-print(fibonacciPatternReg(10))
+print(fibonacci_recursive(10))
+print(fibonacci_iterative(10))
+print(fibonacci_binet(10))
+print(fibonacci_pattern_reg(10))
