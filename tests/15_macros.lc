@@ -110,3 +110,14 @@ assert_eq!(v_single, ([1]))
 assert_eq!(is_ident!(foo), true)
 assert_eq!(is_ident!(123), false)
 assert_eq!(is_ident!(foo bar), false)  // its 2 idents not one so its not an ident
+
+#macro #no-group token!($t, $v):
+    // #push evalutaes what is in the parentheses and pushes the resulting token onto the token stream
+    // at preprocessor time in a new scope so you cannot access variables from the outside scope (runtime variables)
+    #push ( [$t, $v]  )
+#endmacro
+
+import (token!("IDENTIFIER", "13") as elevator_13) from elevator
+
+assert_eq!(elevator_13, 13)
+assert_eq!(token!("BOOLEAN", "true"), true)

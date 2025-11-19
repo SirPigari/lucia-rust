@@ -36,8 +36,6 @@ const STD_LIB_OPS: &str = include_str!("../libs/std/ops.lc");
 #[cfg(feature = "preprocessor_include_std")]
 const STD_LIB_TYPES: &str = include_str!("../libs/std/types.lc");
 #[cfg(feature = "preprocessor_include_std")]
-const STD_LIB_TOKEN_MACROS: &str = include_str!("../libs/std/token_macros.lc");
-#[cfg(feature = "preprocessor_include_std")]
 static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::default();
     m.insert("_import", STD_LIB_IMPORT);
@@ -48,7 +46,6 @@ static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("math", STD_LIB_MATH);
     m.insert("ops", STD_LIB_OPS);
     m.insert("types", STD_LIB_TYPES);
-    m.insert("token_macros", STD_LIB_TOKEN_MACROS);
     m
 });
 

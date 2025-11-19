@@ -9,7 +9,7 @@ use reedline::{
     Signal, Prompt, PromptEditMode,
     PromptHistorySearch, Completer, Suggestion,
     Validator, ValidationResult, Highlighter,
-    StyledText, FileBackedHistory,
+    StyledText, FileBackedHistory, History,
 };
 use nu_ansi_term::Style;
 
@@ -476,5 +476,90 @@ pub fn read_input(
     let input = full_input.trim_end().to_string();
     history.push(input.clone());
     input
+}
+
+pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Result<String, (String, String)> {
+    if !supports_color() {
+        print!("{}", prompt);
+        io::stdout().flush().unwrap();
+
+        let mut buf = String::new();
+        match io::stdin().read_line(&mut buf) {
+            Ok(_) => {},
+            Err(err) => return Err(("IOError".to_string(), format!("Failed to read input: {:?}", err))),
+        }
+        return Ok(buf.trim_end().to_string());
+    }
+
+    let mut tmp_path = std::env::temp_dir();
+    tmp_path.push(format!("lucia_reedline_history_{}", std::process::id()));
+
+    let history = FileBackedHistory::with_file(10_000, tmp_path.clone())
+        .expect("Failed to create temp history file");
+    let history_box = Box::new(history);
+
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(
+        KeyModifiers::ALT,
+        KeyCode::Enter,
+        ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+    );
+    keybindings.add_binding(
+        KeyModifiers::SHIFT,
+        KeyCode::Enter,
+        ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+    );
+
+    let mut editor = Reedline::create()
+        .with_history(history_box)
+        .with_edit_mode(Box::new(Emacs::new(keybindings)));
+
+    let mut full_input = String::new();
+
+    loop {
+        let prompt_instance = if full_input.is_empty() {
+            ReplPrompt::new(prompt.to_string(), multiline_prompt.unwrap_or("").to_string())
+        } else if let Some(multi) = multiline_prompt {
+            ReplPrompt::new(multi.to_string(), multi.to_string())
+        } else {
+            break;
+        };
+
+        match editor.read_line(&prompt_instance) {
+            Ok(Signal::Success(line)) => {
+                full_input.push_str(&line);
+                full_input.push('\n');
+
+                if multiline_prompt.is_none() {
+                    break;
+                }
+            }
+            Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => {
+                let mut history_sync = FileBackedHistory::with_file(10_000, tmp_path.clone())
+                    .expect("Failed to sync temp history");
+                let _ = history_sync.sync();
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err((
+                    "InterruptedError".to_string(),
+                    "Input was interrupted by user".to_string(),
+                ));
+            }
+            Err(err) => {
+                return Err((
+                    "IOError".to_string(),
+                    format!("Error reading input: {:?}", err),
+                ));
+            }
+        }
+    }
+
+    let input = full_input.trim_end().to_string();
+
+    let mut history_sync = FileBackedHistory::with_file(10_000, tmp_path.clone())
+        .expect("Failed to sync temp history");
+    let _ = history_sync.sync();
+    let _ = std::fs::remove_file(&tmp_path);
+
+    Ok(input)
 }
 

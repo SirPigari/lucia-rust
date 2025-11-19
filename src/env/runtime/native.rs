@@ -3,13 +3,13 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
 use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
+use crate::env::runtime::repl::read_input_no_repl;
 use crate::env::runtime::internal_structs::{EffectFlags};
 use crate::interpreter::Interpreter;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::io::{self, Write};
 use once_cell::sync::Lazy;
 
 // -------------------------------
@@ -141,13 +141,14 @@ fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
         None => "",
     };
 
-    print!("{}", prompt);
-    io::stdout().flush().unwrap();
+    let multiline: Option<String> = match args.get("multiline") {
+        Some(Value::String(b)) => Some(b.clone()),
+        _ => None,
+    };
 
-    let mut buffer = String::new();
-    match io::stdin().read_line(&mut buffer) {
-        Ok(_) => Value::String(buffer.trim_end().to_string()),
-        Err(_) => Value::Error("IOError", "Failed to read input", None),
+    match read_input_no_repl(prompt, multiline.as_deref()) {
+        Ok(input) => Value::String(input),
+        Err((err_type, err_msg)) => Value::Error(to_static(err_type), to_static(err_msg), None),
     }
 }
 
