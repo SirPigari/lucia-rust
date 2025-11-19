@@ -1082,7 +1082,7 @@ impl Preprocessor {
                             return Err(create_err("#push missing a value", &tokens[i]));
                         }
 
-                        let loc = last_normal_token_location.clone();
+                        let loc_token = &tokens[i];
                         let mut value: Vec<Token> = Vec::new();
 
                         if tokens[i].1 == "(" {
@@ -1113,24 +1113,34 @@ impl Preprocessor {
 
                         let precompiled_val = precompile_to_value(value)?;
 
-                        let t = match precompiled_val {
-                            Value::List(v) | Value::Tuple(v) => {
-                                if v.len() != 2 {
-                                    return Err(create_err("#push value must have exactly two elements (token TYPE and token VALUE)", &tokens[i - 1]));
-                                }
-                                match (&v[0], &v[1]) {
-                                    (Value::String(t_type), Value::String(t_value)) => (t_type.to_owned(), t_value.to_owned()),
-                                    _ => {
-                                        return Err(create_err("#push value elements must be STRINGs representing token TYPE and token VALUE", &tokens[i - 1]));
+                        fn push_tokens_from_value(val: Value, tokens: &mut Vec<Token>, token_ref: &Token) -> Result<(), Error> {
+                            match val {
+                                Value::List(v) | Value::Tuple(v) => {
+                                    if v.len() == 2 {
+                                        match (&v[0], &v[1]) {
+                                            (Value::String(t_type), Value::String(t_value)) => {
+                                                tokens.push(Token(t_type.clone(), t_value.clone(), token_ref.2.clone()));
+                                            }
+                                            _ => {
+                                                for item in v {
+                                                    push_tokens_from_value(item, tokens, token_ref)?;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        for item in v {
+                                            push_tokens_from_value(item, tokens, token_ref)?;
+                                        }
                                     }
                                 }
+                                _ => {
+                                    return Err(create_err("#push value must evaluate to a list or tuple", token_ref));
+                                }
                             }
-                            _ => {
-                                return Err(create_err("#push value must evaluate to a list or tuple", &tokens[i - 1]));
-                            }
-                        };
+                            Ok(())
+                        }
 
-                        result.push(Token(t.0, t.1, loc.clone()));
+                        push_tokens_from_value(precompiled_val, &mut result, loc_token)?;
 
                         continue;
                     }

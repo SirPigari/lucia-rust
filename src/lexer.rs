@@ -50,7 +50,7 @@ impl<'a> Lexer<'a> {
 
     fn is_emoji(c: char) -> bool {
         matches!(c as u32,
-            0x1F600..=0x1F64F  // emoticons
+            0x1F600..=0x1F64F   // emoticons
             | 0x1F300..=0x1F5FF // symbols & pictographs
             | 0x1F680..=0x1F6FF // transport & map
             | 0x2600..=0x26FF   // misc symbols

@@ -19,7 +19,7 @@ mov %r8, 114                  ; 'r'
 mov %r9, 108                  ; 'l'
 mov %r10, 100                 ; 'd'
 mov %r11, 33                  ; '!'
-mov %r12, 10                  ; newline '\n'
+mov %r12, 10                  ; newline '\\n'
 mov %r13, 0                   ; null terminator
 
 str %r0, [100]      ; 'h'
@@ -34,7 +34,7 @@ str %r8, [108]      ; 'r'
 str %r9, [109]      ; 'l'
 str %r10, [110]     ; 'd'
 str %r11, [111]     ; '!'
-str %r12, [112]     ; '\n'
+str %r12, [112]     ; '\\n'
 str %r13, [113]     ; null terminator
 
 ; write syscall

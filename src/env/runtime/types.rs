@@ -202,17 +202,29 @@ impl Type {
 
     pub fn unmut(&mut self) -> Self {
         std::mem::replace(self, Type::Simple {
-            name: "void".to_string(),
+            name: "void".to_owned(),
             is_reference: false,
             is_maybe_type: false,
         })
     }
 
     pub fn new_simple(name: &str) -> Self {
+        let mut reference = false;
+        let mut maybe_type = false;
+        let mut base_name = name.to_owned();
+        while base_name.starts_with('&') || base_name.starts_with('?') {
+            if base_name.starts_with('&') {
+                reference = true;
+                base_name = base_name[1..].to_owned();
+            } else if base_name.starts_with('?') {
+                maybe_type = true;
+                base_name = base_name[1..].to_owned();
+            }
+        }
         Type::Simple {
-            name: name.to_string(),
-            is_reference: false,
-            is_maybe_type: false,
+            name: base_name,
+            is_reference: reference,
+            is_maybe_type: maybe_type,
         }
     }
 

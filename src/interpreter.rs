@@ -1421,6 +1421,7 @@ impl Interpreter {
     
                 "OPERATION" => self.handle_operation(statement_map),
                 "UNARY_OPERATION" => self.handle_unary_op(statement_map),
+                "PREFIX_OPERATOR" => self.handle_prefix_op(statement_map),
                 "PIPELINE" => self.handle_pipeline(statement_map),
     
                 "CALL" => self.handle_call(statement_map),
@@ -1480,6 +1481,110 @@ impl Interpreter {
         }
     
         result
+    }
+
+    fn handle_prefix_op(&mut self, statement: HashMap<Value, Value>) -> Value {
+        let operator = match statement.get(&Value::String("operator".to_string())) {
+            Some(Value::String(op)) => op,
+            _ => return self.raise("RuntimeError", "Missing or invalid 'operator' in prefix operator statement"),
+        };
+        let operand_stmt = match statement.get(&Value::String("operand".to_string())) {
+            Some(v) => v.convert_to_statement(),
+            None => return self.raise("RuntimeError", "Missing 'operand' in prefix operator statement"),
+        };
+
+        let operand_value = self.evaluate(&operand_stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        match operator.as_str() {
+            "++" => {
+                match operand_stmt.get_type().as_str() {
+                    "VARIABLE" => {
+                        let var_name = operand_stmt.get_name();
+                        if let Some(var) = self.variables.get_mut(&var_name) {
+                            match &var.value {
+                                Value::Int(i) => {
+                                    let new_value = Value::Int((i + Int::from_i64(1)).expect("Integer overflow"));
+                                    var.set_value(new_value.clone());
+                                    new_value
+                                }
+                                Value::Float(f) => {
+                                    let new_value = Value::Float((f + Float::from_f64(1.0)).expect("Float overflow"));
+                                    var.set_value(new_value.clone());
+                                    new_value
+                                }
+                                p if matches!(p, Value::Pointer(_)) => {
+                                    let mut p = p.clone();
+                                    while let Value::Pointer(inner_p) = p {
+                                        p = inner_p.lock().expect("Invalid pointer").clone();
+                                    }
+                                    return p;
+                                }
+                                _ => self.raise("TypeError", "Prefix ++ operator can only be applied to integers and floats"),
+                            }
+                        } else {
+                            self.raise("NameError", &format!("Variable '{}' not found for prefix ++ operator", var_name))
+                        }
+                    }
+                    _ => {
+                        match operand_value {
+                            Value::Int(i) => {
+                                Value::Int(i.abs())
+                            }
+                            Value::Float(f) => {
+                                Value::Float(f.abs())
+                            }
+                            p if matches!(p, Value::Pointer(_)) => {
+                                let mut p = p;
+                                while let Value::Pointer(inner_p) = p {
+                                    p = inner_p.lock().expect("Invalid pointer").clone();
+                                }
+                                return p;
+                            }
+                            _ => self.raise("TypeError", "Prefix ++ operator can only be applied to integers, floats and pointers"),
+                        }
+                    }
+                }
+            }
+            "--" => {
+                match operand_stmt.get_type().as_str() {
+                    "VARIABLE" => {
+                        let var_name = operand_stmt.get_name();
+                        if let Some(var) = self.variables.get_mut(&var_name) {
+                            match &var.value {
+                                Value::Int(i) => {
+                                    let new_value = Value::Int((i - Int::from_i64(1)).expect("Integer underflow"));
+                                    var.set_value(new_value.clone());
+                                    new_value
+                                }
+                                Value::Float(f) => {
+                                    let new_value = Value::Float((f - Float::from_f64(1.0)).expect("Float underflow"));
+                                    var.set_value(new_value.clone());
+                                    new_value
+                                }
+                                _ => self.raise("TypeError", "Prefix -- operator can only be applied to integers and floats"),
+                            }
+                        } else {
+                            self.raise("NameError", &format!("Variable '{}' not found for prefix -- operator", var_name))
+                        }
+                    }
+                    _ => {
+                        match operand_value {
+                            Value::Int(i) => {
+                                Value::Int(-i)
+                            }
+                            Value::Float(f) => {
+                                Value::Float(-f)
+                            }
+                            _ => self.raise("TypeError", "Prefix -- operator can only be applied to integers and floats"),
+                        }
+                    }
+                }
+            }
+            _ => self.raise("SyntaxError", &format!("Unknown prefix operator '{}'", operator)),
+        }
     }
 
     fn handle_pipeline(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -10737,17 +10842,17 @@ impl Interpreter {
     }
 
     fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
-        let mut s = to_static(match map.get(&Value::String("value".to_string())) {
+        let mut s = match map.get(&Value::String("value".to_string())) {
             Some(Value::String(s)) if !s.is_empty() => s.as_str(),
             Some(Value::String(_)) => return self.raise("RuntimeError", "Empty string provided for number"),
             _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
-        }.replace('_', ""));
+        }.replace('_', "");
 
         if s.is_empty() {
             return self.raise("RuntimeError", "Empty string provided for number");
         }
     
-        if let Some(cached) = self.cache.constants.get(s) {
+        if let Some(cached) = self.cache.constants.get(&s) {
             self.debug_log(
                 format_args!("<CachedConstantNumber: {}>", s)
             );
@@ -10755,7 +10860,7 @@ impl Interpreter {
         }
 
         let is_imaginary = if s.ends_with('i') {
-            s = &s[..s.len() - 1];
+            s = s[..s.len() - 1].to_owned();
             true
         } else {
             false
@@ -10811,10 +10916,10 @@ impl Interpreter {
             .map(Value::Int)
             .unwrap_or_else(|_| self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)))        
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
-            if is_number_parentheses(s) {
-                Value::Float(imagnum::create_float(s))
+            if is_number_parentheses(&s) {
+                Value::Float(imagnum::create_float(&s))
             } else {
-                let f = match Float::from_str(s) {
+                let f = match Float::from_str(&s) {
                     Ok(f) => f,
                     Err(_) => return self.raise("RuntimeError", "Invalid float format"),
                 };

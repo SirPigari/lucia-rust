@@ -94,7 +94,7 @@ pub struct LuciaLib {
 }
 
 impl LuciaLib {
-    pub unsafe fn load<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<Self, String> {
+    pub unsafe fn load<P: AsRef<std::ffi::OsStr> + libloading::AsFilename>(path: P) -> Result<Self, String> {
         unsafe { Library::new(path) }
             .map(|lib| LuciaLib { lib: Arc::new(lib) })
             .map_err(|e| e.to_string())

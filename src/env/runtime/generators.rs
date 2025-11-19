@@ -509,15 +509,13 @@ impl Iterator for CustomGenerator {
                             ));
                         }
 
-                        let body_clone = body.clone();
-
-                        if *body_pc >= body_clone.len() {
+                        if *body_pc >= body.len() {
                             *body_pc = 0;
                             *index += 1;
                             continue;
                         }
 
-                        let stmt = body_clone[*body_pc].clone();
+                        let stmt = body[*body_pc].clone();
                         let result = self.interpreter.evaluate(&stmt.convert_to_statement());
 
                         if self.interpreter.err.is_some() {
@@ -542,7 +540,7 @@ impl Iterator for CustomGenerator {
                             }
                             State::Continue => {
                                 self.interpreter.state = State::Normal;
-                                *body_pc = body_clone.len();
+                                *body_pc = body.len();
                                 continue;
                             }
                             _ => {}

@@ -146,9 +146,14 @@ fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
         _ => None,
     };
 
+    let err: bool = match args.get("err") {
+        Some(Value::Boolean(b)) => *b,
+        _ => false,
+    };
+
     match read_input_no_repl(prompt, multiline.as_deref()) {
         Ok(input) => Value::String(input),
-        Err((err_type, err_msg)) => Value::Error(to_static(err_type), to_static(err_msg), None),
+        Err((err_type, err_msg)) => if err { Value::Error(to_static(err_type), to_static(err_msg), None) } else { Value::String("".to_string()) },
     }
 }
 
@@ -609,6 +614,8 @@ pub fn input_fn() -> Function {
         input,
         vec![
             Parameter::positional_optional("prompt", "str", Value::String("".to_string())),
+            Parameter::positional_optional_pt("multiline", &Type::new_simple("?str"), Value::Null),
+            Parameter::keyword_optional("err", "bool", Value::Boolean(false)),
         ],
         "str",
         true, true, true,

@@ -51,3 +51,17 @@ end
 // you need to have header.h and library.so
 // i dont have it
 // thats why its commented out
+
+try:
+    (/* pushes a token to the token stream. having this is a () because syntax hl is fucked */)
+    #push ( ("IDENTIFIER", "42") )
+    throw "This should not be reached" from "FuckThis"
+catch (et, em):
+    assert_eq!(em, "Variable '42' is not defined.")
+end
+
+mutable a: int = 10
+
+#push ( [ ("IDENTIFIER", "a"), ("OPERATOR", "="), ("NUMBER", "69") ] )
+
+assert_eq!(a, 69)

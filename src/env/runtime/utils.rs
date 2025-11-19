@@ -34,8 +34,6 @@ use crossterm::{
     event,
 };
 
-static STATIC_STORAGE: Lazy<Mutex<HashMap<String, &'static str>>> = Lazy::new(|| Mutex::new(HashMap::default()));
-
 #[cfg(windows)]
 pub fn supports_color() -> bool {
     use std::ptr::null_mut;
@@ -203,14 +201,9 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     None
 }
 
-pub fn to_static(s: String) -> &'static str {
-    let mut cache = STATIC_STORAGE.lock().unwrap();
-    if let Some(&static_ref) = cache.get(&s) {
-        return static_ref;
-    }
-    let static_ref: &'static str = Box::leak(s.clone().into_boxed_str());
-    cache.insert(s, static_ref);
-    static_ref
+pub fn to_static<T: Clone + Send + Sync + 'static>(value: T) -> &'static T {
+    // what was i thinking with the static storage
+    Box::leak(Box::new(value))
 }
 
 pub fn levenshtein_distance(a: &str, b: &str) -> usize {

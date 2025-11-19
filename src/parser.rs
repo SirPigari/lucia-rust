@@ -1025,6 +1025,7 @@ impl Parser {
                         "--" => "-",
                         _ => unreachable!(),
                     }.to_string();
+                    let loc = self.get_loc();
                     self.next();
                     expr = Statement::Statement {
                         keys: vec![
@@ -1057,10 +1058,10 @@ impl Parser {
                                     },
                                     Value::String(operator),
                                 ],
-                                loc: self.get_loc(),
+                                loc: loc.clone(),
                             }.convert_to_map(),
                         ],
-                        loc: self.get_loc(),
+                        loc,
                     };
                 }
 
@@ -1639,6 +1640,32 @@ impl Parser {
                             expr.convert_to_map(),
                         ],
                         loc: self.get_loc(),
+                    }
+                }
+
+                "OPERATOR" if ["--", "++"].contains(&token.1.as_str()) => {
+                    let operator = token.1.to_owned();
+                    let loc = self.get_loc();
+                    self.next();
+                    if !is_valid_token(&self.token().cloned()) {
+                        let loc = self.get_loc().unwrap();
+                        self.raise_with_loc("SyntaxError", "Unexpected end of input after unary operator", loc);
+                        return Statement::Null;
+                    }
+                    let operand = self.parse_expression();
+                    if self.err.is_some() { return Statement::Null; }
+                    Statement::Statement {
+                        keys: vec![
+                            Value::String("type".to_string()),
+                            Value::String("operator".to_string()),
+                            Value::String("operand".to_string()),
+                        ],
+                        values: vec![
+                            Value::String("PREFIX_OPERATOR".to_string()),
+                            Value::String(operator),
+                            operand.convert_to_map(),
+                        ],
+                        loc,
                     }
                 }
 
