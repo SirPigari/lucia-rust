@@ -3,6 +3,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
 use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::repl::read_input_no_repl;
 use crate::env::runtime::internal_structs::{EffectFlags};
 use crate::interpreter::Interpreter;
@@ -118,8 +119,7 @@ fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Va
         text = format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", link, text);
     }
 
-    let reset = "\x1b[0m";
-    let styled_text = format!("{}{}{}", style, text, reset);
+    let styled_text = format!("{}{}", style, text);
     let end = match args.get("end") {
         Some(Value::String(s)) => s.clone(),
         Some(other) => format_value(other, interpreter),
@@ -143,6 +143,7 @@ fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) ->
     return Value::Null;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     let prompt = match args.get("prompt") {
         Some(Value::String(s)) => s,
@@ -164,6 +165,17 @@ fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
         Ok(input) => Value::String(input),
         Err((err_type, err_msg)) => if err { Value::Error(to_static(err_type), to_static(err_msg), None) } else { Value::String("".to_string()) },
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn input(args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
+    let prompt = match args.get("prompt") {
+        Some(Value::String(s)) => s,
+        Some(v) => &format_value_dbg(v),
+        None => "",
+    };
+
+    Value::String(input!(prompt))
 }
 
 fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
@@ -599,7 +611,7 @@ pub fn styled_print_fn() -> Function {
         vec![
             Parameter::variadic_optional("args", "any", Value::String("".to_string())),
             Parameter::keyword_optional("sep", "str", Value::String(" ".to_string())),
-            Parameter::keyword_optional("end", "str", Value::String("\n".to_string())),
+            Parameter::keyword_optional("end", "str", Value::String("\n\x1b[0m".to_string())),
             Parameter::keyword_optional("fg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bold", "bool", Value::Boolean(false)),
@@ -739,7 +751,7 @@ pub fn styledstr_fn() -> Function {
         vec![
             Parameter::variadic_optional("args", "any", Value::String("".to_string())),
             Parameter::keyword_optional("sep", "str", Value::String(" ".to_string())),
-            Parameter::keyword_optional("end", "str", Value::String("".to_string())),
+            Parameter::keyword_optional("end", "str", Value::String("\x1b[0m".to_string())),
             Parameter::keyword_optional("fg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bg_color", "str", Value::String("reset".to_string())),
             Parameter::keyword_optional("bold", "bool", Value::Boolean(false)),

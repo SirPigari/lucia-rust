@@ -8395,7 +8395,7 @@ impl Interpreter {
                         let variant_name = property_name;
                         let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
                             Some(variant) => variant,
-                            None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
+                            None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}... (and {} more)", v[..5].join(", "), v.len() - 5) } else { v.join(", ") }})),
                         };
                         if self.err.is_some() {
                             return NULL;

@@ -200,6 +200,7 @@ impl Preprocessor {
         self._process(filtered, current_dir)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get_repl_completions(&self) -> Vec<String> {
         let mut completions: HashSet<String> = HashSet::default();
 

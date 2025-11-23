@@ -13,11 +13,19 @@ thread_local! {
 
     static PRINT_CALLBACK: RefCell<Option<Function>> = RefCell::new(None);
     static CLEAR_CALLBACK: RefCell<Option<Function>> = RefCell::new(None);
+    static INPUT_CALLBACK: RefCell<Option<Function>> = RefCell::new(None);
 }
 
 #[wasm_bindgen]
 pub fn set_print_callback(cb: Function) {
     PRINT_CALLBACK.with(|cell| {
+        *cell.borrow_mut() = Some(cb);
+    });
+}
+
+#[wasm_bindgen]
+pub fn set_input_callback(cb: Function) {
+    INPUT_CALLBACK.with(|cell| {
         *cell.borrow_mut() = Some(cb);
     });
 }
@@ -71,6 +79,24 @@ macro_rules! print {
                 web_sys::console::log_1(&s.into());
             }
         });
+    }};
+}
+
+#[macro_export]
+macro_rules! input {
+    ($prompt:expr) => {{
+        use wasm_bindgen::JsValue;
+        let prompt_str = $prompt;
+        $crate::INPUT_CALLBACK.with(|cb_cell| {
+            if let Some(cb) = &*cb_cell.borrow() {
+                match cb.call1(&JsValue::NULL, &JsValue::from_str(&prompt_str)) {
+                    Ok(result) => result.as_string().unwrap_or_default(),
+                    Err(_) => String::new(),
+                }
+            } else {
+                String::new()
+            }
+        })
     }};
 }
 

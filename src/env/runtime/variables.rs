@@ -1,7 +1,7 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{make_native_method, make_native_method_pt, convert_value_to_type, to_static, parse_type, timsort_by};
 use crate::env::runtime::functions::Parameter;
-use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
+use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, RepeatingIter};
 use std::collections::HashMap;
 use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
@@ -1137,6 +1137,42 @@ impl Variable {
                     )
                 };
 
+                let into_repeating_gen = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "into_repeating_gen",
+                        move |_args| {
+                            let vec = match &val_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+                            
+                            let vec_iter = VecIter::new(&vec);
+                            let generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(vec_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+                            let repeating_iter = RepeatingIter::new(&generator);
+                            let repeating_generator = Generator::new_anonymous(
+                                GeneratorType::Native(NativeGenerator {
+                                    iter: Box::new(repeating_iter),
+                                    iteration: 0,
+                                }),
+                                false,
+                            );
+
+                            Value::Generator(repeating_generator)
+                        },
+                        vec![],
+                        "generator",
+                        false, true, true,
+                        None,
+                    )
+                };
+
                 let enumerate = {
                     let val_clone = self.value.clone();
                     make_native_method(
@@ -1362,6 +1398,28 @@ impl Variable {
                     Variable::new(
                         "iter".to_string(),
                         into_gen,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "into_repeating_gen".to_string(),
+                    Variable::new(
+                        "into_repeating_gen".to_string(),
+                        into_repeating_gen.clone(),
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "repeating_iter".to_string(),
+                    Variable::new(
+                        "repeating_iter".to_string(),
+                        into_repeating_gen,
                         "function".to_string(),
                         false,
                         true,

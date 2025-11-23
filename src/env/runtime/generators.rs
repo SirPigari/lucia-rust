@@ -261,6 +261,23 @@ impl Generator {
         }
     }
 
+    pub fn deep_clone(&self) -> Self {
+        let inner = self.inner.lock().unwrap();
+        let kind_clone = match &inner.kind {
+            GeneratorType::Native(native) => GeneratorType::Native(native.clone()),
+            GeneratorType::Custom(custom) => GeneratorType::Custom(custom.clone()),
+        };
+
+        Self {
+            inner: Arc::new(Mutex::new(GeneratorInner {
+                name: inner.name.clone(),
+                kind: kind_clone,
+                is_static: inner.is_static,
+                has_iterated: inner.has_iterated,
+            })),
+        }
+    }
+
     pub fn help_string(&self) -> String {
         format!("Generator: {}\nParameters: {}\nReturn Type: {}\nIs done: {}\nIterated: {}\nIs static: {}\nIs infinite: {}",
             self.name().unwrap_or("<anonymous>"),
@@ -767,6 +784,21 @@ impl MapIter {
     }
 }
 
+#[derive(Clone)]
+pub struct RepeatingIter {
+    original: Box<Generator>,
+    generator: Box<Generator>,
+}
+
+impl RepeatingIter {
+    pub fn new(generator: &Generator) -> Self {
+        Self {
+            generator: Box::new(generator.clone()),
+            original: Box::new(generator.deep_clone()),
+        }
+    }
+}
+
 impl Iterator for RangeValueIter {
     type Item = Value;
 
@@ -963,6 +995,17 @@ impl Iterator for MapIter {
     }
 }
 
+impl Iterator for RepeatingIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.generator.is_done() {
+            self.generator = Box::new(self.original.deep_clone());
+        }
+        self.generator.next()
+    }
+}
+
 impl GeneratorIterator for RangeValueIter {
     fn clone_box(&self) -> Box<dyn GeneratorIterator> {
         Box::new(self.clone())
@@ -1060,5 +1103,23 @@ impl GeneratorIterator for MapIter {
 
     fn get_size(&self) -> usize {
         std::mem::size_of::<Self>()
+    }
+}
+
+impl GeneratorIterator for RepeatingIter {
+    fn clone_box(&self) -> Box<dyn GeneratorIterator> {
+        Box::new(self.clone())
+    }
+
+    fn is_done(&self) -> bool {
+        false
+    }
+
+    fn get_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn is_infinite(&self) -> bool {
+        true
     }
 }

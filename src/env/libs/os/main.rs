@@ -8,14 +8,21 @@ use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::utils::MAX_PTR;
 use crate::env::runtime::modules::Module;
-use crate::{insert_native_fn, make_native_fn_pt, insert_native_var, make_native_static_fn_pt, insert_native_fn_pt};
+use crate::{insert_native_fn, insert_native_var};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{make_native_fn_pt, make_native_static_fn_pt, insert_native_fn_pt};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::structs_and_enums::{Struct, Enum};
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
-use std::path::{PathBuf, Path};
-use std::io::Read;
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::{path::Path, io::Read};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::statements::Statement;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::types::Type;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -598,12 +605,13 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         make_native_fn_pt!("set_stdin", |args: &HashMap<String, Value>| {
             if let Some(Value::Struct(s)) = args.get("self") {
                 if let Some(val) = args.get("value") {
-                    s.clone().set("stdin".to_string(), val.clone());
-                    return Value::Boolean(true);
+                    let mut s = s.clone();
+                    s.set("stdin".to_string(), val.clone());
+                    return Value::Struct(s);
                 }
             }
-            Value::Boolean(false)
-        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &Type::new_simple("bool"), EffectFlags::PURE)
+            Value::Error("TypeError", "Failed to set stdin", None)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
     );
 
     let stderr_get = ("stderr".to_string(),
@@ -618,12 +626,13 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         make_native_fn_pt!("set_stderr", |args: &HashMap<String, Value>| {
             if let Some(Value::Struct(s)) = args.get("self") {
                 if let Some(val) = args.get("value") {
-                    s.clone().set("stderr".to_string(), val.clone());
-                    return Value::Boolean(true);
+                    let mut s = s.clone();
+                    s.set("stderr".to_string(), val.clone());
+                    return Value::Struct(s);
                 }
             }
-            Value::Boolean(false)
-        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &Type::new_simple("bool"), EffectFlags::PURE)
+            Value::Error("TypeError", "Failed to set stderr", None)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
     );
 
     let args_set = ("args".to_string(),
@@ -666,6 +675,32 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         ], &cmd_struct, EffectFlags::PURE)
     );
 
+    let redirect_enum_clone = redirect_enum.clone();
+    let clear = ("clear".to_string(),
+        make_native_fn_pt!("clear", move |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                let mut s = s.clone();
+                s.set("args".to_string(), Value::List(vec![]));
+                s.set("stdin".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
+                s.set("stdout".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
+                s.set("stderr".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
+                return Value::Struct(s);
+            }
+            Value::Error("TypeError", "Failed to clear args", None)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![])], &cmd_struct, EffectFlags::PURE)
+    );
+
+    let args_clear = ("clear_args".to_string(), 
+        make_native_fn_pt!("clear_args", move |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                let mut s = s.clone();
+                s.set("args".to_string(), Value::List(vec![]));
+                return Value::Struct(s);
+            }
+            Value::Error("TypeError", "Failed to clear args", None)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![])], &cmd_struct, EffectFlags::PURE)
+    );
+
     
     if let Type::Struct { methods, .. } = &mut cmd_struct {
         *methods = vec![
@@ -675,7 +710,9 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
             stdin_get, stdin_set,
             stderr_get, stderr_set,
             args_set,
-            arg_append
+            arg_append,
+            clear,
+            args_clear
         ];
     }
 
