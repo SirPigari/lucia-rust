@@ -40,18 +40,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ubuntu-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ubuntu-${{ matrix.rust }}-
-            ubuntu-
-
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y make
 
@@ -84,18 +72,6 @@ jobs:
         run: rustup default ${{ matrix.rust }}
 
       - uses: actions/checkout@v4
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            /root/.cargo/registry
-            /root/.cargo/git
-            target
-          key: arch-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            arch-${{ matrix.rust }}-
-            arch-
 
       - name: Build project (debug)
         run: make build

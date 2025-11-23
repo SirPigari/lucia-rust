@@ -38,19 +38,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           override: true
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: macos-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            macos-${{ matrix.rust }}-
-            macos-
-
+      
       - name: Install system dependencies
         run: brew install make
 

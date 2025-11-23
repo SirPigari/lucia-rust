@@ -26,18 +26,6 @@ jobs:
           toolchain: nightly
           override: true
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.os }}-cargo-nightly-
-            ${{ matrix.os }}-cargo-
-
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y make
@@ -86,18 +74,6 @@ jobs:
         run: rustup default nightly
 
       - uses: actions/checkout@v4
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            /root/.cargo/registry
-            /root/.cargo/git
-            target
-          key: arch-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            arch-cargo-nightly-
-            arch-cargo-
 
       - name: Build project (release)
         run: make release

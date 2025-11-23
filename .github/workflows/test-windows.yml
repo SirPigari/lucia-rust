@@ -39,18 +39,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            windows-${{ matrix.rust }}-
-            windows-
-
       - name: Install system dependencies
         run: choco install make --no-progress
 
