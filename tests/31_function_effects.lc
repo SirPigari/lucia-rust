@@ -49,7 +49,7 @@ end
 
 m()
 
-assert_eq!(global_state, 42)
+assert_eq!(global_state, &42)
 
 
 fun n(i) -> int <![pure]>:

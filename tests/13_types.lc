@@ -2,8 +2,7 @@
 #config allow_unsafe = true
 
 // this is not an example its a test file its not meant to learn from
-// see examples instead
-
+// see 'src/env/Docs/examples' instead
 
 // primitives
 
@@ -68,6 +67,13 @@ assert_eq!(*k, 42)
 assert_eq!(k, &69)
 assert_eq!(*k, 69)
 assert_eq!(type_of(k), &int)
+
+// nested pointers
+kk: &&int = &(k.clone())  // have to clone here else its just atomic counter increment
+assert_eq!(**kk, 69)
+(**kk) = 100
+assert_eq!(*k, 69)
+assert_eq!(**kk, 100)
 
 // maybe types
 m: ?int = *k

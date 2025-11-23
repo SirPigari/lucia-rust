@@ -8,10 +8,12 @@ use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::utils::MAX_PTR;
 use crate::env::runtime::modules::Module;
-use crate::{insert_native_fn, make_native_fn_pt, insert_native_var};
-use crate::env::runtime::structs_and_enums::Struct;
+use crate::{insert_native_fn, make_native_fn_pt, insert_native_var, make_native_static_fn_pt, insert_native_fn_pt};
+use crate::env::runtime::structs_and_enums::{Struct, Enum};
 use std::sync::Mutex;
-use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::path::{PathBuf, Path};
+use std::io::Read;
 
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::Type;
@@ -22,8 +24,6 @@ use std::env::consts;
 use crate::env::runtime::utils::to_static;
 #[cfg(not(target_arch = "wasm32"))]
 use sys_info;
-
-// ==== Helpers ====
 
 #[cfg(not(target_arch = "wasm32"))]
 fn wrap_string_fn<F>(func: F) -> impl Fn(&HashMap<String, Value>) -> Value
@@ -58,8 +58,6 @@ where
     }
 }
 
-// Unsafe pointer functions are the same for all platforms
-
 fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
         return Value::Error(
@@ -74,8 +72,8 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 
     unsafe {
-        let arc_ptr = ptr as *const Mutex<Value>;
-        let arc_ref: Arc<Mutex<Value>> = Arc::from_raw(arc_ptr);
+        let arc_ptr = ptr as *const Mutex<(Value, usize)>;
+        let arc_ref: Arc<Mutex<(Value, usize)>> = Arc::from_raw(arc_ptr);
         let cloned_arc = Arc::clone(&arc_ref);
         std::mem::forget(arc_ref);
         Value::Pointer(cloned_arc)
@@ -104,7 +102,6 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 }
 
-// Panic helper
 fn panic_handler(args: &HashMap<String, Value>) -> Value {
     const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
@@ -272,8 +269,6 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         wheres: Vec::new(),
     };
 
-    let mut methods = Vec::new();
-
     let exitcode_method = ("exitcode".to_string(),
         make_native_fn_pt!("exitcode", |args: &HashMap<String, Value>| -> Value {
             if let Some(Value::Struct(instance)) = args.get("self") {
@@ -289,9 +284,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         make_native_fn_pt!("runned", |args: &HashMap<String, Value>| -> Value {
             if let Some(Value::Struct(instance)) = args.get("self") {
                 match instance.get_field("shellerr") {
-                    Some(Value::String(s)) => {
-                        return Value::Boolean(s.is_empty());
-                    }
+                    Some(Value::String(s)) => return Value::Boolean(s.is_empty()),
                     _ => {}
                 }
             }
@@ -299,19 +292,13 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         }, vec![Parameter::instance("self", &process_output_struct, vec![])], &Type::new_simple("bool"), EffectFlags::PURE)
     );
 
-    methods.push(exitcode_method);
-    methods.push(runned_method);
-
-    if let Type::Struct { methods: old_methods, .. } = &mut process_output_struct {
-        *old_methods = methods;
+    if let Type::Struct { methods, .. } = &mut process_output_struct {
+        *methods = vec![exitcode_method, runned_method];
     }
 
     let closure_struct = process_output_struct.clone();
-    insert_native_fn!(map, "popen", move |args: &HashMap<String, Value>| -> Value {
-        use std::process::{Command, Stdio};
-        use std::io::Read;
-        use std::path::Path;
 
+    insert_native_fn_pt!(map, "popen", move |args: &HashMap<String, Value>| -> Value {
         let args_val = match args.get("args") {
             Some(Value::List(list)) => list.iter().map(|v| {
                 if let Value::String(s) = v {
@@ -407,11 +394,14 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 ))
             }
         }
-    }, vec![Parameter::positional("args", "list"), Parameter::positional_optional("shell", "bool", Value::Boolean(false)), Parameter::positional_optional_pt("cwd", &Type::new_simple("str").set_maybe_type(true), Value::Null), Parameter::positional_optional("capture_output", "bool", Value::Boolean(false))], "ProcessOutput", EffectFlags::IO);
+    }, vec![
+        Parameter::positional("args", "list"),
+        Parameter::positional_optional("shell", "bool", Value::Boolean(false)),
+        Parameter::positional_optional_pt("cwd", &Type::new_simple("str").set_maybe_type(true), Value::Null),
+        Parameter::positional_optional("capture_output", "bool", Value::Boolean(false))
+    ], &process_output_struct, EffectFlags::IO);
 
     insert_native_fn!(map, "run", |args: &HashMap<String, Value>| -> Value {
-        use std::process::Command;
-
         let command = match args.get("command") {
             Some(Value::String(s)) => s,
             _ => return Value::Error("TypeError", "Expected 'command' to be a string", None),
@@ -440,19 +430,294 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         }
     }, vec![Parameter::positional("command", "str")], "int", EffectFlags::IO);
 
-    insert_native_var!(map, "ProcessOutput", Value::Type(process_output_struct), "type");
+    let redirect_enum = Type::Enum {
+        name: "Redirect".to_string(),
+        variants: vec![
+            ("Pipe".to_string(), Statement::Null, 0),
+            ("Inherit".to_string(), Statement::Null, 1),
+            ("Null".to_string(), Statement::Null, 2),
+            ("File".to_string(), Statement::make_value(Value::Type(Type::new_simple("str"))), 3),
+        ],
+        generics: Vec::new(),
+        wheres: Vec::new(),
+    };
 
+    let mut cmd_struct = Type::Struct {
+        name: "Cmd".to_string(),
+        fields: vec![
+            ("args".to_string(), Statement::make_value(Value::Type(Type::new_simple("list"))), vec![]),
+            ("stdin".to_string(), Statement::make_value(Value::Type(redirect_enum.clone())), vec![]),
+            ("stdout".to_string(), Statement::make_value(Value::Type(redirect_enum.clone())), vec![]),
+            ("stderr".to_string(), Statement::make_value(Value::Type(redirect_enum.clone())), vec![]),
+        ],
+        methods: vec![],
+        generics: Vec::new(),
+        wheres: Vec::new(),
+    };
+
+    let process_output_struct_clone = process_output_struct.clone();
+
+    let run_inside = move |args: &HashMap<String, Value>| -> Value {
+        let self_struct = match args.get("self") {
+            Some(Value::Struct(s)) => s,
+            _ => return Value::Error("TypeError", "Expected 'self' to be a struct", None),
+        };
+
+        let args_val = match self_struct.get_field("args") {
+            Some(Value::List(list)) => list.iter().filter_map(|v| {
+                if let Value::String(s) = v { Some(s.clone()) } else { None }
+            }).collect::<Vec<String>>(),
+            _ => return Value::Error("TypeError", "Expected 'args' to be a list", None),
+        };
+
+        if args_val.is_empty() {
+            return Value::Error("ValueError", "Command args list is empty", None);
+        }
+
+        let stdin_val = self_struct.get_field("stdin");
+        let stdout_val = self_struct.get_field("stdout");
+        let stderr_val = self_struct.get_field("stderr");
+
+        let mut shellerr = String::new();
+
+        let map_redirect = |v: Option<&Value>, shellerr: &mut String| -> Stdio {
+            match v {
+                Some(Value::Enum(e)) => match e.variant.0 {
+                    0 => Stdio::piped(),
+                    1 => Stdio::inherit(),
+                    2 => Stdio::null(),
+                    3 => { // File
+                        match *e.variant.1 {
+                            Value::String(ref path) => match std::fs::File::create(path) {
+                                Ok(f) => Stdio::from(f),
+                                Err(err) => {
+                                    shellerr.push_str(&format!("Failed to create file '{}': {}\n", path, err));
+                                    Stdio::null()
+                                }
+                            },
+                            _ => {
+                                shellerr.push_str("File variant payload must be a string\n");
+                                Stdio::null()
+                            }
+                        }
+                    },
+                    _ => {
+                        shellerr.push_str(&format!("Unknown Redirect variant index: {}\n", e.variant.0));
+                        Stdio::null()
+                    }
+                },
+                _ => Stdio::null(),
+            }
+        };
+
+        let mut command = Command::new(&args_val[0]);
+        if args_val.len() > 1 {
+            command.args(&args_val[1..]);
+        }
+
+        command.stdin(map_redirect(stdin_val, &mut shellerr));
+        command.stdout(map_redirect(stdout_val, &mut shellerr));
+        command.stderr(map_redirect(stderr_val, &mut shellerr));
+
+        let mut output_map: HashMap<String, (Box<Value>, Type)> = HashMap::new();
+
+        match command.spawn() {
+            Ok(mut child) => {
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+
+                if let Some(ref mut out) = child.stdout {
+                    std::io::BufReader::new(out).read_to_string(&mut stdout).ok();
+                }
+                if let Some(ref mut err) = child.stderr {
+                    std::io::BufReader::new(err).read_to_string(&mut stderr).ok();
+                }
+
+                let status = child.wait().unwrap();
+                let returncode = status.code().unwrap_or(-1);
+
+                output_map.insert("pid".to_string(), (Box::new(Value::Int(Int::from_i64(child.id() as i64))), Type::new_simple("int")));
+                output_map.insert("stdout".to_string(), (Box::new(Value::String(stdout)), Type::new_simple("str")));
+                output_map.insert("stderr".to_string(), (Box::new(Value::String(stderr)), Type::new_simple("str")));
+                output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(returncode as i64))), Type::new_simple("int")));
+                output_map.insert("shellerr".to_string(), (Box::new(Value::String(shellerr)), Type::new_simple("str")));
+
+                Value::Struct(Struct::new_with_fields(process_output_struct_clone.clone(), output_map))
+            }
+            Err(e) => {
+                output_map.insert("pid".to_string(), (Box::new(Value::Int(Int::from_i64(-1))), Type::new_simple("int")));
+                output_map.insert("stdout".to_string(), (Box::new(Value::String("".to_string())), Type::new_simple("str")));
+                output_map.insert("stderr".to_string(), (Box::new(Value::String("".to_string())), Type::new_simple("str")));
+                output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(-1))), Type::new_simple("int")));
+                output_map.insert("shellerr".to_string(), (Box::new(Value::String(format!("Failed to spawn command: {}\n{}", e, shellerr))), Type::new_simple("str")));
+
+                Value::Struct(Struct::new_with_fields(process_output_struct_clone.clone(), output_map))
+            }
+        }
+    };
+
+
+    let run_method = ("run".to_string(), 
+        make_native_fn_pt!("run", run_inside.clone(), vec![Parameter::instance("self", &cmd_struct, vec![])], &process_output_struct, EffectFlags::IO)
+    );
+
+    let output_method = ("output".to_string(),
+        make_native_fn_pt!("output", run_inside.clone(), vec![Parameter::instance("self", &cmd_struct, vec![])], &process_output_struct, EffectFlags::IO)
+    );
+
+    let stdout_get = ("stdout".to_string(),
+        make_native_fn_pt!("stdout", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                s.get_field("stdout").cloned().unwrap_or(Value::Null)
+            } else { Value::Null }
+        }, vec![Parameter::instance("self", &cmd_struct, vec![])], &redirect_enum, EffectFlags::PURE)
+    );
+
+    let stdout_set = ("set_stdout".to_string(),
+        make_native_fn_pt!("set_stdout", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                if let Some(val) = args.get("value") {
+                    let mut s = s.clone();
+                    s.set("stdout".to_string(), val.clone());
+                    return Value::Struct(s);
+                }
+            }
+            Value::Error("TypeError", "Failed to set stdout", None)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
+    );
+
+    let stdin_get = ("stdin".to_string(),
+        make_native_fn_pt!("stdin", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                s.get_field("stdin").cloned().unwrap_or(Value::Null)
+            } else { Value::Null }
+        }, vec![Parameter::instance("self", &cmd_struct, vec![])], &redirect_enum, EffectFlags::PURE)
+    );
+
+    let stdin_set = ("set_stdin".to_string(),
+        make_native_fn_pt!("set_stdin", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                if let Some(val) = args.get("value") {
+                    s.clone().set("stdin".to_string(), val.clone());
+                    return Value::Boolean(true);
+                }
+            }
+            Value::Boolean(false)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &Type::new_simple("bool"), EffectFlags::PURE)
+    );
+
+    let stderr_get = ("stderr".to_string(),
+        make_native_fn_pt!("stderr", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                s.get_field("stderr").cloned().unwrap_or(Value::Null)
+            } else { Value::Null }
+        }, vec![Parameter::instance("self", &cmd_struct, vec![])], &redirect_enum, EffectFlags::PURE)
+    );
+
+    let stderr_set = ("set_stderr".to_string(),
+        make_native_fn_pt!("set_stderr", |args: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args.get("self") {
+                if let Some(val) = args.get("value") {
+                    s.clone().set("stderr".to_string(), val.clone());
+                    return Value::Boolean(true);
+                }
+            }
+            Value::Boolean(false)
+        }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &Type::new_simple("bool"), EffectFlags::PURE)
+    );
+
+    let args_set = ("args".to_string(),
+        make_native_fn_pt!("args", |args_map: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args_map.get("self") {
+                if let Some(Value::List(list)) = args_map.get("value") {
+                    let mut s = s.clone();
+                    s.set("args".to_string(), Value::List(list.clone()));
+                    return Value::Struct(s);
+                }
+            }
+            Value::Error("TypeError", "Failed to set args", None)
+        }, vec![
+            Parameter::instance("self", &cmd_struct, vec![]),
+            Parameter::positional_pt("value", &Type::Indexed {
+                base_type: Box::new(Type::new_simple("list")),
+                elements: vec![Type::new_simple("str")],
+            })
+        ], &cmd_struct, EffectFlags::PURE)
+    );
+
+    let arg_append = ("arg".to_string(),
+        make_native_fn_pt!("arg", |args_map: &HashMap<String, Value>| {
+            if let Some(Value::Struct(s)) = args_map.get("self") {
+                if let Some(Value::String(val)) = args_map.get("value") {
+                    let mut current_args = match s.get_field("args") {
+                        Some(Value::List(list)) => list.clone(),
+                        _ => vec![],
+                    };
+                    current_args.push(Value::String(val.clone()));
+                    let mut s = s.clone();
+                    s.set("args".to_string(), Value::List(current_args));
+                    return Value::Struct(s);
+                }
+            }
+            Value::Error("TypeError", "Failed to append arg", None)
+        }, vec![
+            Parameter::instance("self", &cmd_struct, vec![]),
+            Parameter::positional("value", "str")
+        ], &cmd_struct, EffectFlags::PURE)
+    );
+
+    
+    if let Type::Struct { methods, .. } = &mut cmd_struct {
+        *methods = vec![
+            run_method,
+            output_method,
+            stdout_get, stdout_set,
+            stdin_get, stdin_set,
+            stderr_get, stderr_set,
+            args_set,
+            arg_append
+        ];
+    }
+
+    let default_cmd_instance = Arc::new(Struct::new_with_fields(
+        cmd_struct.clone(),
+        HashMap::from_iter(vec![
+            ("args".to_string(), (Box::new(Value::List(vec![])), Type::new_simple("list"))),
+            ("stdin".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
+            ("stdout".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
+            ("stderr".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
+        ])
+    ));
+    
+    // I HATE FUCKING RUSTS CLOSURE SHIT AND THSI FUCKING CODEBASE WHY IN THE FUCK DID I HAVE TO SPEND A HOUR TRYING TO CREATE A NEW STATIC METHOD
+    let new_cmd_closure: Box<dyn Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static> =
+        Box::new({
+            let default_cmd_instance = Arc::clone(&default_cmd_instance);
+            move |_| -> Value {
+                Value::Struct((*default_cmd_instance).clone())
+            }
+        });
+        
+        let new_cmd_method = ("new".to_string(),
+        make_native_static_fn_pt!("new", new_cmd_closure, vec![], &cmd_struct, EffectFlags::PURE)
+    );
+
+    if let Type::Struct { methods, .. } = &mut cmd_struct {
+        methods.push(new_cmd_method);
+    }
+    
+    insert_native_var!(map, "Redirect", Value::Type(redirect_enum.clone()), "type");
+    insert_native_var!(map, "Cmd", Value::Type(cmd_struct.clone()), "type");
+    insert_native_var!(map, "ProcessOutput", Value::Type(process_output_struct.clone()), "type");
+    
     map
 }
-
-// ==== Registration ====
 
 pub fn register(config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // Native OS functions
         let string_fns: Vec<(&str, Box<dyn Fn() -> Result<String, sys_info::Error> + Send + Sync>)> = vec![
             ("os_name", Box::new(sys_info::os_type)),
             ("os_version", Box::new(sys_info::os_release)),
@@ -529,11 +794,11 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         }, vec![], "str", EffectFlags::IO);
 
         insert_native_fn!(map, "cpu_num", |_: &HashMap<String, Value>| -> Value {
-            Value::Int(Int::from_i64(1)) // No real CPU info in WASM
+            Value::Int(Int::from_i64(1))
         }, vec![], "int", EffectFlags::IO);
 
         insert_native_fn!(map, "mem_total", |_: &HashMap<String, Value>| -> Value {
-            Value::Int(Int::from_i64(0)) // Can't access memory info in browser
+            Value::Int(Int::from_i64(0))
         }, vec![], "int", EffectFlags::IO);
 
         insert_native_fn!(map, "time_now", |_: &HashMap<String, Value>| -> Value {
@@ -542,7 +807,6 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         }, vec![], "float", EffectFlags::IO);
     }
 
-    // Unsafe pointer handling
     let allow_unsafe = matches!(get_from_config(config, "allow_unsafe"), Value::Boolean(true));
     
     insert_native_fn!(map, "from_ptr", move |args: &HashMap<String, Value>| -> Value {
@@ -594,7 +858,6 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
     insert_native_var!(map, "signal", Value::Module(signal_module), "module");
 
     // subprocess
-
     #[cfg(not(target_arch = "wasm32"))]
     let subprocess_module = Module {
         name: "subprocess".to_string(),

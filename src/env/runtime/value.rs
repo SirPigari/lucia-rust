@@ -40,7 +40,7 @@ pub enum Value {
     Module(Module),
     Enum(Enum),
     Struct(Struct),
-    Pointer(Arc<Mutex<Value>>),
+    Pointer(Arc<Mutex<(Value, usize)>>),
     Error(&'static str, &'static str, Option<Error>),
 }
 
@@ -377,7 +377,7 @@ impl<C> Decode<C> for Value {
                 }
 
                 let arc = unsafe {
-                    let arc_ref: &Arc<Mutex<Value>> = &*(ptr_usize as *const Arc<Mutex<Value>>);
+                    let arc_ref: &Arc<Mutex<(Value, usize)>> = &*(ptr_usize as *const Arc<Mutex<(Value, usize)>>);
                     Arc::clone(arc_ref)
                 };
 
@@ -667,8 +667,29 @@ impl Value {
             Value::Enum(e) => e.get_type(),
             Value::Struct(s) => s.get_type(),
             Value::Pointer(arc) => {
-                let mut t = (arc.lock().unwrap()).get_type();
-                t.set_reference(true);
+                let mut ptr_level = 1;
+                let mut temp_arc = arc.clone();
+                let mut t = temp_arc.lock().unwrap().0.get_type();
+                loop {
+                    let next = {
+                        let guard = temp_arc.lock().unwrap();
+                        match &*guard {
+                            (Value::Pointer(inner_arc), _) => {
+                                ptr_level += 1;
+                                Some(inner_arc.clone())
+                            }
+                            _ => {
+                                t = guard.0.get_type();
+                                None
+                            }
+                        }
+                    };
+                    match next {
+                        Some(inner) => temp_arc = inner,
+                        None => break,
+                    }
+                }
+                t.set_reference(ptr_level);
                 t
             }
             Value::Error(..) => Type::new_simple("error"),
@@ -721,7 +742,7 @@ impl Value {
             Value::Pointer(p) => {
                 Arc::strong_count(p) > 0 && {
                     let inner = p.lock().unwrap();
-                    !inner.is_null()
+                    !inner.0.is_null()
                 }
             }
             Value::Null => false,
@@ -902,7 +923,7 @@ impl Value {
             }
             Value::Pointer(arc) => {
                 let inner = arc.lock().unwrap();
-                format!("Type: '{}'\nPointer to:\n{}", self.get_type().display_simple(), format_value(&*inner))
+                format!("Type: '{}'\nPointer to:\n{}\nPointer depth: {}", self.get_type().display_simple(), format_value(&inner.0), &inner.1)
             }
             Value::Error(..) => {
                 panic!("how the fuck")

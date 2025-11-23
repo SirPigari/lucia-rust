@@ -24,7 +24,7 @@ assert_eq!((*p), 20)
 
 // nested pointers and flattening
 
-pp := &(&30)
+pp := &&30
 
 // ++ operator flatters pointers
 flattened_p: int = ++pp
@@ -33,10 +33,10 @@ assert_eq!(flattened_p, 30)
 
 pp: any = 10
 
-for i in [0..10]:
+for i in [1..10]:
     pp = &pp
 end
 
-assert!(pp is &any)  // yes
+assert!(pp is &&&&&&&&&&int)
 flattened_p2: int = ++pp
 assert_eq!(flattened_p2, 10)

@@ -2,6 +2,7 @@ use crate::env::runtime::types::Type;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::{format_value, get_variant_name};
+use crate::env::runtime::functions::Function;
 use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
 use std::collections::HashMap;
@@ -210,12 +211,25 @@ impl Struct {
     pub fn fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
         &self.fields
     }
+    pub fn get_methods(&self) -> HashMap<String, Function> {
+        let mut methods = HashMap::new();
+        if let Type::Struct { methods: ty_methods, .. } = &self.ty {
+            for (name, method) in ty_methods {
+                methods.insert(name.clone(), method.clone());
+            }
+        }
+        methods
+    }
 
     pub fn help_string(&self) -> String {
         let mut result = format!("Struct: {}\n", self.ty.display_simple());
         result.push_str("Fields:\n");
         for (field_name, (field_value, field_type)) in &self.fields {
             result.push_str(&format!("  {}: {} = {}\n", field_name, field_type.display_simple(), format_value(field_value)));
+        }
+        result.push_str("Methods:\n");
+        for (name, method) in self.get_methods() {
+            result.push_str(&format!("  {} - {}\n", name, method.help_string()));
         }
         result
     }

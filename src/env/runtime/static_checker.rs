@@ -76,7 +76,7 @@ impl ValueType {
             },
             ValueType::Pointer(arc) => {
                 let mut t = arc.get_type();
-                t.set_reference(true);
+                t.set_reference(1);
                 t
             }
             ValueType::Error(..) => Type::new_simple("error"),
@@ -361,10 +361,10 @@ impl Checker {
         let value_type = value.get_type();
 
         match expected {
-            Type::Simple { name: expected_type, is_reference: expected_ref, is_maybe_type: null_allowed } => {
+            Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: null_allowed } => {
                 if expected_type != "any" {
                     match value_type {
-                        Type::Simple { name: value_type_name, is_reference: value_type_ref, .. } => {
+                        Type::Simple { name: value_type_name, ref_level: value_type_ref, .. } => {
                             if !((*null_allowed && value_type_name == "void") || (value_type_name == *expected_type && value_type_ref == *expected_ref)) {
                                 status = false;
                             }
@@ -373,9 +373,9 @@ impl Checker {
                             err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
                         }
                     }
-                } else if *expected_ref == true {
+                } else if *expected_ref > 0 {
                     match value_type {
-                        Type::Simple { name: _, is_reference: value_type_ref, .. } => {
+                        Type::Simple { name: _, ref_level: value_type_ref, .. } => {
                             if value_type_ref != *expected_ref {
                                 status = false;
                             }
@@ -557,23 +557,27 @@ impl Checker {
 
         match type_kind.as_str() {
             "simple" => {
-                let mut value = match statement_map.get(&Value::String("value".into())) {
+                let value = match statement_map.get(&Value::String("value".into())) {
                     Some(Value::String(v)) => v.clone(),
                     _ => return self.raise(ErrorTypes::RuntimeError, "Type 'simple' missing 'value' or 'value' is not a string")
                 };
-                let mut is_ref = false;
-                let mut is_maybe = false;
-                while value.starts_with('&') || value.starts_with('?') {
-                    if value.starts_with('&') {
-                        is_ref = true;
-                    } else if value.starts_with('?') {
-                        is_maybe = true;
-                    }
-                    value = (&value[1..]).to_string();
-                }
+                let ref_level = match statement_map.get(&Value::String("ptr_level".into())) {
+                    Some(Value::Int(i)) => match i.to_usize() {
+                        Ok(v) => v,
+                        Err(_) => {
+                            self.raise(ErrorTypes::RuntimeError, "'ptr_level' must be a non-negative integer");
+                            return ValueType::Null;
+                        }
+                    },
+                    _ => 0
+                };
+                let is_maybe_type = match statement_map.get(&Value::String("is_maybe".into())) {
+                    Some(Value::Boolean(b)) => *b,
+                    _ => false
+                };
                 match self.state.defined_vars.get(&value) {
                     Some(val) => match &val.value_type {
-                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(is_ref).set_maybe_type(is_maybe).unmut()),
+                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(ref_level).set_maybe_type(is_maybe_type).unmut()),
                         _ => {
                             self.raise_with_help(ErrorTypes::TypeError, &format!("'{}' is a variable name, not a type", value), "If you meant to assign a value, use ':=' instead of ':'");
                             return ValueType::Null;

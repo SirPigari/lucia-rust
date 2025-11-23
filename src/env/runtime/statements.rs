@@ -81,7 +81,7 @@ impl Statement {
     }
     pub fn make_value(val: Value) -> Statement {
         Statement::Statement {
-            keys: vec!["TYPE".into(), "value".into()],
+            keys: vec!["type".into(), "value".into()],
             values: vec!["VALUE".into(), val],
             loc: None,
         }

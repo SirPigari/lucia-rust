@@ -600,7 +600,7 @@ impl Function {
     pub fn help_string(&self) -> String {
         format!("Function: {}\nParameters: {}\nReturn Type: {}\nPublic: {}\nStatic: {}\nFinal: {}\nNative: {}\nState: {}\nEffects: {:?}",
             self.get_name(),
-            self.get_parameters().iter().map(|p| if let Some(default) = &p.default {format!("{}: {} = {}", p.name, p.ty.display_simple(), format_value(default))} else {format!("{}: {}", p.name, p.ty.display_simple())}).collect::<Vec<_>>().join(", "),
+            if self.get_parameters().is_empty() { "None".to_string() } else { self.get_parameters().iter().map(|p| if let Some(default) = &p.default { format!("{}: {} = {}", p.name, p.ty.display_simple(), format_value(default)) } else { format!("{}: {}", p.name, p.ty.display_simple()) }).collect::<Vec<_>>().join(", ") },
             self.get_return_type().display_simple(),
             self.metadata().is_public,
             self.metadata().is_static,

@@ -1,5 +1,5 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method, convert_value_to_type, to_static, parse_type, timsort_by};
+use crate::env::runtime::utils::{make_native_method, make_native_method_pt, convert_value_to_type, to_static, parse_type, timsort_by};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter};
 use std::collections::HashMap;
@@ -67,13 +67,22 @@ impl Variable {
 
         let clone = {
             let val_clone = self.value.clone();
-            make_native_method(
+            make_native_method_pt(
                 "clone",
                 move |_args| {
-                    val_clone.clone()
+                    match &val_clone {
+                        Value::Pointer(inner_arc) => {
+                            let inner_guard = inner_arc.lock().unwrap();
+                            let (inner_value, counter) = &*inner_guard;
+                            let cloned_value = inner_value.clone();
+                            Value::Pointer(Arc::new(Mutex::new((cloned_value, *counter))))
+                        },
+                        Value::Null => Value::Null,
+                        _ => val_clone.clone(),
+                    }
                 },
                 vec![],
-                &self.value.type_name(),
+                &self.value.get_type(),
                 false, true, true,
                 None,
             )
@@ -1484,7 +1493,7 @@ impl Variable {
                         move |_args| {
                             match &val_clone {
                                 Value::Pointer(ptr_arc) => {
-                                    let raw_ptr: *const Mutex<Value> = Arc::as_ptr(ptr_arc);
+                                    let raw_ptr: *const Mutex<(Value, usize)> = Arc::as_ptr(ptr_arc);
                                     Value::Int((raw_ptr as usize).into())
                                 }
                                 _ => Value::Null,

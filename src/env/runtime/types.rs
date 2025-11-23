@@ -18,7 +18,7 @@ pub const VALID_TYPES: &[&str] = &[
 pub enum Type {
     Simple {
         name: String,
-        is_reference: bool,
+        ref_level: usize,
         is_maybe_type: bool,
     },
     Function {
@@ -62,10 +62,12 @@ pub enum Type {
 impl Type {
     pub fn display(&self) -> String {
         match self {
-            Type::Simple { name, is_reference, is_maybe_type } => {
+            Type::Simple { name, ref_level, is_maybe_type } => {
                 let mut result = "<type '".to_string();
-                if *is_reference {
-                    result.push('&');
+                if *ref_level > 0 {
+                    for _ in 0..*ref_level {
+                        result.push('&');
+                    }
                 }
                 if *is_maybe_type {
                     result.push('?');
@@ -142,10 +144,12 @@ impl Type {
 
     pub fn display_simple(&self) -> String {
         match self {
-            Type::Simple { name, is_reference, is_maybe_type } => {
+            Type::Simple { name, ref_level, is_maybe_type } => {
                 let mut result = String::new();
-                if *is_reference {
-                    result.push('&');
+                if *ref_level > 0 {
+                    for _ in 0..*ref_level {
+                        result.push('&');
+                    }
                 }
                 if *is_maybe_type {
                     result.push('?');
@@ -186,9 +190,9 @@ impl Type {
         }
     }
 
-    pub fn set_reference(&mut self, r: bool) -> &mut Self {
-        if let Type::Simple { is_reference, .. } = self {
-            *is_reference = r;
+    pub fn set_reference(&mut self, r: usize) -> &mut Self {
+        if let Type::Simple { ref_level, .. } = self {
+            *ref_level = r;
         }
         self
     }
@@ -203,18 +207,18 @@ impl Type {
     pub fn unmut(&mut self) -> Self {
         std::mem::replace(self, Type::Simple {
             name: "void".to_owned(),
-            is_reference: false,
+            ref_level: 0,
             is_maybe_type: false,
         })
     }
 
     pub fn new_simple(name: &str) -> Self {
-        let mut reference = false;
+        let mut ref_level = 0;
         let mut maybe_type = false;
         let mut base_name = name.to_owned();
         while base_name.starts_with('&') || base_name.starts_with('?') {
             if base_name.starts_with('&') {
-                reference = true;
+                ref_level += 1;
                 base_name = base_name[1..].to_owned();
             } else if base_name.starts_with('?') {
                 maybe_type = true;
@@ -223,7 +227,7 @@ impl Type {
         }
         Type::Simple {
             name: base_name,
-            is_reference: reference,
+            ref_level,
             is_maybe_type: maybe_type,
         }
     }
@@ -245,8 +249,8 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         use Type::*;
         match (self, other) {
-            (Simple { name: n1, is_reference: r1, is_maybe_type: m1 },
-             Simple { name: n2, is_reference: r2, is_maybe_type: m2 }) => {
+            (Simple { name: n1, ref_level: r1, is_maybe_type: m1 },
+             Simple { name: n2, ref_level: r2, is_maybe_type: m2 }) => {
                 n1 == n2 && r1 == r2 && m1 == m2
             },
 
@@ -293,8 +297,8 @@ impl PartialOrd for Type {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         use Type::*;
         match (self, other) {
-            (Simple { name: n1, is_reference: r1, is_maybe_type: m1 },
-             Simple { name: n2, is_reference: r2, is_maybe_type: m2 }) =>
+            (Simple { name: n1, ref_level: r1, is_maybe_type: m1 },
+             Simple { name: n2, ref_level: r2, is_maybe_type: m2 }) =>
                 (n1, r1, m1).partial_cmp(&(n2, r2, m2)),
 
             (Function { parameter_types: p1, return_type: r1 },
@@ -341,9 +345,9 @@ impl Hash for Type {
         use Type::*;
         std::mem::discriminant(self).hash(state);
         match self {
-            Simple { name, is_reference, is_maybe_type } => {
+            Simple { name, ref_level, is_maybe_type } => {
                 name.hash(state);
-                is_reference.hash(state);
+                ref_level.hash(state);
                 is_maybe_type.hash(state);
             }
             Function { parameter_types, return_type } => {

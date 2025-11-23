@@ -368,10 +368,10 @@ impl Interpreter {
         let value_type = value.get_type();
 
         match expected {
-            Type::Simple { name: expected_type, is_reference: expected_ref, is_maybe_type: null_allowed } => {
+            Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: null_allowed } => {
                 if expected_type != "any" {
                     match value_type {
-                        Type::Simple { name: value_type_name, is_reference: value_type_ref, .. } => {
+                        Type::Simple { name: value_type_name, ref_level: value_type_ref, .. } => {
                             if !((*null_allowed && value_type_name == "void") || (value_type_name == *expected_type && value_type_ref == *expected_ref)) {
                                 status = false;
                             }
@@ -380,9 +380,9 @@ impl Interpreter {
                             err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
                         }
                     }
-                } else if *expected_ref == true {
+                } else if *expected_ref > 0 {
                     match value_type {
-                        Type::Simple { name: _, is_reference: value_type_ref, .. } => {
+                        Type::Simple { name: _, ref_level: value_type_ref, .. } => {
                             if value_type_ref != *expected_ref {
                                 status = false;
                             }
@@ -438,7 +438,7 @@ impl Interpreter {
                     }
                     Value::Pointer(ptr) => {
                         let ptr_val = ptr.lock().unwrap();
-                        self.check_type(&ptr_val, expected);
+                        self.check_type(&ptr_val.0, expected);
                     }
                     _ => {
                         err = Some(make_err("TypeError", &format!("Expected type '{}' for indexed type, got '{}'", base.display(), value.get_type().display()), self.get_location_from_current_statement()));
@@ -1440,7 +1440,7 @@ impl Interpreter {
     
                 _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
             },
-            _ => self.raise("SyntaxError", "Missing or invalid 'type' in statement map"),
+            _ => self.raise_with_help("RuntimeError", "Missing 'type' in statement map", to_static(format!("Statement: {:?}", statement_map))),
         };
 
         if self.check_stop_flag() {
@@ -1504,21 +1504,22 @@ impl Interpreter {
                     "VARIABLE" => {
                         let var_name = operand_stmt.get_name();
                         if let Some(var) = self.variables.get_mut(&var_name) {
-                            match &var.value {
+                            let old_value = var.value.clone();
+                            match &old_value {
                                 Value::Int(i) => {
                                     let new_value = Value::Int((i + Int::from_i64(1)).expect("Integer overflow"));
                                     var.set_value(new_value.clone());
-                                    new_value
+                                    old_value
                                 }
                                 Value::Float(f) => {
                                     let new_value = Value::Float((f + Float::from_f64(1.0)).expect("Float overflow"));
                                     var.set_value(new_value.clone());
-                                    new_value
+                                    old_value
                                 }
                                 p if matches!(p, Value::Pointer(_)) => {
                                     let mut p = p.clone();
                                     while let Value::Pointer(inner_p) = p {
-                                        p = inner_p.lock().expect("Invalid pointer").clone();
+                                        p = inner_p.lock().expect("Invalid pointer").0.clone();
                                     }
                                     return p;
                                 }
@@ -1539,7 +1540,7 @@ impl Interpreter {
                             p if matches!(p, Value::Pointer(_)) => {
                                 let mut p = p;
                                 while let Value::Pointer(inner_p) = p {
-                                    p = inner_p.lock().expect("Invalid pointer").clone();
+                                    p = inner_p.lock().expect("Invalid pointer").0.clone();
                                 }
                                 return p;
                             }
@@ -1553,16 +1554,17 @@ impl Interpreter {
                     "VARIABLE" => {
                         let var_name = operand_stmt.get_name();
                         if let Some(var) = self.variables.get_mut(&var_name) {
-                            match &var.value {
+                            let old_value = var.value.clone();
+                            match &old_value {
                                 Value::Int(i) => {
                                     let new_value = Value::Int((i - Int::from_i64(1)).expect("Integer underflow"));
                                     var.set_value(new_value.clone());
-                                    new_value
+                                    old_value
                                 }
                                 Value::Float(f) => {
                                     let new_value = Value::Float((f - Float::from_f64(1.0)).expect("Float underflow"));
                                     var.set_value(new_value.clone());
-                                    new_value
+                                    old_value
                                 }
                                 _ => self.raise("TypeError", "Prefix -- operator can only be applied to integers and floats"),
                             }
@@ -3083,20 +3085,38 @@ impl Interpreter {
 
         match pointer_type {
             Value::String(t) if t == "POINTER_REF" => {
+                let ref_level = match statement.get(&Value::String("ptr_level".to_string())) {
+                    Some(Value::Int(n)) => match n.to_usize() {
+                        Ok(u) => u,
+                        Err(_) => {
+                            self.raise_with_help("ValueError", "Pointer level integer too large", &format!("expected in range between 0 and {}", usize::MAX));
+                            return NULL;
+                        }
+                    },
+                    _ => {
+                        self.raise("TypeError", "Expected 'ptr_level' to be an integer for pointer reference");
+                        return NULL;
+                    }
+                };
                 match value {
                     Value::Type(mut t) => {
-                        Value::Type(t.set_reference(true).unmut())
+                        Value::Type(t.set_reference(ref_level).unmut())
                     }
                     _ => {
-                        Value::Pointer(Arc::new(Mutex::new(value)))
+                        Value::Pointer(Arc::new(Mutex::new((value, ref_level))))
                     }
                 }
             }
 
             Value::String(t) if t == "POINTER_DEREF" => {
                 if let Value::Pointer(ptr_arc) = value {
-                    let inner = ptr_arc.lock().unwrap();
-                    (*inner).clone()
+                    let mut inner = ptr_arc.lock().unwrap();
+                    if inner.1 > 1 {
+                        inner.1 -= 1;
+                        Value::Pointer(ptr_arc.clone())
+                    } else {
+                        inner.0.clone()
+                    }
                 } else {
                     self.raise("TypeError", "Expected a pointer reference for dereferencing");
                     NULL
@@ -3125,7 +3145,7 @@ impl Interpreter {
 
                 if let Value::Pointer(ref ptr_arc) = left {
                     let mut inner = ptr_arc.lock().unwrap();
-                    let _old = std::mem::replace(&mut *inner, right.clone());
+                    let _old = std::mem::replace(&mut *inner, (right.clone(), 0));
                     left.clone()
                 } else {
                     self.raise("TypeError", "Expected pointer reference for assignment");
@@ -3733,6 +3753,7 @@ impl Interpreter {
         }
 
         if target_type.starts_with("&") {
+            let ptr_level: usize = target_type.chars().take_while(|&c| c == '&').count();
             let new_type = target_type.trim_start_matches('&').to_string();
             if !VALID_TYPES.contains(&new_type.as_str()) {
                 return self.raise("TypeError", &format!("Invalid target type '{}'", target_type));
@@ -3741,7 +3762,7 @@ impl Interpreter {
             if self.err.is_some() {
                 return NULL;
             }
-            return Value::Pointer(Arc::new(Mutex::new(new_value)));
+            return Value::Pointer(Arc::new(Mutex::new((new_value, ptr_level))));
         }
 
         if target_type.starts_with("?") {
@@ -3849,7 +3870,6 @@ impl Interpreter {
         };
 
         if !is_valid_alias(&alias) {
-            dbg!(&alias);
             return self.raise_with_help(
                 "ImportError",
                 &format!("'{}' is an invalid name. Please use a different alias.", alias),
@@ -5389,7 +5409,7 @@ impl Interpreter {
                     Value::Pointer(ptr) => {
                         let mut inner = ptr.lock().unwrap();
 
-                        let old_value = std::mem::replace(&mut *inner, Value::Null);
+                        let old_value = std::mem::replace(&mut *inner, (Value::Null, 0));
 
                         drop(old_value);
 
@@ -5425,23 +5445,25 @@ impl Interpreter {
         let type_: Type = match kind_str {
             "simple" => {
                 let type_name = statement.get(&Value::String("value".to_string())).unwrap_or(&default_type);
+                let ref_level = match statement.get(&Value::String("ptr_level".to_string())) {
+                    Some(Value::Int(i)) => match i.to_usize() {
+                        Ok(v) => v,
+                        _ => {
+                            self.raise("TypeError", "'ptr_level' must be a non-negative usize integer");
+                            return NULL;
+                        }
+                    },
+                    _ => 0,
+                };
+                let is_maybe = match statement.get(&Value::String("is_maybe".to_string())) {
+                    Some(Value::Boolean(b)) => *b,
+                    _ => false,
+                };
     
                 if let Value::String(s) = type_name {
-                    let mut is_ref = false;
-                    let mut is_maybe = false;
-                    let mut type_str = s.clone();
-                    while type_str.starts_with('&') || type_str.starts_with('?') {
-                        if type_str.starts_with('&') {
-                            is_ref = true;
-                            type_str = type_str[1..].to_string();
-                        } else if type_str.starts_with('?') {
-                            is_maybe = true;
-                            type_str = type_str[1..].to_string();
-                        }
-                    }
-                    match self.variables.get(&type_str) {
+                    match self.variables.get(s.as_str()) {
                         Some(val) => match &val.value {
-                            Value::Type(t) => t.clone().set_reference(is_ref).set_maybe_type(is_maybe).unmut(),
+                            Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
                             _ => {
                                 self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "If you meant to assign a value, use ':=' instead of ':'");
                                 return NULL;
@@ -5627,11 +5649,11 @@ impl Interpreter {
                 let base = match base_val {
                     Value::String(s) => {
                         let mut s = s.as_str();
-                        let mut is_ref = false;
+                        let mut ref_level = 0;
                         let mut is_maybe = false;
                         while s.starts_with('&') || s.starts_with('?') {
                             if s.starts_with('&') {
-                                is_ref = true;
+                                ref_level += 1;
                                 s = &s[1..];
                             } else if s.starts_with('?') {
                                 is_maybe = true;
@@ -5640,7 +5662,7 @@ impl Interpreter {
                         }
                         match self.variables.get(s) {
                             Some(val) => match &val.value {
-                                Value::Type(t) => t.clone().set_reference(is_ref).set_maybe_type(is_maybe).unmut(),
+                                Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
                                 _ => {
                                     self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
                                     return NULL;
@@ -9752,7 +9774,7 @@ impl Interpreter {
             };
 
             if let Value::Pointer(lp) = &left_test {
-                let l_val = lp.lock().unwrap().clone();
+                let (l_val, _) = lp.lock().unwrap().clone();
                 left_test = l_val;
             }
 
@@ -9789,18 +9811,18 @@ impl Interpreter {
 
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
-                let l_val = lp.lock().unwrap().clone();
-                let r_val = rp.lock().unwrap().clone();
+                let (l_val, _) = lp.lock().unwrap().clone();
+                let (r_val, _) = rp.lock().unwrap().clone();
                 (l_val, r_val)
             }
-            (Value::Pointer(lp), r) => {
-                let l_val = lp.lock().unwrap().clone();
-                (l_val, r.clone())
-            }
-            (l, Value::Pointer(rp)) => {
-                let r_val = rp.lock().unwrap().clone();
-                (l.clone(), r_val)
-            }
+            // (Value::Pointer(lp), r) => {
+            //     let l_val = lp.lock().unwrap().clone();
+            //     (l_val, r.clone())
+            // }
+            // (l, Value::Pointer(rp)) => {
+            //     let r_val = rp.lock().unwrap().clone();
+            //     (l.clone(), r_val)
+            // }
             _ => (left.clone(), right.clone()),
         };
 
@@ -9900,6 +9922,10 @@ impl Interpreter {
                 return NULL;
             }
         };
+
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let operator: &str = match statement.get(&Value::String("operator".to_string())) {
             Some(Value::String(s)) => s.as_str(),

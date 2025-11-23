@@ -70,7 +70,7 @@ final custom: list = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 ]
 
-fun createInitialGrid(rows: int, cols: int) -> list:
+fun create_initial_grid(rows: int, cols: int) -> list:
     // set use to null to get a random grid, or to one of the predefined patterns
     use: ?list = null
     if (use && len(use) == rows && len(use[0]) == cols):
@@ -78,82 +78,82 @@ fun createInitialGrid(rows: int, cols: int) -> list:
     end
     grid: list = []
     for (row in [0..rows - 1]):
-        rowList: list = []
+        row_list: list = []
         for (col in [0..cols - 1]):
             if (random.randint(0, 7) == 0):
                 // append doesnt take a mutable ref so it returns a new list
-                rowList = rowList.append(1)
+                row_list = row_list.append(1)
             else:
-                rowList = rowList.append(0)
+                row_list = row_list.append(0)
             end
         end
-        grid = grid.append(rowList)
+        grid = grid.append(row_list)
     end
     return grid
 end
 
-fun printGrid(rows: int, cols: int, grid: list, generation: int) -> void:
+fun print_grid(rows: int, cols: int, grid: list, generation: int) -> void:
     collections.clear_terminal()
-    outputStr: str = "Generation " + str(generation) + " - To exit the program press <Ctrl-C>\n\r"
+    output_str: str = "Generation " + str(generation) + " - To exit the program press <Ctrl-C>\n\r"
     for (row in [0..rows - 1]):
         for (col in [0..cols - 1]):
             if (grid[row][col] == 0):
-                outputStr += ". "
+                output_str += ". "
             else:
-                outputStr += "@ "
+                output_str += "@ "
             end
         end
-        outputStr += "\n\r"
+        output_str += "\n\r"
     end
-    print(outputStr, end="")
+    print(output_str, end="")
 end
 
-fun getLiveNeighbors(row: int, col: int, rows: int, cols: int, grid: list) -> int:
-    lifeSum: int = 0
+fun get_live_neighbors(row: int, col: int, rows: int, cols: int, grid: list) -> int:
+    life_sum: int = 0
     for (i in [-1, 0, 1]):
         for (j in [-1, 0, 1]):
             if (!((i == 0) && (j == 0))):
-                lifeSum += grid[(row + i + rows) % rows][(col + j + cols) % cols]
+                life_sum += grid[(row + i + rows) % rows][(col + j + cols) % cols]
             end
         end
     end
-    return lifeSum
+    return life_sum
 end
 
 // nested index access bug here
 // using temp variables as a workaround
-fun createNextGrid(rows: int, cols: int, grid: list) -> list:
+fun create_next_grid(rows: int, cols: int, grid: list) -> list:
     mutable temp: list = []
     // no list references so this is the RIGHT way
-    nextGrid := array(rows, array(cols, 0))
+    next_grid := array(rows, array(cols, 0))
 
     for (row in [0..rows - 1]):
         for (col in [0..cols - 1]):
-            liveNeighbors: int = getLiveNeighbors(row, col, rows, cols, grid)
+            live_neighbors: int = get_live_neighbors(row, col, rows, cols, grid)
 
-            if (liveNeighbors < 2 || liveNeighbors > 3):
-                temp = nextGrid[row]
+            if (live_neighbors < 2 || live_neighbors > 3):
+                temp = next_grid[row]
                 temp[col] = 0
-                nextGrid[row] = temp
-                // nextGrid[row][col] = 0
-            else if (liveNeighbors == 3 && grid[row][col] == 0):
-                temp = nextGrid[row]
+                next_grid[row] = temp
+                // next_grid[row][col] = 0
+            else if (live_neighbors == 3 && grid[row][col] == 0):
+                temp = next_grid[row]
                 temp[col] = 1
-                nextGrid[row] = temp
-                // nextGrid[row][col] = 1
+                next_grid[row] = temp
+                // next_grid[row][col] = 1
             else:
-                temp = nextGrid[row]
+                temp = next_grid[row]
                 temp[col] = grid[row][col]
-                nextGrid[row] = temp
-                // nextGrid[row][col] = grid[row][col]
+                next_grid[row] = temp
+                // next_grid[row][col] = grid[row][col]
             end
         end
     end
 
-    return nextGrid
+    return next_grid
 end
 
-fun gridChanging(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
+fun grid_changing(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
     for (row in [0..rows - 1]):
         for (col in [0..cols - 1]):
             if (grid[row][col] != nextGrid[row][col]):
@@ -164,12 +164,11 @@ fun gridChanging(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
     return false
 end
 
-fun getIntegerValue(prompt: str, low: int, high: int) -> int:
+fun get_integer_value(prompt: str, low: int, high: int) -> int:
     while (true):
-        print(prompt, end="")
-        inputStr: str = input()
+        input_str: str = input(prompt)
         try:
-            value: int = int(inputStr)
+            value: int = int(input_str)
         catch (e):
             print("Input was not a valid integer value.")
             continue
@@ -182,38 +181,38 @@ fun getIntegerValue(prompt: str, low: int, high: int) -> int:
     end
 end
 
-fun runGame() -> void:
+fun run_game() -> void:
     collections.clear_terminal()
     print("Conway's Game of Life in Lucia\n")
     print("@ - live cell\n. - dead cell\n")
-    rows: int = getIntegerValue("Enter the number of rows (10-60): ", 10, 60)
-    cols: int = getIntegerValue("Enter the number of cols (10-118): ", 10, 118)
+    rows: int = get_integer_value("Enter the number of rows (10-60): ", 10, 60)
+    cols: int = get_integer_value("Enter the number of cols (10-118): ", 10, 118)
 
     generations: int = 5000
 
-    currentGeneration: list = createInitialGrid(rows, cols)
-    nextGeneration: ?list = null
+    current_generation: list = create_initial_grid(rows, cols)
+    next_generation: ?list = null
 
     for (generation in [1..generations]):
-        if nextGeneration isnt void:
-            if (!gridChanging(rows, cols, currentGeneration, nextGeneration)):
+        if next_generation isnt void:
+            if (!grid_changing(rows, cols, current_generation, next_generation)):
                 break
             end
         end
-        printGrid(rows, cols, currentGeneration, generation)
-        nextGeneration = createNextGrid(rows, cols, currentGeneration)
+        print_grid(rows, cols, current_generation, generation)
+        next_generation = create_next_grid(rows, cols, current_generation)
         // sleep is in MILLISECONDS for clarity because milliseconds are superior to seconds
         time.sleep(100)
-        (currentGeneration, nextGeneration) = (nextGeneration, currentGeneration)
+        (current_generation, next_generation) = (next_generation, current_generation)
     end
 
-    printGrid(rows, cols, currentGeneration, generations)
+    print_grid(rows, cols, current_generation, generations)
     print("<Enter> to exit or r to run again: ", end="")
     out: str = input()
     if (out == "r"):
-        runGame()
+        run_game()
     end
     null
 end
 
-runGame()
+run_game()

@@ -82,3 +82,12 @@ assert_eq!(result, 16)
 
 result2: bool = add(1, 2) |> add(3) |> add(4, _) |> is_10()
 assert_eq!(result2, true)
+
+// prefix and postfix ++ and --
+i: int = 10
+assert_eq!(++i, 10)
+assert_eq!(i, 11)
+
+j: int = 20
+assert_eq!(j++, 21)
+assert_eq!(j, 21)

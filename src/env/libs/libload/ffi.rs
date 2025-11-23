@@ -56,7 +56,7 @@ pub unsafe fn get_list(ptr: *const c_void, elem_type: ValueType, len: usize) -> 
             let ptr_ptr = ptr as *const *const c_void;
             for i in 0..len {
                 let val = unsafe { *ptr_ptr.add(i) };
-                result.push(Value::Pointer(Arc::new(Mutex::new(Value::Int((val as usize as i64).into())))));
+                result.push(Value::Pointer(Arc::new(Mutex::new((Value::Int((val as usize as i64).into()), 1)))));
             }
         }
         ValueType::Void => {
@@ -212,7 +212,7 @@ impl LuciaFfiFn {
                 (Value::Pointer(ptr_arc), ValueType::Ptr) => {
                     let val_ref = ptr_arc.lock().unwrap();
 
-                    if let Value::Int(raw_val) = &*val_ref {
+                    if let (Value::Int(raw_val), _) = &*val_ref {
                         let raw_usize = raw_val.to_i64().unwrap_or(0) as usize;
                         if raw_usize == 0 {
                             return Err("Pointer is null".into());
@@ -276,7 +276,7 @@ impl LuciaFfiFn {
             }
             ValueType::Ptr => {
                 let ret: *const () = unsafe { cif.call(self.func_ptr, &ffi_args) };
-                Value::Pointer(Arc::new(Mutex::new(Value::Int((ret as usize as i64).into()))))
+                Value::Pointer(Arc::new(Mutex::new((Value::Int((ret as usize as i64).into()), 1))))
             }
             ValueType::Void => {
                 unsafe { cif.call::<()>(self.func_ptr, &ffi_args) };

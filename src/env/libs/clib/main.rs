@@ -52,7 +52,7 @@ pub fn register() -> HashMap<String, Variable> {
 
     let any_ptr_type = parse_type("&any");
 
-    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("text", "str")], "int", EffectFlags::IO | EffectFlags::UNSAFE);
+    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("format", "str"), Parameter::variadic("args", "any")], "int", EffectFlags::IO | EffectFlags::UNSAFE);
 
     insert_native_fn_pt!(map, "malloc", malloc_fn, vec![Parameter::positional("size", "int")], &any_ptr_type, EffectFlags::UNSAFE);
     insert_native_fn_pt!(map, "calloc", calloc_fn, vec![
@@ -95,7 +95,7 @@ pub fn register() -> HashMap<String, Variable> {
 fn ptr_from_value_pointer(v: &Value) -> Result<*mut c_void, Value> {
     match v {
         Value::Pointer(arc_val) => match &*arc_val.lock().unwrap() {
-            Value::Int(i) => Ok(i.to_i64().unwrap() as usize as *mut c_void),
+            (Value::Int(i), _) => Ok(i.to_i64().unwrap() as usize as *mut c_void),
             _ => Err(Value::Error("TypeError", "Expected inner pointer as Int", None)),
         },
         _ => Err(Value::Error("TypeError", "Expected pointer type", None)),
@@ -103,11 +103,15 @@ fn ptr_from_value_pointer(v: &Value) -> Result<*mut c_void, Value> {
 }
 
 fn value_pointer_from_raw(ptr: *mut c_void) -> Value {
-    Value::Pointer(Arc::new(Mutex::new(Value::Int((ptr as usize as i64).into()))))
+    Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 1))))
 }
 
 fn printf_fn(args: &HashMap<String, Value>) -> Value {
-    match args.get("text") {
+    if args.get("args").is_some() {
+        return Value::Error("NotImplementedError", "Variadic arguments are not supported in this FFI binding", None);
+    }
+
+    match args.get("format") {
         Some(Value::String(s)) => match CString::new(s.as_str()) {
             Ok(cstr) => unsafe {
                 let written = printf(cstr.as_ptr());

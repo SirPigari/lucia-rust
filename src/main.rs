@@ -1556,6 +1556,34 @@ fn repl(
             continue;
         }
         
+        
+        if input.starts_with(":load") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() < 2 {
+                println!("Usage: :load <file_path>");
+                continue;
+            }
+            let file_path = parts[1].trim().trim_end_matches('"').trim_start_matches('"');
+            let path = Path::new(file_path);
+            if path.exists() && path.is_file() {
+                let file_content = match fs::read_to_string(path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        handle_error(&Error::with_help(
+                            "FileReadError",
+                            to_static(format!("Failed to read file '{}': {}", path.display(), e)),
+                            "Check if the file exists and is readable.",
+                            to_static(file_path.to_string()),
+                        ), "", &config);
+                        continue;
+                    }
+                };
+                input = include_content.clone() + &file_content;
+            } else {
+                println!("Error: File '{}' does not exist or is not a valid file", file_path);
+                continue;
+            }
+        }
 
         if input.starts_with(':') {
             let new_input = match &*input {

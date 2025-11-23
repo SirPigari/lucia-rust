@@ -11,6 +11,7 @@ use crate::env::runtime::config::{get_version};
 use std::collections::HashMap;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
+use std::io::{stdout, Write};
 
 // -------------------------------
 // Function Implementations
@@ -32,6 +33,11 @@ fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
         _ => &vec![],
     };
 
+    let flush = match args.get("flush") {
+        Some(Value::Boolean(b)) => *b,
+        _ => false,
+    };
+
     let mut out = String::new();
     for (i, val) in values.iter().enumerate() {
         if i > 0 {
@@ -43,6 +49,9 @@ fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
     out.push_str(&end);
 
     print!("{}", out);
+    if flush {
+        stdout().flush().unwrap_or(());
+    }
 
     Value::Null
 }

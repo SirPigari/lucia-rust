@@ -78,13 +78,13 @@ end
 
 // === Assertions ===
 
-voidFunction()
+assert_eq!(voidFunction(), null)
 assert_eq!(intFunction(), 42)
 assert_eq!(stringFunction(), "Hello, World!")
 assert_eq!(boolFunction(), true)
 assert_eq!(listFunction(), ([1, 2, 3, 4, 5]))
-parameterFunction(5, "test")
-defaultParameterFunction()
+assert_eq!(parameterFunction(5, "test"), null)
+assert_eq!(defaultParameterFunction(), null)
 assert_eq!(combinedFunction(15), "Combined: 15, default")
 assert_eq!(combinedFunction(25, "override"), "Combined: 25, override")
 assert_eq!(recursiveFunction(5), 15)
@@ -93,4 +93,4 @@ assert_eq!(recursiveFunction(1), 1)
 assert_eq!(higherOrderFunction(lowerOrderFunction, 10), 20)
 assert_eq!(mutableArgumentsFunction(10, "test"), 15)
 assert_eq!(variadicFunction(1, 2, 3, 4, 5), 15)
-printNoEndline("Hello", "World!")
+assert_eq!(printNoEndline("Hello", "World!"), null)

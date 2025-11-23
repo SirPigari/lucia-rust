@@ -1698,18 +1698,28 @@ impl Parser {
                     }
                 }
 
-                "OPERATOR" if token.1 == "&" => {
-                    self.next();
+                "OPERATOR" if token.1 == "&" || token.1 == "&&" => {
+                    let mut ptr_level: usize = 0;
+                    while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "&&") {
+                        if self.token_is("OPERATOR", "&") {
+                            ptr_level += 1;
+                        } else {
+                            ptr_level += 2;
+                        }
+                        self.next();
+                    }
                     let expr = self.parse_expression();
                     if self.err.is_some() { return Statement::Null; }
                     Statement::Statement {
                         keys: vec![
                             Value::String("type".to_string()),
                             Value::String("value".to_string()),
+                            Value::String("ptr_level".to_string()),
                         ],
                         values: vec![
                             Value::String("POINTER_REF".to_string()),
                             expr.convert_to_map(),
+                            Value::Int(Int::from(ptr_level)),
                         ],
                         loc: self.get_loc(),
                     }
@@ -4577,22 +4587,32 @@ impl Parser {
     }
 
     fn parse_single_type(&mut self) -> Option<(String, Statement)> {
-        let mut is_ptr = false;
+        let mut ptr_level: usize = 0;
         let mut is_maybe = false;
     
-        while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") {
-            if self.token_is("OPERATOR", "&") {
-                if is_ptr {
-                    self.raise("SyntaxError", "Duplicate '&' in type prefix");
-                    return None;
+        while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "&&") || self.token_is("OPERATOR", "??") {
+            match self.token().cloned().unwrap().1.as_str() {
+                "&" => {
+                    ptr_level += 1;
                 }
-                is_ptr = true;
-            } else {
-                if is_maybe {
-                    self.raise("SyntaxError", "Duplicate '?' in type prefix");
-                    return None;
+                "&&" => {
+                    ptr_level += 2;
                 }
-                is_maybe = true;
+                "?" => {
+                    if is_maybe {
+                        self.raise("SyntaxError", "Type can only be marked as maybe once");
+                        return None;
+                    }
+                    is_maybe = true;
+                }
+                "??" => {
+                    if is_maybe {
+                        self.raise("SyntaxError", "Type can only be marked as maybe once");
+                        return None;
+                    }
+                    is_maybe = true;
+                }
+                _ => {}
             }
             self.next();
         }
@@ -4655,12 +4675,7 @@ impl Parser {
         }
         self.next();
     
-        let name = format!(
-            "{}{}{}",
-            if is_ptr { "&" } else { "" },
-            if is_maybe { "?" } else { "" },
-            token.1
-        );
+        let name = token.1;
     
         Some((
             name.clone(),
@@ -4669,11 +4684,15 @@ impl Parser {
                     Value::String("type".to_string()),
                     Value::String("type_kind".to_string()),
                     Value::String("value".to_string()),
+                    Value::String("ptr_level".to_string()),
+                    Value::String("is_maybe".to_string()),
                 ],
                 values: vec![
                     Value::String("TYPE".to_string()),
                     Value::String("simple".to_string()),
                     Value::String(name),
+                    Value::Int(Int::from(ptr_level)),
+                    Value::Boolean(is_maybe),
                 ],
                 loc: self.get_loc(),
             },

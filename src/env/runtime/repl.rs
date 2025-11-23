@@ -390,6 +390,11 @@ fn add_menu_keybindings(keybindings: &mut Keybindings) {
         KeyCode::Enter,
         ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
     );
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('a'),
+        ReedlineEvent::Edit(vec![EditCommand::SelectAll]),
+    );
 }
 
 pub fn read_input(
@@ -494,27 +499,51 @@ pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Resul
     let mut tmp_path = std::env::temp_dir();
     tmp_path.push(format!("lucia_reedline_history_{}", std::process::id()));
 
+    let mut full_input = String::new();
+
     let history = FileBackedHistory::with_file(10_000, tmp_path.clone())
         .expect("Failed to create temp history file");
     let history_box = Box::new(history);
-
+        
     let mut keybindings = default_emacs_keybindings();
-    keybindings.add_binding(
-        KeyModifiers::ALT,
-        KeyCode::Enter,
-        ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+        keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('a'),
+        ReedlineEvent::Edit(vec![EditCommand::SelectAll]),
     );
-    keybindings.add_binding(
-        KeyModifiers::SHIFT,
-        KeyCode::Enter,
-        ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
-    );
+    if multiline_prompt.is_some() {
+        keybindings.add_binding(
+            KeyModifiers::ALT,
+            KeyCode::Enter,
+            ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+        );
+        keybindings.add_binding(
+            KeyModifiers::SHIFT,
+            KeyCode::Enter,
+            ReedlineEvent::Edit(vec![EditCommand::InsertNewline]),
+        );
+    } else {
+        keybindings.add_binding(
+            KeyModifiers::NONE,
+            KeyCode::Enter,
+            ReedlineEvent::Submit,
+        );
+        keybindings.add_binding(
+            KeyModifiers::ALT,
+            KeyCode::Enter,
+            ReedlineEvent::Submit,
+        );
+        keybindings.add_binding(
+            KeyModifiers::SHIFT,
+            KeyCode::Enter,
+            ReedlineEvent::Submit,
+        );
+    }
 
     let mut editor = Reedline::create()
         .with_history(history_box)
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
-    let mut full_input = String::new();
 
     loop {
         let prompt_instance = if full_input.is_empty() {

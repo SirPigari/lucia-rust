@@ -668,12 +668,44 @@ where
     Value::Function(Function::NativeMethod(Arc::new(method)))
 }
 
-pub fn get_type_default(type_: &str) -> Value {
-    if type_.starts_with("&") {
-        let inner_type = &type_[1..];
-        let default_val = get_type_default(inner_type);
+pub fn make_native_method_pt<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &Type,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>
+) -> Value
+where
+    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    let method = NativeMethod {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: return_type.clone(),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+            effects: EffectFlags::UNKNOWN,
+        },
+    };
 
-        let arc = Arc::new(Mutex::new(default_val));
+    Value::Function(Function::NativeMethod(Arc::new(method)))
+}
+
+pub fn get_type_default(type_: &str) -> Value {
+    let ptr_level: usize = type_.chars().take_while(|&c| c == '&').count();
+    let type_ = &type_[ptr_level..];
+    if ptr_level > 0 {
+        let default_val = get_type_default(type_);
+
+        let arc = Arc::new(Mutex::new((default_val, ptr_level)));
 
         return Value::Pointer(arc);
     }
@@ -2062,8 +2094,8 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
 
     match (&inner_actual, &inner_expected) {
         (
-            Simple { name: actual_name, is_reference: actual_ref, .. },
-            Simple { name: expected_name, is_reference: expected_ref, .. },
+            Simple { name: actual_name, ref_level: actual_ref, .. },
+            Simple { name: expected_name, ref_level: expected_ref, .. },
         ) if expected_name == "any" || actual_name == "any" =>
         {
             return actual_ref == expected_ref;
