@@ -1882,6 +1882,11 @@ impl Parser {
                         return Statement::Null;
                     }
 
+                    if self.token_is("IDENTIFIER", "fun") {
+                        self.raise_with_help("SyntaxError", "Unexpected keyword 'fun' after 'for'", "Yes, for fun.");
+                        return Statement::Null;
+                    }
+
                     let mut parentheses = false;
                     if self.token_is("SEPARATOR", "(") {
                         parentheses = true;
