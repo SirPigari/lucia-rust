@@ -1,7 +1,7 @@
 use crate::env::runtime::utils::{hex_to_ansi, unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix, is_valid_token, supports_color, to_static};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node, MatchCase, ThrowNode,  alloc_loc};
 use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
@@ -390,16 +390,11 @@ impl Parser {
                         }
                         let value;
                         if self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "}") {
-                            value = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("name".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("VARIABLE".to_string()),
-                                    Value::String(name.clone()),
-                                ],
-                                loc: self.get_loc(),
+                            value = Statement {
+                                node: Node::Variable {
+                                    name: name.clone(),
+                                },
+                                loc: alloc_loc(self.get_loc())
                             };
                         } else {
                             if !self.token_is("OPERATOR", "=") {
@@ -536,37 +531,23 @@ impl Parser {
                             return Statement::Null;
                         }
                         self.next();
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("else_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("IF".to_string()),
-                                expr.convert_to_map(),
-                                Value::List(body.into_iter().map(|e| e.convert_to_map()).collect()),
-                                Value::List(vec![]),
-                            ],
-                            loc,
+                        return Statement {
+                            node: Node::If {
+                                condition: Box::new(expr),
+                                body,
+                                else_body: vec![],
+                            },
+                            loc: alloc_loc(loc),
                         };
                     } else {
                         let then_body = self.parse_expression();
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("else_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("IF".to_string()),
-                                expr.convert_to_map(),
-                                Value::List(vec![then_body.convert_to_map()]),
-                                Value::List(vec![]),
-                            ],
-                            loc,
+                        return Statement {
+                            node: Node::If {
+                                condition: Box::new(expr),
+                                body: vec![then_body],
+                                else_body: vec![],
+                            },
+                            loc: alloc_loc(loc),
                         };
                     }
                 }
@@ -607,19 +588,10 @@ impl Parser {
                             let var_name = left.get_value("name").unwrap_or(Value::Null).to_string();
                             variable_names.push(var_name.clone());
                             body.push(
-                                Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("name".to_string()),
-                                        Value::String("var_type".to_string()),
-                                        Value::String("value".to_string()),
-                                        Value::String("modifiers".to_string()),
-                                        Value::String("is_default".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("VARIABLE_DECLARATION".to_string()),
-                                        Value::String(var_name),
-                                        Statement::Statement {
+                                Statement {
+                                    node: Node::VariableDeclaration {
+                                        name: var_name,
+                                        var_type: Box::new(Statement::Statement {
                                             keys: vec![
                                                 Value::String("type".to_string()),
                                                 Value::String("value".to_string()),
@@ -631,12 +603,12 @@ impl Parser {
                                                 Value::String("simple".to_string()),
                                             ],
                                             loc: loc.clone(),
-                                        }.convert_to_map(),
-                                        right,
-                                        Value::List(vec![]),
-                                        Value::Boolean(false),
-                                    ],
-                                    loc: loc.clone(),
+                                        }),
+                                        val_stmt: Box::new(right.convert_to_statement()),
+                                        modifiers: vec![],
+                                        is_default: false,
+                                    },
+                                    loc: alloc_loc(loc.clone()),
                                 }
                             )
                         } else {
@@ -703,7 +675,26 @@ impl Parser {
                     let mut group_body = vec![];
                     group_body.extend(body.into_iter().map(|e| e.convert_to_map()));
                     group_body.push(
-                        Statement::Statement {
+                        Statement {
+                            node: Node::VariableDeclaration {
+                                name: mangled_res_name.clone(),
+                                var_type: Box::new(Statement::Statement {
+                                    keys: vec![
+                                        Value::String("type".to_string()),
+                                        Value::String("value".to_string()),
+                                        Value::String("type_kind".to_string()),
+                                    ],
+                                    values: vec![
+                                        Value::String("TYPE".to_string()),
+                                        Value::String("any".to_string()),
+                                        Value::String("simple".to_string()),
+                                    ],
+                                    loc: loc.clone(),
+                                }),
+                                val_stmt: Box::new(expr),
+                                modifiers: vec![],
+                                is_default: false,
+                            },
                             keys: vec![
                                 Value::String("type".to_string()),
                                 Value::String("name".to_string()),
@@ -745,16 +736,11 @@ impl Parser {
                                 ],
                                 values: vec![
                                     Value::String("ASSIGNMENT".to_string()),
-                                    Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("name".to_string())
-                                        ],
-                                        values: vec![
-                                            Value::String("VARIABLE".to_string()),
-                                            Value::String(mangled_res_name.clone())
-                                        ],
-                                        loc: loc.clone(),
+                                    Statement {
+                                        node: Node::Variable {
+                                            name: mangled_res_name.clone(),
+                                        },
+                                        loc: alloc_loc(loc.clone()),
                                     }.convert_to_map(),
                                     match then_op {
                                         ThenOp::Call(function_name, pos_args, named_args) => {
@@ -769,21 +755,16 @@ impl Parser {
                                                 values: vec![
                                                     Value::String("METHOD_CALL".to_string()),
                                                     Value::String(function_name),
-                                                    Statement::Statement {
-                                                        keys: vec![
-                                                            Value::String("type".to_string()),
-                                                            Value::String("name".to_string())
-                                                        ],
-                                                        values: vec![
-                                                            Value::String("VARIABLE".to_string()),
-                                                            Value::String(mangled_res_name.clone())
-                                                        ],
-                                                        loc: loc.clone(),
+                                                    Statement {
+                                                        node: Node::Variable {
+                                                            name: mangled_res_name.clone(),
+                                                        },
+                                                        loc: alloc_loc(loc.clone()),
                                                     }.convert_to_map(),
                                                     pos_args,
                                                     named_args,
                                                 ],
-                                                loc: loc.clone(),
+                                                loc: alloc_loc(loc.clone()),
                                             }.convert_to_map()
                                         }
                                         ThenOp::Op(op, val) => {
@@ -797,16 +778,11 @@ impl Parser {
                                                 values: vec![
                                                     Value::String("OPERATION".to_string()),
                                                     Value::String(op.to_string()),
-                                                    Statement::Statement {
-                                                        keys: vec![
-                                                            Value::String("type".to_string()),
-                                                            Value::String("name".to_string()),
-                                                        ],
-                                                        values: vec![
-                                                            Value::String("VARIABLE".to_string()),
-                                                            Value::String(mangled_res_name.clone()),
-                                                        ],
-                                                        loc: loc.clone(),
+                                                    Statement {
+                                                        node: Node::Variable {
+                                                            name: mangled_res_name.clone(),
+                                                        },
+                                                        loc: alloc_loc(loc.clone()),
                                                     }.convert_to_map(),
                                                     val.convert_to_map()
                                                 ],
@@ -821,62 +797,35 @@ impl Parser {
                     }
                     for var_name in variable_names {
                         group_body.push(
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("value".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("FORGET".to_string()),
-                                    Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("name".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("VARIABLE".to_string()),
-                                            Value::String(var_name),
-                                        ],
-                                        loc: loc.clone(),
-                                    }.convert_to_map(),
-                                ],
-                                loc: loc.clone(),
+                            Statement {
+                                node: Node::Forget {
+                                    node: Box::new(Statement {
+                                        node: Node::Variable {
+                                            name: var_name,
+                                        },
+                                        loc: alloc_loc(loc.clone()),
+                                    }),
+                                },
+                                loc: alloc_loc(loc.clone()),
                             }.convert_to_map()
                         );
                     }
                     group_body.push(
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("RETURN".to_string()),
-                                Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("name".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("VARIABLE".to_string()),
-                                        Value::String(mangled_res_name),
-                                    ],
-                                    loc: loc.clone(),
-                                }.convert_to_map(),
-                            ],
-                            loc: loc.clone(),
+                        Statement {
+                            node: Node::Return {
+                                value: Box::new(Statement {
+                                    node: Node::Variable {
+                                        name: mangled_res_name.clone(),
+                                    },
+                                    loc: alloc_loc(loc.clone()),
+                                }),
+                            },
+                            loc: alloc_loc(loc.clone()),
                         }.convert_to_map()
                     );
-                    return Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("expressions".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("GROUP".to_string()),
-                            Value::List(group_body)
-                        ],
-                        loc: loc.clone(),
+                    return Statement {
+                        node: Node::Group { body: group_body },
+                        loc: alloc_loc(loc),
                     };
                 }
 
@@ -894,37 +843,23 @@ impl Parser {
                         if self.err.is_some() {
                             return Statement::Null;
                         }
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("exception_vars".to_string()),
-                                Value::String("catch_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("TRY_CATCH".to_string()),
-                                Value::List(vec![expr.convert_to_map()]),
-                                Value::List(vec![Value::String("_".to_string())]),
-                                Value::List(vec![otherwise.convert_to_map()]),
-                            ],
-                            loc,
+                        return Statement {
+                            node: Node::TryCatch {
+                                body: vec![expr],
+                                catch_body: Some(vec![otherwise]),
+                                exception_vars: Some(vec!["_".to_string()]),
+                            },
+                            loc: alloc_loc(loc),
                         };
                     }
 
-                    return Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("body".to_string()),
-                            Value::String("exception_vars".to_string()),
-                            Value::String("catch_body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TRY".to_string()),
-                            Value::List(vec![expr.convert_to_map()]),
-                            Value::List(vec![]),
-                            Value::List(vec![]),
-                        ],
-                        loc,
+                    return Statement {
+                        node: Node::TryCatch {
+                            body: vec![expr],
+                            catch_body: None,
+                            exception_vars: None,
+                        },
+                        loc: alloc_loc(loc),
                     };
                 }
 
@@ -948,37 +883,23 @@ impl Parser {
                             return Statement::Null;
                         }
 
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("exception_vars".to_string()),
-                                Value::String("catch_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("TRY_CATCH".to_string()),
-                                Value::List(vec![expr.convert_to_map()]),
-                                Value::List(vec![Value::String("_".to_string())]),
-                                Value::List(vec![otherwise.convert_to_map()]),
-                            ],
-                            loc,
+                        return Statement {
+                            node: Node::TryCatch {
+                                body: vec![expr],
+                                catch_body: Some(vec![otherwise]),
+                                exception_vars: Some(vec!["_".to_string()]),
+                            },
+                            loc: alloc_loc(loc),
                         };
                     }
 
-                    return Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("body".to_string()),
-                            Value::String("exception_vars".to_string()),
-                            Value::String("catch_body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("TRY".to_string()),
-                            Value::List(vec![expr.convert_to_map()]),
-                            Value::List(vec![]),
-                            Value::List(vec![]),
-                        ],
-                        loc,
+                    return Statement {
+                        node: Node::TryCatch {
+                            body: vec![expr],
+                            catch_body: None,
+                            exception_vars: None,
+                        },
+                        loc: alloc_loc(loc),
                     };
                 }
 
@@ -1025,18 +946,12 @@ impl Parser {
                         "--" => "-",
                         _ => unreachable!(),
                     }.to_string();
-                    let loc = self.get_loc();
+                    let loc = alloc_loc(self.get_loc());
                     self.next();
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("ASSIGNMENT".to_string()),
-                            expr.convert_to_map(),
-                            Statement::Statement {
+                    expr = Statement {
+                        node: Node::Assignment {
+                            left: Box::new(expr.clone()),
+                            right: Box::new(Statement::Statement {
                                 keys: vec![
                                     Value::String("type".to_string()),
                                     Value::String("left".to_string()),
@@ -1059,8 +974,8 @@ impl Parser {
                                     Value::String(operator),
                                 ],
                                 loc: loc.clone(),
-                            }.convert_to_map(),
-                        ],
+                            }.convert_to_map(),),
+                        },
                         loc,
                     };
                 }
@@ -1271,32 +1186,16 @@ impl Parser {
                         }
                     }
 
-                    let named_args_map = Value::Map {
-                        keys: named_args.iter().map(|(k, _)| Value::String(k.clone())).collect(),
-                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                    };
-
                     let body = vec![body_expr];
-                    let body_values: Vec<Value> = body.into_iter().map(|stmt| stmt.convert_to_map()).collect();
 
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".into()),
-                            Value::String("name".into()),
-                            Value::String("modifiers".into()),
-                            Value::String("pos_args".into()),
-                            Value::String("named_args".into()),
-                            Value::String("body".into()),
-                            Value::String("return_type".into()),
-                        ],
-                        values: vec![
-                            Value::String("FUNCTION_DECLARATION".into()),
-                            Value::String("<lambda#{id}>".into()),
-                            Value::List(vec![Value::String("mutable".into())]),
-                            Value::List(pos_args),
-                            named_args_map,
-                            Value::List(body_values),
-                            Value::Map {
+                    expr = Statement {
+                        node: Node::FunctionDeclaration {
+                            name: "<lambda#{id}>".to_owned(),
+                            pos_args,
+                            named_args,
+                            body,
+                            modifiers: vec!["mutable".to_string()],
+                            return_type: Box::new(Value::Map {  // TODO: convert to Statement
                                 keys: vec![
                                     Value::String("type".into()),
                                     Value::String("value".into()),
@@ -1307,9 +1206,10 @@ impl Parser {
                                     Value::String("any".into()),
                                     Value::String("simple".into()),
                                 ],
-                            },
-                        ],
-                        loc: self.get_loc(),
+                            }),
+                            effect_flags: EffectFlags::empty(),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     };
                 }
 
@@ -1328,33 +1228,21 @@ impl Parser {
                     let expr_type = expr.get_type();
                     if expr_type == "TUPLE" {
                         let targets = expr.get_value("items").unwrap_or(Value::Null);
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("targets".to_string()),
-                                Value::String("value".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("UNPACK_ASSIGN".to_string()),
-                                targets.clone(),
-                                value.convert_to_map(),
-                            ],
-                            loc: self.get_loc(),
+                        return Statement {
+                            node: Node::UnpackAssignment {
+                                targets: targets,
+                                stmt: Box::new(value),
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         };
                     }
 
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("ASSIGNMENT".to_string()),
-                            expr.convert_to_map(),
-                            value.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    expr = Statement {
+                        node: Node::Assignment {
+                            left: Box::new(expr),
+                            right: Box::new(value),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     };
                 }
 
@@ -1406,16 +1294,10 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("ASSIGNMENT".to_string()),
-                            expr.convert_to_map(),
-                            Statement::Statement {
+                    expr = Statement {
+                        node: Node::Assignment {
+                            left: Box::new(expr),
+                            right: Box::new(Statement::Statement {  // TODO here too
                                 keys: vec![
                                     Value::String("type".to_string()),
                                     Value::String("left".to_string()),
@@ -1429,9 +1311,9 @@ impl Parser {
                                     Value::String(operator),
                                 ],
                                 loc: self.get_loc(),
-                            }.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                            }),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     };
                 }
 
@@ -1596,16 +1478,9 @@ impl Parser {
                     if exprs.is_empty() {
                         return Statement::Null;
                     }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("expressions".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("GROUP".to_string()),
-                            Value::List(exprs.into_iter().map(|e| e.convert_to_map()).collect()),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Group { body: exprs },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -1919,8 +1794,8 @@ impl Parser {
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
-                            if func.get_type() != "FUNCTION_DECLARATION" {
-                                if func.get_type() == "VARIABLE_DECLARATION" {
+                            if !matches!(func.node, Node::FunctionDeclaration { .. }) {
+                                if !matches!(func, Statement::VariableDeclaration { .. }) {
                                     self.raise_with_help("SyntaxError", "Expected function definition in methods block", "Did you mean to put this into the struct definition?");
                                 } else {
                                     self.raise("SyntaxError", "Expected function definition in methods block");
@@ -1997,20 +1872,13 @@ impl Parser {
                     }
                     self.next();
 
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("variable".to_string()),
-                            Value::String("iterable".to_string()),
-                            Value::String("body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("FOR".to_string()),
-                            variable.to_value(),
-                            iterable.convert_to_map(),
-                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::If {
+                            iterable,
+                            body,
+                            variable,
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -2021,18 +1889,12 @@ impl Parser {
                         return Statement::Null;
                     }
                     if self.token_is("IDENTIFIER", "end") {
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("WHILE".to_string()),
-                                condition.convert_to_map(),
-                                Value::List(vec![]),
-                            ],
-                            loc: self.get_loc(),
+                        return Statement {
+                            node: Node::While {
+                                condition: Box::new(condition),
+                                body: vec![],
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         };
                     }
                     self.check_for("SEPARATOR", ":");
@@ -2056,44 +1918,28 @@ impl Parser {
                     }
                     self.next();
 
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("condition".to_string()),
-                            Value::String("body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("WHILE".to_string()),
-                            condition.convert_to_map(),
-                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::While {
+                            condition: Box::new(condition),
+                            body,
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
                 "IDENTIFIER" if token.1 == "continue" => {
                     self.next();
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("CONTINUE".to_string()),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Continue,
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
                 "IDENTIFIER" if token.1 == "break" => {
                     self.next();
                     Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("BREAK".to_string()),
-                        ],
-                        loc: self.get_loc(),
+                        node: Node::Break,
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -2103,16 +1949,11 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("value".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("FORGET".to_string()),
-                            value.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Forget {
+                            value: Box::new(value),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -2125,58 +1966,33 @@ impl Parser {
                         if self.err.is_some() {
                             return Statement::Null;
                         }
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                                Value::String("throw_type".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("THROW".to_string()),
-                                val.convert_to_map(),
-                                Value::String("tuple".to_string()),
-                            ],
-                            loc,
+                        Statement {
+                            node: Node::Throw {
+                                node: ThrowNode::Tuple(val),
+                            },
+                            loc: alloc_loc(loc),
                         }
                     } else {
                         let message = self.parse_expression();
                         if self.err.is_some() {
                             return Statement::Null;
                         }
-                        let mut from = Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                                Value::String("mods".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("STRING".to_string()),
-                                Value::String("\"LuciaError\"".to_string()),
-                                Value::List(vec![]),
-                            ],
-                            loc: self.get_loc(),
-                        };
+                        let mut from = None;
                         if self.token_is("IDENTIFIER", "from") {
                             self.next();
-                            from = self.parse_expression();
+                            from = Some(self.parse_expression());
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
                         }
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("message".to_string()),
-                                Value::String("from".to_string()),
-                                Value::String("throw_type".to_string())
-                            ],
-                            values: vec![
-                                Value::String("THROW".to_string()),
-                                message.convert_to_map(),
-                                from.convert_to_map(),
-                                Value::String("string".to_string())
-                            ],
-                            loc: self.get_loc(),
+                        Statement {
+                            node: Node::Throw {
+                                node: ThrowNode::Message {
+                                    message,
+                                    from,
+                                },
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     }
                 }
@@ -2210,23 +2026,16 @@ impl Parser {
                         } else {
                             None
                         };
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("else_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("IF".to_string()),
-                                condition.convert_to_map(),
-                                Value::List(vec![then_expr.convert_to_map()]),
-                                Value::List(match else_expr {
-                                    Some(e) => vec![e.convert_to_map()],
-                                    None => vec![],
-                                }),
-                            ],
-                            loc: self.get_loc(),
+                        Statement {
+                            node: Node::If {
+                                condition: Box::new(condition),
+                                body: vec![then_expr],
+                                else_body: match else_expr {
+                                    Some(e) => Some(vec![e]),
+                                    None => None,
+                                },
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     } else {
                         self.check_for("SEPARATOR", ":");
@@ -2289,23 +2098,13 @@ impl Parser {
                             self.raise("SyntaxError", "Expected 'end' or 'else' after 'if' body");
                             return Statement::Null;
                         }
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("body".to_string()),
-                                Value::String("else_body".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("IF".to_string()),
-                                condition.convert_to_map(),
-                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                Value::List(match else_body {
-                                    Some(stmts) => stmts.into_iter().map(|s| s.convert_to_map()).collect(),
-                                    None => vec![],
-                                }),
-                            ],
-                            loc: self.get_loc(),
+                        Statement {
+                            node: Node::If {
+                                condition: Box::new(condition),
+                                body,
+                                else_body,
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     }
                 }
@@ -2402,20 +2201,13 @@ impl Parser {
                         }
                     }
 
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("body".to_string()),
-                            Value::String("exception_vars".to_string()),
-                            Value::String("catch_body".to_string()),
-                        ],
-                        values: vec![
-                            Value::String(if has_catch { "TRY_CATCH" } else { "TRY" }.to_string()),
-                            Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                            Value::List(exception_vars.into_iter().map(Value::String).collect()),
-                            Value::List(catch_body.into_iter().map(|s| s.convert_to_map()).collect()),
-                        ],
-                        loc
+                    Statement {
+                        node: Node::TryCatch {
+                            body,
+                            catch_body: if has_catch { Some(catch_body) } else { None },
+                            exception_vars: if exception_vars.is_empty() { None } else { Some(exception_vars.clone()) },
+                        },
+                        loc: alloc_loc(loc),
                     }
                 }
 
@@ -2671,31 +2463,27 @@ impl Parser {
                             self.check_for("IDENTIFIER", "end");
                             self.next();
 
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("name".to_string()),
-                                    Value::String("modifiers".to_string()),
-                                    Value::String("pos_args".to_string()),
-                                    Value::String("named_args".to_string()),
-                                    Value::String("body".to_string()),
-                                    Value::String("return_type".to_string()),
-                                    Value::String("effects".to_string()),
-                                ],
-                                values: vec![
-                                    if is_function { Value::String("FUNCTION_DECLARATION".to_string()) } else { Value::String("GENERATOR_DECLARATION".to_string()) },
-                                    Value::String(name),
-                                    Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                    Value::List(pos_args.into_iter().map(|s| s.convert_to_map()).collect()),
-                                    Value::Map {
-                                        keys: named_args.iter().map(|(k, _)| Value::String(k.clone())).collect(),
-                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                                    },
-                                    Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                    return_type.convert_to_map(),
-                                    Value::Int((effect_flags.bits() as i64).into()),
-                                ],
-                                loc: self.get_loc(),
+                            return Statement {
+                                node: if is_function {
+                                    Node::FunctionDeclaration {
+                                        pos_args,
+                                        named_args,
+                                        body,
+                                        modifiers,
+                                        return_type: Box::new(return_type),
+                                        effect_flags,
+                                    }
+                                } else {
+                                    Node::GeneratorDeclaration {
+                                        pos_args,
+                                        named_args,
+                                        body,
+                                        modifiers,
+                                        return_type: Box::new(return_type),
+                                        effect_flags,
+                                    }
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             };
                         }
                         "typedef" => {
@@ -3057,23 +2845,15 @@ impl Parser {
 
                             if self.token_is("NUMBER", "42") {
                                 return Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("module_name".to_string()),
-                                        Value::String("path".to_string()),
-                                        Value::String("alias".to_string()),
-                                        Value::String("named".to_string()),
-                                        Value::String("modifiers".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("IMPORT".to_string()),
-                                        Value::String("42".to_string()),
-                                        Value::String("".to_string()),
-                                        Value::String("".to_string()),
-                                        Value::Null,
-                                        Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                    ],
-                                    loc: self.get_loc(),
+                                    node: Node::Import {
+                                        name: "42".to_string(),
+                                        alias: None,
+                                        named_imports: vec![],
+                                        modifiers: vec![],
+                                        import_all: false,
+                                        module_path_opt: None,
+                                    },
+                                    loc: alloc_loc(self.get_loc()),
                                 }
                             }
 
@@ -3262,23 +3042,12 @@ impl Parser {
                                 self.next();
                             }
 
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("module_name".to_string()),
-                                    Value::String("path".to_string()),
-                                    Value::String("alias".to_string()),
-                                    Value::String("named".to_string()),
-                                    Value::String("modifiers".to_string()),
-                                    Value::String("import_all".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("IMPORT".to_string()),
-                                    Value::String(module_name_final),
-                                    from_path.map_or(Value::Null, |p| p.convert_to_map()),
-                                    alias.map_or(Value::Null, |a| Value::String(a.1)),
-                                    if is_named_import {
-                                        let converted = named_imports
+                            Statement {
+                                node: Node::Import {
+                                    name: module_name_final,
+                                    alias: alias.map(|a| a.1),
+                                    named_imports: if is_named_import {
+                                        let converted: Vec<Value> = named_imports
                                             .into_iter()
                                             .map(|(name, alias)| {
                                                 let mut keys = vec![Value::String("name".to_string())];
@@ -3291,14 +3060,15 @@ impl Parser {
                                                 Value::Map { keys, values }
                                             })
                                             .collect();
-                                        Value::List(converted)
+                                        Some(converted)
                                     } else {
-                                        Value::Null
+                                        None
                                     },
-                                    Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                    Value::Boolean(import_all),
-                                ],
-                                loc: self.get_loc(),
+                                    modifiers,
+                                    import_all,
+                                    module_path_opt: from_path.map(Box::new),
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             }
                         }
                         _ => {
@@ -3312,50 +3082,36 @@ impl Parser {
                                     return Statement::Null;
                                 }
                                 let type_ = self.parse_type();
-                                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_).convert_to_map(), true);
+                                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_), true);
                                 if self.err.is_some() {
                                     return Statement::Null;
                                 }
                                 if self.token_is("OPERATOR", "=") {
                                     self.next();
-                                    value = self.parse_expression().convert_to_map();
+                                    value = self.parse_expression();
                                     is_default = false;
                                     if self.err.is_some() {
                                         return Statement::Null;
                                     }
                                 }
-                                return Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("name".to_string()),
-                                        Value::String("var_type".to_string()),
-                                        Value::String("value".to_string()),
-                                        Value::String("modifiers".to_string()),
-                                        Value::String("is_default".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("VARIABLE_DECLARATION".to_string()),
-                                        Value::String(name),
-                                        type_.clone().convert_to_map(),
+                                return Statement {
+                                    node: Node::VariableDeclaration {
+                                        name,
+                                        var_type: type_,
                                         value,
-                                        Value::List(modifiers.into_iter().map(Value::String).collect()),
-                                        Value::Boolean(is_default),
-                                    ],
-                                    loc: self.get_loc(),
+                                        modifiers,
+                                        is_default,
+                                    },
+                                    loc: alloc_loc(self.get_loc()),
                                 };
                             } else if self.token_is("OPERATOR", ":=") {
                                 return self.raise_with_help("SyntaxError", "':=' cannot be used in variable declaration with modifiers.", &format!("Use '{}{}{}: {} ={} ...' instead.", if modifiers.is_empty() { "" } else { to_static(format!("{} ", modifiers.join(" "))) }, name, hex_to_ansi("#1CC58B", supports_color()), "auto", hex_to_ansi("#21B8DB", supports_color())));
                             } else {
-                                return Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("name".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("VARIABLE".to_string()),
-                                        Value::String(name),
-                                    ],
-                                    loc: self.get_loc(),
+                                return Statement {
+                                    node: Node::Variable {
+                                        name,
+                                    },
+                                    loc: alloc_loc(self.get_loc()),
                                 };
                             }
                         }
@@ -3503,39 +3259,22 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("names".to_string()),
-                            Value::String("aliases".to_string()),
-                            Value::String("modifiers".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("EXPORT".to_string()),
-                            Value::List(names.into_iter().map(Value::String).collect()),
-                            Value::List(aliases.into_iter().map(Value::String).collect()),
-                            Value::List(
-                                modifiers_list
-                                    .into_iter()
-                                    .map(|mods| Value::List(mods.into_iter().map(Value::String).collect()))
-                                    .collect(),
-                            ),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Export {
+                            names,
+                            aliases,
+                            modifiers_list,
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
                 "IDENTIFIER" if token.1 == "return" => {
                     self.next();
                     if ["end"].contains(&self.token().map(|t| t.1.as_str()).unwrap_or("")) {
-                        return Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("value".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("RETURN".to_string()),
-                                Value::Map {
+                        return Statement {
+                            node: Node::Return {
+                                value: Box::new(Value::Map {  // TODO here too
                                     keys: vec![
                                         Value::String("type".to_string()),
                                         Value::String("value".to_string()),
@@ -3544,8 +3283,8 @@ impl Parser {
                                         Value::String("BOOLEAN".to_string()),
                                         Value::String("null".to_string()),
                                     ],
-                                },
-                            ],
+                                },),
+                            },
                             loc: self.get_loc(),
                         };
                     }
@@ -3568,16 +3307,11 @@ impl Parser {
                     } else if parenthesis {
                         self.next();
                     }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("value".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("RETURN".to_string()),
-                            value.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Return {
+                            value: Box::new(value),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -3596,16 +3330,11 @@ impl Parser {
                                 return Statement::Null;
                             }
                             self.next();
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("body".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("DEFER".to_string()),
-                                    Value::List(vec![expr.convert_to_map()]),
-                                ],
-                                loc: self.get_loc(),
+                            Statement {
+                                node: Node::Defer {
+                                    body: vec![expr],
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             }
                         }
                         Some(next_token) if next_token.0 == "SEPARATOR" && next_token.1 == ":" => {
@@ -3632,16 +3361,9 @@ impl Parser {
                             }
 
                             self.next();
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("body".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("DEFER".to_string()),
-                                    Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                ],
-                                loc: self.get_loc(),
+                            Statement {
+                                node: Node::Defer { body },
+                                loc: alloc_loc(self.get_loc()),
                             }
                         }
                         _ => {
@@ -3668,7 +3390,7 @@ impl Parser {
                         _ => None,
                     };
 
-                    let locals_opt = if self.token_is("SEPARATOR", "(") {
+                    let locals = if self.token_is("SEPARATOR", "(") {
                         self.next();
                         let mut locals = Vec::new();
 
@@ -3707,9 +3429,9 @@ impl Parser {
                         }
                         self.next();
 
-                        Some(locals)
+                        locals
                     } else {
-                        Some(Vec::new())
+                        Vec::new()
                     };
 
                     if !self.token_is("SEPARATOR", ":") {
@@ -3744,33 +3466,14 @@ impl Parser {
                     }
                     self.next();
 
-                    let mut keys = vec![
-                        Value::String("type".to_string()),
-                        Value::String("body".to_string()),
-                    ];
-                    let mut values = vec![
-                        Value::String("SCOPE".to_string()),
-                        Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                    ];
-
-                    if let Some(name) = name_opt {
-                        keys.push(Value::String("name".to_string()));
-                        values.push(Value::String(name));
-                    }
-
-                    let locals = locals_opt.unwrap();
-                    keys.push(Value::String("locals".to_string()));
-                    values.push(Value::List(locals.into_iter().map(Value::String).collect()));
-
-                    if is_local {
-                        keys.push(Value::String("is_local".to_string()));
-                        values.push(Value::Boolean(true));
-                    }
-
-                    Statement::Statement {
-                        keys,
-                        values,
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Scope {
+                            body,
+                            name: name_opt,
+                            locals,
+                            is_local,
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -3787,7 +3490,7 @@ impl Parser {
                     if self.token_is("IDENTIFIER", "from") {
                         self.next();
                         let pat_expr = match self.parse_path() {
-                            Some(p) => p.to_value(),
+                            Some(p) => p,
                             None => {
                                 return Statement::Null;
                             }
@@ -3802,75 +3505,51 @@ impl Parser {
                         } else {
                             None
                         };
-                        let cases = vec![
-                            Value::Map {
-                                keys: vec![
-                                    Value::String("style".to_string()),
-                                    Value::String("pattern".to_string()),
-                                    Value::String("guard".to_string()),
-                                    Value::String("body".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("pattern".to_string()),
-                                    pat_expr,
-                                    guard.map_or(Value::Null, |g| g.convert_to_map()),
-                                    Value::List(vec![
-                                        Statement::Statement {
-                                            keys: vec![
-                                                Value::String("type".to_string()),
-                                                Value::String("value".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String("BOOLEAN".to_string()),
-                                                Value::String("true".to_string()),
-                                            ],
-                                            loc: self.get_loc(),
-                                        }.convert_to_map()
-                                    ]),
+                        let cases: Vec<MatchCase> = vec![
+                            MatchCase::Pattern {
+                                pattern: pat_expr,
+                                guard: guard,
+                                body: vec![
+                                    Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("BOOLEAN".to_string()),
+                                            Value::String("true".to_string()),
+                                        ],
+                                        loc: self.get_loc(),
+                                    }
                                 ],
                             },
-                            Value::Map {
-                                keys: vec![
-                                    Value::String("style".to_string()),
-                                    Value::String("pattern".to_string()),
-                                    Value::String("guard".to_string()),
-                                    Value::String("body".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("pattern".to_string()),
-                                    Value::Map {
-                                        keys: vec![Value::String("segments".into()), Value::String("args".into())],
-                                        values: vec![Value::List(vec![Value::String("_".to_string())]), Value::List(vec![])],
-                                    },
-                                    Value::Null,
-                                    Value::List(vec![
-                                        Statement::Statement {
-                                            keys: vec![
-                                                Value::String("type".to_string()),
-                                                Value::String("value".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String("BOOLEAN".to_string()),
-                                                Value::String("false".to_string()),
-                                            ],
-                                            loc: self.get_loc(),
-                                        }.convert_to_map()
-                                    ]),
-                                ],
+                            Value::Pattern {
+                                pattern: PathElement::Path {
+                                    segments: Vec::new("_"),
+                                    args: Vec::new(),
+                                },
+                                guard: None,
+                                body: vec![
+                                    Statement::Statement {
+                                        keys: vec![
+                                            Value::String("type".to_string()),
+                                            Value::String("value".to_string()),
+                                        ],
+                                        values: vec![
+                                            Value::String("BOOLEAN".to_string()),
+                                            Value::String("false".to_string()),
+                                        ],
+                                        loc: self.get_loc(),
+                                    }
+                                ]
                             }
                         ];
                         Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("cases".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("MATCH".to_string()),
-                                condition.convert_to_map(),
-                                Value::List(cases),
-                            ],
-                            loc: self.get_loc(),
+                            node: Node::Match {
+                                value: condition,
+                                cases: cases,
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     } else if self.token_is("SEPARATOR", ":") {
                         self.next();
@@ -3890,7 +3569,8 @@ impl Parser {
 
                                 Some(Token(..)) => {
                                     let (style, guard);
-                                    let mut patterns = vec![];
+                                    let mut patterns_literal = vec![];
+                                    let mut pattern = None;
 
                                     let saved_pos = self.pos;
                                     while !(self.token_is("SEPARATOR", ":") || self.token_is("OPERATOR", "->") || self.token_is("IDENTIFIER", "if")) {
@@ -3917,7 +3597,7 @@ impl Parser {
 
                                     if &style == "pattern" {
                                         let pat_expr = match self.parse_path() {
-                                            Some(p) => p.to_value(),
+                                            Some(p) => p,
                                             None => {
                                                 return Statement::Null;
                                             }
@@ -3943,10 +3623,10 @@ impl Parser {
                                         }
                                         self.next();
 
-                                        patterns.push(pat_expr);
+                                        pattern = Some(pat_expr);
                                     } else {
                                         let tok_val = self.token().unwrap().1.clone();
-                                        patterns = if tok_val == "_" {
+                                        patterns_literal = if tok_val == "_" {
                                             self.next();
                                             return self.raise_with_help("SyntaxError", "'_' is not allowed in 'match' literal case", "Did you mean to use pattern case? ('->' instead of ':')");
                                         } else {
@@ -4006,35 +3686,15 @@ impl Parser {
                                     }
 
                                     let case_map = if style == "literal" {
-                                        Value::Map {
-                                            keys: vec![
-                                                Value::String("style".to_string()),
-                                                Value::String("patterns".to_string()),
-                                                Value::String("body".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String(style),
-                                                Value::List(patterns),
-                                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                            ],
+                                        MatchCase::Literal {
+                                            patterns: patterns_literal,
+                                            body
                                         }
                                     } else {
-                                        if patterns.len() != 1 {
-                                            return self.raise_with_help("RuntimeError", "'patterns' is supposed to have lenght of 1", "This is not your issue, report this to https://github.com/SirPigari/lucia-rust/issues/new")
-                                        }
-                                        Value::Map {
-                                            keys: vec![
-                                                Value::String("style".to_string()),
-                                                Value::String("pattern".to_string()),
-                                                Value::String("guard".to_string()),
-                                                Value::String("body".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String(style),
-                                                patterns[0].clone(),
-                                                guard.map_or(Value::Null, |g| g.convert_to_map()),
-                                                Value::List(body.into_iter().map(|s| s.convert_to_map()).collect()),
-                                            ],
+                                        MatchCase::Pattern {
+                                            pattern: pattern.take().unwrap(),
+                                            guard,
+                                            body,
                                         }
                                     };
 
@@ -4057,18 +3717,12 @@ impl Parser {
                             return Statement::Null;
                         }
 
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("condition".to_string()),
-                                Value::String("cases".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("MATCH".to_string()),
-                                condition.convert_to_map(),
-                                Value::List(cases),
-                            ],
-                            loc: self.get_loc(),
+                        Statement {
+                            node: Node::Match {
+                                value: condition,
+                                cases: cases,
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     } else {
                         self.raise(
@@ -4112,18 +3766,12 @@ impl Parser {
                                     }
                                     let value = self.parse_expression();
 
-                                    return Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("targets".to_string()),
-                                            Value::String("value".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("UNPACK_ASSIGN".to_string()),
-                                            Value::List(vec![]),
-                                            value.convert_to_map(),
-                                        ],
-                                        loc: self.get_loc(),
+                                    return Statement {
+                                        node: Node::UnpackAssignment {
+                                            targets: vec![],
+                                            stmt: Box::new(value),
+                                        },
+                                        loc: alloc_loc(self.get_loc()),
                                     };
                                 }
                             }
@@ -4241,18 +3889,12 @@ impl Parser {
                                 }
                             });
 
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("targets".to_string()),
-                                    Value::String("value".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("UNPACK_ASSIGN".to_string()),
-                                    Value::List(targets.collect()),
-                                    value.convert_to_map(),
-                                ],
-                                loc: self.get_loc(),
+                            return Statement {
+                                node: Node::UnpackAssignment {
+                                    targets: targets.collect(),
+                                    stmt: Box::new(value),
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             };
                         }
                     }
@@ -5155,36 +4797,27 @@ impl Parser {
                     return Statement::Null;
                 }
                 let type_ = self.parse_type();
-                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_).convert_to_map(), true);
+                let (mut value, mut is_default) = (get_type_default_as_statement_from_statement(&type_), true);
                 if self.err.is_some() {
                     return Statement::Null;
                 }
                 if self.token_is("OPERATOR", "=") {
                     self.next();
-                    value = self.parse_expression().convert_to_map();
+                    value = self.parse_expression();
                     is_default = false;
                     if self.err.is_some() {
                         return Statement::Null;
                     }
                 }
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("name".to_string()),
-                        Value::String("var_type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("modifiers".to_string()),
-                        Value::String("is_default".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("VARIABLE_DECLARATION".to_string()),
-                        Value::String(name),
-                        type_.clone().convert_to_map(),
+                return Statement {
+                    node: Node::VariableDeclaration {
+                        name,
+                        var_type: type_,
                         value,
-                        Value::List(vec![]),
-                        Value::Boolean(is_default),
-                    ],
-                    loc
+                        modifiers: vec![],
+                        is_default,
+                    },
+                    loc: alloc_loc(loc),
                 };
             } else if self.token_is("OPERATOR", ":=") && self.parse_var_decl {
                 let name = token.1.clone();
@@ -5207,40 +4840,26 @@ impl Parser {
                     self.raise_with_loc("SyntaxError", "Unexpected end of input after ':='", loc);
                     return Statement::Null;
                 }
-                let value = self.parse_expression().convert_to_map();
+                let value = self.parse_expression();
                 if self.err.is_some() {
                     return Statement::Null;
                 }
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("name".to_string()),
-                        Value::String("var_type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("modifiers".to_string()),
-                        Value::String("is_default".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("VARIABLE_DECLARATION".to_string()),
-                        Value::String(name),
-                        type_.clone().convert_to_map(),
-                        value,
-                        Value::List(vec![]),
-                        Value::Boolean(false),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::VariableDeclaration {
+                        name,
+                        var_type: type_,
+                        value: value,
+                        modifiers: vec![],
+                        is_default: false,
+                    },
+                    loc: alloc_loc(loc),
                 };
             } else {
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("name".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("VARIABLE".to_string()),
-                        Value::String(name),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::Variable {
+                        name: name.clone(),
+                    },
+                    loc: alloc_loc(loc),
                 };
             }
         }

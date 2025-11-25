@@ -48,13 +48,13 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::STD_LIBS;
-use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags};
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement};
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
@@ -1380,30 +1380,56 @@ impl Interpreter {
             return NULL;
         }
     
-        let statement_map: HashMap<Value, Value> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-    
-        static KEY_TYPE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("type".into()));
+        let result = match statement.node {
+            Node::If { condition, body, else_body } => self.handle_if(*condition, body, else_body),
+            Node::For { iterable, body, variable } => self.handle_for_loop(*iterable, body, variable),
+            Node::While { condition, body } => self.handle_while(*condition, body),
+            Node::TryCatch { body, catch_body, exception_vars } => self.handle_try(*body, catch_body, exception_vars),
+            Node::Throw { node } => self.handle_throw(*node),
+            Node::Forget { node } => self.handle_forget(*node),
+            Node::Continue | Node::Break => self.handle_continue_and_break(&statement.node),
+            Node::Defer { body } => self.handle_defer(body),
+            Node::Scope { body, name, locals, is_local } => self.handle_scope(body, name, locals, is_local),
+            Node::Match { condition, cases } => self.handle_match(*condition, cases),
+            Node::Group { body } => self.handle_group(body),
+
+            Node::FunctionDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => 
+                self.handle_function_declaration(name, pos_args, named_args, body, modifiers, *return_type, effect_flags),
+            Node::GeneratorDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => 
+                self.handle_generator_declaration(name, pos_args, named_args, body, modifiers, *return_type, effect_flags),
+            Node::Return { value } => self.handle_return(*value),
+
+            Node::Import { name, alias, named_imports, modifiers, import_all, module_path_opt } => self.handle_import(name, alias, named_imports, modifiers, import_all, module_path_opt),
+            Node::Export { names, aliases, modifiers_list } => self.handle_export(names, aliases, modifiers_list),
+
+            Node::VariableDeclaration { name, val_stmt, var_type, modifiers, is_default: _ } => self.handle_variable_declaration(name, *val_stmt, *var_type, modifiers),
+            Node::Variable { name } => self.handle_variable(name),
+            Node::Assignment { left, right } => self.handle_assignment(*left, *right),
+            Node::UnpackAssignment { targets, stmt } => self.handle_unpack_assignment(targets, *stmt),
+            t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
+        };
 
         let result = match statement_map.get(&*KEY_TYPE) {
             Some(Value::String(t)) => match t.as_str() {
-                "IF" => self.handle_if(statement_map),
-                "FOR" => self.handle_for_loop(statement_map),
-                "WHILE" => self.handle_while(statement_map),
-                "TRY_CATCH" | "TRY" => self.handle_try(statement_map),
-                "THROW" => self.handle_throw(statement_map),
-                "FORGET" => self.handle_forget(statement_map),
-                "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement_map),
-                "DEFER" => self.handle_defer(statement_map),
-                "SCOPE" => self.handle_scope(statement_map),
-                "MATCH" => self.handle_match(statement_map),
-                "GROUP" => self.handle_group(statement_map),
+                /// DONE
+                // "IF" => self.handle_if(statement_map),
+                // "FOR" => self.handle_for_loop(statement_map),
+                // "WHILE" => self.handle_while(statement_map),
+                // "TRY_CATCH" | "TRY" => self.handle_try(statement_map),
+                // "THROW" => self.handle_throw(statement_map),
+                // "FORGET" => self.handle_forget(statement_map),
+                // "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement_map),
+                // "DEFER" => self.handle_defer(statement_map),
+                // "SCOPE" => self.handle_scope(statement_map),
+                // "MATCH" => self.handle_match(statement_map),
+                // "GROUP" => self.handle_group(statement_map),
 
-                "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
-                "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
-                "RETURN" => self.handle_return(statement_map),
+                // "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
+                // "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
+                // "RETURN" => self.handle_return(statement_map),
     
-                "IMPORT" => self.handle_import(statement_map),
-                "EXPORT" => self.handle_export(statement_map),
+                // "IMPORT" => self.handle_import(statement_map),
+                // "EXPORT" => self.handle_export(statement_map),
 
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement_map),
                 "VARIABLE" => self.handle_variable(statement_map),
@@ -1712,15 +1738,14 @@ impl Interpreter {
             ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
         ]));
         for method in methods_ast {
-            let mut m = method.convert_to_hashmap_value();
-            m.entry(Value::String("modifiers".to_string()))
-                .and_modify(|v| {
-                    if let Value::List(mods) = v {
-                        mods.insert(0, Value::String("final".to_string()));
-                    }
-                })
-                .or_insert_with(|| Value::List(vec![Value::String("final".to_string())]));
-            let func = self.handle_function_declaration(m);
+            let mut m = method.node;
+            let func;
+            if let Node::FunctionDeclaration { name, pos_args: pa, named_args: na, body, modifiers, return_type, effect_flags } = &mut m {
+                modifiers.insert(0, "final".to_string());
+                func = self.handle_function_declaration(name, pa, na, body, modifiers, return_type, effect_flags);
+            } else {
+                return self.raise("TypeError", "Expected a function declaration in struct methods");
+            }
             if let Value::Function(f) = func {
                 if !f.is_static() {
                     let mut func_params = f.get_parameters().to_vec();
@@ -1877,22 +1902,7 @@ impl Interpreter {
         }
     }
 
-    fn handle_export(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let names = match statement.get(&Value::String("names".to_string())) {
-            Some(Value::List(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'names' in export"),
-        };
-
-        let aliases = match statement.get(&Value::String("aliases".to_string())) {
-            Some(Value::List(a)) => a,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'aliases' in export"),
-        };
-
-        let modifiers_list = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(m)) => m,
-            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in export"),
-        };
-
+    fn handle_export(&mut self, names: Vec<String>, aliases: Vec<String>, modifiers_list: Vec<Vec<String>>) -> Value {
         if names.len() != aliases.len() || names.len() != modifiers_list.len() {
             return self.raise("RuntimeError", "Mismatched lengths of names, aliases, or modifiers");
         }
@@ -1900,33 +1910,22 @@ impl Interpreter {
         let mut exported_values = vec![];
 
         for i in 0..names.len() {
-            let name = match &names[i] {
-                Value::String(s) => s,
-                _ => return self.raise("RuntimeError", "Invalid name in export list"),
-            };
-            let alias = match &aliases[i] {
-                Value::String(s) => s,
-                _ => return self.raise("RuntimeError", "Invalid alias in export list"),
-            };
-            let modifiers = match &modifiers_list[i] {
-                Value::List(l) => l,
-                _ => return self.raise("RuntimeError", "Invalid modifiers list for export item"),
-            };
+            let name = &names[i];
+            let alias = &aliases[i];
+            let modifiers = &modifiers_list[i];
 
             let mut is_public = false;
             let mut is_static = None;
             let mut is_final = None;
 
             for modifier in modifiers {
-                if let Value::String(modifier_str) = modifier {
-                    match modifier_str.as_str() {
-                        "public" => is_public = true,
-                        "static" => is_static = Some(true),
-                        "final" => is_final = Some(true),
-                        "non-static" => is_static = Some(false),
-                        "mutable" => is_final = Some(false),
-                        _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
-                    }
+                match modifier_str.as_str() {
+                    "public" => is_public = true,
+                    "static" => is_static = Some(true),
+                    "final" => is_final = Some(true),
+                    "non-static" => is_static = Some(false),
+                    "mutable" => is_final = Some(false),
+                    _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
                 }
             }
 
@@ -1962,15 +1961,10 @@ impl Interpreter {
         }
     }
 
-    fn handle_group(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let expressions = match statement.get(&Value::String("expressions".to_string())) {
-            Some(Value::List(exprs)) => exprs,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'expressions' in group"),
-        };
-
+    fn handle_group(&mut self, body: Vec<Statement>) -> Value {
         let mut result = Value::Null;
-        for expr in expressions {
-            result = self.evaluate(&expr.convert_to_statement());
+        for expr in body {
+            result = self.evaluate(&expr);
         }
         if self.is_returning {
             result = self.return_value.clone();
@@ -1979,53 +1973,15 @@ impl Interpreter {
         result
     }
 
-    fn handle_generator_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in generator declaration"),
-        };
-    
-        let pos_args = match statement.get(&Value::String("pos_args".to_string())) {
-            Some(Value::List(p)) => p,
-            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in generator declaration"),
-        };
-
-        let named_args = match statement.get(&Value::String("named_args".to_string())) {
-            Some(Value::Map { keys, values }) => {
-                Value::Map {
-                    keys: keys.clone(),
-                    values: values.clone(),
-                }
-            }
-            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in generator declaration"),
-        };
-    
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(b)) => b,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in generator declaration"),
-        };
-
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(m)) => m,
-            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in generator declaration"),
-        };
-    
-        let return_type = match statement.get(&Value::String("return_type".to_string())) {
-            Some(Value::Map { keys, values } ) => Value::Map {
-                keys: keys.clone(),
-                values: values.clone(),
-            },
-            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in generator declaration"),
-        };
-
-        let effect_flags: EffectFlags = match statement.get(&Value::String("effects".to_string())) {
-            Some(Value::Int(i)) => match i.to_i64() {
-                Ok(v) if v >= 0 => EffectFlags::from_u32(v as u32),
-                _ => return self.raise("RuntimeError", "'effect_flags' must be a non-negative integer"),
-            },
-            _ => return self.raise("RuntimeError", "Expected an integer for 'effect_flags' in generator declaration"),
-        };
-
+    fn handle_generator_declaration(&mut self,
+        name: String,
+        pos_args: Vec<Value>,
+        named_args: Vec<(String, Value)>, 
+        body: Vec<Statement>, 
+        modifiers: Vec<String>, 
+        return_type: Statement,
+        effect_flags: EffectFlags,
+    ) -> Value {
         if self.err.is_some() {
             return NULL;
         }
@@ -2107,10 +2063,7 @@ impl Interpreter {
             }
         }
 
-        let named_args_hashmap = named_args.convert_to_hashmap().unwrap_or_else(|| {
-            self.raise("TypeError", "Expected a map for named arguments");
-            HashMap::new()
-        });
+        let named_args_hashmap = named_args.into_iter().collect::<HashMap<String, Value>>();
         
         for (name_str, info) in named_args_hashmap {
             if let Value::Map { keys, values } = info {
@@ -2224,7 +2177,7 @@ impl Interpreter {
             Variable::new(
                 name.to_string(),
                 Value::Function(Function::Native(Arc::new(NativeFunction::new(
-                    name,
+                    &name,
                     generate_gen,
                     parameters,
                     "generator",
@@ -2584,25 +2537,10 @@ impl Interpreter {
         }
     }
 
-    fn handle_match(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let condition = match statement.get(&Value::String("condition".to_string())) {
-            Some(v) => v,
-            _ => {
-                self.raise("RuntimeError", "Missing 'condition' in match statement");
-                return NULL;
-            }
-        };
+    fn handle_match(&mut self, condition: Statement, cases: Vec<MatchCase>) -> Value {
         if self.err.is_some() {
             return NULL;
         }
-
-        let cases = match statement.get(&Value::String("cases".to_string())) {
-            Some(Value::List(c)) => c,
-            _ => {
-                self.raise("RuntimeError", "Expected a list for 'cases' in match statement");
-                return NULL;
-            }
-        };
 
         let mut match_result: (Option<Value>, bool) = (None, false);
         for case in cases.iter() {
@@ -2624,30 +2562,8 @@ impl Interpreter {
                     }
                 };
 
-                match style {
-                    "pattern" => {
-                        let pattern = match keys.iter().position(|k| k == &Value::String("pattern".to_string())) {
-                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
-                            None => {
-                                self.raise("RuntimeError", "Expected 'patterns' in match case");
-                                return NULL;
-                            }
-                        };
-
-                        let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
-                            Some(pos) => match values.get(pos) {
-                                Some(Value::List(b)) => b,
-                                _ => {
-                                    self.raise("RuntimeError", "Expected 'body' to be a list in match case");
-                                    return NULL;
-                                }
-                            },
-                            None => {
-                                self.raise("RuntimeError", "Missing 'body' in match case");
-                                return NULL;
-                            }
-                        };
-
+                match case {
+                    MatchCase::Pattern { pattern, body, guard } => {
                         let guard = match keys.iter().position(|k| k == &Value::String("guard".to_string())) {
                             Some(pos) => values.get(pos).unwrap_or(&Value::Null),
                             None => {
@@ -2656,11 +2572,11 @@ impl Interpreter {
                             }
                         };
 
-                        let eval_cond = self.evaluate(&condition.convert_to_statement());
+                        let eval_cond = self.evaluate(&condition);
                         if self.err.is_some() {
                             return NULL;
                         }
-                        let (matched, variables) = match check_pattern(&eval_cond, &pattern) {
+                        let (matched, variables) = match check_pattern(&eval_cond, &pattern.to_value()) {
                             Ok(matched) => matched,
                             Err((err_ty, err_msg)) => {
                                 self.raise(&err_ty, &err_msg);
@@ -2679,7 +2595,7 @@ impl Interpreter {
                         if matched {
                             let mut res = NULL;
                             let mut cont = false;
-                            if guard != &Value::Null {
+                            if let Some(g) = guard {
                                 let mut guard_interp = Interpreter::new(
                                     self.config.clone(),
                                     &self.file_path,
@@ -2688,7 +2604,7 @@ impl Interpreter {
                                     &[],
                                 );
                                 guard_interp.variables.extend(variables.clone());
-                                let guard_result = guard_interp.evaluate(&guard.convert_to_statement());
+                                let guard_result = guard_interp.evaluate(&g);
                                 if guard_interp.err.is_some() {
                                     self.err = guard_interp.err.clone();
                                     drop(guard_interp);
@@ -2708,7 +2624,7 @@ impl Interpreter {
                             );
                             interp.variables = variables;
                             'outer: for stmt in body.iter() {
-                                let result = interp.evaluate(&stmt.convert_to_statement());
+                                let result = interp.evaluate(&stmt);
                                 if interp.err.is_some() {
                                     self.err = interp.err.clone();
                                     return NULL;
@@ -2738,35 +2654,10 @@ impl Interpreter {
                             }
                         }
                     }
-                    "literal" => {
-                        let patterns = match keys.iter().position(|k| k == &Value::String("patterns".to_string())) {
-                            Some(pos) => match values.get(pos) {
-                                Some(Value::List(p)) => p.clone(),
-                                _ => return self.raise("RuntimeError", "Expected 'patterns' to be a list in match case"),
-                            },
-                            None => {
-                                self.raise("RuntimeError", "Expected 'patterns' in match case");
-                                return NULL;
-                            }
-                        };
-
-                        let body = match keys.iter().position(|k| k == &Value::String("body".to_string())) {
-                            Some(pos) => match values.get(pos) {
-                                Some(Value::List(b)) => b,
-                                _ => {
-                                    self.raise("RuntimeError", "Expected 'body' to be a list in match case");
-                                    return NULL;
-                                }
-                            },
-                            None => {
-                                self.raise("RuntimeError", "Missing 'body' in match case");
-                                return NULL;
-                            }
-                        };
-
+                    MatchCase::Literal { patterns, body } => {
                         let mut matched = false;
                         for p in patterns {
-                            if self.evaluate(&condition.convert_to_statement()) == self.evaluate(&p.convert_to_statement()) {
+                            if self.evaluate(&condition) == self.evaluate(&p) {
                                 matched = true;
                                 break;
                             }
@@ -2780,7 +2671,7 @@ impl Interpreter {
                             let mut res = NULL;
                             let mut cont = false;
                             'outer: for stmt in body.iter() {
-                                let result = self.evaluate(&stmt.convert_to_statement());
+                                let result = self.evaluate(&stmt);
                                 if self.err.is_some() {
                                     return NULL;
                                 }
@@ -2823,52 +2714,27 @@ impl Interpreter {
         match_result.0.unwrap_or(NULL)
     }
 
-    fn handle_scope(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(b)) => b,
-            _ => {
-                self.raise("SyntaxError", "Expected a list for 'body' in scope statement");
-                return NULL;
-            }
-        };
-    
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n.clone(),
-            None => self.scope.clone(),
-            _ => {
-                self.raise("SyntaxError", "Expected a string for 'name' in scope statement");
-                return NULL;
-            }
-        };
-
-        let locals = match statement.get(&Value::String("locals".to_string())) {
-            Some(Value::List(locals_list)) => locals_list,
-            _ => {
-                &vec![]
-            }
-        };
-
-        let is_local = match statement.get(&Value::String("is_local".to_string())) {
-            Some(Value::Boolean(b)) => *b,
-            _ => false,
-        };
-
-        let stmts: Vec<Statement> = body.iter()
-            .filter_map(|v| {
-                match v {
-                    Value::Map { .. } => Some(v.convert_to_statement()),
-                    Value::Null => Some(Statement::Null),
+    fn handle_scope(&mut self, body: Vec<Statement>, name: Option<String>, locals: Vec<String>, is_local: bool) -> Value {
+        let name = match name{
+            Some(v) => {
+                let n = self.evaluate(&v);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                match n {
+                    Value::String(s) => s,
                     _ => {
-                        self.raise("RuntimeError", "Invalid value in 'scope' body - expected map");
-                        None
+                        self.raise("TypeError", "Expected scope name to be a string");
+                        return NULL;
                     }
                 }
-            })
-            .collect();
+            }
+            None => self.scope.clone(),
+        };
 
         if is_local {
             let mut result = NULL;
-            for stmt in stmts.iter() {
+            for stmt in body.iter() {
                 result = self.evaluate(&stmt);
                 if self.err.is_some() {
                     return NULL;
@@ -2884,10 +2750,13 @@ impl Interpreter {
             return result;
         }
 
-        let new_file_path = if statement.get(&Value::String("name".to_string())).is_some() {
-            self.file_path.clone() + &format!("+scope.{}", name)
-        } else {
-            self.file_path.clone()
+        let new_file_path = match name {
+            Some(v) => {
+                self.file_path.clone() + &format!("+scope.{}", v)
+            }
+            None => {
+                self.file_path.clone()
+            }
         };
 
 
@@ -2911,17 +2780,15 @@ impl Interpreter {
         scope_interpreter.set_scope(&name.clone());
 
         for local in locals.iter() {
-            if let Value::String(var_name) = local {
-                if let Some(val) = self.variables.get(var_name) {
-                    scope_interpreter.variables.insert(var_name.clone(), val.clone());
-                } else {
-                    self.stack.pop();
-                    self.raise(
-                        "NameError",
-                        &format!("Variable '{}' is not defined in the outer scope", var_name),
-                    );
-                    return NULL;
-                }
+            if let Some(val) = self.variables.get(var_name) {
+                scope_interpreter.variables.insert(var_name.clone(), val.clone());
+            } else {
+                self.stack.pop();
+                self.raise(
+                    "NameError",
+                    &format!("Variable '{}' is not defined in the outer scope", var_name),
+                );
+                return NULL;
             }
         }
 
@@ -2959,82 +2826,35 @@ impl Interpreter {
         }
     }
 
-    fn handle_defer(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(b)) => b,
-            _ => {
-                self.raise("RuntimeError", "Expected a list for 'body' in defer statement");
-                return NULL;
-            }
-        };
-    
+    fn handle_defer(&mut self, body: Vec<Statement>) -> Value {
         if body.is_empty() {
             return NULL;
         }
     
-        let stmts: Vec<Statement> = body.iter()
-            .filter_map(|v| {
-                match v {
-                    Value::Map { .. } => Some(v.convert_to_statement()),
-                    Value::Null => Some(Statement::Null),
-                    _ => {
-                        self.raise("RuntimeError", "Invalid value in 'defer' body - expected map");
-                        None
-                    }
-                }
-            })
-            .collect();
-    
-        self.defer_stack.push(stmts);
+        // yes thats all i was also suprised when refactoring
+        self.defer_stack.push(body);
     
         NULL
     }
 
-    fn handle_continue_and_break(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let control_type = match statement.get(&Value::String("type".to_string())) {
-            Some(Value::String(t)) => t,
+    fn handle_continue_and_break(&mut self, node: &Node) -> Value {
+        match node {
+            Node::Continue => {
+                self.state = State::Continue;
+            },
+            Node::Break => {
+                self.state = State::Break;
+            },
             _ => {
-                self.raise("SyntaxError", "Expected 'type' to be a string in continue/break statement");
-                return NULL;
+                self.raise("SyntaxError", "Invalid control statement");
             }
-        };
-    
-        if control_type == "CONTINUE" {
-            self.state = State::Continue;
-            return NULL;
-        } else if control_type == "BREAK" {
-            self.state = State::Break;
-            return NULL;
-        } else {
-            self.raise("SyntaxError", &format!("Unsupported control type: {}", control_type));
-            return NULL;
         }
+        return NULL;
     }
 
-    fn handle_while(&mut self, statement: HashMap<Value, Value>) -> Value {
-        static CONDITION_KEY: &str = "condition";
-        static BODY_KEY: &str = "body";
-
-        let condition = match statement.get(&Value::String(CONDITION_KEY.to_string())) {
-            Some(v) => v,
-            _ => {
-                self.raise("SyntaxError", "Missing 'condition' in while loop");
-                return NULL;
-            }
-        }.convert_to_statement();
-
-        let body = match statement.get(&Value::String(BODY_KEY.to_string())) {
-            Some(Value::List(b)) => b,
-            _ => {
-                self.raise("SyntaxError", "Expected a list for 'body' in while loop");
-                return NULL;
-            }
-        };
-
-        let body_statements: Vec<_> = body.iter().map(|stmt| stmt.convert_to_statement()).collect();
-
+    fn handle_while(&mut self, condition: Statement, body: Vec<Statement>) -> Value {
         while self.evaluate(&condition).is_truthy() {
-            for stmt in &body_statements {
+            for stmt in &body {
                 let result = self.evaluate(&stmt);
                 if self.err.is_some() {
                     return NULL;
@@ -3160,33 +2980,12 @@ impl Interpreter {
         }
     }
 
-    fn handle_unpack_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let targets_opt = statement.get(&Value::String("targets".to_string())).unwrap_or_else(|| {
-            self.raise("RuntimeError", "Missing 'targets' in unpack assignment");
-            &NULL
-        });
-        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or_else(|| {
-            self.raise("RuntimeError", "Missing 'value' in unpack assignment");
-            &NULL
-        });
+    fn handle_unpack_assignment(&mut self, targets: Vec<Statement>, stmt: Statement) -> Value {
+        let value = self.evaluate(&stmt);
 
         if self.err.is_some() {
             return NULL;
         }
-
-        let value = self.evaluate(&value_opt.convert_to_statement());
-
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        let targets = match targets_opt {
-            Value::List(target_list) => target_list,
-            _ => {
-                self.raise("RuntimeError", "Unpack assignment targets expected to be a list");
-                return NULL;
-            }
-        };
 
         let value_list: Vec<Value> = match value {
             Value::List(target_list) => {
@@ -3256,104 +3055,72 @@ impl Interpreter {
         for (i, target) in targets.iter().enumerate() {
             let val = value_list[i].clone();
         
-            match target {
-                Value::Map { keys, values } => {
-                    let mut map: HashMap<String, Value> = HashMap::new();
-                    for (k, v) in keys.iter().zip(values.iter()) {
-                        if let Value::String(key_str) = k {
-                            map.insert(key_str.clone(), v.clone());
-                        } else {
-                            self.raise("TypeError", "Invalid key in unpack target map");
-                            return NULL;
-                        }
-                    }
-        
-                    let typ = map.get("type");
-                    let name = map.get("name");
-        
-                    match typ {
-                        Some(Value::String(t)) if t == "VARIABLE" => {
-                            if let Some(Value::String(var_name)) = name {
-                                if let Some(var) = self.variables.get_mut(var_name) {
-                                    var.set_value(val);
-                                    result_values.push(var.value.clone());
-                                } else {
-                                    self.raise("TypeError", &format!(
-                                        "Variable '{}' must be declared with a type in unpack assignment",
-                                        var_name
-                                    ));
-                                    return NULL;
-                                }
-                            } else {
-                                self.raise("TypeError", "Missing or invalid variable name in unpack target");
-                                return NULL;
-                            }
-                        }
-                        Some(Value::String(t)) if t == "VARIABLE_DECLARATION" => {
-                            let decl_map: HashMap<Value, Value> = keys
-                                .iter()
-                                .cloned()
-                                .zip(values.iter().cloned())
-                                .collect();
-
-                            let type_ = match decl_map.get(&Value::String("var_type".to_string())) {
-                                Some(t) => match self.evaluate(&t.convert_to_statement()) {
-                                    Value::Type(t) => t,
-                                    _ => {
-                                        self.raise("TypeError", "Expected 'var_type' to be a Type");
-                                        return NULL;
-                                    }
-                                }
-                                _ => {
-                                    self.raise("TypeError", "Missing or invalid 'var_type' in variable declaration");
-                                    return NULL;
-                                }
-                            };
-
-                            if type_ != Type::new_simple("auto") && let (is_valid, err) = self.check_type(&val, &type_) && !is_valid {
-                                if let Some(err) = err {
-                                    self.raise_with_ref("TypeError", &format!(
-                                        "Value '{}' does not match the type '{}'",
-                                        val, type_.display_simple()
-                                    ), err);
-                                } else {
-                                    self.raise("TypeError", &format!(
-                                        "Value '{}' does not match the type '{}'",
-                                        val, type_.display_simple()
-                                    ));
-                                }
-                                return NULL;
-                            }
-                            
-                            if self.err.is_some() {
-                                return NULL;
-                            }
-
-                            let _ = self.handle_variable_declaration(decl_map);
-                            if self.err.is_some() {
-                                return NULL;
-                            }
-
-                            if let Some(Value::String(var_name)) = map.get("name") {
-                                if let Some(var) = self.variables.get_mut(var_name) {
-                                    var.set_value(val.clone());
-                                }
-                            }
-                        
-                            result_values.push(val);
-                        }                        
-                        _ => {
-                            self.raise("TypeError", "Unpack target must be of type VARIABLE or VARIABLE_DECLARATION");
-                            return NULL;
-                        }
+            match target.node {
+                Node::Variable { name } => {
+                    if let Some(var) = self.variables.get_mut(name.as_str()) {
+                        var.set_value(val);
+                        result_values.push(var.value.clone());
+                    } else {
+                        self.raise("TypeError", &format!(
+                            "Variable '{}' must be declared with a type in unpack assignment",
+                            name
+                        ));
+                        return NULL;
                     }
                 }
+                Node::VariableDeclaration { var_type, name, val_stmt, modifiers } => {
+                    let type_ = match self.evaluate(&var_type) {
+                        Value::Type(t) => t,
+                        _ => {
+                            self.raise("TypeError", "Expected a type in variable declaration for unpack assignment");
+                            return NULL;
+                        }
+                    };
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+
+                    if type_ != Type::new_simple("auto") && let (is_valid, err) = self.check_type(&val, &type_) && !is_valid {
+                        if let Some(err) = err {
+                            self.raise_with_ref("TypeError", &format!(
+                                "Value '{}' does not match the type '{}'",
+                                val, type_.display_simple()
+                            ), err);
+                        } else {
+                            self.raise("TypeError", &format!(
+                                "Value '{}' does not match the type '{}'",
+                                val, type_.display_simple()
+                            ));
+                        }
+                        return NULL;
+                    }
+                    
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+
+                    let _ = self.handle_variable_declaration(
+                        name.clone(),
+                        val_stmt,
+                        var_type.clone(),
+                        modifiers,
+                    );
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+
+                    if let Some(var) = self.variables.get_mut(name.as_str()) {
+                        var.set_value(val.clone());
+                    }
+                
+                    result_values.push(val);
+                }                        
                 _ => {
-                    self.raise("TypeError", "Unpack target must be a map");
+                    self.raise("TypeError", "Unpack target must be of type VARIABLE or VARIABLE_DECLARATION");
                     return NULL;
                 }
             }
-        }        
+        }
         
         if self.err.is_some() {
             return NULL;
@@ -3804,28 +3571,32 @@ impl Interpreter {
         result
     }
 
-    fn handle_import(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let (base_name, name_parts, module_name) = match statement.get(&Value::String("module_name".to_string())) {
-            Some(Value::String(name)) => {
-                let is_file_like = name.rsplit('.').next().map(|s| {
-                    matches!(s, "lc" | "lucia" | "rs")
-                }).unwrap_or(false);
+    fn handle_import(&mut self, 
+        name: String, 
+        alias: Option<String>, 
+        named_imports: Vec<Value>, 
+        modifiers: Vec<String>,
+        import_all: bool, 
+        module_path_opt: Option<Statement>,
+    ) -> Value {
+        let (base_name, name_parts, module_name) = {
+            let is_file_like = name.rsplit('.').next().map(|s| {
+                matches!(s, "lc" | "lucia" | "rs")
+            }).unwrap_or(false);
 
-                if name.contains('/') || name.contains('\\') || is_file_like {
-                    let parts: Vec<&str> = vec![name.as_str()];
-                    let base = if let Some(idx) = name.rfind('.') { name[..idx].to_string() } else { name.clone() };
-                    (base, parts, name.clone())
-                } else {
-                    let parts: Vec<&str> = name.split('.').collect();
-                    if parts.is_empty() {
-                        self.raise("RuntimeError", "Invalid 'module_name' in import statement");
-                        return NULL;
-                    }
-                    let base = parts[0].to_string();
-                    (base, parts.clone(), name.clone())
+            if name.contains('/') || name.contains('\\') || is_file_like {
+                let parts: Vec<&str> = vec![name.as_str()];
+                let base = if let Some(idx) = name.rfind('.') { name[..idx].to_string() } else { name.clone() };
+                (base, parts, name.clone())
+            } else {
+                let parts: Vec<&str> = name.split('.').collect();
+                if parts.is_empty() {
+                    self.raise("RuntimeError", "Invalid 'module_name' in import statement");
+                    return NULL;
                 }
+                let base = parts[0].to_string();
+                (base, parts.clone(), name.clone())
             }
-            _ => return self.raise("RuntimeError", "Missing or invalid 'module_name' in import statement"),
         };
 
         if module_name == "42" {
@@ -3840,33 +3611,12 @@ impl Interpreter {
             return NULL;
         }
 
-        let alias: &str = match statement.get(&Value::String("alias".to_string())) {
-            Some(Value::String(a)) => a,
-            Some(Value::Null) => {
+        let alias: &str = match alias {
+            Some(a) => a.as_str(),
+            None => {
                 let last_segment: &str = name_parts.last().map(|s| *s).unwrap_or(base_name.as_str());
                 last_segment
             }
-            _ => {
-                self.raise("RuntimeError", "Missing or invalid 'alias' in import statement");
-                return NULL;
-            },
-        };
-
-        let named_imports = match statement.get(&Value::String("named".to_string())) {
-            Some(Value::List(l)) => l.clone(),
-            Some(Value::Null) => Vec::new(),
-            _ => {
-                self.raise("RuntimeError", "Missing or invalid 'named' in import statement");
-                return NULL;
-            },
-        };
-
-        let import_all = match statement.get(&Value::String("import_all".to_string())) {
-            Some(Value::Boolean(b)) => *b,
-            _ => {
-                self.raise("RuntimeError", "Missing or invalid 'import_all' in import statement");
-                return NULL;
-            },
         };
 
         if !is_valid_alias(&alias) {
@@ -3884,36 +3634,22 @@ impl Interpreter {
             );
         }
 
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(l)) => l.clone(),
-            Some(Value::Null) => Vec::new(),
-            _ => {
-                self.raise("RuntimeError", "Missing or invalid 'modifiers' in import statement");
-                return NULL;
-            },
-        };
-
         let mut is_public = false;
         let mut is_final = true;
         let mut is_static = true;
 
         for modifier in &modifiers {
-            if let Value::String(modifier_str) = modifier {
-                match modifier_str.as_str() {
-                    "public" => is_public = true,
-                    "final" => is_final = true,
-                    "static" => is_static = true,
-                    "private" => is_public = false,
-                    "mutable" => is_final = false,
-                    "non-static" => is_static = false,
-                    _ => {
-                        self.raise("SyntaxError", &format!("Unknown import modifier '{}'", modifier_str));
-                        return NULL;
-                    }
+            match modifier_str.as_str() {
+                "public" => is_public = true,
+                "final" => is_final = true,
+                "static" => is_static = true,
+                "private" => is_public = false,
+                "mutable" => is_final = false,
+                "non-static" => is_static = false,
+                _ => {
+                    self.raise("SyntaxError", &format!("Unknown import modifier '{}'", modifier_str));
+                    return NULL;
                 }
-            } else {
-                self.raise("TypeError", "Import modifiers must be strings");
-                return NULL;
             }
         }
     
@@ -4144,17 +3880,10 @@ impl Interpreter {
                     &format!("Module '{}' not found in WebAssembly build", module_name),
                 );
             }
-            let module_path_opt = statement.get(&Value::String("path".to_string()));
-    
             let libs_dir = PathBuf::from(self.config.home_dir.clone()).join("libs");
     
             let base_module_path = match module_path_opt {
-                Some(Value::Map { keys, values }) => {
-                    let map_statement = Value::Map {
-                        keys: keys.clone(),
-                        values: values.clone(),
-                    }.convert_to_statement();
-
+                Some(map_statement) => {
                     let path_eval = self.evaluate(&map_statement);
                     let path_str = path_eval.to_string();
             
@@ -4175,16 +3904,12 @@ impl Interpreter {
                     };
                     path
                 }
-                Some(Value::Null) | None => {
+                None => {
                     match libs_dir.canonicalize() {
                         Ok(p) => p,
                         Err(_) => libs_dir.clone(),
                     }
                 }
-                _ => {
-                    self.stack.pop();
-                    return self.raise("RuntimeError", "Invalid 'path' in import statement");
-                },
             };
     
             let mut resolved_module_path: Option<PathBuf> = None;
@@ -4683,12 +4408,7 @@ impl Interpreter {
         }
     }
 
-    fn handle_return(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let value = match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'value' in return statement"),
-        };
-
+    fn handle_return(&mut self, stmt: Statement) -> Value {
         self.state = State::Defer;
         if !self.defer_stack.is_empty() {
             let defer_statements = self.defer_stack.concat();
@@ -4697,8 +4417,6 @@ impl Interpreter {
             }
         }
         self.state = State::Normal;
-
-        let stmt = value.convert_to_statement();
 
         // Tailcall optimization (TCO)
         if stmt.get_type() == "CALL" {
@@ -4724,56 +4442,19 @@ impl Interpreter {
         evaluated_value
     }
 
-    fn handle_function_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let mut name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in function declaration"),
-        };
-    
-        let pos_args = match statement.get(&Value::String("pos_args".to_string())) {
-            Some(Value::List(p)) => p,
-            _ => return self.raise("RuntimeError", "Expected a list for 'pos_args' in function declaration"),
-        };
-
-        let named_args = match statement.get(&Value::String("named_args".to_string())) {
-            Some(Value::Map { keys, values }) => {
-                Value::Map {
-                    keys: keys.clone(),
-                    values: values.clone(),
-                }
-            }
-            _ => return self.raise("RuntimeError", "Expected a list for 'named_args' in function declaration"),
-        };
-    
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(b)) => b,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in function declaration"),
-        };
-
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(m)) => m,
-            _ => return self.raise("RuntimeError", "Expected a list for 'modifiers' in function declaration"),
-        };
-    
-        let return_type = match statement.get(&Value::String("return_type".to_string())) {
-            Some(Value::Map { keys, values } ) => Value::Map {
-                keys: keys.clone(),
-                values: values.clone(),
-            },
-            _ => return self.raise("RuntimeError", "Missing or invalid 'return_type' in function declaration"),
-        };
-
-        let mut return_type_str = match self.evaluate(&return_type.convert_to_statement()) {
+    fn handle_function_declaration(
+        &mut self, 
+        name: String, 
+        pos_args: Vec<Value>, 
+        named_args: Vec<(String, Value)>, 
+        body: Vec<Statement>, 
+        modifiers: Vec<String>, 
+        return_type: Statement,
+        effect_flags: EffectFlags,
+    ) -> Value {
+        let mut return_type_str = match self.evaluate(&return_type) {
             Value::Type(t) => t,
             _ => return self.raise("RuntimeError", "Invalid 'return_type' in function declaration"),
-        };
-
-        let effect_flags: EffectFlags = match statement.get(&Value::String("effects".to_string())) {
-            Some(Value::Int(i)) => EffectFlags::from_u32(match i.to_i64() {
-                Ok(v) if v >= 0 => v as u32,
-                _ => return self.raise("TypeError", "'effects' must be a non-negative integer"),
-            }),
-            _ => EffectFlags::empty(),
         };
 
         if return_type_str == Type::new_simple("auto") {
@@ -4789,18 +4470,14 @@ impl Interpreter {
         let mut is_final = false;
 
         for modifier in modifiers {
-            if let Value::String(modifier_str) = modifier {
-                match modifier_str.as_str() {
-                    "public" => is_public = true,
-                    "static" => is_static = true,
-                    "final" => is_final = true,
-                    "private" => is_public = false,
-                    "non-static" => is_static = false,
-                    "mutable" => is_final = false,
-                    _ => return self.raise("SyntaxError", &format!("Unknown function modifier: {}", modifier_str)),
-                }
-            } else {
-                return self.raise("TypeError", "Function modifiers must be strings");
+            match modifier.as_str() {
+                "public" => is_public = true,
+                "static" => is_static = true,
+                "final" => is_final = true,
+                "private" => is_public = false,
+                "non-static" => is_static = false,
+                "mutable" => is_final = false,
+                _ => return self.raise("SyntaxError", &format!("Unknown function modifier: {}", modifier)),
             }
         }
 
@@ -4863,10 +4540,7 @@ impl Interpreter {
             }
         }
         
-        let named_args_hashmap = named_args.convert_to_hashmap().unwrap_or_else(|| {
-            self.raise("TypeError", "Expected a map for named arguments");
-            HashMap::new()
-        });
+        let named_args_hashmap = named_args.into_iter().collect::<HashMap<_, _>>();
         
         for (name_str, info) in named_args_hashmap {
             if let Value::Map { keys, values } = info {
@@ -4918,9 +4592,7 @@ impl Interpreter {
             } else {
                 return self.raise("TypeError", "Expected a map for named argument");
             }
-        }        
-
-        let body_formatted: Vec<Statement> = body.iter().map(|v| v.convert_to_statement()).collect();
+        }
 
         let lambda_name;  // stupid lifetimes
         if name == "<lambda#{id}>" {
@@ -4957,12 +4629,12 @@ impl Interpreter {
         let function = if name.starts_with("<") && name.ends_with(">") {
             Value::Function(Function::Lambda(Arc::new(UserFunction {
                 meta: metadata.clone(),
-                body: body_formatted,
+                body: body,
             }), self.variables.clone()))
         } else {
             create_function(
                 metadata.clone(),
-                body_formatted,
+                body,
             )
         };
 
@@ -4981,19 +4653,14 @@ impl Interpreter {
             .map_or(NULL, |var| var.value.clone())
     }
 
-    fn handle_throw(&mut self, statement: HashMap<Value, Value>) -> Value {
+    fn handle_throw(&mut self, throw_ast: ThrowNode) -> Value {
         let mut prev_err = None;
 
-        let throw_type = match statement.get(&Value::String("throw_type".to_string())) {
-            Some(Value::String(t)) => t,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'throw_type' in throw statement"),
-        };
-
-        match throw_type.as_str() {
-            "string" => {
-                let error_type_val = match statement.get(&Value::String("from".to_string())) {
-                    Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-                    None => return self.raise("RuntimeError", "Missing 'from' in throw statement"),
+        match throw_ast {
+            ThrowNode::Message { message, from } => {
+                let error_type_val = match from {
+                    Some(v) => self.evaluate(&v),
+                    None => Value::String("LuciaError".to_string()),
                 };
 
                 if self.err.is_some() {
@@ -5001,10 +4668,7 @@ impl Interpreter {
                     self.err = None;
                 }
                 
-                let error_msg_val = match statement.get(&Value::String("message".to_string())) {
-                    Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-                    None => return self.raise("RuntimeError", "Missing 'message' in throw statement"),
-                };
+                let error_msg_val = self.evaluate(&message);
 
                 self.debug_log(
                     format_args!(
@@ -5041,12 +4705,8 @@ impl Interpreter {
                     to_static(error_msg_val.to_string()),
                 )
             }
-            "tuple" => {
-                let value = match statement.get(&Value::String("value".to_string())) {
-                    Some(v) => v,
-                    None => return self.raise("RuntimeError", "Missing 'value' in tuple throw statement"),
-                };
-                let val_evaluated = self.evaluate(&Value::convert_to_statement(value));
+            ThrowNode::Tuple(stmt) => {
+                let val_evaluated = self.evaluate(&stmt);
                 if self.err.is_some() {
                     prev_err = self.err.clone();
                     self.err = None;
@@ -5176,18 +4836,10 @@ impl Interpreter {
                     }
                 }
             }
-            _ => {
-                self.raise("RuntimeError", "Invalid 'throw_type' in throw statement")
-            }
         }
     }
 
-    fn handle_forget(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let value = match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'value' in forget statement"),
-        };
-    
+    fn handle_forget(&mut self, stmt: Statement) -> Value {
         let value_map = match value {
             Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
             _ => return self.raise("RuntimeError", "Expected a map for forget value"),
@@ -6046,26 +5698,11 @@ impl Interpreter {
         return Value::Type(type_);
     }
 
-    fn handle_if(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let condition = match statement.get(&Value::String("condition".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'condition' in if statement"),
-        };
-
-        let condition_value = self.evaluate(&condition.convert_to_statement());
+    fn handle_if(&mut self, condition: Statement, body: Vec<Statement>, else_body: Option<Vec<Statement>>) -> Value {
+        let condition_value = self.evaluate(&condition);
         if self.err.is_some() {
             return NULL;
         }
-    
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(body)) => body,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in if statement"),
-        };
-    
-        let else_body = match statement.get(&Value::String("else_body".to_string())) {
-            Some(Value::List(body)) => Some(body),
-            _ => None,
-        };
     
         let stmts_to_run = if condition_value.is_truthy() { Some(body) } else { else_body };
     
@@ -6104,239 +5741,114 @@ impl Interpreter {
         Value::Tuple(values)
     }
 
-    fn handle_try(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let stmt_type = match statement.get(&Value::String("type".to_string())) {
-            Some(Value::String(s)) => s.as_str(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in try statement"),
-        };
-    
-        let body = match statement.get(&Value::String("body".to_string())) {
-            Some(Value::List(body)) => body,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in try statement"),
-        };
-    
-        let mut catch_body = &vec![];
-        let mut exception_vars = &vec![];
-    
-        if stmt_type == "TRY_CATCH" {
-            catch_body = match statement.get(&Value::String("catch_body".to_string())) {
-                Some(Value::List(catch_body)) => catch_body,
-                _ => return self.raise("RuntimeError", "Expected a list for 'catch' in try-catch statement"),
-            };
-    
-            exception_vars = match statement.get(&Value::String("exception_vars".to_string())) {
-                Some(Value::List(vars)) => vars,
-                _ => return self.raise("RuntimeError", "Expected a list for 'exception_vars' in try-catch statement"),
-            };
-    
-            if exception_vars.len() > 3 {
-                return self.raise(
-                    "SyntaxError",
-                    "Too many exception variables (max is 3, err_type, err_msg, err_help)",
-                );
-            }
-    
-            if exception_vars.is_empty() {
-                return self.raise_with_help(
-                    "SyntaxError",
-                    "No exception variables provided",
-                    &format!(
-                        "Use '_' if you want to ignore the caught exception(s): 'try: ... end catch ( {}_{} ): ... end'",
-                        hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color),
-                        hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color),
-                    ),
-                );
-            }
-    
-            let mut seen = std::collections::HashSet::new();
-            for var in exception_vars {
-                if let Value::String(name) = var {
-                    if !seen.insert(name) {
-                        return self.raise("NameError", &format!("Duplicate exception variable name '{}'", name));
+    fn handle_try(&mut self, body: Vec<Statement>, catch_body_opt: Option<Vec<Statement>>, exception_vars_opt: Option<Vec<String>>) -> Value {
+        let catch_body: &[Statement] = catch_body_opt.as_deref().unwrap_or(&[]);
+        let mut is_try_catch = !catch_body.is_empty();
+
+        let exception_vars: &[String] = if is_try_catch {
+            match exception_vars_opt.as_deref() {
+                Some(vars) => {
+                    if vars.len() > 3 {
+                        return self.raise(
+                            "SyntaxError",
+                            "Too many exception variables (max 3: err_type, err_msg, err_help)",
+                        );
                     }
-                } else {
-                    return self.raise("RuntimeError", "Invalid exception variable type");
+                    if vars.is_empty() {
+                        return self.raise_with_help(
+                            "SyntaxError",
+                            "No exception variables provided",
+                            "Use '_' to ignore caught exception(s)",
+                        );
+                    }
+                    let mut seen = std::collections::HashSet::new();
+                    for name in vars {
+                        if !seen.insert(name) {
+                            return self.raise(
+                                "NameError",
+                                &format!("Duplicate exception variable name '{}'", name),
+                            );
+                        }
+                    }
+                    vars
+                }
+                None => {
+                    return self.raise_with_help(
+                        "RuntimeError",
+                        "No exception variables provided for catch block",
+                        "This should not happen",
+                    );
                 }
             }
-        }
-    
+        } else {
+            &[]
+        };
+
         let mut result = NULL;
         let change_in_try = !self.internal_storage.in_try_block;
         if change_in_try {
             self.internal_storage.in_try_block = true;
         }
-        for stmt in body {
-            if !stmt.is_statement() {
-                continue;
-            }
 
-            result = self.evaluate(&stmt.convert_to_statement());
-            if self.err.is_some() {
-                if stmt_type != "TRY_CATCH" {
-                    return self.err.take().map_or(NULL, |_| NULL);
+        for stmt in &body {
+            result = self.evaluate(stmt);
+            if let Some(mut err) = self.err.take() {
+                if !is_try_catch {
+                    if change_in_try {
+                        self.internal_storage.in_try_block = false;
+                    }
+                    return NULL;
                 }
-    
-                let mut err = self.err.take().unwrap();
+
                 self.err = None;
+                while let Some(ref_err) = err.ref_err.take() {
+                    err = *ref_err;
+                }
 
-                while err.ref_err.is_some() {
-                    err = *err.ref_err.unwrap();
+                for (i, name) in exception_vars.iter().enumerate() {
+                    if let Value::String(var_name) = name {
+                        let val = match i {
+                            0 => Value::String(err.error_type.clone()),
+                            1 => Value::String(err.msg.clone()),
+                            2 => Value::String(err.help.clone().unwrap_or_default()),
+                            _ => continue,
+                        };
+                        self.variables.insert(
+                            var_name.clone(),
+                            Variable::new(var_name.clone(), val, "str".to_string(), false, true, true),
+                        );
+                    }
                 }
-    
-                match exception_vars.len() {
-                    1 => {
-                        if let Value::String(name) = &exception_vars[0] {
-                            let tuple = Value::Tuple(vec![
-                                Value::String(err.error_type.clone()),
-                                Value::String(err.msg.clone()),
-                            ]);
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(name.clone(), tuple, "tuple".to_string(), false, true, true),
-                            );
-                        }
-                    }
-                    2 => {
-                        if let Value::String(name) = &exception_vars[0] {
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(
-                                    name.clone(),
-                                    Value::String(err.error_type.clone()),
-                                    "string".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ),
-                            );
-                        }
-                        if let Value::String(name) = &exception_vars[1] {
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(
-                                    name.clone(),
-                                    Value::String(err.msg.clone()),
-                                    "string".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ),
-                            );
-                        }
-                    }
-                    3 => {
-                        if let Value::String(name) = &exception_vars[0] {
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(
-                                    name.clone(),
-                                    Value::String(err.error_type.clone()),
-                                    "string".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ),
-                            );
-                        }
-                        if let Value::String(name) = &exception_vars[1] {
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(
-                                    name.clone(),
-                                    Value::String(err.msg.clone()),
-                                    "string".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ),
-                            );
-                        }
-                        if let Value::String(name) = &exception_vars[2] {
-                            self.variables.insert(
-                                name.clone(),
-                                Variable::new(
-                                    name.clone(),
-                                    Value::String(err.help.unwrap_or_default()),
-                                    "string".to_string(),
-                                    false,
-                                    true,
-                                    true,
-                                ),
-                            );
-                        }
-                    }
-                    _ => {}
-                }
-    
+
                 let mut err_result = NULL;
+                for catch_stmt in catch_body {
+                    err_result = self.evaluate(catch_stmt);
+                }
+
                 if change_in_try {
                     self.internal_storage.in_try_block = false;
-                }
-                for catch_stmt in catch_body {
-                    if !catch_stmt.is_statement() {
-                        continue;
-                    }
-                    err_result = self.evaluate(&catch_stmt.convert_to_statement());
                 }
 
                 return err_result;
             }
         }
-    
-        if self.err.is_some() {
-            return NULL;
+
+        if change_in_try {
+            self.internal_storage.in_try_block = false;
         }
+
         result
     }
 
-    fn handle_assignment(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let left = match statement.get(&Value::String("left".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'left' in assignment statement"),
-        };
-        let right = match statement.get(&Value::String("right".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'right' in assignment statement"),
-        };
-
-        let right_value = self.evaluate(&right.convert_to_statement());
-
-        if self.err.is_some() {
-            return NULL;
-        }
-    
-        let left_hashmap = match left {
-            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-            Value::Null => Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string())
-                ],
-                values: vec![
-                    Value::String("BOOLEAN".to_string()),
-                    Value::String("null".to_string())
-                ],
-                loc: None,
-            }.convert_to_hashmap(),
-            _ => return self.raise("RuntimeError", "Expected a map for assignment"),
-        };
-    
-        let left_type = match left_hashmap.get(&Value::String("type".to_string())) {
-            Some(Value::String(t)) => t,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in assignment left"),
-        };
+    fn handle_assignment(&mut self, left: Statement, right: Statement) -> Value {
+        let right_value = self.evaluate(&right);
 
         if self.err.is_some() {
             return NULL;
         }
 
-        match left_type.as_str() {
-            "VARIABLE" => {
-                let name = match left_hashmap.get(&Value::String("name".to_string())) {
-                    Some(Value::String(n)) => n,
-                    _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable assignment"),
-                };
-    
+        match left.node {
+            Node::Variable { name } => {
                 let expected_type: Type = {
                     let var = match self.variables.get(name) {
                         Some(v) => v,
@@ -6405,6 +5917,7 @@ impl Interpreter {
                 var.set_value(right_value);
                 var.value.clone()
             }
+            // TODO
             "INDEX_ACCESS" => {
                 fn value_to_usize(val: &Value) -> Result<usize, Value> {
                     match val {
@@ -7131,42 +6644,36 @@ impl Interpreter {
         }
     }
     
-    fn handle_variable_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(s)) => s,
-            _ => return self.raise("SyntaxError", "Expected a string for variable name"),
-        };
+    fn handle_variable_declaration(&mut self, name: String, val_stmt: Statement, var_type: Statement, modifiers: Vec<String>) -> Value {
+        let value = self.evaluate(&val_stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
     
-        let value = match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'value' in variable declaration"),
-        };
-    
-        let value = self.evaluate(&value.convert_to_statement());
-    
-        let mut declared_type: Type = match statement.get(&Value::String("var_type".to_string())) {
-            Some(t) => {
-                match self.evaluate(&t.convert_to_statement()) {
-                    Value::Type(t) => t,
-                    Value::Null => return NULL,
-                    t => return self.raise("TypeError", &format!("Expected a type for variable type, got {}", t.type_name())),
-                }
-            },
-            _ => Type::new_simple("any"),
+        let mut declared_type: Type = match self.evaluate(&var_type) {
+            Value::Type(t) => t,
+            Value::Null => return NULL,
+            t => return self.raise("TypeError", &format!("Expected a type for variable type, got {}", t.type_name())),
         };
 
         if declared_type == Type::new_simple("auto") {
             declared_type = value.get_type();
         }
 
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(mods)) => mods,
-            _ => &vec![],
-        };
+        let mut is_public = false;
+        let mut is_static = false;
+        let mut is_final = false;
 
-        let is_public = modifiers.iter().any(|m| m == &Value::String("public".to_string()));
-        let is_final = modifiers.iter().any(|m| m == &Value::String("final".to_string()));
-        let is_static = modifiers.iter().any(|m| m == &Value::String("static".to_string()));
+        for modifier in modifiers {
+            match modifier_str.as_str() {
+                "public" => is_public = true,
+                "static" => is_static = true,
+                "final" => is_final = true,
+                "non-static" => is_static = false,
+                "mutable" => is_final = false,
+                _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
+            }
+        }
 
         if self.err.is_some() {
             return NULL;
@@ -7190,12 +6697,7 @@ impl Interpreter {
         value   
     }
 
-    fn handle_variable(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(s)) => s,
-            _ => return self.raise("SyntaxError", "Expected a string for variable name"),
-        };
-
+    fn handle_variable(&mut self, name: String) -> Value {
         if self.err.is_some() {
             return NULL;
         }
@@ -7335,35 +6837,16 @@ impl Interpreter {
         }
     }
     
-    fn handle_for_loop(&mut self, statement: HashMap<Value, Value>) -> Value {
-        static KEY_ITERABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("iterable".into()));
-        static KEY_BODY: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("body".into()));
-        static KEY_VARIABLE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("variable".into()));
-
-        let iterable = match statement.get(&*KEY_ITERABLE) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'iterable' in for loop statement"),
-        };
-
+    fn handle_for_loop(&mut self, iterable: Statement, body: Vec<Statement>, variable: PathElement) -> Value {
         let iterable_value = self.evaluate(&iterable.convert_to_statement());
         if self.err.is_some() { return NULL; }
         if !iterable_value.is_iterable() {
             return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
         }
 
-        let body = match statement.get(&*KEY_BODY) {
-            Some(Value::List(body)) => body,
-            _ => return self.raise("RuntimeError", "Expected a list for 'body' in for loop statement"),
-        };
-
-        let body: Vec<Statement> = body.iter().map(|s| s.convert_to_statement()).collect();
-
-        let variable_pattern = match statement.get(&*KEY_VARIABLE) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'variable' in for loop statement"),
-        };
-
         let mut result = NULL;
+
+        let variable_pattern = variable.to_value();
 
         for item in iterable_value.iter() {
             if self.check_stop_flag() { return NULL; }
@@ -7377,7 +6860,7 @@ impl Interpreter {
                 return NULL;
             }
 
-            let bindings = match check_pattern(&item, variable_pattern) {
+            let bindings = match check_pattern(&item, &variable_pattern) {
                 Ok((true, vars)) => vars,
                 Ok((false, _)) => return self.raise("ValueError", "Item did not match for-loop variable pattern"),
                 Err((etype, emsg)) => return self.raise(&etype, &emsg),
