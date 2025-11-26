@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
+use std::fmt;
 
 pub static LOC_TABLE: Lazy<Arc<Mutex<Vec<Location>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
@@ -45,6 +46,15 @@ pub enum RangeModeType {
     Length,
 }
 
+impl fmt::Display for RangeModeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RangeModeType::Value => write!(f, "value"),
+            RangeModeType::Length => write!(f, "lenght"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum IterableNode {
     List {
@@ -64,6 +74,17 @@ pub enum IterableNode {
         for_clauses: Vec<Value>,
         map_expression: Box<Statement>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum AccessType {
+    Range {
+        start: Statement,
+        end: Statement,
+    },
+    Single {
+        index: Statement
+    }
 }
 
 
@@ -194,7 +215,38 @@ pub enum Node {
         operator: String,
         right: Box<Statement>,
     },
+    UnaryOperation {
+        operator: String,
+        operand: Box<Statement>,
+    },
+    PrefixOperation {
+        operator: String,
+        operand: Box<Statement>,
+    },
+    Pipeline {
+        initial_value: Box<Statement>,
+        arguments: Vec<Statement>,
+    },
 
+    Call {
+        name: String,
+        pos_args: Vec<Statement>,
+        named_args: HashMap<String, Statement>,
+    },
+    MethodCall {
+        object: Box<Statement>,
+        method_name: String,
+        pos_args: Vec<Statement>,
+        named_args: HashMap<String, Statement>,
+    },
+    PropertyAccess {
+        object: Box<Statement>,
+        property_name: String,
+    },
+    IndexAccess {
+        object: Box<Statement>,
+        access: Box<AccessType>,
+    },
     Null,
 }
 
@@ -236,6 +288,9 @@ impl Node {
             Node::Map { .. } => "map".to_string(),
             Node::Iterable { .. } => "iterable".to_string(),
             Node::Value { .. } => "value".to_string(),
+            Node::Operation { .. } => "operation".to_string(),
+            Node::UnaryOperation { .. } => "unary operation".to_string(),
+            Node::PrefixOperation { .. } => "prefix operation".to_string(),
             Node::Null => "none".to_string(),
         }
     }
@@ -248,6 +303,196 @@ impl Statement {
         loc_id: None,
     };
 
+    pub fn get_type(&self) -> String {
+        match &self.node {
+            Node::If { .. } => "IF".to_string(),
+            Node::For { .. } => "FOR".to_string(),
+            Node::While { .. } => "WHILE".to_string(),
+            Node::TryCatch { .. } => "TRY_CATCH".to_string(),
+            Node::Throw { .. } => "THROW".to_string(),
+            Node::Forget { .. } => "FORGET".to_string(),
+            Node::Continue => "CONTINUE".to_string(),
+            Node::Break => "BREAK".to_string(),
+            Node::Defer { .. } => "DEFER".to_string(),
+            Node::Scope { .. } => "SCOPE".to_string(),
+            Node::Match { .. } => "MATCH".to_string(),
+            Node::Group { .. } => "GROUP".to_string(),
+            Node::FunctionDeclaration { .. } => "FUNCTION_DECLARATION".to_string(),
+            Node::GeneratorDeclaration { .. } => "GENERATOR_DECLARATION".to_string(),
+            Node::Return { .. } => "RETURN".to_string(),
+            Node::Import { .. } => "IMPORT".to_string(),
+            Node::Export { .. } => "EXPORT".to_string(),
+            Node::VariableDeclaration { .. } => "VARIABLE_DECLARATION".to_string(),
+            Node::Variable { .. } => "VARIABLE".to_string(),
+            Node::Assignment { .. } => "ASSIGNMENT".to_string(),
+            Node::UnpackAssignment { .. } => "UNPACK_ASSIGNMENT".to_string(),
+            Node::Number { .. } => "NUMBER".to_string(),
+            Node::String { .. } => "STRING".to_string(),
+            Node::Boolean { .. } => "BOOLEAN".to_string(),
+            Node::Map { .. } => "MAP".to_string(),
+            Node::Iterable { .. } => "ITERABLE".to_string(),
+            Node::Value { .. } => "VALUE".to_string(),
+            Node::Operation { .. } => "OPERATION".to_string(),
+            Node::UnaryOperation { .. } => "UNARY_OPERATION".to_string(),
+            Node::PrefixOperation { .. } => "PREFIX_OPERATION".to_string(),
+            Node::Null => "NULL".to_string(),
+        }
+    }
+
+    pub fn format_for_debug(&self) -> String {
+        let mut buffer = format!("{{\"type\": \"{}\"", self.get_type());
+        buffer.push_sr(match &self.node {
+            Node::If { condition, else_body, body } => format!("\"condition\": {}, \"body\": [{}], \"else_body\": [{}]",
+                condition.format_for_debug(),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                else_body.as_ref().map_or("".to_string(), |eb| eb.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "))
+            ),
+            Node::For { iterable, body, variable } => format!("\"iterable\": {}, \"variable\": \"{}\", \"body\": [{}]",
+                iterable.format_for_debug(),
+                variable,
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::While { condition, body } => format!("\"condition\": {}, \"body\": [{}]",
+                condition.format_for_debug(),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::TryCatch { body, catch_body, exception_vars } => format!("\"body\": [{}], \"catch_body\": [{}], \"exception_vars\": [{}]",
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                catch_body.as_ref().map_or("".to_string(), |cb| cb.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")),
+                exception_vars.as_ref().map_or("".to_string(), |ev| ev.join(", "))
+            ),
+            Node::Throw { node } => match &**node {
+                ThrowNode::Tuple(stmt) => format!("\"value\": {}", stmt.format_for_debug()),
+                ThrowNode::Message { message, from } => format!("\"message\": {}, \"from\": {}",
+                    message.format_for_debug(),
+                    from.as_ref().map_or("null".to_string(), |f| f.format_for_debug())
+                ),
+            },
+            Node::Forget { node } => format!("\"value\": {}", node.format_for_debug()),
+            Node::Continue | Node::Break => "".to_string(),
+            Node::Defer { body } => format!("\"body\": [{}]",
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::Scope { body, name, locals, is_local } => format!("\"name\": \"{}\", \"is_local\": {}, \"locals\": [{}], \"body\": [{}]",
+                name.as_ref().map_or("".to_string(), |n| n.clone()),
+                is_local,
+                locals.join(", "),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::Match { condition, cases } => format!("\"condition\": {}, \"cases\": [{}]",
+                condition.format_for_debug(),
+                (cases.iter().map(|case| match case {
+                    MatchCase::Pattern { pattern, body, guard } => format!("{{\"pattern\": \"{}\", \"guard\": {}, \"body\": [{}]}}",
+                        pattern,
+                        guard.as_ref().map_or("null".to_string(), |g| g.format_for_debug()),
+                        body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                    ),
+                    MatchCase::Literal { patterns, body } => format!("{{\"patterns\": [{}], \"body\": [{}]}}",
+                        patterns.iter().map(|p| p.format_for_debug()).collect::<Vec<String>>().join(", "),
+                        body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                    ),
+                }).collect::<Vec<String>>().join(", "))
+            ),
+            Node::Group { body } => format!("\"body\": [{}]",
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::FunctionDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => format!("\"name\": \"{}\", \"pos_args\": [{}], \"named_args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{:?}\", \"body\": [{}]",
+                name,
+                pos_args.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
+                named_args.iter().map(|(n, v)| format!("{{\"{}\": {}}}", n, v.format_for_debug())).collect::<Vec<String>>().join(", "),
+                modifiers.join(", "),
+                return_type.format_for_debug(),
+                effect_flags.display(),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::GeneratorDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => format!("\"name\": \"{}\", \"pos_args\": [{}], \"named_args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{:?}\", \"body\": [{}]",
+                name,
+                pos_args.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
+                named_args.iter().map(|(n, v)| format!("{{\"{}\": {}}}", n, v.format_for_debug())).collect::<Vec<String>>().join(", "),
+                modifiers.join(", "),
+                return_type.format_for_debug(),
+                effect_flags.display(),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::Return { value } => format!("\"value\": {}", value.format_for_debug()),
+            Node::Import { name, alias, named_imports, modifiers, import_all, module_path_opt } => format!("\"name\": \"{}\", \"alias\": {}, \"named_imports\": [{}], \"modifiers\": [{}], \"import_all\": {}, \"module_path_opt\": {}",
+                name,
+                alias.as_ref().map_or("null".to_string(), |a| format!("\"{}\"", a)),
+                named_imports.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
+                modifiers.join(", "),
+                import_all,
+                module_path_opt.as_ref().map_or("null".to_string(), |mp| mp.format_for_debug())
+            ),
+            Node::Export { names, aliases, modifiers_list } => format!("\"names\": [{}, \"aliases\": [{}], \"modifiers_list\": [[{}]]",
+                names.iter().map(|n| format!("\"{}\"", n)).collect::<Vec<String>>().join(", "),
+                aliases.iter().map(|a| format!("\"{}\"", a)).collect::<Vec<String>>().join(", "),
+                modifiers_list.iter().map(|mods| mods.join(", ")).collect::<Vec<String>>().join("], [")
+            ),
+            Node::VariableDeclaration { name, val_stmt, var_type, modifiers, is_default } => format!("\"name\": \"{}\", \"var_type\": {}, \"val_stmt\": {}, \"modifiers\": [{}], \"is_default\": {}",
+                name,
+                var_type.format_for_debug(),
+                val_stmt.format_for_debug(),
+                modifiers.join(", "),
+                is_default
+            ),
+            Node::Variable { name } => format!("\"name\": \"{}\"", name),
+            Node::Assignment { left, right } => format!("\"left\": {}, \"right\": {}",
+                left.format_for_debug(),
+                right.format_for_debug()
+            ),
+            Node::UnpackAssignment { targets, stmt } => format!("\"targets\": [{}], \"stmt\": {}",
+                targets.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                stmt.format_for_debug()
+            ),
+            Node::Number { value } => format!("\"value\": \"{}\"", value),
+            Node::String { value, mods } => format!("\"value\": \"{}\", \"mods\": [{}]",
+                value,
+                mods.join(", ")
+            ),
+            Node::Boolean { value } => format!("\"value\": {}", value.map_or("null".to_string(), |v| v.to_string())),
+            Node::Map { keys_stmts, values_stmts } => format!("\"keys_stmts\": [{}], \"values_stmts\": [{}]",
+                keys_stmts.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                values_stmts.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+            ),
+            Node::Iterable { node } => match node {
+                IterableNode::List { elements } => format!("\"type\": \"list\", \"elements\": [{}]",
+                    elements.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                ),
+                IterableNode::Tuple { elements } => format!("\"type\": \"tuple\", \"elements\": [{}]",
+                    elements.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                ),
+                IterableNode::ListCompletion { seed, end, pattern_flag, range_mode, is_infinite } => format!("\"type\": \"list_completion\", \"seed\": [{}], \"end\": {}, \"pattern_flag\": {}, \"range_mode\": \"{:?}\", \"is_infinite\": {}",
+                    seed.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                    end.format_for_debug(),
+                    pattern_flag,
+                    range_mode,
+                    is_infinite
+                ),
+                IterableNode::ListComprehension { for_clauses, map_expression } => format!("\"type\": \"list_comprehension\", \"for_clauses\": [{}], \"map_expression\": {}",
+                    for_clauses.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
+                    map_expression.format_for_debug()
+                ),
+            },
+            Node::Value { value } => format!("\"value\": {}", value.format_for_debug()),
+            Node::Operation { left, operator, right } => format!("\"left\": {}, \"operator\": \"{}\", \"right\": {}",
+                left.format_for_debug(),
+                operator,
+                right.format_for_debug()
+            ),
+            Node::UnaryOperation { operator, operand } => format!("\"operator\": \"{}\", \"operand\": {}",
+                operator,
+                operand.format_for_debug()
+            ),
+            Node::PrefixOperation { operator, operand } => format!("\"operator\": \"{}\", \"operand\": {}",
+                operator,
+                operand.format_for_debug()
+            ),
+            Node::Value { value } => format!("\"value\": {}", value.format_for_debug()),
+            Node::Null => "".to_string(),
+        });
+        buffer.push('}');
+        buffer
+    }
     // pub fn convert_to_map(&self) -> Value {
     //     match self {
     //         Statement::Statement { keys, values, loc } => {
@@ -469,52 +714,6 @@ impl Statement {
     //         Statement::Null => None,
     //     }
     // }
-    pub fn get_type(&self) -> String {
-        match &self.node {
-            Node::If { .. } => "IF".to_string(),
-            Node::For { .. } => "FOR".to_string(),
-            Node::While { .. } => "WHILE".to_string(),
-            Node::TryCatch { .. } => "TRY_CATCH".to_string(),
-            Node::Throw { .. } => "THROW".to_string(),
-            Node::Forget { .. } => "FORGET".to_string(),
-            Node::Continue => "CONTINUE".to_string(),
-            Node::Break => "BREAK".to_string(),
-            Node::Defer { .. } => "DEFER".to_string(),
-            Node::Scope { .. } => "SCOPE".to_string(),
-            Node::Match { .. } => "MATCH".to_string(),
-            Node::Group { .. } => "GROUP".to_string(),
-            Node::FunctionDeclaration { .. } => "FUNCTION_DECLARATION".to_string(),
-            Node::GeneratorDeclaration { .. } => "GENERATOR_DECLARATION".to_string(),
-            Node::Return { .. } => "RETURN".to_string(),
-            Node::Import { .. } => "IMPORT".to_string(),
-            Node::Export { .. } => "EXPORT".to_string(),
-            Node::VariableDeclaration { .. } => "VARIABLE_DECLARATION".to_string(),
-            Node::Variable { .. } => "VARIABLE".to_string(),
-            Node::Assignment { .. } => "ASSIGNMENT".to_string(),
-            Node::UnpackAssignment { .. } => "UNPACK_ASSIGNMENT".to_string(),
-            Node::Number { .. } => "NUMBER".to_string(),
-            Node::String { .. } => "STRING".to_string(),
-            Node::Boolean { .. } => "BOOLEAN".to_string(),
-            Node::Map { .. } => "MAP".to_string(),
-            Node::Iterable { .. } => "ITERABLE".to_string(),
-            Node::Value { .. } => "VALUE".to_string(),
-            Node::Null => "NULL".to_string(),
-        }
-    }
-
-    pub fn format_for_debug(&self) -> String {
-        let mut buffer = format!("{{\"type\": \"{}\"", self.get_type());
-        buffer.push_sr(match &self.node {
-            Node::If { condition, else_body, body } => format!("\"condition\": {}, \"body\": [{}], \"else_body\": [{}]",
-                buffer,
-                condition.format_for_debug(),
-                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
-                else_body.as_ref().map_or("".to_string(), |eb| eb.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "))
-            ),
-        });
-        buffer.push('}');
-        buffer
-    }
 
     // pub fn get_name(&self) -> String {
     //     let map = self.convert_to_hashmap();

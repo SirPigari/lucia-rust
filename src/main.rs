@@ -121,7 +121,7 @@ use crate::env::runtime::repl::read_input;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node};
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::libs::{load_std_libs, check_project_deps};
@@ -1846,9 +1846,9 @@ fn repl(
         let loc = statements.iter().rev().find_map(|stmt| {
             if let Statement { node, loc } = stmt {
                 let found = match node {
-                    StatementNode::For { .. }
-                    | StatementNode::While { .. }
-                    | StatementNode::Call { .. } => true,
+                    Node::For { .. }
+                    | Node::While { .. }
+                    | Node::Call { .. } => true,
                     _ => false,
                 };
                 if found {

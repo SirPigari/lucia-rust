@@ -8,12 +8,15 @@ Be free to fix them or add new ones.
 _Total TODOs found: 7_
 ---
 
-### [`src/interpreter.rs:5863:1`](../../../src/interpreter.rs#L5863) _(added by **SirPigari** on **2025-11-25**)_
+### [`src/interpreter.rs:1451:1`](../../../src/interpreter.rs#L1451) _(added by **SirPigari** on **2025-11-26**)_
+- on these
+
+### [`src/interpreter.rs:5865:1`](../../../src/interpreter.rs#L5865) _(added by **SirPigari** on **2025-11-25**)_
 
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3466:1`](../../../src/interpreter.rs#L3466) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3468:1`](../../../src/interpreter.rs#L3468) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
@@ -24,9 +27,6 @@ _Total TODOs found: 7_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/interpreter.rs:1442:1`](../../../src/interpreter.rs#L1442) **(TODO not committed yet)**
-- on these
 
 ---
 *Report generated automatically.*

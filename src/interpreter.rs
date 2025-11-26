@@ -48,7 +48,7 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType};
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
@@ -1418,6 +1418,12 @@ impl Interpreter {
             Node::Operation { left, operator, right } => self.handle_operation(*left, operator, *right),
             Node::UnaryOperation { operator, operand } => self.handle_unary_op(*operand, &operator),
             Node::PrefixOperator { operator, operand } => self.handle_prefix_op(*operand, &operator),
+            Node::Pipeline { initial_value, arguments } => self.handle_pipeline(*initial_value, arguments),
+
+            Node::Call { name, pos_args, named_args } => self.handle_call(&name, pos_args, named_args),
+            Node::MethodCall { object, method_name, pos_args, named_args } => self.handle_method_call(*object, &method_name, pos_args, named_args),
+            Node::PropertyAccess { object, property_name } => self.handle_property_access(*object, &property_name),
+            Node::IndexAccess { object, access } => self.handle_index_access(*object, *access),
             t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
         };
 
@@ -1460,13 +1466,13 @@ impl Interpreter {
     
                 // "OPERATION" => self.handle_operation(statement_map),
                 // "UNARY_OPERATION" => self.handle_unary_op(statement_map),
-                "PREFIX_OPERATOR" => self.handle_prefix_op(statement_map),
-                "PIPELINE" => self.handle_pipeline(statement_map),
+                // "PREFIX_OPERATOR" => self.handle_prefix_op(statement_map),
+                // "PIPELINE" => self.handle_pipeline(statement_map),
     
-                "CALL" => self.handle_call(statement_map),
-                "METHOD_CALL" => self.handle_method_call(statement_map),
-                "PROPERTY_ACCESS" => self.handle_property_access(statement_map),
-                "INDEX_ACCESS" => self.handle_index_access(statement_map),
+                // "CALL" => self.handle_call(statement_map),
+                // "METHOD_CALL" => self.handle_method_call(statement_map),
+                // "PROPERTY_ACCESS" => self.handle_property_access(statement_map),
+                // "INDEX_ACCESS" => self.handle_index_access(statement_map),
     
                 "TYPE" => self.handle_type(statement_map),
                 "TYPE_CONVERT" => self.handle_type_conversion(statement_map),
@@ -1619,24 +1625,25 @@ impl Interpreter {
         }
     }
 
-    fn handle_pipeline(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let initial_value = match statement.get(&Value::String("initial_value".to_string())) {
-            Some(v) => v.clone(),
-            None => return self.raise("RuntimeError", "Missing 'initial_value' in pipeline statement"),
-        };
-        let arguments = match statement.get(&Value::String("arguments".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'arguments' in pipeline statement"),
-        };
-
-        let mut current_val = self.evaluate(&initial_value.convert_to_statement());
+    fn handle_pipeline(&mut self, initial_value: Statement, arguments: Vec<Statement>) -> Value {
+        let mut current_val = self.evaluate(&initial_value);
         if self.err.is_some() {
             return NULL;
         }
 
-        for step_val in arguments.iter().map(|v| v.convert_to_statement()) {
+        for step_val in arguments.iter() {
             if self.err.is_some() {
                 return NULL;
+            }
+
+            match step_val.node {
+                Node::Call { .. } | Node::MethodCall { .. } => {},  // TODO
+                _ => {
+                    self.variables.insert(
+                        "_".to_string(),
+                        Variable::new("_".to_string(), current_val.clone(), "any".to_string(), true, false, false)
+                    );
+                }
             }
 
             let step_type = step_val.get_type();
@@ -6282,25 +6289,12 @@ impl Interpreter {
         }
     }
 
-    fn handle_index_access(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let object_val = match statement.get(&Value::String("object".to_string())) {
-            Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-            None => return self.raise("RuntimeError", "Missing object in index access"),
-        };
-    
-        let access_val = match statement.get(&Value::String("access".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing access in index access"),
-        };
-    
-        let access_hashmap = match access_val {
-            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-            _ => return self.raise("RuntimeError", "Expected a map for index access"),
-        };
-    
-        let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
-        let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
-    
+    fn handle_index_access(&mut self, object_stmt: Statement, access_type: AccessType) -> Value {
+        let object_val = self.evaluate(&object_stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
+
         let len = match &object_val {
             Value::String(s) => s.chars().count(),
             Value::List(l) => l.len(),
@@ -6312,76 +6306,30 @@ impl Interpreter {
                 }
                 keys.len()
             }
-            Value::Struct(s) => if let Ok(_) = find_struct_method(&s, None, "op_index", &[s.get_type(), Type::new_simple("int")], &Type::new_simple("any")) {
-                usize::MAX
-            } else {
-                return self.raise("TypeError", "Struct not indexable");
+            Value::Struct(s) => {
+                if find_struct_method(&s, None, "op_index", &[s.get_type(), Type::new_simple("int")], &Type::new_simple("any")).is_ok() {
+                    usize::MAX
+                } else {
+                    return self.raise("TypeError", "Struct not indexable");
+                }
             }
-            Value::Type(t) => if let Type::Enum { variants, ..} = t {
-                variants.iter().max_by_key(|x| x.2).map(|x| x.2).unwrap_or(variants.len())
-            }  else {
-                return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
+            Value::Type(t) => {
+                if let Type::Enum { variants, .. } = t {
+                    variants.iter().max_by_key(|x| x.2).map(|x| x.2).unwrap_or(variants.len())
+                } else {
+                    return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
+                }
             }
             _ => return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
         };
-    
-        let start_eval_opt = start_val_opt
-            .map(|v| self.evaluate(&v.convert_to_statement()))
-            .and_then(|val| if val == NULL { Some(Value::Int(0.into())) } else { Some(val) });
-        let end_eval_opt = end_val_opt
-            .map(|v| self.evaluate(&v.convert_to_statement()))
-            .and_then(|val| Some(val));
 
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        if let Value::Map { keys, values } = &object_val {
-            match (start_eval_opt.as_ref(), end_eval_opt.as_ref()) {
-                (Some(start_val), Some(end_val)) if start_val == end_val => {
-                    for (k, v) in keys.iter().zip(values.iter()) {
-                        if k == start_val {
-                            return v.clone();
-                        }
-                    }
-                    return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(start_val)));
-                }
-                (Some(_), Some(_)) => {
-                    return self.raise("TypeError", "Slicing maps is not supported");
-                }
-                (Some(start_val), None) => {
-                    for (k, v) in keys.iter().zip(values.iter()) {
-                        if k == start_val {
-                            return v.clone();
-                        }
-                    }
-                    return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(start_val)));
-                }
-                _ => {
-                    return self.raise("TypeError", "Invalid index access on map");
-                }
-            }
-        }
-    
-        let mut to_index = |val: &Value| -> Result<usize, Value> {
+        let to_index = |val: &Value| -> Result<usize, Value> {
             match val {
                 Value::Int(i) => {
                     let idx = i.to_i64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err(self.raise("IndexError", "Index out of range"))
-                    }
-                }
-                Value::String(s) => {
-                    let idx: isize = s.parse().map_err(|_| self.raise("IndexError", "Index out of range"))?;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err(self.raise("IndexError", "Index out of range"))
-                    }
+                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
+                    else { Err(self.raise("IndexError", "Index out of range")) }
                 }
                 Value::Float(f) => {
                     if !f.is_integer_like() {
@@ -6389,197 +6337,102 @@ impl Interpreter {
                     }
                     let idx = f.to_f64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
                     let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len {
-                        Ok(adjusted as usize)
-                    } else {
-                        Err(self.raise("IndexError", "Index out of range"))
-                    }
+                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
+                    else { Err(self.raise("IndexError", "Index out of range")) }
                 }
-                _ => Err(self.raise("TypeError", "Index must be 'int', 'str' or 'float' with no fraction")),
+                Value::String(s) => {
+                    let idx: isize = s.parse().map_err(|_| self.raise("IndexError", "Index out of range"))?;
+                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
+                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
+                    else { Err(self.raise("IndexError", "Index out of range")) }
+                }
+                _ => Err(self.raise("TypeError", "Index must be int, float, or string representing a number")),
             }
         };
-    
-        match (start_eval_opt, end_eval_opt) {
-            (Some(start_val), None) => match &object_val {
-                Value::String(_) | Value::List(_) | Value::Bytes(_) | Value::Tuple(_) => {
-                    let start_idx = match to_index(&start_val) {
-                        Ok(i) => i,
-                        Err(e) => return e,
-                    };
-    
-                    match &object_val {
-                        Value::String(s) => s.chars().nth(start_idx).map(|c| Value::String(c.to_string())).unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::List(l) => l.get(start_idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::Bytes(b) => b.get(start_idx).map(|&b| Value::Int((b as i64).into())).unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::Tuple(t) => t.get(start_idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        _ => unreachable!(),
-                    }
-                }
-                Value::Map { keys, values } => {
-                    let key_val = start_val;
-                    for (k, v) in keys.iter().zip(values.iter()) {
-                        if k == &key_val {
-                            return v.clone();
-                        }
-                    }
-                    return self.raise("KeyError", &format!("'{}' not found in map", format_value(&key_val)));
-                }
-                Value::Struct(s) => {
-                    let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
-                    if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), start_val.get_type()], &Type::new_simple("any")) {
-                        if method.is_static() {
-                            return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
-                        }
-                        let result = self.call_function(&method, vec![start_val.clone()], HashMap::new(), Some((None, Some(&mut var))));
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        return result;
-                    } else {
-                        return self.raise("TypeError", "Struct not indexable");
-                    }
-                }
-                _ => return self.raise("TypeError", "Start must be int or string"),
-            },
-            (start_opt, end_opt) => {
-                let start_idx = match start_opt {
-                    Some(ref v) => match to_index(v) {
-                        Ok(i) => i,
-                        Err(e) => return e,
-                    },
-                    None => 0,
-                };
 
-                let end_idx = match end_opt {
-                    Some(Value::Null) => {
-                        return match &object_val {
-                            Value::String(s) => {
-                                let result = s.chars().skip(start_idx).collect::<String>();
-                                Value::String(result)
-                            }
+        match access_type {
+            AccessType::Single { index } => {
+                let idx_val = self.evaluate(&index);
+                if self.err.is_some() { return NULL; }
 
-                            Value::List(l) => l
-                                .get(start_idx..)
-                                .map(|slice| Value::List(slice.to_vec()))
-                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-
-                            Value::Bytes(b) => b
-                                .get(start_idx..)
-                                .map(|slice| Value::Bytes(slice.to_vec()))
-                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-
-                            Value::Tuple(t) => t
-                                .get(start_idx..)
-                                .map(|slice| Value::Tuple(slice.to_vec()))
-                                .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-
-                            _ => self.raise(
-                                "TypeError",
-                                &format!("'{}' not indexable", object_val.get_type().display_simple()),
-                            ),
-                        };
-                    }
-                    Some(ref v) => match to_index(v) {
-                        Ok(i) => i,
-                        Err(e) => return e,
-                    },
-                    None => len,
-                };
-            
-                if end_idx > len {
-                    return self.raise("IndexError", "End index out of range");
-                }
-
-                if end_idx == start_idx {
-                    return match &object_val {
-                        Value::String(s) => s.chars().nth(start_idx).map(|c| Value::String(c.to_string()))
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::List(l) => l.get(start_idx).cloned()
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::Bytes(b) => b.get(start_idx).map(|&b| Value::Int((b as i64).into()))
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::Tuple(t) => t.get(start_idx).cloned()
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range")),
-                        Value::Type(t) => {
-                            if let Type::Enum { variants, name, .. } = t {
-                                for (variant_name, ty, idx) in variants {
-                                    if *idx == start_idx {
-                                        if *ty != Statement::Null {
-                                            match self.evaluate(&ty) {
-                                                Value::Type(t) => self.raise_with_help("TypeError", "Discriminant index access works only for non-value variants", &format!("'{}.{}' accepts type '{}'", name, variant_name, t.display_simple())),
-                                                _ => self.raise("TypeError", "Discriminant index access works only for non-value variants"),
-                                            };
-                                            let ref_err = self.err.clone().unwrap();
-                                            return self.raise_with_ref("NotImplemented", "Discriminant index access for value variants is not supported yet", ref_err);
-                                        }
-                                        return Value::Enum(Enum::new(t.clone(), (*idx, Value::Null)));
-                                    }
-                                }
-                                return self.raise("ValueError", &format!("No enum variant with value {}", start_idx));
-                            } else {
-                                return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
-                            }
-                        }
-                        Value::Struct(s) => {
-                            let start_val = Value::Int((start_idx as i64).into());
-                            let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
-                            if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), start_val.get_type()], &Type::new_simple("any")) {
-                                if method.is_static() {
-                                    return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
-                                }
-                                let result = self.call_function(&method, vec![start_val.clone()], HashMap::new(), Some((None, Some(&mut var))));
-                                if self.err.is_some() {
-                                    return NULL;
-                                }
-                                return result;
-                            } else {
-                                return self.raise("TypeError", "Struct not indexable");
-                            }
-                        }
-                        _ => return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
-                    };
-                }                
-            
-                if start_idx > end_idx {
-                    match &object_val {
-                        Value::String(s) => {
-                            let slice: String = s.chars()
-                                .skip(end_idx)
-                                .take(start_idx - end_idx)
-                                .collect();
-                            let rev_slice = slice.chars().rev().collect();
-                            return Value::String(rev_slice);
-                        }
-                        Value::List(l) => {
-                            let slice = l.get(end_idx..start_idx).unwrap_or(&[]).to_vec();
-                            let rev_slice = slice.into_iter().rev().collect();
-                            return Value::List(rev_slice);
-                        }
-                        Value::Bytes(b) => {
-                            let slice = b.get(end_idx..start_idx).unwrap_or(&[]).to_vec();
-                            let rev_slice = slice.into_iter().rev().collect();
-                            return Value::Bytes(rev_slice);
-                        }
-                        Value::Tuple(t) => {
-                            let slice = t.get(end_idx..start_idx).unwrap_or(&[]).to_vec();
-                            let rev_slice = slice.into_iter().rev().collect();
-                            return Value::Tuple(rev_slice);
-                        }
-                        _ => return self.raise("TypeError", "Object not sliceable"),
-                    }
-                }
-            
                 match &object_val {
-                    Value::String(s) => {
-                        let slice = s.chars().skip(start_idx).take(end_idx - start_idx).collect::<String>();
-                        Value::String(slice)
+                    Value::Map { keys, values } => {
+                        for (k, v) in keys.iter().zip(values.iter()) {
+                            if k == &idx_val {
+                                return v.clone();
+                            }
+                        }
+                        return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(&idx_val)));
                     }
+                    Value::String(s) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
+                        chars.get(idx).map(|c| Value::String(c.to_string()))
+                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
+                    }
+                    Value::List(l) => {
+                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
+                        l.get(idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
+                    }
+                    Value::Bytes(b) => {
+                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
+                        b.get(idx).map(|&b| Value::Int((b as i64).into()))
+                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
+                    }
+                    Value::Tuple(t) => {
+                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
+                        t.get(idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
+                    }
+                    Value::Struct(s) => {
+                        let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
+                        if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), idx_val.get_type()], &Type::new_simple("any")) {
+                            if method.is_static() {
+                                return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
+                            }
+                            self.call_function(&method, vec![idx_val], HashMap::new(), Some((None, Some(&mut var))))
+                        } else {
+                            self.raise("TypeError", "Struct not indexable")
+                        }
+                    }
+                    _ => self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
+                }
+            }
+
+            AccessType::Range { start, end } => {
+                // Evaluate start/end expressions
+                let start_val = self.evaluate(&start);
+                let end_val = self.evaluate(&end);
+                if self.err.is_some() { return NULL; }
+
+                let start_idx = match &object_val {
+                    Value::String(_) | Value::List(_) | Value::Bytes(_) | Value::Tuple(_) => to_index(&start_val).unwrap_or(0),
+                    _ => 0,
+                };
+                let end_idx = match &object_val {
+                    Value::String(_) | Value::List(_) | Value::Bytes(_) | Value::Tuple(_) => to_index(&end_val).unwrap_or(len),
+                    _ => len,
+                };
+
+                // Handle reversed slices
+                if start_idx > end_idx {
+                    return match &object_val {
+                        Value::String(s) => s.chars().skip(end_idx).take(start_idx - end_idx).rev().collect::<String>().into(),
+                        Value::List(l) => Value::List(l.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
+                        Value::Bytes(b) => Value::Bytes(b.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
+                        Value::Tuple(t) => Value::Tuple(t.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
+                        _ => return self.raise("TypeError", "Object not sliceable"),
+                    };
+                }
+
+                // Normal slice
+                match &object_val {
+                    Value::String(s) => s.chars().skip(start_idx).take(end_idx - start_idx).collect::<String>().into(),
                     Value::List(l) => Value::List(l.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
                     Value::Bytes(b) => Value::Bytes(b.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
                     Value::Tuple(t) => Value::Tuple(t.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
-                    _ => return self.raise("TypeError", "Object not sliceable"),
+                    _ => self.raise("TypeError", "Object not sliceable"),
                 }
-            }            
+            }
         }
     }
     
@@ -7501,27 +7354,8 @@ impl Interpreter {
         }
     }
 
-    fn handle_method_call(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing 'object' in method call", None);
-        };
-
-        let Some(Value::String(method)) = statement.get(&Value::String("method".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing or invalid 'method' in method call", None);
-        };
-    
-        let (pos_args, named_args) = match self.translate_args(
-            statement.get(&Value::String("pos_args".to_string())).cloned().unwrap_or(Value::List(vec![])),
-            statement.get(&Value::String("named_args".to_string())).cloned().unwrap_or(Value::Map { keys: vec![], values: vec![] }),
-        ) {
-            Ok(args) => args,
-            Err(err) => {
-                return self.raise("RuntimeError", to_static(err.to_string()));
-            }
-        };
-    
-        let method_name = method.as_str();
-        let object_value = self.evaluate(&object.convert_to_statement());
+    fn handle_method_call(&mut self, object_stmt: Statement, method_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
+        let object_value = self.evaluate(&object_stmt);
         let object_type = object_value.type_name();
 
         let mut object_variable = Variable::new(
@@ -7537,6 +7371,15 @@ impl Interpreter {
         } else {
             None
         };
+
+        let pos_args: Vec<Value> = pos_args_stmt.into_iter().map(|s| self.evaluate(&s)).collect();
+        if self.err.is_some() {
+            return NULL;
+        }
+        let named_args: HashMap<String, Value> = named_args_stmt.into_iter().map(|(k, v)| (k, self.evaluate(&v))).collect();
+        if self.err.is_some() {
+            return NULL;
+        }
 
         match object_value {
             Value::Type(ref t) => {
@@ -7705,17 +7548,8 @@ impl Interpreter {
         return result;
     }
 
-    fn handle_property_access(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let Some(object) = statement.get(&Value::String("object".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing 'object' in property access", None);
-        };
-    
-        let Some(Value::String(property)) = statement.get(&Value::String("property".to_string())).cloned() else {
-            return Value::Error("RuntimeError", "Missing or invalid 'property' in property access", None);
-        };
-    
-        let property_name = property.as_str();
-        let object_value = self.evaluate(&object.convert_to_statement());
+    fn handle_property_access(&mut self, object: Statement, property_name: &str) -> Value {
+        let object_value = self.evaluate(&object);
         let object_type = object_value.type_name();
 
         let mut object_variable = Variable::new(
@@ -7822,68 +7656,41 @@ impl Interpreter {
         };
         var.get_value().clone()
     }
-
-    fn translate_args(
-        &mut self,
-        pos_args: Value,
-        named_args: Value,
-    ) -> Result<(Vec<Value>, HashMap<String, Value>), Value> {
-        let pos_args = match pos_args {
-            Value::List(args) => {
-                args.iter()
-                    .map(|stmt| self.evaluate(&stmt.convert_to_statement()))
-                    .collect::<Vec<Value>>()
-            }
-            _ => return Err(self.raise("TypeError", "Expected a list for function arguments")),
-        };
     
-        let named_args = match named_args {
-            Value::Map { keys, values } => {
-                let mut map = HashMap::new();
-                for (key, val_stmt) in keys.iter().zip(values.iter()) {
-                    if let Value::String(key_str) = key {
-                        let val = self.evaluate(&val_stmt.convert_to_statement());
-                        map.insert(key_str.clone(), val);
-                    } else {
-                        return Err(self.raise("TypeError", "Expected string keys for named arguments"));
-                    }
-                }
-                map
-            }
-            _ => return Err(self.raise("TypeError", "Expected a map for named arguments")),
-        };
-    
-        Ok((pos_args, named_args))
-    }
-    
-    fn handle_call(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let function_name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(s)) => s.as_str(),
-            _ => return self.raise("TypeError", "Expected a string for function name"),
-        };
-
-        let (pos_args, named_args) = match self.translate_args(
-            statement.get(&Value::String("pos_arguments".to_string())).cloned().unwrap_or(Value::List(vec![])),
-            statement.get(&Value::String("named_arguments".to_string())).cloned().unwrap_or(Value::Map { keys: vec![], values: vec![] }),
-        ) {
-            Ok(args) => args,
-            Err(err) => {
-                return err;
-            }
-        };
-
-        if self.err.is_some() {
-            return NULL;
-        }
-        
-        if self.err.is_some() {
-            return NULL;
-        }
-
-
+    fn handle_call(&mut self, function_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
         let special_functions = [
             "exit", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
         ];
+
+        let pos_args = pos_args_stmt.into_iter()
+            .map(|stmt| { 
+                let r = self.evaluate(&stmt);
+                if self.err.is_some() {
+                    NULL
+                } else {
+                    r
+                }
+            })
+            .collect::<Vec<Value>>();
+
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let named_args = named_args_stmt.into_iter()
+            .map(|(k, v)| {
+                let r = self.evaluate(&v);
+                if self.err.is_some() {
+                    (k, NULL)
+                } else {
+                    (k, r)
+                }
+            })
+            .collect::<HashMap<String, Value>>();
+
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let is_special_function = special_functions.contains(&function_name);
         let func = if is_special_function {

@@ -1,11 +1,12 @@
 use crate::env::runtime::utils::{hex_to_ansi, unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, parse_usize_radix, is_valid_token, supports_color, to_static};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::statements::{Statement, Node, MatchCase, ThrowNode,  alloc_loc};
+use crate::env::runtime::statements::{Statement, Node, MatchCase, ThrowNode,  alloc_loc, RangeModeType, IterableNode, };
 use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
 use crate::env::runtime::utils::RESERVED_KEYWORDS;
+use std::collections::HashMap;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -471,39 +472,22 @@ impl Parser {
                                 return Statement::Null;
                             }
         
-                            expr = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("method".to_string()),
-                                    Value::String("pos_args".to_string()),
-                                    Value::String("named_args".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("METHOD_CALL".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::String(property_token.1),
-                                    Value::List(pos_args),
-                                    Value::Map {
-                                        keys: named_args.iter().map(|(k, _)| k.clone()).collect(),
-                                        values: named_args.iter().map(|(_, v)| v.clone()).collect(),
-                                    },
-                                ],
-                                loc: self.get_loc(),
+                            expr = Statement {
+                                node: Node::MethodCall {
+                                    object: Box::new(expr),
+                                    method_name: property_token.1,
+                                    pos_args,
+                                    named_args,
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             };
                         } else {
-                            expr = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("object".to_string()),
-                                    Value::String("property".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("PROPERTY_ACCESS".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::String(property_token.1),
-                                ],
-                                loc: self.get_loc(),
+                            expr = Statement {
+                                node: Node::PropertyAccess {
+                                    object: Box::new(expr),
+                                    property_name: property_token.1,
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             };
                         }
                     }
@@ -695,34 +679,6 @@ impl Parser {
                                 modifiers: vec![],
                                 is_default: false,
                             },
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("name".to_string()),
-                                Value::String("var_type".to_string()),
-                                Value::String("value".to_string()),
-                                Value::String("modifiers".to_string()),
-                                Value::String("is_default".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("VARIABLE_DECLARATION".to_string()),
-                                Value::String(mangled_res_name.clone()),
-                                Statement::Statement {
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("value".to_string()),
-                                        Value::String("type_kind".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("TYPE".to_string()),
-                                        Value::String("any".to_string()),
-                                        Value::String("simple".to_string()),
-                                    ],
-                                    loc: loc.clone(),
-                                }.convert_to_map(),
-                                expr.convert_to_map(),
-                                Value::List(vec![]),
-                                Value::Boolean(false),
-                            ],
                             loc: loc.clone(),
                         }.convert_to_map(),
                     );
@@ -744,28 +700,20 @@ impl Parser {
                                     }.convert_to_map(),
                                     match then_op {
                                         ThenOp::Call(function_name, pos_args, named_args) => {
-                                            Statement::Statement {
-                                                keys: vec![
-                                                    Value::String("type".to_string()),
-                                                    Value::String("method".to_string()),
-                                                    Value::String("object".to_string()),
-                                                    Value::String("pos_args".to_string()),
-                                                    Value::String("named_args".to_string()),
-                                                ],
-                                                values: vec![
-                                                    Value::String("METHOD_CALL".to_string()),
-                                                    Value::String(function_name),
-                                                    Statement {
+                                            Statement {
+                                                node: Node::MethodCall {
+                                                    object: Box::new(Statement {
                                                         node: Node::Variable {
                                                             name: mangled_res_name.clone(),
                                                         },
                                                         loc: alloc_loc(loc.clone()),
-                                                    }.convert_to_map(),
+                                                    }),
+                                                    method_name: function_name,
                                                     pos_args,
                                                     named_args,
-                                                ],
+                                                },
                                                 loc: alloc_loc(loc.clone()),
-                                            }.convert_to_map()
+                                            }
                                         }
                                         ThenOp::Op(op, val) => {
                                             Statement {
@@ -780,7 +728,7 @@ impl Parser {
                                                     right: Box::new(val),
                                                 },
                                                 loc: alloc_loc(loc.clone()),
-                                            }.convert_to_map()
+                                            }
                                         }
                                     }
                                 ],
@@ -1228,18 +1176,12 @@ impl Parser {
                     if self.err.is_some() {
                         return Statement::Null;
                     }
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("initial_value".to_string()),
-                            Value::String("arguments".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("PIPELINE".to_string()),
-                            expr.convert_to_map(),
-                            Value::List(next_exprs.iter().map(|e| e.convert_to_map()).collect::<Vec<Value>>()),
-                        ],
-                        loc: self.get_loc(),
+                    expr = Statement {
+                        node: Node::Pipeline {
+                            initial_value: Box::new(expr),
+                            arguments: next_exprs.clone(),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     };
                 }
      
@@ -5017,7 +4959,7 @@ impl Parser {
                 return Statement::Null;
             }
         };
-        let name = token.1.clone();
+        let name = token.1.to_owned();
         if self.err.is_some() {
             return Statement::Null;
         }
@@ -5038,46 +4980,29 @@ impl Parser {
         }
 
         if pos_args.is_empty() && named_args.is_empty() {
-            let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("name".to_string()),
-                    Value::String("pos_arguments".to_string()),
-                    Value::String("named_arguments".to_string()),
-                ],
-                values: vec![
-                    Value::String("CALL".to_string()),
-                    Value::String(name.to_string()),
-                    Value::List(pos_args),
-                    Value::Map { keys, values },
-                ],
-                loc
+            return Statement {
+                node: Node::Call {
+                    name,
+                    pos_args: Vec::new(),
+                    named_args: HashMap::new(),
+                },
+                loc: alloc_loc(loc),
             }
         }
 
-        let (keys, values): (Vec<_>, Vec<_>) = named_args.into_iter().unzip();
-        
-        Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("name".to_string()),
-                Value::String("pos_arguments".to_string()),
-                Value::String("named_arguments".to_string()),
-            ],
-            values: vec![
-                Value::String("CALL".to_string()),
-                Value::String(name.to_string()),
-                Value::List(pos_args),
-                Value::Map { keys, values },
-            ],
-            loc
+        Statement {
+            node: Node::Call {
+                name,
+                pos_args,
+                named_args,
+            },
+            loc: alloc_loc(loc),
         }
     }
 
-    fn parse_arguments(&mut self) -> (Vec<Value>, Vec<(Value, Value)>) {
+    fn parse_arguments(&mut self) -> (Vec<Statement>, HashMap<String, Statement>) {
         let mut pos_args = Vec::new();
-        let mut named_args = Vec::new();
+        let mut named_args = HashMap::new();
         let mut seen_named = false;
     
         while let Some(current_token) = self.token().cloned() {
@@ -5105,7 +5030,7 @@ impl Parser {
                     if self.err.is_some() {
                         return (vec![], vec![]);
                     }
-                    named_args.push((Value::String(name), value.convert_to_map()));
+                    named_args.insert(name, value);
                     seen_named = true;
                 } else {
                     if seen_named {
@@ -5114,10 +5039,9 @@ impl Parser {
                     }
                     let expr = self.parse_expression();
                     if self.err.is_some() {
-                        pos_args.push(Value::Null);
-                        return (vec![], vec![]);
+                        return (vec![], HashMap::new());
                     }
-                    pos_args.push(expr.convert_to_map());
+                    pos_args.push(expr);
                 }
             } else {
                 if seen_named {
@@ -5126,9 +5050,9 @@ impl Parser {
                 }
                 let expr = self.parse_expression();
                 if self.err.is_some() {
-                    return (vec![], vec![]);
+                    return (vec![], HashMap::new());
                 }
-                pos_args.push(expr.convert_to_map());
+                pos_args.push(expr);
             }
     
             if let Some(Token(t_type, t_val, _)) = self.token() {
