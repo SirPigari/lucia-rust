@@ -768,30 +768,23 @@ impl Parser {
                                             }.convert_to_map()
                                         }
                                         ThenOp::Op(op, val) => {
-                                            Statement::Statement {
-                                                keys: vec![
-                                                    Value::String("type".to_string()),
-                                                    Value::String("operator".to_string()),
-                                                    Value::String("left".to_string()),
-                                                    Value::String("right".to_string()),
-                                                ],
-                                                values: vec![
-                                                    Value::String("OPERATION".to_string()),
-                                                    Value::String(op.to_string()),
-                                                    Statement {
+                                            Statement {
+                                                node: Node::Operation {
+                                                    left: Box::new(Statement {
                                                         node: Node::Variable {
                                                             name: mangled_res_name.clone(),
                                                         },
                                                         loc: alloc_loc(loc.clone()),
-                                                    }.convert_to_map(),
-                                                    val.convert_to_map()
-                                                ],
-                                                loc: loc.clone(),
+                                                    }),
+                                                    operator: op.to_owned(),
+                                                    right: Box::new(val),
+                                                },
+                                                loc: alloc_loc(loc.clone()),
                                             }.convert_to_map()
                                         }
                                     }
                                 ],
-                                loc: loc.clone(),
+                                loc: alloc_loc(loc.clone()),
                             }.convert_to_map()
                         );
                     }
@@ -913,30 +906,18 @@ impl Parser {
                         fact_level += 1;
                         self.next();
                     }
-                    expr = Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("OPERATION".to_string()),
-                            Value::String("!".to_string()),
-                            Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("value".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("NUMBER".to_string()),
-                                    Value::String(fact_level.to_string()),
-                                ],
-                                loc: self.get_loc(),
-                            }.convert_to_map(),
-                            expr.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    expr = Statement {
+                        node: Node::Statement {
+                            left: Box::new(expr.clone()),
+                            operator: "!".to_owned(),
+                            right: Box::new(Statement {
+                                node: Node::Number {
+                                    value: fact_level.to_owned(),
+                                },
+                                loc: alloc_loc(self.get_loc()),
+                            }),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     };
                 }
 
@@ -951,30 +932,19 @@ impl Parser {
                     expr = Statement {
                         node: Node::Assignment {
                             left: Box::new(expr.clone()),
-                            right: Box::new(Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("left".to_string()),
-                                    Value::String("right".to_string()),
-                                    Value::String("operator".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("OPERATION".to_string()),
-                                    expr.convert_to_map(),
-                                    Value::Map {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("NUMBER".to_string()),
-                                            Value::String("1".to_string()),
-                                        ],
-                                    },
-                                    Value::String(operator),
-                                ],
-                                loc: loc.clone(),
-                            }.convert_to_map(),),
+                            right: Box::new(Statement {
+                                node: Node::Statement {
+                                    left: Box::new(expr.clone()),
+                                    operator: operator.to_owned(),
+                                    right: Box::new(Statement {
+                                        node: Node::Number {
+                                            value: "1".to_owned(),
+                                        },
+                                        loc: alloc_loc(loc.clone()),
+                                    }),
+                                },
+                                loc: alloc_loc(loc.clone()),
+                            }),
                         },
                         loc,
                     };
@@ -1039,9 +1009,9 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    let params = match &expr {
-                        Statement::Statement { .. } if expr.get_type() == "TUPLE" => {
-                            expr.get_value("items").unwrap_or(Value::List(vec![]))
+                    let params = match &expr.node {
+                        Node::Iterable { node: IterableNode::Tuple { elements } } => {
+                            Value::List(elements.iter().map(|e| e.convert_to_map()).collect())
                         }
                         _ => Value::List(vec![expr.convert_to_map()]),
                     };
@@ -1226,8 +1196,7 @@ impl Parser {
                     }
 
                     let expr_type = expr.get_type();
-                    if expr_type == "TUPLE" {
-                        let targets = expr.get_value("items").unwrap_or(Value::Null);
+                    if let Node::Iterable { node: IterableNode::Tuple { elements: targets } } = &expr.node {
                         return Statement {
                             node: Node::UnpackAssignment {
                                 targets: targets,
@@ -1297,20 +1266,13 @@ impl Parser {
                     expr = Statement {
                         node: Node::Assignment {
                             left: Box::new(expr),
-                            right: Box::new(Statement::Statement {  // TODO here too
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("left".to_string()),
-                                    Value::String("right".to_string()),
-                                    Value::String("operator".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("OPERATION".to_string()),
-                                    expr.convert_to_map(),
-                                    right.convert_to_map(),
-                                    Value::String(operator),
-                                ],
-                                loc: self.get_loc(),
+                            right: Box::new(Statement {
+                                node: Node::Operation {
+                                    left: Box::new(expr.clone()),
+                                    operator,
+                                    right: Box::new(right),
+                                },
+                                loc: alloc_loc(self.get_loc()),
                             }),
                         },
                         loc: alloc_loc(self.get_loc()),
@@ -1423,20 +1385,13 @@ impl Parser {
                 }
             }
 
-            lhs = Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("left".to_string()),
-                    Value::String("operator".to_string()),
-                    Value::String("right".to_string()),
-                ],
-                values: vec![
-                    Value::String("OPERATION".to_string()),
-                    lhs.convert_to_map(),
-                    Value::String(op_str.to_string()),
-                    rhs.convert_to_map(),
-                ],
-                loc: self.get_loc(),
+            lhs = Statement {
+                node: Node::Operation {
+                    left: Box::new(lhs),
+                    operator: op_str.to_owned(),
+                    right: Box::new(rhs),
+                },
+                loc: alloc_loc(self.get_loc()),
             };
         }
 
@@ -1501,20 +1456,13 @@ impl Parser {
                     if self.err.is_some() { return Statement::Null; }
                     self.check_for("OPERATOR", "|");
                     self.next();
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("OPERATION".to_string()),
-                            Value::String("abs".to_string()),
-                            Value::Null,
-                            expr.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::Operation {
+                            left: Box::new(expr),
+                            operator: "abs".to_owned(),
+                            right: Box::new(Statement::Null),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -1529,18 +1477,12 @@ impl Parser {
                     }
                     let operand = self.parse_expression();
                     if self.err.is_some() { return Statement::Null; }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("operand".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("PREFIX_OPERATOR".to_string()),
-                            Value::String(operator),
-                            operand.convert_to_map(),
-                        ],
-                        loc,
+                    Statement {
+                        node: Node::PrefixOperator {
+                            operator,
+                            operand: Box::new(operand),
+                        },
+                        loc: alloc_loc(loc),
                     }
                 }
 
@@ -1558,18 +1500,12 @@ impl Parser {
                         self.parse_expression()
                     };
                     if self.err.is_some() { return Statement::Null; }
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("operator".to_string()),
-                            Value::String("operand".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("UNARY_OPERATION".to_string()),
-                            Value::String(operator),
-                            operand.convert_to_map(),
-                        ],
-                        loc: self.get_loc(),
+                    Statement {
+                        node: Node::UnaryOperation {
+                            operator,
+                            operand: Box::new(operand),
+                        },
+                        loc: alloc_loc(self.get_loc()),
                     }
                 }
 
@@ -1638,8 +1574,9 @@ impl Parser {
                 "SEPARATOR" if token.1 == "{" => {
                     let loc = self.get_loc();
                     self.next();
-                    let mut keys = vec![];
-                    let mut values = vec![];
+
+                    let mut keys = Vec::new();
+                    let mut values = Vec::new();
 
                     while let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
@@ -1647,98 +1584,47 @@ impl Parser {
                             break;
                         }
 
-                        let mut modifier = Value::String("mutable".to_string());
-                        loop {
-                            if let Some(tok) = self.token() {
-                                if tok.0 == "IDENTIFIER" && (tok.1 == "final" || tok.1 == "mutable") {
-                                    modifier = Value::String(tok.1.clone());
-                                    self.next();
-                                } else {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-
                         let key = self.parse_expression();
-                        if self.err.is_some() {
-                            return Statement::Null;
-                        }
+                        if self.err.is_some() { return Statement::Null; }
 
-                        let key_map = key.convert_to_map();
-
-                        // if keys.iter().any(|k| {
-                        //     if let Value::Map { keys: mk, values: mv } = k {
-                        //         mk.iter().zip(mv).any(|(kk, vv)| {
-                        //             kk == &Value::String("key".to_string()) && vv == &key_map
-                        //         })
-                        //     } else {
-                        //         false
-                        //     }
-                        // }) {
-                        //     self.raise("SyntaxError", "Duplicate key in map");
-                        //     return Statement::Null;
-                        // }
-
-                        let value;
-                        if let Some(next_token) = self.token() {
-                            if next_token.0 == "SEPARATOR" && next_token.1 == ":" {
-                                self.next();
-                                value = self.parse_expression();
-                                if self.err.is_some() {
-                                    return Statement::Null;
-                                }
-                            } else {
+                        match self.token() {
+                            Some(("SEPARATOR", ":")) => self.next(),
+                            Some(_) => {
                                 self.raise("SyntaxError", "Expected ':' after key in map");
                                 return Statement::Null;
                             }
-                        } else {
-                            self.raise("SyntaxError", "Unexpected end of input in map");
-                            return Statement::Null;
+                            None => {
+                                self.raise("SyntaxError", "Unexpected end of input in map");
+                                return Statement::Null;
+                            }
                         }
 
-                        keys.push(Value::Map {
-                            keys: vec![
-                                Value::String("modifier".to_string()),
-                                Value::String("key".to_string()),
-                            ],
-                            values: vec![
-                                modifier,
-                                key_map,
-                            ],
-                        });                        
+                        let value = self.parse_expression();
+                        if self.err.is_some() { return Statement::Null; }
 
-                        values.push(value.convert_to_map());
+                        keys.push(key);
+                        values.push(value);
 
-                        if let Some(next_token) = self.token() {
-                            if next_token.0 == "SEPARATOR" && next_token.1 == "," {
-                                self.next();
-                            } else if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
-                                self.next();
-                                break;
-                            } else {
+                        match self.token() {
+                            Some(Token("SEPARATOR", ",", _)) => self.next(),
+                            Some(Token("SEPARATOR", "}", _)) => { self.next(); break; }
+                            Some(_) => {
                                 self.raise("SyntaxError", "Expected ',' or '}' in map");
                                 return Statement::Null;
                             }
-                        } else {
-                            self.raise("SyntaxError", "Unexpected end of input in map");
-                            return Statement::Null;
+                            None => {
+                                self.raise("SyntaxError", "Unexpected end of input in map");
+                                return Statement::Null;
+                            }
                         }
                     }
 
-                    Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("keys".to_string()),
-                            Value::String("values".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("MAP".to_string()),
-                            Value::List(keys),
-                            Value::List(values),
-                        ],
-                        loc,
+                    Statement {
+                        node: Node::Map {
+                            keys_stmts: keys,
+                            values_stmts: values,
+                        },
+                        loc: alloc_loc(loc),
                     }
                 }
 
@@ -2600,16 +2486,11 @@ impl Parser {
                                     self.next();
 
                                     let mut var_type = Value::Null;
-                                    let mut discriminant = Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string())
-                                        ],
-                                        values: vec![
-                                            Value::String("NUMBER".to_string()),
-                                            Value::String(discriminants_counter.to_string())
-                                        ],
-                                        loc: self.get_loc(),
+                                    let mut discriminant = Statement {
+                                        node: Node::Number {
+                                            value: discriminants_counter.to_owned()
+                                        },
+                                        loc: alloc_loc(self.get_loc()),
                                     }.convert_to_map();
                                     discriminants_counter += 1;
 
@@ -3274,18 +3155,16 @@ impl Parser {
                     if ["end"].contains(&self.token().map(|t| t.1.as_str()).unwrap_or("")) {
                         return Statement {
                             node: Node::Return {
-                                value: Box::new(Value::Map {  // TODO here too
-                                    keys: vec![
-                                        Value::String("type".to_string()),
-                                        Value::String("value".to_string()),
-                                    ],
-                                    values: vec![
-                                        Value::String("BOOLEAN".to_string()),
-                                        Value::String("null".to_string()),
-                                    ],
-                                },),
+                                value: Box::new(
+                                    Statement {
+                                        node: Node::Boolean {
+                                            value: None,
+                                        },
+                                        loc: alloc_loc(self.get_loc()),
+                                    }
+                                ),
                             },
-                            loc: self.get_loc(),
+                            loc: alloc_loc(self.get_loc()),
                         };
                     }
                     let mut parenthesis = false;
@@ -3510,16 +3389,11 @@ impl Parser {
                                 pattern: pat_expr,
                                 guard: guard,
                                 body: vec![
-                                    Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("BOOLEAN".to_string()),
-                                            Value::String("true".to_string()),
-                                        ],
-                                        loc: self.get_loc(),
+                                    Statement {
+                                        node: Node::Boolean {
+                                            value: Some(true),
+                                        },
+                                        loc: alloc_loc(self.get_loc()),
                                     }
                                 ],
                             },
@@ -3530,21 +3404,16 @@ impl Parser {
                                 },
                                 guard: None,
                                 body: vec![
-                                    Statement::Statement {
-                                        keys: vec![
-                                            Value::String("type".to_string()),
-                                            Value::String("value".to_string()),
-                                        ],
-                                        values: vec![
-                                            Value::String("BOOLEAN".to_string()),
-                                            Value::String("false".to_string()),
-                                        ],
-                                        loc: self.get_loc(),
+                                    Statement {
+                                        node: Node::Boolean {
+                                            value: Some(false),
+                                        },
+                                        loc: alloc_loc(self.get_loc()),
                                     }
                                 ]
                             }
                         ];
-                        Statement::Statement {
+                        Statement {
                             node: Node::Match {
                                 value: condition,
                                 cases: cases,
@@ -3744,16 +3613,13 @@ impl Parser {
                     if let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == ")" {
                             self.next();
-                            let tuple_expr = Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("items".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("TUPLE".to_string()),
-                                    Value::List(vec![]),
-                                ],
-                                loc: self.get_loc(),
+                            let tuple_expr = Statement {
+                                node: Node::Iterable {
+                                    node: IterableNode::Tuple {
+                                        elements: vec![],
+                                    }
+                                },
+                                loc: alloc_loc(self.get_loc())
                             };
 
                             if let Some(assign_token) = self.token() {
@@ -3867,15 +3733,11 @@ impl Parser {
                                                         Value::String("auto".to_string()),
                                                     ],
                                                 },
-                                                Value::Map {
-                                                    keys: vec![
-                                                        Value::String("type".to_string()),
-                                                        Value::String("value".to_string()),
-                                                    ],
-                                                    values: vec![
-                                                        Value::String("BOOLEAN".to_string()),
-                                                        Value::String("null".to_string()),
-                                                    ],
+                                                Statement {
+                                                    node: Node::Boolean {
+                                                        value: None,
+                                                    },
+                                                    loc: alloc_loc(self.get_loc()),
                                                 },
                                                 Value::List(vec![]),
                                                 Value::Boolean(true),
@@ -3900,16 +3762,13 @@ impl Parser {
                     }
 
                     if is_tuple || values.len() != 1 {
-                        Statement::Statement {
-                            keys: vec![
-                                Value::String("type".to_string()),
-                                Value::String("items".to_string()),
-                            ],
-                            values: vec![
-                                Value::String("TUPLE".to_string()),
-                                Value::List(values.into_iter().map(|s| s.convert_to_map()).collect()),
-                            ],
-                            loc: self.get_loc(),
+                        Statement {
+                            node: Node::Iterable {
+                                node: IterableNode::Tuple {
+                                    elements: values,
+                                }
+                            },
+                            loc: alloc_loc(self.get_loc()),
                         }
                     } else {
                         values.remove(0)
@@ -3953,16 +3812,11 @@ impl Parser {
                                         self.next();
                                         self.next();
 
-                                        Statement::Statement {
-                                            keys: vec![
-                                                Value::String("type".to_string()),
-                                                Value::String("value".to_string()),
-                                            ],
-                                            values: vec![
-                                                Value::String("NUMBER".to_string()),
-                                                Value::String(format!("{}({})", token.1, inner_value)),
-                                            ],
-                                            loc: self.get_loc(),
+                                        Statement {
+                                            node: Node::Number {
+                                                value: format!("{}({})", token.1, inner_value),
+                                            },
+                                            loc: alloc_loc(self.get_loc()),
                                         }
                                     } else {
                                         let left = self.parse_operand();
@@ -3981,20 +3835,13 @@ impl Parser {
                                                 if self.err.is_some() {
                                                     Statement::Null
                                                 } else {
-                                                    Statement::Statement {
-                                                        keys: vec![
-                                                            Value::String("type".to_string()),
-                                                            Value::String("operator".to_string()),
-                                                            Value::String("left".to_string()),
-                                                            Value::String("right".to_string()),
-                                                        ],
-                                                        values: vec![
-                                                            Value::String("OPERATION".to_string()),
-                                                            Value::String("*".to_string()),
-                                                            left.convert_to_map(),
-                                                            right.convert_to_map(),
-                                                        ],
-                                                        loc: self.get_loc(),
+                                                    Statement {
+                                                        node: Node::Operation {
+                                                            left: Box::new(left),
+                                                            operator: "*".to_owned(),
+                                                            right: Box::new(right),
+                                                        },
+                                                        loc: alloc_loc(self.get_loc()),
                                                     }
                                                 }
                                             }
@@ -4020,20 +3867,13 @@ impl Parser {
                                         if self.err.is_some() {
                                             Statement::Null
                                         } else {
-                                            Statement::Statement {
-                                                keys: vec![
-                                                    Value::String("type".to_string()),
-                                                    Value::String("operator".to_string()),
-                                                    Value::String("left".to_string()),
-                                                    Value::String("right".to_string()),
-                                                ],
-                                                values: vec![
-                                                    Value::String("OPERATION".to_string()),
-                                                    Value::String("*".to_string()),
-                                                    left.convert_to_map(),
-                                                    right.convert_to_map(),
-                                                ],
-                                                loc: self.get_loc(),
+                                            Statement {
+                                                node: Node::Operation {
+                                                    left: Box::new(left),
+                                                    operator: "*".to_owned(),
+                                                    right: Box::new(right),
+                                                },
+                                                loc: alloc_loc(self.get_loc()),
                                             }
                                         }
                                     }
@@ -4885,7 +4725,7 @@ impl Parser {
                 if self.err.is_some() {
                     return Statement::Null;
                 }
-                values.push(expr.convert_to_map());
+                values.push(expr);
                 if self.token_is("SEPARATOR", ",") {
                     self.next();
                 } else {
@@ -4895,34 +4735,26 @@ impl Parser {
             self.check_for("SEPARATOR", ")");
             self.next();
             if values.len() == 1 {
-                return values[0].convert_to_statement();
+                return values[0];
             }
 
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("items".to_string()),
-                ],
-                values: vec![
-                    Value::String("TUPLE".to_string()),
-                    Value::List(values),
-                ],
-                loc
+            return Statement {
+                node: Node::Iterable {
+                    node: IterableNode::Tuple {
+                        elements: values,
+                    }
+                },
+                loc: alloc_loc(loc),
             };
         }
 
         if token_type == "NUMBER" {
             self.next();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string()),
-                ],
-                values: vec![
-                    Value::String("NUMBER".to_string()),
-                    Value::String(token_value.clone()),
-                ],
-                loc
+            return Statement {
+                node: Node::Number {
+                    value: token_value.to_owned(),
+                },
+                loc: alloc_loc(loc),
             };
         }
 
@@ -4938,35 +4770,23 @@ impl Parser {
                 let mods: Vec<Value> = prefix_str
                     .chars()
                     .filter(|ch| valid_mods.contains(ch))
-                    .map(|ch| Value::String(ch.to_string()))
+                    .map(|ch| ch.to_owned())
                     .collect();
         
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("mods".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("STRING".to_string()),
-                        Value::String(literal_str.to_string()),
-                        Value::List(mods),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::String {
+                        value: literal_str.to_string(),
+                        mods,
+                    },
+                    loc: alloc_loc(loc),
                 };
             } else {
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("mods".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("STRING".to_string()),
-                        Value::String(token_value.clone()),
-                        Value::List(Vec::new()),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::String {
+                        value: token_value.to_owned(),
+                        mods: Vec::new(),
+                    },
+                    loc: alloc_loc(loc),
                 };
             }
         }
@@ -4980,38 +4800,26 @@ impl Parser {
             if let Some(first_quote_idx) = token_value.find(|c| c == '\'' || c == '"') {
                 let (prefix_str, literal_str) = token_value.split_at(first_quote_idx);
         
-                let mods: Vec<Value> = prefix_str
+                let mods: Vec<String> = prefix_str
                     .chars()
                     .filter(|ch| valid_mods.contains(ch))
-                    .map(|ch| Value::String(ch.to_string()))
+                    .map(|ch| ch.to_owned())
                     .collect();
         
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("mods".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("STRING".to_string()),
-                        Value::String(literal_str.to_string()),
-                        Value::List(mods),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::String {
+                        value: literal_str.to_string(),
+                        mods
+                    },
+                    loc: alloc_loc(loc),
                 };
             } else {
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("value".to_string()),
-                        Value::String("mods".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("STRING".to_string()),
-                        Value::String(token_value.clone()),
-                        Value::List(Vec::new()),
-                    ],
-                    loc
+                return Statement {
+                    node: Node::String {
+                        value: literal_str.to_owned(),
+                        mods: Vec::new(),
+                    },
+                    loc: alloc_loc(loc),
                 };
             }
         }
@@ -5025,16 +4833,19 @@ impl Parser {
     
         if token_type == "BOOLEAN" {
             self.next();
-            return Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string()),
-                ],
-                values: vec![
-                    Value::String("BOOLEAN".to_string()),
-                    Value::String(token_value.clone()),
-                ],
-                loc
+            return Statement {
+                node: Node::Boolean {
+                    value: match token_value.as_str() {
+                        "true" => Some(true),
+                        "false" => Some(false),
+                        "null" => None,
+                        _ => {
+                            self.raise("SyntaxError", "Invalid boolean value");
+                            return Statement::Null;
+                        }
+                    },
+                },
+                loc: alloc_loc(loc),
             };
         };        
         self.raise("SyntaxError", &format!(
@@ -5068,26 +4879,17 @@ impl Parser {
 
                         if self.token_is("SEPARATOR", "]") {
                             self.next();
-                            return Statement::Statement {
-                                keys: vec![
-                                    Value::String("type".to_string()),
-                                    Value::String("iterable_type".to_string()),
-                                    Value::String("seed".to_string()),
-                                    Value::String("end".to_string()),
-                                    Value::String("pattern_reg".to_string()),
-                                    Value::String("range_mode".to_string()),
-                                    Value::String("is_infinite".to_string()),
-                                ],
-                                values: vec![
-                                    Value::String("ITERABLE".to_string()),
-                                    Value::String("LIST_COMPLETION".to_string()),
-                                    Value::List(elements),
-                                    Value::Null,
-                                    Value::Boolean(pattern_reg),
-                                    Value::String("length".to_string()),
-                                    Value::Boolean(true),
-                                ],
-                                loc,
+                            return Statement {
+                                node: Node::Iterable {
+                                    node: IterableNode::ListCompletion {
+                                        seed: elements,
+                                        end: Statement::Null,
+                                        pattern_flag: pattern_reg,
+                                        range_mode: RangeModeType::Length,
+                                        is_infinite: true,
+                                    },
+                                },
+                                loc: alloc_loc(loc),
                             };
                         }
     
@@ -5111,24 +4913,17 @@ impl Parser {
                 self.check_for("SEPARATOR", "]");
                 self.next();
     
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("iterable_type".to_string()),
-                        Value::String("seed".to_string()),
-                        Value::String("end".to_string()),
-                        Value::String("pattern_reg".to_string()),
-                        Value::String("range_mode".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("ITERABLE".to_string()),
-                        Value::String("LIST_COMPLETION".to_string()),
-                        Value::List(elements),
-                        end_expr,
-                        Value::Boolean(pattern_reg),
-                        Value::String(if found_semicolon { "length" } else { "value" }.to_string()),
-                    ],
-                    loc,
+                return Statement {
+                    node: Node::Iterable {
+                        node: IterableNode::ListCompletion {
+                            seed: elements,
+                            end: end_expr,
+                            pattern_flag: pattern_reg,
+                            range_mode: if found_semicolon { RangeModeType::Length } else { RangeModeType::Value },
+                            is_infinite: false,
+                        },
+                    },
+                    loc: alloc_loc(loc),
                 };
             }
     
@@ -5169,27 +4964,17 @@ impl Parser {
                     for_clauses.push((variables, iterable.convert_to_map(), Value::List(filters)));
                 }
 
-                let map_expression = expr.convert_to_map();
-
                 self.check_for("SEPARATOR", "]");
                 self.next();
 
-                return Statement::Statement {
-                    keys: vec![
-                        Value::String("type".to_string()),
-                        Value::String("iterable_type".to_string()),
-                        Value::String("for_clauses".to_string()),
-                        Value::String("map_expression".to_string()),
-                    ],
-                    values: vec![
-                        Value::String("ITERABLE".to_string()),
-                        Value::String("LIST_COMPREHENSION".to_string()),
-                        Value::List(for_clauses.into_iter().map(|(v,it,f)| {
-                            Value::List(vec![v.to_value(), it, f])
-                        }).collect()),
-                        map_expression,
-                    ],
-                    loc,
+                return Statement {
+                    node: Node::Iterable {
+                        node: IterableNode::ListComprehension {
+                            for_clauses,
+                            map_expression: expr,
+                        },
+                    },
+                    loc: alloc_loc(loc),
                 };
             }
             
@@ -5214,18 +4999,13 @@ impl Parser {
         self.check_for("SEPARATOR", "]");
         self.next();
     
-        Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("iterable_type".to_string()),
-                Value::String("elements".to_string()),
-            ],
-            values: vec![
-                Value::String("ITERABLE".to_string()),
-                Value::String("LIST".to_string()),
-                Value::List(elements),
-            ],
-            loc,
+        Statement {
+            node: Node::Iterable {
+                node: IterableNode::List {
+                    elements,
+                },
+            },
+            loc: alloc_loc(loc),
         }
     }
     

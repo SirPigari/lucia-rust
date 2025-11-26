@@ -40,6 +40,34 @@ pub enum MatchCase {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum RangeModeType {
+    Value,
+    Length,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum IterableNode {
+    List {
+        elements: Vec<Statement>,
+    },
+    Tuple {
+        elements: Vec<Statement>,
+    },
+    ListCompletion {
+        seed: Vec<Statement>,
+        end: Box<Statement>,
+        pattern_flag: bool,
+        range_mode: RangeModeType,
+        is_infinite: bool,
+    },
+    ListComprehension {
+        for_clauses: Vec<Value>,
+        map_expression: Box<Statement>,
+    },
+}
+
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum Node {
     If {
         condition: Box<Statement>,
@@ -138,6 +166,35 @@ pub enum Node {
         targets: Vec<Statement>,
         stmt: Box<Statement>,
     },
+
+    Number {
+        value: String,
+    },
+    String {
+        value: String,
+        mods: Vec<String>,
+    },
+    Boolean {
+        value: Option<bool>, // Some(true), Some(false), None for null
+    },
+
+    Map {
+        keys_stmts: Vec<Statement>,
+        values_stmts: Vec<Statement>,
+    },
+    Iterable {
+        node: IterableNode,
+    },
+    Value {
+        value: Value,
+    },
+
+    Operation {
+        left: Box<Statement>,
+        operator: String,
+        right: Box<Statement>,
+    },
+
     Null,
 }
 
@@ -173,6 +230,12 @@ impl Node {
             Node::Variable { .. } => "variable".to_string(),
             Node::Assignment { .. } => "assignment".to_string(),
             Node::UnpackAssignment { .. } => "unpack assignment".to_string(),
+            Node::Number { .. } => "number".to_string(),
+            Node::String { .. } => "string".to_string(),
+            Node::Boolean { .. } => "boolean".to_string(),
+            Node::Map { .. } => "map".to_string(),
+            Node::Iterable { .. } => "iterable".to_string(),
+            Node::Value { .. } => "value".to_string(),
             Node::Null => "none".to_string(),
         }
     }
@@ -429,9 +492,30 @@ impl Statement {
             Node::Variable { .. } => "VARIABLE".to_string(),
             Node::Assignment { .. } => "ASSIGNMENT".to_string(),
             Node::UnpackAssignment { .. } => "UNPACK_ASSIGNMENT".to_string(),
+            Node::Number { .. } => "NUMBER".to_string(),
+            Node::String { .. } => "STRING".to_string(),
+            Node::Boolean { .. } => "BOOLEAN".to_string(),
+            Node::Map { .. } => "MAP".to_string(),
+            Node::Iterable { .. } => "ITERABLE".to_string(),
+            Node::Value { .. } => "VALUE".to_string(),
             Node::Null => "NULL".to_string(),
         }
     }
+
+    pub fn format_for_debug(&self) -> String {
+        let mut buffer = format!("{{\"type\": \"{}\"", self.get_type());
+        buffer.push_sr(match &self.node {
+            Node::If { condition, else_body, body } => format!("\"condition\": {}, \"body\": [{}], \"else_body\": [{}]",
+                buffer,
+                condition.format_for_debug(),
+                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
+                else_body.as_ref().map_or("".to_string(), |eb| eb.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "))
+            ),
+        });
+        buffer.push('}');
+        buffer
+    }
+
     // pub fn get_name(&self) -> String {
     //     let map = self.convert_to_hashmap();
     //     match map.get(&Value::String("name".to_string())) {

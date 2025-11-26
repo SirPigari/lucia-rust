@@ -48,7 +48,7 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase};
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
@@ -1206,7 +1206,7 @@ impl Interpreter {
     #[track_caller]
     fn get_location_from_current_statement(&self) -> Option<Location> {
         match &self.current_statement {
-            Some(Statement::Statement { loc, .. }) => match loc {
+            Some(Statement { loc, .. }) => match loc {
                 Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
                 None => None,
             },
@@ -1216,7 +1216,7 @@ impl Interpreter {
 
     fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
         match &self.current_statement {
-            Some(Statement::Statement { loc, .. }) => match loc {
+            Some(Statement { loc, .. }) => match loc {
                 Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
                 None => None,
             },
@@ -1406,6 +1406,18 @@ impl Interpreter {
             Node::Variable { name } => self.handle_variable(name),
             Node::Assignment { left, right } => self.handle_assignment(*left, *right),
             Node::UnpackAssignment { targets, stmt } => self.handle_unpack_assignment(targets, *stmt),
+
+            Node::Number { value } => self.handle_number(value),
+            Node::String { value, mods } => self.handle_string(value, mods),
+            Node::Boolean { value } => self.handle_boolean(value),
+
+            Node::Map { keys_stmts, values_stmts } => self.handle_map(keys_stmts, values_stmts),
+            Node::Iterable { elements } => self.handle_iterable(elements),
+            Node::Value { value } => self.handle_value(value),
+
+            Node::Operation { left, operator, right } => self.handle_operation(*left, operator, *right),
+            Node::UnaryOperation { operator, operand } => self.handle_unary_op(*operand, &operator),
+            Node::PrefixOperator { operator, operand } => self.handle_prefix_op(*operand, &operator),
             t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
         };
 
@@ -1431,22 +1443,23 @@ impl Interpreter {
                 // "IMPORT" => self.handle_import(statement_map),
                 // "EXPORT" => self.handle_export(statement_map),
 
+                // TODO on these
                 "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement_map),
                 "VARIABLE" => self.handle_variable(statement_map),
                 "ASSIGNMENT" => self.handle_assignment(statement_map),
                 "UNPACK_ASSIGN" => self.handle_unpack_assignment(statement_map),
     
-                "NUMBER" => self.handle_number(statement_map),
-                "STRING" => self.handle_string(statement_map),
-                "BOOLEAN" => self.handle_boolean(statement_map),
+                // "NUMBER" => self.handle_number(statement_map),
+                // "STRING" => self.handle_string(statement_map),
+                // "BOOLEAN" => self.handle_boolean(statement_map),
     
-                "TUPLE" => self.handle_tuple(statement_map),
-                "MAP" => self.handle_map(statement_map),
-                "ITERABLE" => self.handle_iterable(statement_map),
-                "VALUE" => self.handle_value(statement_map),
+                // "TUPLE" => self.handle_tuple(statement_map),
+                // "MAP" => self.handle_map(statement_map),
+                // "ITERABLE" => self.handle_iterable(statement_map),
+                // "VALUE" => self.handle_value(statement_map),
     
-                "OPERATION" => self.handle_operation(statement_map),
-                "UNARY_OPERATION" => self.handle_unary_op(statement_map),
+                // "OPERATION" => self.handle_operation(statement_map),
+                // "UNARY_OPERATION" => self.handle_unary_op(statement_map),
                 "PREFIX_OPERATOR" => self.handle_prefix_op(statement_map),
                 "PIPELINE" => self.handle_pipeline(statement_map),
     
@@ -1509,16 +1522,7 @@ impl Interpreter {
         result
     }
 
-    fn handle_prefix_op(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(op)) => op,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'operator' in prefix operator statement"),
-        };
-        let operand_stmt = match statement.get(&Value::String("operand".to_string())) {
-            Some(v) => v.convert_to_statement(),
-            None => return self.raise("RuntimeError", "Missing 'operand' in prefix operator statement"),
-        };
-
+    fn handle_prefix_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
         let operand_value = self.evaluate(&operand_stmt);
         if self.err.is_some() {
             return NULL;
@@ -1642,10 +1646,11 @@ impl Interpreter {
                 let pos_key = if step_type.as_str() == "CALL" { "pos_arguments" } else { "pos_args" };
                 let named_key = if step_type.as_str() == "CALL" { "named_arguments" } else { "named_args" };
 
-                let val_wrapped = Statement::Statement {
-                    keys: vec!["type".into(), "value".into()],
-                    values: vec!["VALUE".into(), current_val.clone()],
-                    loc: self.get_location_from_current_statement(),
+                let val_wrapped = Statement {
+                    node: Node::Value {
+                        value: current_val.clone(),
+                    },
+                    loc: alloc_loc(self.get_location_from_current_statement()),
                 };
 
                 arg_map.entry(Value::String(pos_key.to_string()))
@@ -1702,11 +1707,16 @@ impl Interpreter {
         current_val
     }
 
-    fn handle_value(&mut self, statement: HashMap<Value, Value>) -> Value {
-        match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v.clone(),
-            None => self.raise("RuntimeError", "Missing 'value' in value statement"),
+    fn handle_value(&mut self, value: Value) -> Value {
+        if let Value::Error(err_ty, err_msg, ref_err) = &value {
+            if let Some(ref_err) = ref_err {
+                self.raise_with_ref(err_ty, &err_msg, ref_err.clone());
+            } else {
+                self.raise(err_ty, &err_msg);
+            }
+            return NULL;
         }
+        value
     }
 
     fn handle_struct_methods(&mut self, statement: HashMap<Value, Value>) -> Value {
@@ -3068,7 +3078,7 @@ impl Interpreter {
                         return NULL;
                     }
                 }
-                Node::VariableDeclaration { var_type, name, val_stmt, modifiers } => {
+                Node::VariableDeclaration { var_type, name, val_stmt, modifiers, is_default: _ } => {
                     let type_ = match self.evaluate(&var_type) {
                         Value::Type(t) => t,
                         _ => {
@@ -3129,91 +3139,35 @@ impl Interpreter {
         Value::Tuple(result_values)
     }
 
-    fn handle_map(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let keys_opt = statement.get(&Value::String("keys".to_string())).unwrap_or_else(|| {
-            self.raise("RuntimeError", "Missing 'keys' in map statement");
-            &NULL
-        });
-        let values_opt = statement.get(&Value::String("values".to_string())).unwrap_or_else(|| {
-            self.raise("RuntimeError", "Missing 'values' in map statement");
-            &NULL
-        });
-    
-        let raw_keys = match keys_opt {
-            Value::List(v) => v,
-            _ => {
-                self.raise("TypeError", "Expected list for map keys");
-                return NULL;
-            }
-        };
-    
-        let raw_values = match values_opt {
-            Value::List(v) => v,
-            _ => {
-                self.raise("TypeError", "Expected list for map values");
-                return NULL;
-            }
-        };
-    
-        if raw_keys.len() != raw_values.len() {
+    fn handle_map(&mut self, keys: Vec<Statement>, values: Vec<Statement>) -> Value {
+        if keys.len() != values.len() {
             self.raise("RuntimeError", "Keys and values lists must have the same length");
             return NULL;
         }
-    
-        let mut keys = Vec::with_capacity(raw_keys.len());
-        let mut values = Vec::with_capacity(raw_values.len());
-    
-        let mut seen = std::collections::HashSet::new();
-    
-        for (i, raw_key_entry) in raw_keys.iter().enumerate() {
-            let (modifier, raw_key) = match raw_key_entry {
-                Value::Map { keys: mk, values: mv } => {
-                    let mut modifier = None;
-                    let mut key = None;
-                    for (k, v) in mk.iter().zip(mv.iter()) {
-                        match k {
-                            Value::String(s) if s == "modifier" => modifier = Some(v),
-                            Value::String(s) if s == "key" => key = Some(v),
-                            _ => {}
-                        }
-                    }
-                    match (modifier, key) {
-                        (Some(m), Some(k)) => (m.clone(), k.clone()),
-                        _ => {
-                            self.raise("RuntimeError", "Malformed key map entry (missing 'modifier' or 'key')");
-                            return NULL;
-                        }
-                    }
-                }
-                _ => {
-                    self.raise("TypeError", "Map key entry must be a map with 'modifier' and 'key'");
-                    return NULL;
-                }
-            };
 
-            if modifier != Value::Null && modifier == Value::String("final".to_string()) {
-                self.raise("NotImplemented", "Final modifier for keys in maps is not implemented yet");
-                return NULL;
-            }
+        let mut map = HashMap::with_capacity(keys.len());
 
-            let evaluated_key = self.evaluate(&raw_key.convert_to_statement());
+        for (key_stmt, value_stmt) in keys.into_iter().zip(values.into_iter()) {
+            let key = self.evaluate(&key_stmt);
             if self.err.is_some() {
                 return NULL;
             }
-            let evaluated_value = self.evaluate(&raw_values[i].convert_to_statement());
+
+            let value = self.evaluate(&value_stmt);
             if self.err.is_some() {
                 return NULL;
             }
-            if !seen.insert(evaluated_key.clone()) {
-                self.raise("SyntaxError", &format!("Duplicate key in map: {}", evaluated_key));
+
+            if map.contains_key(&key) {
+                self.raise("SyntaxError", &format!("Duplicate key in map: {}", key));
                 return NULL;
             }
-            
-            keys.push(evaluated_key);
-            values.push(evaluated_value);
+
+            map.insert(key, value);
         }
-    
-        Value::Map { keys, values }
+
+        let (map_keys, map_values): (Vec<_>, Vec<_>) = map.into_iter().unzip();
+        Value::Map { keys: map_keys, values: map_values }
     }
 
     fn convert_value_to_type(&mut self, target_type: &str, value: &Value) -> Value {
@@ -3251,10 +3205,11 @@ impl Interpreter {
                     if !is_number(&s) {
                         return self.raise("ConversionError", &format!("Invalid number format: '{}'", s));
                     }
-                    let stmt = Statement::Statement {
-                        keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
-                        values: vec![Value::String("NUMBER".to_string()), Value::String(s.clone())],
-                        loc: self.get_location_from_current_statement(),
+                    let stmt = Statement {
+                        node: Node::Number {
+                            value: s.clone(),
+                        },
+                        loc: alloc_loc(self.get_location_from_current_statement()),
                     };
                     let result = self.evaluate(&stmt);
                     if self.err.is_some() {
@@ -5435,10 +5390,11 @@ impl Interpreter {
                                     return NULL;
                                 }
                             };
-                            let new_field_type = Statement::Statement {
-                                keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
-                                values: vec![Value::String("VALUE".to_string()), v],
-                                loc: self.get_location_from_current_statement(),
+                            let new_field_type = Statement {
+                                node: Node::Value {
+                                    value: v
+                                },
+                                loc: alloc_loc(self.get_location_from_current_statement()),
                             };
                             built_fields.push((field_name.clone(), new_field_type, field_mods.clone()));
                         }
@@ -5539,10 +5495,11 @@ impl Interpreter {
                                     return NULL;
                                 }
                             };
-                            let new_field_type = Statement::Statement {
-                                keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
-                                values: vec![Value::String("VALUE".to_string()), v],
-                                loc: self.get_location_from_current_statement(),
+                            let new_field_type = Statement {
+                                node: Node::Value {
+                                    value: v
+                                },
+                                loc: alloc_loc(self.get_location_from_current_statement()),
                             };
                             built_fields.push((variant_name.clone(), new_field_type, variant_disc.clone()));
                         }
@@ -5721,24 +5678,6 @@ impl Interpreter {
         }
     
         NULL
-    }
-
-    fn handle_tuple(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let items = match statement.get(&Value::String("items".to_string())) {
-            Some(Value::List(items)) => items,
-            _ => return Value::Tuple(vec![]),
-        };
-    
-        let mut values = Vec::new();
-        for item in items {
-            let value = self.evaluate(&item.convert_to_statement());
-            if self.err.is_some() {
-                return NULL;
-            }
-            values.push(value);
-        }
-    
-        Value::Tuple(values)
     }
 
     fn handle_try(&mut self, body: Vec<Statement>, catch_body_opt: Option<Vec<Statement>>, exception_vars_opt: Option<Vec<String>>) -> Value {
@@ -6904,100 +6843,52 @@ impl Interpreter {
         result
     }
 
-    fn handle_iterable(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let Some(_) = statement.get(&Value::String("iterable_type".to_string())).cloned() else {
-            return self.raise("IterableError", "Missing 'iterable' in iterable statement");
-        };
-        
-        let iterable_type = statement.get(&Value::String("iterable_type".to_string()))
-            .and_then(|v| Some(v.to_string()))
-            .unwrap_or_else(|| "LIST".to_string());
-        
-        match iterable_type.as_str() {
-            "LIST" => {
-                let elements = statement.get(&Value::String("elements".to_string())).unwrap_or_else(|| {
-                    self.raise("IterableError", "Missing 'elements' in iterable statement");
-                    &NULL
-                });
-
-                if let Value::List(elements_list) = elements {
-                    let mut evaluated_elements = Vec::new();
-                    for element in elements_list {
-                        evaluated_elements.push(self.evaluate(&element.convert_to_statement()));
+    fn handle_iterable(&mut self, iterable: IterableNode) -> Value {
+        match iterable {
+            IterableNode::List { elements } => {
+                let mut evaluated_elements = Vec::with_capacity(elements.len());
+                for element in elements {
+                    evaluated_elements.push(self.evaluate(&element));
+                    if self.err.is_some() {
+                        return NULL;
                     }
-                    Value::List(evaluated_elements)
-                } else {
-                    self.raise("TypeError", "Expected 'elements' to be a list")
                 }
+                Value::List(evaluated_elements)
             }
-            "LIST_COMPLETION" => {
-                let seed_raw = statement.get(&Value::String("seed".to_string()))
-                    .cloned()
-                    .unwrap_or(Value::List(vec![]));
-
-                let end_raw = statement.get(&Value::String("end".to_string()))
-                    .cloned()
-                    .unwrap_or(NULL);
-
-                let pattern_flag = statement.get(&Value::String("pattern_reg".to_string()))
-                    .cloned()
-                    .unwrap_or(Value::Boolean(false));
-
-                let seed: Vec<Value> = match &seed_raw {
-                    Value::List(elements) => elements.clone(),
-                    _ => {
-                        self.raise("TypeError", "Expected 'seed' to be a list");
+            IterableNode::Tuple { elements } => {
+                let mut evaluated_elements = Vec::with_capacity(elements.len());
+                for element in elements {
+                    evaluated_elements.push(self.evaluate(&element));
+                    if self.err.is_some() {
                         return NULL;
                     }
-                };
-
-                let range_mode = match statement.get(&Value::String("range_mode".to_string()))
-                    .cloned()
-                    .unwrap_or(Value::String("value".to_string()))
-                {
-                    Value::String(s) => s,
-                    _ => {
-                        self.raise("TypeError", "Expected 'range_mode' to be a string");
-                        return NULL;
-                    }
-                };
-
+                }
+                Value::Tuple(evaluated_elements)
+            }
+            IterableNode::ListCompletion { seed, end, pattern_flag, range_mode, is_infinite: is_inf } => {
                 let evaluated_seed: Vec<Value> = seed.into_iter().map(|map_val| {
-                    if let Value::Map { .. } = map_val {
-                        self.evaluate(&map_val.convert_to_statement())
-                    } else {
-                        self.raise("RuntimeError", "Expected all elements in seed to be Map");
+                    let r = self.evaluate(&map_val.convert_to_statement());
+                    if self.err.is_some() {
                         NULL
+                    } else {
+                        r
                     }
                 }).collect();
-
-                let is_inf = match statement.get(&Value::String("is_infinite".to_string())) {
-                    Some(Value::Boolean(b)) => *b,
-                    _ => false,
-                };
-
-                let pattern_flag_bool: bool = match pattern_flag {
-                    Value::Boolean(b) => b,
-                    _ => {
-                        self.raise("RuntimeError", "Expected 'pattern_reg' to be a boolean");
-                        return NULL;
-                    }
-                };
 
                 if self.err.is_some() {
                     return NULL;
                 }
 
-                let evaluated_end = self.evaluate(&end_raw.convert_to_statement());
+                let evaluated_end = self.evaluate(&end);
 
-                let cache_key = match range_mode.as_str() {
-                    "value" => Value::List(vec![
+                let cache_key = match range_mode {
+                    RangeModeType::Value => Value::List(vec![
                         Value::List(evaluated_seed.clone()),
                         evaluated_end.clone(),
                         Value::String(range_mode.clone()),
-                        Value::Boolean(pattern_flag_bool),
+                        Value::Boolean(pattern_flag),
                     ]),
-                    "length" => {
+                    RangeModeType::Length => {
                         let length_usize = match &evaluated_end {
                             Value::Int(i) => match i.to_usize() {
                                 Ok(n) => n,
@@ -7019,12 +6910,8 @@ impl Interpreter {
                             Value::List(evaluated_seed.clone()),
                             Value::Int(Int::from_i64(length_usize as i64)),
                             Value::String(range_mode.clone()),
-                            Value::Boolean(pattern_flag_bool),
+                            Value::Boolean(pattern_flag),
                         ])
-                    },
-                    _ => {
-                        self.raise("RuntimeError", "Invalid 'range_mode', expected 'value' or 'length'");
-                        return NULL;
                     }
                 };
 
@@ -7045,7 +6932,7 @@ impl Interpreter {
                                         seed_str,
                                         end_str,
                                         range_mode,
-                                        pattern_flag_bool
+                                        pattern_flag
                                     ));
                                 }
 
@@ -7059,9 +6946,9 @@ impl Interpreter {
                 }
 
 
-                let result: Value = match range_mode.as_str() {
-                    "value" => {
-                        if !pattern_flag_bool {
+                let result: Value = match range_mode {
+                    RangeModeType::Value => {
+                        if !pattern_flag {
                             let len = evaluated_seed.len();
 
                             if len == 0 {
@@ -7202,7 +7089,7 @@ impl Interpreter {
                             Value::List(result_list)
                         }
                     },
-                    "length" => {
+                    RangeModeType::Length => {
                         let length_usize = match &evaluated_end {
                             Value::Int(i) => {
                                 match i.to_usize() {
@@ -7229,7 +7116,7 @@ impl Interpreter {
                             return NULL;
                         }
 
-                        if pattern_flag_bool {
+                        if pattern_flag {
                             let (vec_f64, pm) = match predict_sequence_until_length(evaluated_seed.clone(), length_usize) {
                                 Ok(v) => v,
                                 Err((err_type, err_msg, err_help)) => {
@@ -7403,10 +7290,6 @@ impl Interpreter {
                             }
                         }
                     },
-                    _ => {
-                        self.raise("RuntimeError", "Invalid 'range_mode', expected 'value' or 'length'");
-                        return NULL;
-                    }
                 };
 
                 self.cache.iterables.insert(cache_key, result.clone());
@@ -7431,7 +7314,7 @@ impl Interpreter {
                         seed_str,
                         end_str,
                         range_mode,
-                        pattern_flag_bool,
+                        pattern_flag,
                         is_inf_str,
                         pattern_method_str
                     ));
@@ -7439,25 +7322,7 @@ impl Interpreter {
 
                 return result;
             }
-            "LIST_COMPREHENSION" => {
-                let raw_for_clauses = match statement.get(&Value::String("for_clauses".to_string())) {
-                    Some(val) => val.clone(),
-                    None => {
-                        self.raise("RuntimeError", "Missing 'for_clauses' in list comprehension statement");
-                        return NULL;
-                    }
-                };
-
-                let map_expression = match statement.get(&Value::String("map_expression".to_string())) {
-                    Some(val) => val.convert_to_statement(),
-                    None => {
-                        self.raise("RuntimeError", "Missing 'map_expression' in list comprehension statement");
-                        return NULL;
-                    }
-                };
-
-                if self.err.is_some() { return NULL; }
-
+            IterableNode::ListComprehension { for_clauses, map_expression } => {
                 fn eval_nested(
                     interpreter: &mut Interpreter,
                     clauses: &[Value],
@@ -7553,18 +7418,14 @@ impl Interpreter {
                         }
                     }
                 }
-                let result = if let Value::List(for_clauses_list) = raw_for_clauses {
-                    let mut flat_result = Vec::with_capacity(for_clauses_list.len() * 4);
-                    eval_nested(self, &for_clauses_list, 0, &mut flat_result, &map_expression);
+                let result = {
+                    let mut flat_result = Vec::with_capacity(for_clauses.len() * 4);
+                    eval_nested(self, &for_clauses, 0, &mut flat_result, &map_expression);
                     Value::List(flat_result)
-                } else {
-                    self.raise("RuntimeError", "Expected 'for_clauses' to be a list of clauses");
-                    return NULL;
                 };
 
                 result
             }
-            _ => self.raise("RuntimeError", &format!("Unsupported iterable type: {}", iterable_type)),
         }
     }
 
@@ -9227,23 +9088,8 @@ impl Interpreter {
         return result
     }
 
-    fn handle_operation(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let operator = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(s)) => s.clone(),
-            _ => {
-                self.raise("TypeError", "Expected a string for operator");
-                return NULL;
-            }
-        };
-
-        let left = match statement.get(&Value::String("left".to_string())) {
-            Some(val_left) => self.evaluate(&val_left.convert_to_statement()),
-            None => {
-                self.raise("KeyError", "Missing 'left' key in the statement.");
-                return NULL;
-            }
-        };
-
+    fn handle_operation(&mut self, left_stmt: Statement, operator: String, right_stmt: Statement) -> Value {
+        let left = self.evaluate(&left_stmt);
         if self.err.is_some() {
             return NULL;
         }
@@ -9269,13 +9115,10 @@ impl Interpreter {
             }
         }
 
-        let right = match statement.get(&Value::String("right".to_string())) {
-            Some(val_right) => self.evaluate(&val_right.convert_to_statement()),
-            None => {
-                self.raise("KeyError", "Missing 'right' key in the statement.");
-                return NULL;
-            }
-        };
+        let right = self.evaluate(&right_stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
 
         let left = if let Value::Boolean(b) = left && !(["&" , "|", "xnor", "xor", "<<", "lshift", ">>", "rshift"].contains(&operator.as_str())) {
             Value::Int(if b { 1.into() } else { 0.into() })
@@ -9287,10 +9130,6 @@ impl Interpreter {
         } else {
             right
         };
-
-        if self.err.is_some() {
-            return NULL;
-        }
 
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
@@ -9393,27 +9232,15 @@ impl Interpreter {
         result
     }
     
-    fn handle_unary_op(&mut self, statement: HashMap<Value, Value>) -> Value {
+    fn handle_unary_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
         if self.err.is_some() {
             return NULL;
         }
 
-        let operand = match statement.get(&Value::String("operand".to_string())) {
-            Some(val) => self.evaluate(&val.convert_to_statement()),
-            None => {
-                self.raise("KeyError", "Missing 'operand' key in the statement.");
-                return NULL;
-            }
-        };
-
+        let operand = self.evaluate(&operand_stmt);
         if self.err.is_some() {
             return NULL;
         }
-
-        let operator: &str = match statement.get(&Value::String("operator".to_string())) {
-            Some(Value::String(s)) => s.as_str(),
-            _ => return self.raise("TypeError", "Expected a string for operator"),
-        };
 
         let operator = match operator {
             "isnt" | "isn't" | "nein" | "not" => "!",
@@ -10350,12 +10177,8 @@ impl Interpreter {
         return result;
     }
 
-    fn handle_number(&mut self, map: HashMap<Value, Value>) -> Value {
-        let mut s = match map.get(&Value::String("value".to_string())) {
-            Some(Value::String(s)) if !s.is_empty() => s.as_str(),
-            Some(Value::String(_)) => return self.raise("RuntimeError", "Empty string provided for number"),
-            _ => return self.raise("RuntimeError", "Missing 'value' in number statement"),
-        }.replace('_', "");
+    fn handle_number(&mut self, value: String) -> Value {
+        let mut s = value.replace('_', "");
 
         if s.is_empty() {
             return self.raise("RuntimeError", "Empty string provided for number");
@@ -10484,216 +10307,200 @@ impl Interpreter {
         result
     }
     
-    fn handle_string(&mut self, map: HashMap<Value, Value>) -> Value {
-        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            let mut modified_string = s.clone();
-            let mut is_raw = false;
-            let mut is_bytes = false;
+    fn handle_string(&mut self, value: String, mods: Vec<String>) -> Value {
+        let mut modified_string = value;
+        let mut is_raw = false;
+        let mut is_bytes = false;
 
-            if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
-                for mod_value in mods {
-                    if let Value::String(modifier) = mod_value {
-                        match modifier.as_str() {
-                            "f" => {
-                                let mut output = String::new();
-                                let mut chars = modified_string.chars().peekable();
+        for modifier in mods {
+            match modifier.as_str() {
+                "f" => {
+                    let mut output = String::new();
+                    let mut chars = modified_string.chars().peekable();
 
-                                while let Some(c) = chars.next() {
-                                    if c == '{' {
-                                        if let Some(&'{') = chars.peek() {
-                                            chars.next();
-                                            output.push('{');
-                                            continue;
-                                        }
+                    while let Some(c) = chars.next() {
+                        if c == '{' {
+                            if let Some(&'{') = chars.peek() {
+                                chars.next();
+                                output.push('{');
+                                continue;
+                            }
 
-                                        let mut expr = String::new();
-                                        let mut format_spec: Option<String> = None;
-                                        let mut brace_level = 1;
-                                        let mut in_string: Option<char> = None;
+                            let mut expr = String::new();
+                            let mut format_spec: Option<String> = None;
+                            let mut brace_level = 1;
+                            let mut in_string: Option<char> = None;
 
-                                        while let Some(&next_c) = chars.peek() {
-                                            chars.next();
+                            while let Some(&next_c) = chars.peek() {
+                                chars.next();
 
-                                            if let Some(quote) = in_string {
-                                                expr.push(next_c);
-                                                if next_c == quote {
-                                                    in_string = None;
-                                                }
-                                                continue;
-                                            } else if next_c == '"' || next_c == '\'' {
-                                                in_string = Some(next_c);
-                                                expr.push(next_c);
-                                                continue;
-                                            }
+                                if let Some(quote) = in_string {
+                                    expr.push(next_c);
+                                    if next_c == quote {
+                                        in_string = None;
+                                    }
+                                    continue;
+                                } else if next_c == '"' || next_c == '\'' {
+                                    in_string = Some(next_c);
+                                    expr.push(next_c);
+                                    continue;
+                                }
 
-                                            if next_c == '{' {
-                                                brace_level += 1;
-                                            } else if next_c == '}' {
-                                                brace_level -= 1;
-                                                if brace_level == 0 {
-                                                    break;
-                                                }
-                                            }
-
-                                            if brace_level == 1
-                                                && next_c == ':'
-                                                && chars.peek() == Some(&':')
-                                            {
-                                                chars.next();
-                                                let mut spec = String::new();
-                                                while let Some(&spec_c) = chars.peek() {
-                                                    if spec_c == '}' { break; }
-                                                    chars.next();
-                                                    spec.push(spec_c);
-                                                }
-                                                format_spec = Some(spec.trim().to_string());
-                                                continue;
-                                            }
-
-                                            expr.push(next_c);
-                                        }
-
-                                        expr = match unescape_string_premium_edition(&expr) {
-                                            Ok(unescaped) => unescaped,
-                                            Err(err) => {
-                                                return self.raise("UnescapeError", &err);
-                                            }
-                                        };
-
-                                        if brace_level != 0 {
-                                            return self.raise("SyntaxError", "Unmatched '{' in f-string");
-                                        }
-
-                                        let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
-
-                                        let filtered = tokens.iter()
-                                            .filter(|token| {
-                                                let t = &token.0;
-                                                t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
-                                            })
-                                            .collect::<Vec<_>>();
-
-                                        let formatted_toks = filtered.iter()
-                                            .map(|token| (&token.0, &token.1))
-                                            .collect::<Vec<_>>();
-
-                                        self.debug_log(
-                                            format_args!("Generated f-string tokens: {:?}", formatted_toks)
-                                        );
-
-                                        let tokens_no_loc: Vec<Token> = tokens
-                                            .iter()
-                                            .map(|tk| Token(tk.0.clone(), tk.1.clone(), None))
-                                            .collect();
-
-                                        let parsed = match Parser::new(tokens_no_loc).parse_safe() {
-                                            Ok(parsed) => parsed,
-                                            Err(error) => {
-                                                return self.raise(
-                                                    "SyntaxError",
-                                                    &format!("Error parsing f-string expression: {}", error.msg),
-                                                );
-                                            }
-                                        };
-
-                                        self.debug_log(
-                                            format_args!(
-                                                "Generated f-string statement: {}",
-                                                parsed.iter().map(|stmt| {
-                                                    let cleaned = remove_loc_keys(&stmt.convert_to_map());
-                                                    format_value(&cleaned)
-                                                }).collect::<Vec<String>>().join(", ")
-                                            )
-                                        );
-
-                                        self.debug_log(
-                                            format_args!("<FString: {}>", expr.clone().trim())
-                                        );
-
-                                        let result_val = self.evaluate(&parsed[0]);
-                                        if self.err.is_some() {
-                                            return NULL;
-                                        }
-                                        let result;
-                                        if let Some(spec) = format_spec {
-                                            result = match apply_format_spec(&result_val, &spec, self) {
-                                                Ok(res) => res,
-                                                Err(e) => return self.raise("SyntaxError", &e),
-                                            };
-                                        } else {
-                                            result = match escape_string(&native::format_value(&result_val, self)) {
-                                                Ok(res) => res,
-                                                Err(e) => return self.raise("UnicodeError", &e),
-                                            };
-                                        }
-
-                                        output.push_str(&result);
-                                    } else if c == '}' {
-                                        if let Some(&'}') = chars.peek() {
-                                            chars.next();
-                                            output.push('}');
-                                            continue;
-                                        } else {
-                                            return self.raise("SyntaxError", "Single '}' encountered in format string");
-                                        }
-                                    } else {
-                                        output.push(c);
+                                if next_c == '{' {
+                                    brace_level += 1;
+                                } else if next_c == '}' {
+                                    brace_level -= 1;
+                                    if brace_level == 0 {
+                                        break;
                                     }
                                 }
 
-                                modified_string = output;
-                            }
-                            "r" => is_raw = true,
-                            "b" => is_bytes = true,
-                            _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
-                        }
-                    } else {
-                        self.raise("TypeError", "Expected a string for string modifier");
-                        return NULL;
-                    }
-                }
-            }
+                                if brace_level == 1
+                                    && next_c == ':'
+                                    && chars.peek() == Some(&':')
+                                {
+                                    chars.next();
+                                    let mut spec = String::new();
+                                    while let Some(&spec_c) = chars.peek() {
+                                        if spec_c == '}' { break; }
+                                        chars.next();
+                                        spec.push(spec_c);
+                                    }
+                                    format_spec = Some(spec.trim().to_string());
+                                    continue;
+                                }
 
-            if is_raw {
-                let unquoted = if modified_string.len() >= 2 {
-                    let first = modified_string.chars().next().unwrap();
-                    let last = modified_string.chars().last().unwrap();
-                    if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-                        modified_string[1..modified_string.len() - 1].to_string()
-                    } else {
-                        modified_string
+                                expr.push(next_c);
+                            }
+
+                            expr = match unescape_string_premium_edition(&expr) {
+                                Ok(unescaped) => unescaped,
+                                Err(err) => {
+                                    return self.raise("UnescapeError", &err);
+                                }
+                            };
+
+                            if brace_level != 0 {
+                                return self.raise("SyntaxError", "Unmatched '{' in f-string");
+                            }
+
+                            let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
+
+                            let filtered = tokens.iter()
+                                .filter(|token| {
+                                    let t = &token.0;
+                                    t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+                                })
+                                .collect::<Vec<_>>();
+
+                            let formatted_toks = filtered.iter()
+                                .map(|token| (&token.0, &token.1))
+                                .collect::<Vec<_>>();
+
+                            self.debug_log(
+                                format_args!("Generated f-string tokens: {:?}", formatted_toks)
+                            );
+
+                            let tokens_no_loc: Vec<Token> = tokens
+                                .iter()
+                                .map(|tk| Token(tk.0.clone(), tk.1.clone(), None))
+                                .collect();
+
+                            let parsed = match Parser::new(tokens_no_loc).parse_safe() {
+                                Ok(parsed) => parsed,
+                                Err(error) => {
+                                    return self.raise(
+                                        "SyntaxError",
+                                        &format!("Error parsing f-string expression: {}", error.msg),
+                                    );
+                                }
+                            };
+
+                            self.debug_log(
+                                format_args!(
+                                    "Generated f-string statement: {}",
+                                    parsed.iter().map(|stmt| {
+                                        let cleaned = remove_loc_keys(&stmt.convert_to_map());
+                                        format_value(&cleaned)
+                                    }).collect::<Vec<String>>().join(", ")
+                                )
+                            );
+
+                            self.debug_log(
+                                format_args!("<FString: {}>", expr.clone().trim())
+                            );
+
+                            let result_val = self.evaluate(&parsed[0]);
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            let result;
+                            if let Some(spec) = format_spec {
+                                result = match apply_format_spec(&result_val, &spec, self) {
+                                    Ok(res) => res,
+                                    Err(e) => return self.raise("SyntaxError", &e),
+                                };
+                            } else {
+                                result = match escape_string(&native::format_value(&result_val, self)) {
+                                    Ok(res) => res,
+                                    Err(e) => return self.raise("UnicodeError", &e),
+                                };
+                            }
+
+                            output.push_str(&result);
+                        } else if c == '}' {
+                            if let Some(&'}') = chars.peek() {
+                                chars.next();
+                                output.push('}');
+                                continue;
+                            } else {
+                                return self.raise("SyntaxError", "Single '}' encountered in format string");
+                            }
+                        } else {
+                            output.push(c);
+                        }
                     }
+
+                    modified_string = output;
+                }
+                "r" => is_raw = true,
+                "b" => is_bytes = true,
+                _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
+            }
+        }
+
+        if is_raw {
+            let unquoted = if modified_string.len() >= 2 {
+                let first = modified_string.chars().next().unwrap();
+                let last = modified_string.chars().last().unwrap();
+                if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+                    modified_string[1..modified_string.len() - 1].to_string()
                 } else {
                     modified_string
-                };
-                modified_string = unquoted;
+                }
             } else {
-                modified_string = match unescape_string(&modified_string) {
-                    Ok(unescaped) => unescaped,
-                    Err(e) => return self.raise("UnicodeError", &e),
-                };
-            }
-
-            if is_bytes {
-                return Value::Bytes(modified_string.clone().into_bytes());
-            }
-
-            Value::String(modified_string)
+                modified_string
+            };
+            modified_string = unquoted;
         } else {
-            self.raise("RuntimeError", "Missing 'value' in string statement")
+            modified_string = match unescape_string(&modified_string) {
+                Ok(unescaped) => unescaped,
+                Err(e) => return self.raise("UnicodeError", &e),
+            };
         }
+
+        if is_bytes {
+            return Value::Bytes(modified_string.clone().into_bytes());
+        }
+
+        Value::String(modified_string)
     }
 
-    fn handle_boolean(&mut self, map: HashMap<Value, Value>) -> Value {
-        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            match s.as_str() {
-                "true" => TRUE,
-                "false" => FALSE,
-                "null" => NULL,
-                _ => self.raise("RuntimeError", &format!("Invalid boolean format: {}, expected: true, false or null.", s).as_str()),
-            }
-        } else {
-            self.raise("RuntimeError", "Missing 'value' in boolean statement")
+    fn handle_boolean(&mut self, value: Option<bool>) -> Value {
+        match value {
+            Some(true) => TRUE,
+            Some(false) => FALSE,
+            None => NULL,
         }
     }
 }

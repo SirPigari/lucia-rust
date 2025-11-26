@@ -1801,10 +1801,7 @@ fn repl(
                     "Statements: [{}]",
                     statements
                         .iter()
-                        .map(|stmt| {
-                            let cleaned = remove_loc_keys(&stmt.convert_to_map());
-                            format_value(&cleaned)
-                        })
+                        .map(|stmt| stmt.format_for_debug())
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
@@ -1847,13 +1844,13 @@ fn repl(
         let mut interpreter_clone = interpreter.clone();
         let statements_clone = statements.clone();
         let loc = statements.iter().rev().find_map(|stmt| {
-            if let Statement::Statement { keys, values, loc } = stmt {
-                let found = keys.iter().zip(values.iter()).any(|(k, v)| {
-                    *k == Value::String("type".into())
-                        && (*v == Value::String("FOR".into())
-                            || *v == Value::String("WHILE".into())
-                            || *v == Value::String("CALL".into()))
-                });
+            if let Statement { node, loc } = stmt {
+                let found = match node {
+                    StatementNode::For { .. }
+                    | StatementNode::While { .. }
+                    | StatementNode::Call { .. } => true,
+                    _ => false,
+                };
                 if found {
                     loc.clone()
                 } else {
@@ -1864,7 +1861,7 @@ fn repl(
             }
         }).or_else(|| {
             statements.iter().rev().find_map(|stmt| {
-                if let Statement::Statement { loc, .. } = stmt {
+                if let Statement { loc, .. } = stmt {
                     loc.clone()
                 } else {
                     None
