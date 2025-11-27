@@ -121,7 +121,7 @@ use crate::env::runtime::repl::read_input;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
-use crate::env::runtime::statements::{Statement, Node};
+use crate::env::runtime::statements::{Statement, Node, get_loc};
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
 use crate::env::runtime::libs::{load_std_libs, check_project_deps};
@@ -1861,11 +1861,7 @@ fn repl(
             }
         }).or_else(|| {
             statements.iter().rev().find_map(|stmt| {
-                if let Statement { loc, .. } = stmt {
-                    loc.clone()
-                } else {
-                    None
-                }
+                let Statement { loc, .. } = stmt;
             })
         });
 
@@ -1892,7 +1888,7 @@ fn repl(
                 stop_flag.store(true, Ordering::Relaxed);
                 
                 let err = match loc {
-                    Some(loc) => Error::with_location("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", loc),
+                    Some(loc) => Error::with_location("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", get_loc(loc)),
                     None => Error::new("KeyboardInterrupt", "Execution interrupted by user (Ctrl+T)", "<stdin>"),
                 };
 

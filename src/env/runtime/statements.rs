@@ -12,10 +12,20 @@ use std::fmt;
 pub static LOC_TABLE: Lazy<Arc<Mutex<Vec<Location>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
-pub fn alloc_loc(loc: Location) -> AstNodeId {
-    let mut table = LOC_TABLE.lock().unwrap();
-    table.push(loc);
-    table.len() - 1
+pub fn alloc_loc(loc: Option<Location>) -> Option<AstNodeId> {
+    match loc {
+        None => return None,
+        Some(l) => {
+            let mut table = LOC_TABLE.lock().unwrap();
+            table.push(loc);
+            Some(table.len() - 1)
+        }
+    }
+}
+
+pub fn get_loc(id: usize) -> Location {
+    let table = LOC_TABLE.lock().unwrap();
+    table[id].clone()
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
@@ -87,7 +97,36 @@ pub enum AccessType {
     }
 }
 
-
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum TypeNode {
+    Simple {
+        base: String,
+        ptr_level: usize,
+        is_maybe: bool,  
+    },
+    Union {
+        types: Vec<TypeNode>,
+    },
+    Function {
+        parameters_types: Vec<TypeNode>,
+        return_type: Box<TypeNode>,
+    },
+    Generator {
+        parameters_types: Vec<TypeNode>,
+        yield_type: Box<TypeNode>,
+    },
+    Generics {
+        base_type: Box<TypeNode>,
+        generics_types: Vec<TypeNode>,
+    },
+    Impl {
+        impls: Vec<(String, Vec<TypeNode>, Vec<String>, Box<TypeNode>)>, // (trait_name, args, modifiers, return_type)
+        joins: Vec<String>,
+    },
+    Variadics {
+        base: Box<TypeNode>
+    }
+}
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum Node {
     If {
@@ -246,6 +285,10 @@ pub enum Node {
     IndexAccess {
         object: Box<Statement>,
         access: Box<AccessType>,
+    },
+
+    Type {
+        node: TypeNode,
     },
     Null,
 }
@@ -492,6 +535,12 @@ impl Statement {
         });
         buffer.push('}');
         buffer
+    }
+    pub fn make_value(v: Value) -> Self {
+        Statement {
+            node: Node::Value { value: v },
+            loc: None,
+        }
     }
     // pub fn convert_to_map(&self) -> Value {
     //     match self {

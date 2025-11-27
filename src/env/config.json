@@ -10,7 +10,7 @@
   "allow_unsafe": true,
   "allow_inline_config": true,
   "type_strict": true,
-  "home_dir": "C:\\Users\\Ja\\Desktop\\projects\\lucia-rust\\src\\env",
+  "home_dir": "/home/markofwitch/Projects/lucia/src/env",
   "stack_size": 16777216,
   "version": "2.0.0",
   "type_checker": {

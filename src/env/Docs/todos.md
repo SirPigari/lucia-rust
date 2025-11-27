@@ -8,15 +8,15 @@ Be free to fix them or add new ones.
 _Total TODOs found: 7_
 ---
 
-### [`src/interpreter.rs:1451:1`](../../../src/interpreter.rs#L1451) _(added by **SirPigari** on **2025-11-26**)_
+### [`src/interpreter.rs:1453:1`](../../../src/interpreter.rs#L1453) _(added by **SirPigari** on **2025-11-26**)_
 - on these
 
-### [`src/interpreter.rs:5865:1`](../../../src/interpreter.rs#L5865) _(added by **SirPigari** on **2025-11-25**)_
+### [`src/interpreter.rs:5663:1`](../../../src/interpreter.rs#L5663) _(added by **SirPigari** on **2025-11-25**)_
 
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3468:1`](../../../src/interpreter.rs#L3468) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3470:1`](../../../src/interpreter.rs#L3470) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_

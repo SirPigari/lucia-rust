@@ -48,7 +48,7 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc};
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, TypeNode};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
@@ -1424,6 +1424,7 @@ impl Interpreter {
             Node::MethodCall { object, method_name, pos_args, named_args } => self.handle_method_call(*object, &method_name, pos_args, named_args),
             Node::PropertyAccess { object, property_name } => self.handle_property_access(*object, &property_name),
             Node::IndexAccess { object, access } => self.handle_index_access(*object, *access),
+            Node::Type { node} => self.handle_type(node),
             t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
         };
 
@@ -1474,7 +1475,7 @@ impl Interpreter {
                 // "PROPERTY_ACCESS" => self.handle_property_access(statement_map),
                 // "INDEX_ACCESS" => self.handle_index_access(statement_map),
     
-                "TYPE" => self.handle_type(statement_map),
+                // "TYPE" => self.handle_type(statement_map),
                 "TYPE_CONVERT" => self.handle_type_conversion(statement_map),
                 "TYPE_DECLARATION" => self.handle_type_declaration(statement_map),
 
@@ -5037,91 +5038,38 @@ impl Interpreter {
         }
     }
 
-    fn handle_type(&mut self, statement: HashMap<Value, Value>) -> Value {
+    fn handle_type(&mut self, type_kind: TypeNode) -> Value {
         let default_type = Value::String("any".to_string());
     
-        let type_kind = match statement.get(&Value::String("type_kind".to_string())) {
-            Some(kind) => kind,
-            None => {
-                self.raise("RuntimeError", "missing 'type_kind' in statement");
-                return NULL;
-            }
-        };
-    
-        let kind_str = match type_kind {
-            Value::String(s) => s.as_str(),
-            _ => {
-                self.raise("RuntimeError", "Invalid 'type_kind' for type statement");
-                return NULL;
-            }
-        };
-    
-        let type_: Type = match kind_str {
-            "simple" => {
-                let type_name = statement.get(&Value::String("value".to_string())).unwrap_or(&default_type);
-                let ref_level = match statement.get(&Value::String("ptr_level".to_string())) {
-                    Some(Value::Int(i)) => match i.to_usize() {
-                        Ok(v) => v,
+        let type_: Type = match type_kind {
+            TypeNode::Simple { base: type_name, ptr_level, is_maybe} => {
+                match self.variables.get(s.as_str()) {
+                    Some(val) => match &val.value {
+                        Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
                         _ => {
-                            self.raise("TypeError", "'ptr_level' must be a non-negative usize integer");
+                            self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "If you meant to assign a value, use ':=' instead of ':'");
                             return NULL;
                         }
                     },
-                    _ => 0,
-                };
-                let is_maybe = match statement.get(&Value::String("is_maybe".to_string())) {
-                    Some(Value::Boolean(b)) => *b,
-                    _ => false,
-                };
-    
-                if let Value::String(s) = type_name {
-                    match self.variables.get(s.as_str()) {
-                        Some(val) => match &val.value {
-                            Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
-                            _ => {
-                                self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "If you meant to assign a value, use ':=' instead of ':'");
-                                return NULL;
-                            }
-                        },
-                        None => {
-                            self.raise(
-                                "TypeError",
-                                &format!(
-                                    "Invalid type '{}'. Valid types are: {}, ...",
-                                    s,
-                                    VALID_TYPES[0..5].join(", ")
-                                ),
-                            );
-                            return NULL;
-                        }
+                    None => {
+                        self.raise(
+                            "TypeError",
+                            &format!(
+                                "Invalid type '{}'. Valid types are: {}, ...",
+                                s,
+                                VALID_TYPES[0..5].join(", ")
+                            ),
+                        );
+                        return NULL;
                     }
-                } else {
-                    self.raise("TypeError", "Type value is not a string");
-                    return NULL;
                 }
             }
     
-            "union" => {
-                let types_val = match statement.get(&Value::String("types".to_string())) {
-                    Some(t) => t,
-                    None => {
-                        self.raise("RuntimeError", "Missing 'types' in union type statement");
-                        return NULL;
-                    }
-                };
-
-                let types_list = match types_val {
-                    Value::List(l) => l,
-                    _ => {
-                        self.raise("RuntimeError", "'types' in union must be a list");
-                        return NULL;
-                    }
-                };
-
-                let mut types: Vec<Type> = Vec::new();
+            TypeNode::Union { types: types_list } => {
+                let mut types: Vec<Type> = Vec::with_capacity(types_list.len());
 
                 for t in types_list {
-                    let ty = self.handle_type(t.convert_to_hashmap_value());
+                    let ty = self.handle_type(t);
                     if self.err.is_some() {
                         return NULL;
                     }
@@ -5136,28 +5084,10 @@ impl Interpreter {
                 Type::Union(types)
             }
     
-            "function" => {
-                let elements_val = match statement.get(&Value::String("elements".to_string())) {
-                    Some(e) => match e {
-                        Value::List(l) => l,
-                        _ => {
-                            self.raise("RuntimeError", "'elements' in function type must be a list");
-                            return NULL;
-                        }
-                    },
-                    None => {
-                        self.raise("RuntimeError", "Missing 'elements' in function type statement");
-                        return NULL;
-                    }
-                };
-
+            TypeNode::Function { parameter_types, return_type }=> {
                 let mut elements: Vec<Type> = Vec::new();
-                for el in elements_val {
-                    let el_map = el.convert_to_hashmap_value();
-                    if self.err.is_some() {
-                        return NULL;
-                    }
-                    match self.handle_type(el_map) {
+                for p in parameter_types {
+                    match self.handle_type(p) {
                         Value::Type(t) => elements.push(t),
                         _ => {
                             self.raise("TypeError", "Function parameter types must be valid types");
@@ -5165,16 +5095,7 @@ impl Interpreter {
                         }
                     }
                 };
-
-                let return_type_val = match statement.get(&Value::String("return_type".to_string())) {
-                    Some(rt) => rt,
-                    None => {
-                        self.raise("RuntimeError", "Missing 'return_type' in function type statement");
-                        return NULL;
-                    }
-                };
-
-                let return_type: Type = if let Value::Type(t) = self.handle_type(return_type_val.convert_to_hashmap_value()) {
+                let return_type: Type = if let Value::Type(t) = self.handle_type(*return_type) {
                     t
                 } else {
                     self.raise("TypeError", &format!("Invalid function return type '{}'", return_type_val));
@@ -5187,28 +5108,10 @@ impl Interpreter {
                 }
             }
 
-            "generator" => {
-                let elements_val = match statement.get(&Value::String("elements".to_string())) {
-                    Some(e) => match e {
-                        Value::List(l) => l,
-                        _ => {
-                            self.raise("RuntimeError", "'elements' in generator type must be a list");
-                            return NULL;
-                        }
-                    },
-                    None => {
-                        self.raise("RuntimeError", "Missing 'elements' in generator type statement");
-                        return NULL;
-                    }
-                };
-
-                let mut elements: Vec<Type> = Vec::new();
-                for el in elements_val {
-                    let el_map = el.convert_to_hashmap_value();
-                    if self.err.is_some() {
-                        return NULL;
-                    }
-                    match self.handle_type(el_map) {
+            TypeNode::Generator { parameter_types, yield_type } => {
+                let mut elements: Vec<Type> = Vec::with_capacity(parameter_types.len());
+                for p in parameter_types {
+                    match self.handle_type(p) {
                         Value::Type(t) => elements.push(t),
                         _ => {
                             self.raise("TypeError", "Function parameter types must be valid types");
@@ -5217,16 +5120,8 @@ impl Interpreter {
                     }
                 };
 
-                let return_type_val = match statement.get(&Value::String("return_type".to_string())) {
-                    Some(rt) => rt,
-                    None => {
-                        self.raise("RuntimeError", "Missing 'return_type' in function type statement");
-                        return NULL;
-                    }
-                };
-
-                let return_type: Type = if let Value::Type(t) = self.handle_type(return_type_val.convert_to_hashmap_value()) {
-                    t
+                let yield_type: Box<Type> = if let Value::Type(t) = self.handle_type(*yield_type) {
+                    Box::new(t)
                 } else {
                     self.raise("TypeError", &format!("Invalid generator return type '{}'", return_type_val));
                     return NULL;
@@ -5234,75 +5129,44 @@ impl Interpreter {
 
                 Type::Generator {
                     parameter_types: elements,
-                    yield_type: Box::new(return_type),
+                    yield_type,
                 }
             }
     
-            "generics" => {
-                let base_val = match statement.get(&Value::String("base".to_string())) {
-                    Some(b) => b,
-                    None => {
-                        self.raise("RuntimeError", "Missing 'base' in generics type statement");
-                        return NULL;
-                    }
-                };
-                let elements_val = match statement.get(&Value::String("generics".to_string())) {
-                    Some(e) => match e {
-                        Value::List(l) => l,
-                        _ => {
-                            self.raise("RuntimeError", "'generics' in generics type must be a list");
-                            return NULL;
+            TypeNode::Generics { base_type, generics_types } => {
+                let base = {
+                    let mut s = base_type.as_str();
+                    let mut ref_level = 0;
+                    let mut is_maybe = false;
+                    while s.starts_with('&') || s.starts_with('?') {
+                        if s.starts_with('&') {
+                            ref_level += 1;
+                            s = &s[1..];
+                        } else if s.starts_with('?') {
+                            is_maybe = true;
+                            s = &s[1..];
                         }
-                    },
-                    None => {
-                        self.raise("RuntimeError", "Missing 'generics' in generics type statement");
-                        return NULL;
                     }
-                };
-
-                let base = match base_val {
-                    Value::String(s) => {
-                        let mut s = s.as_str();
-                        let mut ref_level = 0;
-                        let mut is_maybe = false;
-                        while s.starts_with('&') || s.starts_with('?') {
-                            if s.starts_with('&') {
-                                ref_level += 1;
-                                s = &s[1..];
-                            } else if s.starts_with('?') {
-                                is_maybe = true;
-                                s = &s[1..];
-                            }
-                        }
-                        match self.variables.get(s) {
-                            Some(val) => match &val.value {
-                                Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
-                                _ => {
-                                    self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
-                                    return NULL;
-                                }
-                            },
-                            None => {
-                                self.raise("TypeError", &format!("Invalid base type '{}'", s));
+                    match self.variables.get(s) {
+                        Some(val) => match &val.value {
+                            Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
+                            _ => {
+                                self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
                                 return NULL;
                             }
+                        },
+                        None => {
+                            self.raise("TypeError", &format!("Invalid base type '{}'", s));
+                            return NULL;
                         }
-                    }
-                    _ => {
-                        self.raise("TypeError", "Base type for indexed type must be a string");
-                        return NULL;
                     }
                 };
 
-                let mut elements = Vec::new();
-                let mut elements_raw = Vec::new();
-                for el in elements_val {
-                    let el_map = el.convert_to_hashmap_value();
-                    if self.err.is_some() {
-                        return NULL;
-                    }
-                    match self.handle_type(el_map) {
-                        Value::Type(t) => { elements_raw.push(el.convert_to_statement()); elements.push(t) },
+                let mut elements = Vec::with_capacity(generics_types.len());
+                let mut elements_raw = Vec::with_capacity(generics_types.len());
+                for gt in generics_types {
+                    match self.handle_type(gt) {
+                        Value::Type(t) => { elements_raw.push(Statement { node: Node::Type { node: gt }, loc: self.get_location_from_current_statement()}); elements.push(t) },
                         _ => {
                             self.raise("TypeError", "Indexed type elements must be valid types");
                             return NULL;
@@ -5524,88 +5388,31 @@ impl Interpreter {
                 }
             }
 
-            "impl" => {
-                let impls_ast = match statement.get(&Value::String("impls".to_string())) {
-                    Some(Value::List(l)) => l,
-                    _ => {
-                        self.raise("RuntimeError", "Missing or invalid 'impls' in impl type statement");
-                        return NULL;
-                    }
-                };
-                let joins_ast = match statement.get(&Value::String("joins".to_string())) {
-                    Some(Value::List(l)) => l,
-                    _ => &vec![],
-                };
+            TypeNode::Impl { impls, joins } => {
                 let mut impls: Vec<(String, Box<Type>, Vec<String>)> = Vec::new();
-                for impl_ast in impls_ast {
-                    let impl_map = match impl_ast {
-                        Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-                        _ => {
-                            self.raise("RuntimeError", "Each impl must be a map");
-                            return NULL;
-                        }
-                    };
-                    let name = match impl_map.get(&Value::String("name".to_string())) {
-                        Some(Value::String(n)) => n.clone(),
-                        _ => {
-                            self.raise("RuntimeError", "Missing or invalid 'name' in impl");
-                            return NULL;
-                        }
-                    };
-                    let args = match impl_map.get(&Value::String("args".to_string())) {
-                        Some(Value::List(l)) => l,
-                        _ => {
-                            self.raise("RuntimeError", "Missing 'type' in impl");
-                            return NULL;
-                        }
-                    };
-                    let mods = match impl_map.get(&Value::String("modifiers".to_string())) {
-                        Some(Value::List(l)) => l.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else { None }
-                        }).collect(),
-                        _ => vec![],
-                    };
+                for (name, args, mods, return_type) in impls {
                     let vars_clone = self.variables.clone();
                     self.variables.insert("Self".to_string(), Variable::new("Self".to_string(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true));
                     
-                    let return_type = match impl_map.get(&Value::String("return_type".to_string())) {
-                        Some(rt) => match self.evaluate(&rt.convert_to_statement()) {
-                            Value::Type(t) => t,
-                            _ => {
-                                self.variables = vars_clone;
-                                self.raise("TypeError", "Impl return type must be a valid type");
-                                return NULL;
-                            }
-                        },
-                        None => {
-                            self.variables = vars_clone;
-                            self.raise("RuntimeError", "Missing 'return_type' in impl");
-                            return NULL;
-                        }
-                    };
-
+                    let return_type = self.handle_type(*return_type);
                     if self.err.is_some() {
                         self.variables = vars_clone;
                         return NULL;
                     }
 
-                    let mut elements: Vec<Type> = Vec::new();
+                    let mut elements: Vec<Type> = Vec::with_capacity(args.len());
                     for arg in args {
-                        let arg_map = arg.convert_to_hashmap_value();
-                        if self.err.is_some() {
-                            self.variables = vars_clone;
-                            return NULL;
-                        }
-                        
-                        match self.handle_type(arg_map) {
+                        match self.handle_type(arg) {
                             Value::Type(t) => elements.push(t),
                             _ => {
                                 self.raise("TypeError", "Impl parameter types must be valid types");
                                 self.variables = vars_clone;
                                 return NULL;
                             }
+                        }
+                        if self.err.is_some() {
+                            self.variables = vars_clone;
+                            return NULL;
                         }
                     }
                     self.variables = vars_clone;
@@ -5616,47 +5423,37 @@ impl Interpreter {
                     }), mods));
                 }
                 for join in joins_ast {
-                    if let Value::String(s) = join {
-                        if !self.variables.contains_key(s) {
-                            self.raise("NameError", &format!("Unknown type '{}'", s));
-                            return NULL;
-                        }
-                        if let Some(var) = self.variables.get(s) {
-                            if let Value::Type(t) = &var.value {
-                                if let Ok((_, inner)) = get_inner_type(t) {
-                                    match inner {
-                                        Type::Impl { implementations } => {
-                                            for (name, func_type, mods) in implementations {
-                                                impls.push((name.clone(), func_type.clone(), mods.clone()));
-                                            }
-                                        }
-                                        _ => {
-                                            self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
-                                            return NULL;
+                    if !self.variables.contains_key(join) {
+                        self.raise("NameError", &format!("Type '{}' not defined", s));
+                        return NULL;
+                    }
+                    if let Some(var) = self.variables.get(s) {
+                        if let Value::Type(t) = &var.value {
+                            if let Ok((_, inner)) = get_inner_type(t) {
+                                match inner {
+                                    Type::Impl { implementations } => {
+                                        for (name, func_type, mods) in implementations {
+                                            impls.push((name.clone(), func_type.clone(), mods.clone()));
                                         }
                                     }
-                                } else {
-                                    self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
-                                    return NULL;
+                                    _ => {
+                                        self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
+                                        return NULL;
+                                    }
                                 }
                             } else {
-                                self.raise("TypeError", &format!("'{}' is a variable name, not a type", s));
+                                self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
                                 return NULL;
                             }
+                        } else {
+                            self.raise("TypeError", &format!("'{}' is a variable name, not a type", s));
+                            return NULL;
                         }
-                    } else {
-                        self.raise("TypeError", "Join names must be strings");
-                        return NULL;
                     }
                 }
                 Type::Impl {
                     implementations: impls,
                 }
-            }
-
-            _ => {
-                self.raise("RuntimeError", "Invalid 'type_kind' for type statement");
-                return NULL;
             }
         };
         return Value::Type(type_);
@@ -6612,7 +6409,7 @@ impl Interpreter {
             }
 
             let available_names: Vec<String> = self.variables.keys().cloned().collect();
-            if let Some(closest) = find_closest_match(name, &available_names) {
+            if let Some(closest) = find_closest_match(&name, &available_names) {
                 return self.raise_with_help(
                     "NameError",
                     &format!("Variable '{}' is not defined.", name),
@@ -6738,7 +6535,7 @@ impl Interpreter {
                     RangeModeType::Value => Value::List(vec![
                         Value::List(evaluated_seed.clone()),
                         evaluated_end.clone(),
-                        Value::String(range_mode.clone()),
+                        Value::String(range_mode.display()),
                         Value::Boolean(pattern_flag),
                     ]),
                     RangeModeType::Length => {
@@ -6762,7 +6559,7 @@ impl Interpreter {
                         Value::List(vec![
                             Value::List(evaluated_seed.clone()),
                             Value::Int(Int::from_i64(length_usize as i64)),
-                            Value::String(range_mode.clone()),
+                            Value::String(range_mode.display()),
                             Value::Boolean(pattern_flag),
                         ])
                     }
