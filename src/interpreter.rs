@@ -120,7 +120,8 @@ impl Interpreter {
             cache: Cache {
                 operations: FxHashMap::default(),
                 constants: FxHashMap::default(),
-                iterables: FxHashMap::default()
+                iterables: FxHashMap::default(),
+                last_called_function: None,
             },
             internal_storage: InternalStorage {
                 lambda_counter: 0,
@@ -8558,111 +8559,118 @@ impl Interpreter {
                 },
             }))
         } else {
-            match self.variables.get(function_name) {
-                Some(v) => match v.get_value() {
-                    Value::Function(f) => f.clone(),
-                    other => return self.raise_with_help(
-                        "TypeError",
-                        &format!("'{}' is not callable", function_name),
-                        &format!("Expected a function, but got: {}", other.to_string()),
-                    ),
-                },
-                None => {
-                    let mut candidates: Vec<(String, Type, Statement)> = vec![];
-                    let mut seen = std::collections::HashSet::new();
-                    let variant_name = function_name;
+            if self.cache.last_called_function.as_ref().map_or(false, |(name, _)| name == function_name) {
+                self.cache.last_called_function.as_ref().unwrap().1.clone()
+            } else {
+                match self.variables.get(function_name) {
+                    Some(v) => match v.get_value() {
+                        Value::Function(f) => {
+                            self.cache.last_called_function = Some((function_name.to_string(), f.clone()));
+                            f.clone()
+                        },
+                        other => return self.raise_with_help(
+                            "TypeError",
+                            &format!("'{}' is not callable", function_name),
+                            &format!("Expected a function, but got: {}", other.to_string()),
+                        ),
+                    },
+                    None => {
+                        let mut candidates: Vec<(String, Type, Statement)> = vec![];
+                        let mut seen = std::collections::HashSet::new();
+                        let variant_name = function_name;
 
-                    for (k, v) in &self.variables {
-                        if k == "_" { continue; }
-                        if let Value::Type(t) = &v.value {
-                            if let Type::Enum { name: enum_name, variants, .. } = t {
-                                for variant in variants {
-                                    if variant.0 == *variant_name && variant.1 != Statement::Null {
-                                        if seen.insert((enum_name.clone(), variant.0.clone())) {
-                                            candidates.push((variant.0.clone(), t.clone(), variant.1.clone()));
+                        for (k, v) in &self.variables {
+                            if k == "_" { continue; }
+                            if let Value::Type(t) = &v.value {
+                                if let Type::Enum { name: enum_name, variants, .. } = t {
+                                    for variant in variants {
+                                        if variant.0 == *variant_name && variant.1 != Statement::Null {
+                                            if seen.insert((enum_name.clone(), variant.0.clone())) {
+                                                candidates.push((variant.0.clone(), t.clone(), variant.1.clone()));
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    if candidates.len() == 1 {
-                        if !named_args.is_empty() {
-                            self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", candidates[0].1.display_simple(), variant_name));
-                        }
-                        if candidates[0].2 == Statement::Null {
-                            if pos_args.is_empty() {
-                                return self.raise_with_help(
-                                    "TypeError",
-                                    &format!("Unexpected '()' for '{}.{}'", candidates[0].1.display_simple(), variant_name),
-                                    &format!("Remove '()' from '{}.{}()'", candidates[0].1.display_simple(), variant_name),
-                                );
-                            } else {
-                                return self.raise_with_help(
-                                    "TypeError",
-                                    &format!("Variant '{}.{}' doesn't accept any arguments", candidates[0].1.display_simple(), variant_name),
-                                    &format!("Did you mean to use '{}.{}'", candidates[0].1.display_simple(), variant_name),
-                                );
+                        if candidates.len() == 1 {
+                            if !named_args.is_empty() {
+                                self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", candidates[0].1.display_simple(), variant_name));
                             }
-                        }
-                        let saved_variables = self.variables.clone();
-                        let generics = match candidates[0].1 {
-                            Type::Enum { ref generics, .. } => generics.clone(),
-                            _ => vec![],
-                        };
-                        self.variables.extend(generics.iter().map(|k| {
-                            (k.clone(), Variable::new(k.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))
-                        }));
-                        let eval_type = match self.evaluate(&candidates[0].2) {
-                            Value::Type(t) => t,
-                            e => {
-                                self.variables = saved_variables;
-                                if self.err.is_some() {
-                                    return NULL;
+                            if candidates[0].2 == Statement::Null {
+                                if pos_args.is_empty() {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Unexpected '()' for '{}.{}'", candidates[0].1.display_simple(), variant_name),
+                                        &format!("Remove '()' from '{}.{}()'", candidates[0].1.display_simple(), variant_name),
+                                    );
+                                } else {
+                                    return self.raise_with_help(
+                                        "TypeError",
+                                        &format!("Variant '{}.{}' doesn't accept any arguments", candidates[0].1.display_simple(), variant_name),
+                                        &format!("Did you mean to use '{}.{}'", candidates[0].1.display_simple(), variant_name),
+                                    );
                                 }
-                                return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string()))
-                            },
-                        };
-                        self.variables = saved_variables;
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        let variant_value = if pos_args.is_empty() {
-                            NULL
-                        } else if pos_args.len() == 1 {
-                            pos_args[0].clone()
-                        } else {
-                            Value::Tuple(pos_args)
-                        };
-                        if self.check_type(&variant_value, &eval_type).0 {
-                            let idx = match get_enum_idx(&candidates[0].1, &candidates[0].0) {
-                                Some(u) => u,
-                                None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
+                            }
+                            let saved_variables = self.variables.clone();
+                            let generics = match candidates[0].1 {
+                                Type::Enum { ref generics, .. } => generics.clone(),
+                                _ => vec![],
                             };
-                            return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, variant_value)));
-                        } else {
-                            return self.raise("TypeError", &format!("Expected '{}' for '{}.{}' value, but got: {}", eval_type.display_simple(), candidates[0].1.display_simple(), variant_name, variant_value.get_type().display_simple()));
+                            self.variables.extend(generics.iter().map(|k| {
+                                (k.clone(), Variable::new(k.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))
+                            }));
+                            let eval_type = match self.evaluate(&candidates[0].2) {
+                                Value::Type(t) => t,
+                                e => {
+                                    self.variables = saved_variables;
+                                    if self.err.is_some() {
+                                        return NULL;
+                                    }
+                                    return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", candidates[0].0.clone(), e.to_string()))
+                                },
+                            };
+                            self.variables = saved_variables;
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            let variant_value = if pos_args.is_empty() {
+                                NULL
+                            } else if pos_args.len() == 1 {
+                                pos_args[0].clone()
+                            } else {
+                                Value::Tuple(pos_args)
+                            };
+                            if self.check_type(&variant_value, &eval_type).0 {
+                                let idx = match get_enum_idx(&candidates[0].1, &candidates[0].0) {
+                                    Some(u) => u,
+                                    None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
+                                };
+                                return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, variant_value)));
+                            } else {
+                                return self.raise("TypeError", &format!("Expected '{}' for '{}.{}' value, but got: {}", eval_type.display_simple(), candidates[0].1.display_simple(), variant_name, variant_value.get_type().display_simple()));
+                            }
+                        } else if candidates.len() > 1 {
+                            let variant_list = candidates.iter()
+                                .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            return self.raise_with_help("NameError", &format!("Variable '{}' is not defined.", variant_name), &format!("However, it matches multiple enum variants: {}. Did you mean to use one of these?", variant_list));
                         }
-                    } else if candidates.len() > 1 {
-                        let variant_list = candidates.iter()
-                            .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        return self.raise_with_help("NameError", &format!("Variable '{}' is not defined.", variant_name), &format!("However, it matches multiple enum variants: {}. Did you mean to use one of these?", variant_list));
-                    }
-                    let available_names: Vec<String> = self.variables.keys().cloned().collect();
-                    if let Some(closest) = find_closest_match(function_name, &available_names) {
-                        return self.raise_with_help(
-                            "NameError",
-                            &format!("Function '{}' is not defined", function_name),
-                            &format!("Did you mean '{}{}{}'?",
-                                check_ansi("\x1b[4m", &self.config.supports_color),
-                                closest,
-                                check_ansi("\x1b[24m", &self.config.supports_color),
-                            ),
-                        );
-                    } else {
-                        return self.raise("NameError", &format!("Function '{}' is not defined", function_name));
+                        let available_names: Vec<String> = self.variables.keys().cloned().collect();
+                        if let Some(closest) = find_closest_match(function_name, &available_names) {
+                            return self.raise_with_help(
+                                "NameError",
+                                &format!("Function '{}' is not defined", function_name),
+                                &format!("Did you mean '{}{}{}'?",
+                                    check_ansi("\x1b[4m", &self.config.supports_color),
+                                    closest,
+                                    check_ansi("\x1b[24m", &self.config.supports_color),
+                                ),
+                            );
+                        } else {
+                            return self.raise("NameError", &format!("Function '{}' is not defined", function_name));
+                        }
                     }
                 }
             }
