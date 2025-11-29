@@ -273,7 +273,7 @@ impl Callable for NativeFunction {
     }
 }
 
-#[derive(Clone, PartialEq, Hash, PartialOrd)]
+#[derive(Clone, PartialEq)]
 pub struct UserFunction {
     pub meta: FunctionMetadata,
     pub body: Vec<Statement>,

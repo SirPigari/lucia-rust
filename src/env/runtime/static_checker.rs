@@ -5,11 +5,11 @@
 use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node, TypeNode, TypeDeclNode, PtrNode, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, ParamAST, alloc_loc, get_loc};
 use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, CAN_BE_UNINITIALIZED, check_ansi, find_closest_match, unescape_string};
 use crate::env::runtime::types::{Type, VALID_TYPES};
 use crate::env::runtime::tokens::Location;
-use crate::env::runtime::internal_structs::State;
+use crate::env::runtime::internal_structs::{State, PathElement, EffectFlags};
 use crate::env::runtime::functions::FunctionMetadata;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
@@ -296,31 +296,28 @@ impl Checker {
     #[track_caller]
     fn get_location_from_current_statement(&self) -> Option<Location> {
         match &self.current_statement {
-            Some(Statement::Statement { loc, .. }) => match loc {
-                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+            Some(stmt) => match &stmt.loc {
+                Some(loc_id) => Some(get_loc(*loc_id).set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
                 None => None,
             },
-            _ => None,
+            None => None,
         }
     }
 
     fn get_location_from_statement(&self, statement: &Statement) -> Option<Location> {
-        match statement {
-            Statement::Statement { loc, .. } => match loc {
-                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
-                None => None,
-            },
-            _ => None,
+        match &statement.loc {
+            Some(loc_id) => Some(get_loc(*loc_id).set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+            None => None,
         }
     }
 
     fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
         match &self.current_statement {
-            Some(Statement::Statement { loc, .. }) => match loc {
-                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
+            Some(stmt) => match &stmt.loc {
+                Some(loc_id) => Some(get_loc(*loc_id).set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
                 None => None,
             },
-            _ => None,
+            None => None,
         }
     }
 
@@ -549,37 +546,14 @@ impl Checker {
         self.errors.clone()
     }
 
-    pub fn check_type(&mut self, statement_map: HashMap<Value, Value>) -> ValueType {
-        let type_kind = match statement_map.get(&Value::String("type_kind".into())) {
-            Some(Value::String(t)) => t.clone(),
-            _ => return self.raise(ErrorTypes::RuntimeError, "Type statement missing 'type_kind' or 'type_kind' is not a string")
-        };
-
-        match type_kind.as_str() {
-            "simple" => {
-                let value = match statement_map.get(&Value::String("value".into())) {
-                    Some(Value::String(v)) => v.clone(),
-                    _ => return self.raise(ErrorTypes::RuntimeError, "Type 'simple' missing 'value' or 'value' is not a string")
-                };
-                let ref_level = match statement_map.get(&Value::String("ptr_level".into())) {
-                    Some(Value::Int(i)) => match i.to_usize() {
-                        Ok(v) => v,
-                        Err(_) => {
-                            self.raise(ErrorTypes::RuntimeError, "'ptr_level' must be a non-negative integer");
-                            return ValueType::Null;
-                        }
-                    },
-                    _ => 0
-                };
-                let is_maybe_type = match statement_map.get(&Value::String("is_maybe".into())) {
-                    Some(Value::Boolean(b)) => *b,
-                    _ => false
-                };
-                match self.state.defined_vars.get(&value) {
+    pub fn check_type(&mut self, type_node: &TypeNode) -> ValueType {
+        match type_node {
+            TypeNode::Simple { base, ptr_level, is_maybe } => {
+                match self.state.defined_vars.get(base) {
                     Some(val) => match &val.value_type {
-                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(ref_level).set_maybe_type(is_maybe_type).unmut()),
+                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(*ptr_level).set_maybe_type(*is_maybe).unmut()),
                         _ => {
-                            self.raise_with_help(ErrorTypes::TypeError, &format!("'{}' is a variable name, not a type", value), "If you meant to assign a value, use ':=' instead of ':'");
+                            self.raise_with_help(ErrorTypes::TypeError, &format!("'{}' is a variable name, not a type", base), "If you meant to assign a value, use ':=' instead of ':'");
                             return ValueType::Null;
                         }
                     },
@@ -588,7 +562,7 @@ impl Checker {
                             ErrorTypes::TypeError,
                             &format!(
                                 "Invalid type '{}'. Valid types are: {}, ...",
-                                value,
+                                base,
                                 VALID_TYPES[0..5].join(", ")
                             ),
                         );
@@ -596,139 +570,106 @@ impl Checker {
                     }
                 }
             },
-            "union" => {
-                let types_val = match statement_map.get(&Value::String("types".to_string())) {
-                    Some(t) => t,
-                    None => {
-                        self.raise(ErrorTypes::RuntimeError, "Missing 'types' in union type statement");
-                        return ValueType::Null;
-                    }
-                };
+            TypeNode::Union { types } => {
+                let mut type_vec: Vec<Type> = Vec::new();
 
-                let types_list = match types_val {
-                    Value::List(l) => l,
-                    _ => {
-                        self.raise(ErrorTypes::RuntimeError, "'types' in union must be a list");
-                        return ValueType::Null;
-                    }
-                };
-
-                let mut types: Vec<Type> = Vec::new();
-
-                for t in types_list {
-                    let ty = self.check_type(t.convert_to_hashmap_value());
+                for t in types {
+                    let ty = self.check_type(t);
                     if let ValueType::Type(t) = ty {
-                        types.push(t);
+                        type_vec.push(t);
                     } else {
                         self.raise(ErrorTypes::TypeError, "Union type must be a valid type");
                         return ValueType::Null;
                     }
                 }
 
-                ValueType::Type(Type::Union(types))
+                ValueType::Type(Type::Union(type_vec))
             }
-            "function" => {
+            TypeNode::Function { .. } => {
                 ValueType::Type(Type::new_simple("function"))
             }
-            "generator" => {
+            TypeNode::Generator { .. } => {
                 ValueType::Type(Type::new_simple("generator"))
             }
-            "generics" => {
+            TypeNode::Generics { .. } => {
                 ValueType::Type(Type::new_simple("any"))
             }
-            "impl" => {
+            TypeNode::Impl { .. } => {
                 ValueType::Type(Type::new_simple("any"))
             }
-            _ => self.raise(ErrorTypes::RuntimeError, "Invalid 'type_kind' for type statement"),
+            TypeNode::Variadics { .. } => {
+                ValueType::Type(Type::new_simple("any"))
+            }
         }
     }
 
     #[track_caller]
     pub fn check_statement(&mut self, statement: Statement) -> ValueType {
         self.current_statement = Some(statement.clone());
-
-        if statement.is_empty() {
-            return ValueType::Null;
-        }
-    
-        let Statement::Statement { keys, values, .. } = &statement else {
-            return self.raise(ErrorTypes::SyntaxError, to_static(format!("Expected a statement map, got {:?}", statement)));
-        };
     
         if self.code_state == State::Break || self.code_state == State::Continue {
             return ValueType::Null;
         }
     
-        let statement_map: HashMap<Value, Value> = statement.convert_to_hashmap();
-    
-        static KEY_TYPE: once_cell::sync::Lazy<Value> = once_cell::sync::Lazy::new(|| Value::String("type".into()));
+        let result = match &statement.node {
+            Node::If { .. } => self.raise(ErrorTypes::NotImplemented, "If statement checking not implemented"),
+            Node::For { .. } => self.raise(ErrorTypes::NotImplemented, "For loop checking not implemented"),
+            Node::While { .. } => self.raise(ErrorTypes::NotImplemented, "While loop checking not implemented"),
+            Node::TryCatch { .. } => self.raise(ErrorTypes::NotImplemented, "Try-catch checking not implemented"),
+            Node::Throw { .. } => self.raise(ErrorTypes::NotImplemented, "Throw checking not implemented"),
+            Node::Forget { .. } => self.raise(ErrorTypes::NotImplemented, "Forget checking not implemented"),
+            Node::Continue | Node::Break => self.raise(ErrorTypes::NotImplemented, "Continue/Break checking not implemented"),
+            Node::Defer { .. } => self.raise(ErrorTypes::NotImplemented, "Defer checking not implemented"),
+            Node::Scope { .. } => self.raise(ErrorTypes::NotImplemented, "Scope checking not implemented"),
+            Node::Match { .. } => self.raise(ErrorTypes::NotImplemented, "Match checking not implemented"),
+            Node::Group { .. } => self.raise(ErrorTypes::NotImplemented, "Group checking not implemented"),
 
-        let result = match statement_map.get(&*KEY_TYPE) {
-            Some(Value::String(t)) => match t.as_str() {
-                // "IF" => self.check_if(statement_map),
-                // "FOR" => self.check_for_loop(statement_map),
-                // "WHILE" => self.check_while(statement_map),
-                // "TRY_CATCH" | "TRY" => self.check_try(statement_map),
-                // "THROW" => self.check_throw(statement_map),
-                // "FORGET" => self.check_forget(statement_map),
-                // "CONTINUE" | "BREAK" => self.check_continue_and_break(statement_map),
-                // "DEFER" => self.check_defer(statement_map),
-                // "SCOPE" => self.check_scope(statement_map),
-                // "MATCH" => self.check_match(statement_map),
-                // "GROUP" => self.check_group(statement_map),
+            Node::FunctionDeclaration { .. } => self.raise(ErrorTypes::NotImplemented, "Function declaration checking not implemented"),
+            Node::GeneratorDeclaration { .. } => self.raise(ErrorTypes::NotImplemented, "Generator declaration checking not implemented"),
+            Node::Return { .. } => self.raise(ErrorTypes::NotImplemented, "Return checking not implemented"),
 
-                // "FUNCTION_DECLARATION" => self.check_function_declaration(statement_map),
-                // "GENERATOR_DECLARATION" => self.check_generator_declaration(statement_map),
-                // "RETURN" => self.check_return(statement_map),
-    
-                // "IMPORT" => self.check_import(statement_map),
-                // "EXPORT" => self.check_export(statement_map),
+            Node::Import { .. } => self.raise(ErrorTypes::NotImplemented, "Import checking not implemented"),
+            Node::Export { .. } => self.raise(ErrorTypes::NotImplemented, "Export checking not implemented"),
 
-                "VARIABLE_DECLARATION" => self.check_variable_declaration(statement_map),
-                "VARIABLE" => self.check_variable(statement_map),
-                // "ASSIGNMENT" => self.check_assignment(statement_map),
-                // "UNPACK_ASSIGN" => self.check_unpack_assignment(statement_map),
-    
-                "NUMBER" => self.check_number(statement_map),
-                "STRING" => self.check_string(statement_map),
-                "BOOLEAN" => self.check_boolean(statement_map),
-    
-                // "TUPLE" => self.check_tuple(statement_map),
-                // "MAP" => self.check_map(statement_map),
-                // "ITERABLE" => self.check_iterable(statement_map),
-                // "VALUE" => self.check_value(statement_map),
-    
-                // "OPERATION" => self.check_operation(statement_map),
-                // "UNARY_OPERATION" => self.check_unary_op(statement_map),
-    
-                // "CALL" => self.check_call(statement_map),
-                // "METHOD_CALL" => self.check_method_call(statement_map),
-                // "PROPERTY_ACCESS" => self.check_property_access(statement_map),
-                // "INDEX_ACCESS" => self.check_index_access(statement_map),
-    
-                "TYPE" => self.check_type(statement_map),
-                // "TYPE_CONVERT" => self.check_type_conversion(statement_map),
-                // "TYPE_DECLARATION" => self.check_type_declaration(statement_map),
+            Node::VariableDeclaration { name, val_stmt, var_type, modifiers, is_default } => 
+                self.check_variable_declaration(name, val_stmt, var_type, modifiers, *is_default),
+            Node::Variable { name } => self.check_variable(name),
+            Node::Assignment { .. } => self.raise(ErrorTypes::NotImplemented, "Assignment checking not implemented"),
+            Node::UnpackAssignment { .. } => self.raise(ErrorTypes::NotImplemented, "Unpack assignment checking not implemented"),
 
-                // "STRUCT_CREATION" => self.check_struct_creation(statement_map),
-                // "STRUCT_METHODS" => self.check_struct_methods(statement_map),
+            Node::Number { value } => self.check_number(value),
+            Node::String { value, mods } => self.check_string(value, mods),
+            Node::Boolean { value } => self.check_boolean(*value),
 
-                // "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.check_pointer(statement_map),
+            Node::Map { .. } => self.raise(ErrorTypes::NotImplemented, "Map checking not implemented"),
+            Node::Iterable { .. } => self.raise(ErrorTypes::NotImplemented, "Iterable checking not implemented"),
+            Node::Value { .. } => self.raise(ErrorTypes::NotImplemented, "Value checking not implemented"),
 
-                _ => ValueType::Null, //self.raise(ErrorTypes::NotImplemented, &format!("Unsupported statement type: {}", t)),
-            },
-            _ => self.raise(ErrorTypes::SyntaxError, "Missing or invalid 'type' in statement map"),
+            Node::Operation { .. } => self.raise(ErrorTypes::NotImplemented, "Operation checking not implemented"),
+            Node::UnaryOperation { .. } => self.raise(ErrorTypes::NotImplemented, "Unary operation checking not implemented"),
+            Node::PrefixOperation { .. } => self.raise(ErrorTypes::NotImplemented, "Prefix operation checking not implemented"),
+            Node::Pipeline { .. } => self.raise(ErrorTypes::NotImplemented, "Pipeline checking not implemented"),
+
+            Node::Call { .. } => self.raise(ErrorTypes::NotImplemented, "Call checking not implemented"),
+            Node::MethodCall { .. } => self.raise(ErrorTypes::NotImplemented, "Method call checking not implemented"),
+            Node::PropertyAccess { .. } => self.raise(ErrorTypes::NotImplemented, "Property access checking not implemented"),
+            Node::IndexAccess { .. } => self.raise(ErrorTypes::NotImplemented, "Index access checking not implemented"),
+            
+            Node::Type { node } => self.check_type(node),
+            Node::TypeConvert { .. } => self.raise(ErrorTypes::NotImplemented, "Type conversion checking not implemented"),
+            Node::TypeDeclaration { .. } => self.raise(ErrorTypes::NotImplemented, "Type declaration checking not implemented"),
+
+            Node::StructCreation { .. } => self.raise(ErrorTypes::NotImplemented, "Struct creation checking not implemented"),
+            Node::StructMethods { .. } => self.raise(ErrorTypes::NotImplemented, "Struct methods checking not implemented"),
+            Node::Pointer { .. } => self.raise(ErrorTypes::NotImplemented, "Pointer checking not implemented"),
+            Node::Null => ValueType::Null,
         };
     
         result
     }
 
-    fn check_number(&mut self, map: HashMap<Value, Value>) -> ValueType {
-        let s = match map.get(&Value::String("value".to_string())) {
-            Some(Value::String(s)) if !s.is_empty() => s.replace('_', ""),
-            Some(Value::String(_)) => return self.raise(ErrorTypes::RuntimeError, "Empty string provided for number"),
-            _ => return self.raise(ErrorTypes::RuntimeError, "Missing 'value' in number statement"),
-        };
+    fn check_number(&mut self, value: &str) -> ValueType {
+        let s = value.replace('_', "");
 
         if s.is_empty() {
             return self.raise(ErrorTypes::RuntimeError, "Empty string provided for number");
@@ -747,95 +688,66 @@ impl Checker {
         }
     }
 
-    fn check_boolean(&mut self, map: HashMap<Value, Value>) -> ValueType {
-        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            match s.as_str() {
-                "true" => ValueType::Boolean(true),
-                "false" => ValueType::Boolean(false),
-                "null" => ValueType::Null,
-                _ => self.raise(ErrorTypes::RuntimeError, &format!("Invalid boolean format: {}, expected: true, false or null.", s).as_str()),
-            }
-        } else {
-            self.raise(ErrorTypes::RuntimeError, "Missing 'value' in boolean statement")
+    fn check_boolean(&mut self, value: Option<bool>) -> ValueType {
+        match value {
+            Some(true) => ValueType::Boolean(true),
+            Some(false) => ValueType::Boolean(false),
+            None => ValueType::Null,
         }
     }
 
-    fn check_string(&mut self, map: HashMap<Value, Value>) -> ValueType {
-        if let Some(Value::String(s)) = map.get(&Value::String("value".to_string())) {
-            let mut modified_string = s.clone();
-            let mut is_raw = false;
-            let mut is_bytes = false;
+    fn check_string(&mut self, value: &str, mods: &[char]) -> ValueType {
+        let mut modified_string = value.to_string();
+        let mut is_raw = false;
+        let mut is_bytes = false;
 
-            if let Some(Value::List(mods)) = map.get(&Value::String("mods".to_string())) {
-                for mod_value in mods {
-                    if let Value::String(modifier) = mod_value {
-                        match modifier.as_str() {
-                            "f" => {
-                                return ValueType::String(None);
-                            }
-                            "r" => is_raw = true,
-                            "b" => is_bytes = true,
-                            _ => return self.raise(ErrorTypes::RuntimeError, &format!("Unknown string modifier: {}", modifier)),
-                        }
-                    } else {
-                        self.raise(ErrorTypes::TypeError, "Expected a string for string modifier");
-                        return ValueType::Null;
-                    }
+        for m in mods {
+            match m {
+                'f' => {
+                    return ValueType::String(None);
+                }
+                'r' => is_raw = true,
+                'b' => is_bytes = true,
+                _ => {
+                    self.raise(ErrorTypes::RuntimeError, &format!("Unknown string modifier: {}", m));
                 }
             }
+        }
 
-            if is_raw {
-                if modified_string.len() >= 2 {
-                    let first = modified_string.chars().next().unwrap();
-                    let last = modified_string.chars().last().unwrap();
-                    if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-                        modified_string = modified_string[1..modified_string.len() - 1].to_string();
-                    }
+        if is_raw {
+            if modified_string.len() >= 2 {
+                let first = modified_string.chars().next().unwrap();
+                let last = modified_string.chars().last().unwrap();
+                if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+                    modified_string = modified_string[1..modified_string.len() - 1].to_string();
                 }
-            } else {
-                modified_string = match unescape_string(&modified_string) {
-                    Ok(unescaped) => unescaped,
-                    Err(e) => return self.raise(ErrorTypes::UnicodeError, &e),
-                };
-            }
-
-            if is_bytes {
-                ValueType::Bytes(modified_string.len())
-            } else {
-                ValueType::String(Some(modified_string.len()))
             }
         } else {
-            self.raise(ErrorTypes::RuntimeError, "Missing 'value' in string statement")
+            modified_string = match unescape_string(&modified_string) {
+                Ok(unescaped) => unescaped,
+                Err(e) => return self.raise(ErrorTypes::UnicodeError, &e),
+            };
+        }
+
+        if is_bytes {
+            ValueType::Bytes(modified_string.len())
+        } else {
+            ValueType::String(Some(modified_string.len()))
         }
     }
 
-    fn check_variable_declaration(&mut self, statement_map: HashMap<Value, Value>) -> ValueType {
-        let name = match statement_map.get(&Value::String("name".into())) {
-            Some(Value::String(n)) => n.clone(),
-            _ => return self.raise(ErrorTypes::RuntimeError, "Variable declaration missing 'name' or 'name' is not a string"),
-        };
-        
-        let modifiers = match statement_map.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(mods)) => mods,
-            _ => &vec![],
-        };
+    fn check_variable_declaration(&mut self, name: &str, val_stmt: &Statement, var_type: &Statement, modifiers: &[String], is_default: bool) -> ValueType {
+        let is_public = modifiers.iter().any(|m| m == "public");
+        let is_final = modifiers.iter().any(|m| m == "final");
+        let is_static = modifiers.iter().any(|m| m == "static");
 
-        let is_public = modifiers.iter().any(|m| m == &Value::String("public".to_string()));
-        let is_final = modifiers.iter().any(|m| m == &Value::String("final".to_string()));
-        let is_static = modifiers.iter().any(|m| m == &Value::String("static".to_string()));
-
-        let is_default = match statement_map.get(&Value::String("is_default".into())) {
-            Some(Value::Boolean(b)) => *b,
-            _ => false,
-        };
-
-        let mut declared_type = match statement_map.get(&Value::String("var_type".into())) {
-            Some(Value::Map { keys, values }) => match self.check_statement(Value::Map { keys: keys.clone(), values: values.clone() }.convert_to_statement()) {
-                ValueType::Type(t) => t.clone(),
-                ValueType::Null => return ValueType::Null,
-                t => {self.raise(ErrorTypes::TypeError, &format!("Expected a type for variable type, got {}", t.type_name())); Type::new_simple("any")},
+        let mut declared_type = match self.check_statement(var_type.clone()) {
+            ValueType::Type(t) => t.clone(),
+            ValueType::Null => return ValueType::Null,
+            t => {
+                self.raise(ErrorTypes::TypeError, &format!("Expected a type for variable type, got {}", t.type_name()));
+                Type::new_simple("any")
             },
-            _ => return self.raise(ErrorTypes::RuntimeError, "Variable declaration 'var_type' is not a map"),
         };
 
         if is_default {
@@ -848,20 +760,15 @@ impl Checker {
             }
         }
 
-        if self.state.defined_vars.contains_key(&name) {
-            if !self.state.used_vars.contains(&name) {
+        if self.state.defined_vars.contains_key(name) {
+            if !self.state.used_vars.contains(name) {
                 self.warn(WarningTypes::OverwrittenVariable, &format!("Value of '{}' was overwritten before use.", name));
             } else {
                 self.warn(WarningTypes::AlreadyDefined, &format!("Variable '{}' is already defined in this scope", name));
             }
         };
 
-        let var_value = match statement_map.get(&Value::String("value".into())) {
-            Some(Value::Map { keys, values }) => self.check_statement(Value::Map { keys: keys.clone(), values: values.clone() }.convert_to_statement()),
-            _ => {
-                return self.raise(ErrorTypes::RuntimeError, "Variable declaration missing 'value'");
-            },
-        };
+        let var_value = self.check_statement(val_stmt.clone());
 
         if declared_type == Type::new_simple("auto") {
             declared_type = var_value.get_type();
@@ -876,18 +783,13 @@ impl Checker {
             }
         }
 
-        let variable = Variable::new(var_value.clone(), declared_type, is_static, is_public, is_final, false, self.get_location_from_statement(&Statement::from_hashmap_values(&statement_map)));
+        let variable = Variable::new(var_value.clone(), declared_type, is_static, is_public, is_final, false, self.get_location_from_current_statement());
         self.state.defined_vars.insert(name.to_string(), variable);
 
         ValueType::Null
     }
 
-    fn check_variable(&mut self, statement: HashMap<Value, Value>) -> ValueType {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(s)) => s,
-            _ => return self.raise(ErrorTypes::RuntimeError, "Expected a string for variable name"),
-        };
-
+    fn check_variable(&mut self, name: &str) -> ValueType {
         if let Some(var) = self.state.defined_vars.get(name) {
             self.state.used_vars.insert(name.to_string());
             return var.value_type.clone();

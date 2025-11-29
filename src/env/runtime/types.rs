@@ -53,8 +53,8 @@ pub enum Type {
     Alias {
         name: String,
         base_type: Box<Type>,
-        conditions: Vec<Value>,
-        variables: Vec<Value>,
+        conditions: Vec<Statement>,
+        variables: Vec<String>,
     },
     Unwrap(Vec<Value>),
 }
@@ -294,49 +294,8 @@ impl PartialEq for Type {
 }
 
 impl PartialOrd for Type {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use Type::*;
-        match (self, other) {
-            (Simple { name: n1, ref_level: r1, is_maybe_type: m1 },
-             Simple { name: n2, ref_level: r2, is_maybe_type: m2 }) =>
-                (n1, r1, m1).partial_cmp(&(n2, r2, m2)),
-
-            (Function { parameter_types: p1, return_type: r1 },
-             Function { parameter_types: p2, return_type: r2 }) =>
-                (p1, r1).partial_cmp(&(p2, r2)),
-
-            (Generator { parameter_types: p1, yield_type: y1 },
-             Generator { parameter_types: p2, yield_type: y2 }) =>
-                (p1, y1).partial_cmp(&(p2, y2)),
-
-            (Indexed { base_type: b1, elements: e1 },
-             Indexed { base_type: b2, elements: e2 }) =>
-                (b1, e1).partial_cmp(&(b2, e2)),
-
-            (Union(u1), Union(u2)) =>
-                u1.partial_cmp(u2),
-
-            (Enum { name: n1, variants: v1, generics: g1, wheres: c1, .. },
-             Enum { name: n2, variants: v2, generics: g2, wheres: c2, .. }) =>
-                (n1, v1, g1, c1).partial_cmp(&(n2, v2, g2, c2)),
-
-            (Struct { name: n1, fields: f1, generics: g1, wheres: c1, .. },
-             Struct { name: n2, fields: f2, generics: g2, wheres: c2, .. }) =>
-                (n1, f1, g1, c1).partial_cmp(&(n2, f2, g2, c2)),
-
-            (Alias { name: n1, base_type: b1, conditions: c1, .. },
-             Alias { name: n2, base_type: b2, conditions: c2, .. }) =>
-                (n1, b1, c1).partial_cmp(&(n2, b2, c2)),
-
-            (Impl { implementations: m1, .. },
-             Impl { implementations: m2, .. }) =>
-                m1.partial_cmp(&m2),
-
-            (Unwrap(v1), Unwrap(v2)) =>
-                v1.partial_cmp(&v2),
-
-            _ => None,
-        }
+    fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
+        return None;
     }
 }
 
@@ -365,22 +324,19 @@ impl Hash for Type {
             Union(u) => {
                 u.hash(state);
             }
-            Enum { name, variants, generics, wheres, .. } => {
+            Enum { name, generics, wheres, .. } => {
                 name.hash(state);
-                variants.hash(state);
                 generics.hash(state);
                 wheres.hash(state);
             }
-            Struct { name, fields, generics, wheres, .. } => {
+            Struct { name, generics, wheres, .. } => {
                 name.hash(state);
-                fields.hash(state);
                 generics.hash(state);
                 wheres.hash(state);
             }
-            Alias { name, base_type, conditions, .. } => {
+            Alias { name, base_type, .. } => {
                 name.hash(state);
                 base_type.hash(state);
-                conditions.hash(state);
             }
             Impl { implementations, .. } => {
                 implementations.hash(state);

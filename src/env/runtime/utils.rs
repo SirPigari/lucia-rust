@@ -9,7 +9,7 @@ use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use std::sync::{Mutex, Arc};
 use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node, TypeNode, PtrNode, IterableNode};
 use crate::env::runtime::structs_and_enums::Struct;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::value::{Value};
@@ -527,11 +527,10 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_type_from_statement(stmt: &Statement) -> Option<String> {
-    let map = stmt.convert_to_hashmap();
-    match map.get(&Value::String("type".to_string())) {
-        Some(Value::String(type_str)) if type_str == "TYPE" => {
-            match map.get(&Value::String("value".to_string())) {
-                Some(Value::String(inner_type)) => Some(inner_type.clone()),
+    match &stmt.node {
+        Node::Type { node } => {
+            match node {
+                TypeNode::Simple { base, .. } => Some(base.to_owned()),
                 _ => None,
             }
         }
@@ -732,12 +731,13 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
     if type_.starts_with("&") {
         let inner_type = &type_[1..];
         let inner_statement = get_type_default_as_statement(inner_type);
-        return Statement::Statement {
-            keys: vec![Value::String("type".to_string()), Value::String("value".to_string())],
-            values: vec![
-                Value::String("POINTER_REF".to_string()),
-                inner_statement.convert_to_map()
-            ],
+        return Statement {
+            node: Node::Pointer {
+                ptr_node: PtrNode::PointerRef {
+                    ref_level: 1,
+                },
+                value: Box::new(inner_statement),
+            },
             loc: None,
         };
     }
@@ -748,148 +748,85 @@ pub fn get_type_default_as_statement(type_: &str) -> Statement {
     }
 
     match type_ {
-        "int" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("NUMBER".to_string()),
-                Value::String("0".to_string())
-            ],
+        "int" => Statement {
+            node: Node::Number {
+                value: "0".to_string(),
+            },
             loc: None,
         },
-        "float" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("NUMBER".to_string()),
-                Value::String("0.0".to_string())
-            ],
+        "float" => Statement {
+            node: Node::Number {
+                value: "0.0".to_string(),
+            },
             loc: None,
         },
-        "str" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string()),
-                Value::String("mods".to_string()),
-            ],
-            values: vec![
-                Value::String("STRING".to_string()),
-                Value::String("\"\"".to_string()),
-                Value::List(vec![]),
-            ],
+        "str" => Statement {
+            node: Node::String {
+                value: "\"\"".to_string(),
+                mods: vec![],
+            },
             loc: None,
         },
-        "bool" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("BOOLEAN".to_string()),
-                Value::String("false".to_string()),
-            ],
+        "bool" => Statement {
+            node: Node::Boolean {
+                value: Some(false),
+            },
             loc: None,
         },
-        "any" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("BOOLEAN".to_string()),
-                Value::String("null".to_string()),
-            ],
+        "any" => Statement {
+            node: Node::Boolean {
+                value: None,
+            },
             loc: None,
         },
-        "map" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("keys".to_string()),
-                Value::String("values".to_string())
-            ],
-            values: vec![
-                Value::String("MAP".to_string()),
-                Value::List(vec![]),
-                Value::List(vec![])
-            ],
+        "map" => Statement {
+            node: Node::Map {
+                keys_stmts: vec![],
+                values_stmts: vec![],
+            },
             loc: None,
         },
-        "list" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("iterable_type".to_string()),
-                Value::String("elements".to_string())
-            ],
-            values: vec![
-                Value::String("ITERABLE".to_string()),
-                Value::String("LIST".to_string()),
-                Value::List(vec![])
-            ],
+        "list" => Statement {
+            node: Node::Iterable {
+                node: IterableNode::List {
+                    elements: vec![],
+                }
+            },
             loc: None,
         },
-        "bytes" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string()),
-                Value::String("mods".to_string()),
-            ],
-            values: vec![
-                Value::String("STRING".to_string()),
-                Value::String("\"\"".to_string()),
-                Value::List(vec![Value::String("b".to_string())])
-            ],
+        "bytes" => Statement {
+            node: Node::String {
+                value: "\"\"".to_string(),
+                mods: vec!['b'],
+            },
             loc: None,
         },
-        "tuple" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("elements".to_string())
-            ],
-            values: vec![
-                Value::String("TUPLE".to_string()),
-                Value::List(vec![])
-            ],
+        "tuple" => Statement {
+            node: Node::Iterable {
+                node: IterableNode::Tuple {
+                    elements: vec![],
+                }
+            },
             loc: None,
         },
-        "void" => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("BOOLEAN".to_string()),
-                Value::String("null".to_string()),
-            ],
+        "void" => Statement {
+            node: Node::Boolean {
+                value: None,
+            },
             loc: None,
         },
-        _ => Statement::Statement {
-            keys: vec![
-                Value::String("type".to_string()),
-                Value::String("value".to_string())
-            ],
-            values: vec![
-                Value::String("BOOLEAN".to_string()),
-                Value::String("null".to_string()),
-            ],
+        _ => Statement {
+            node: Node::Boolean {
+                value: None,
+            },
             loc: None,
         },
     }
 }
 
 pub fn get_type_default_as_statement_from_statement(type_: &Statement) -> Statement {
-    let binding = type_.convert_to_hashmap();
-    let default = Value::String("any".to_string());
-
-    let type_name = binding.get(&Value::String("value".to_string())).unwrap_or(&default);
-
-    match type_name {
-        Value::String(type_str) => get_type_default_as_statement(&type_str),
-        _ => get_type_default_as_statement("any"),
-    }
+    let type_name = get_type_from_statement(type_).unwrap_or_else(|| "any".to_string());
+    get_type_default_as_statement(&type_name)
 }
 
 pub fn create_function(metadata: FunctionMetadata, body: Vec<Statement>) -> Value {
@@ -911,21 +848,6 @@ pub fn parse_usize_radix(value: &str) -> Option<usize> {
             Ok(f) if f.fract() == 0.0 && f >= 0.0 => Some(f as usize),
             _ => None,
         }
-    }
-}
-
-pub fn get_type_from_token_name(token_name: &str) -> String {
-    match token_name {
-        "NUMBER" => "int".to_string(),
-        "FLOAT" => "float".to_string(),
-        "STRING" => "string".to_string(),
-        "BOOLEAN" => "bool".to_string(),
-        "MAP" => "map".to_string(),
-        "LIST" => "list".to_string(),
-        "TUPLE" => "tuple".to_string(),
-        "TYPE" => "type".to_string(),
-        "POINTER_REF" => "pointer".to_string(),
-        t => t.to_string(),
     }
 }
 
@@ -1254,38 +1176,6 @@ pub fn fix_path(raw_path: String) -> String {
         return path[4..].to_string().replace('\\', "/");
     }
     path.replace('\\', "/")
-}
-
-pub fn remove_loc_keys(value: &Value) -> Value {
-    match value {
-        Value::Map { keys, values } => {
-            let filtered: Vec<(Value, Value)> = keys.iter()
-                .zip(values.iter())
-                .filter_map(|(k, v)| {
-                    if let Value::String(s) = k {
-                        if s == "_loc" {
-                            return None;
-                        }
-                    }
-                    Some((k.clone(), remove_loc_keys(v)))
-                })
-                .collect();
-
-            let (new_keys, new_values): (Vec<_>, Vec<_>) = filtered.into_iter().unzip();
-
-            Value::Map {
-                keys: new_keys,
-                values: new_values,
-            }
-        }
-        Value::List(items) => {
-            Value::List(items.iter().map(remove_loc_keys).collect())
-        }
-        Value::Tuple(items) => {
-            Value::Tuple(items.iter().map(remove_loc_keys).collect())
-        }
-        _ => value.clone(),
-    }
 }
 
 pub fn char_to_digit(c: char) -> Option<u32> {
@@ -2305,7 +2195,7 @@ pub fn diff_fields(
 
         map.insert(name_a.clone(), name_b.clone());
 
-        let is_a_stmt_b_stmt = stmt_a.is_equal_to_statement(stmt_b);
+        let is_a_stmt_b_stmt = stmt_a.node == stmt_b.node;
 
         if is_a_stmt_b_stmt && mods_a == mods_b {
             i += 1;
