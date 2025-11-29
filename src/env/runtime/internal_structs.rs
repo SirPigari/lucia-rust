@@ -8,6 +8,7 @@ use bincode::{Encode, Decode};
 use std::sync::RwLock;
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
+use crate::env::runtime::functions::Function;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Encode, Decode, Hash)]
@@ -543,6 +544,7 @@ pub struct Cache {
     pub operations: FxHashMap<String, Value>,
     pub constants: FxHashMap<String, Value>,
     pub iterables: FxHashMap<Value, Value>,
+    pub last_called_function: Option<(String, Function)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
