@@ -563,7 +563,7 @@ pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Resul
                     break;
                 }
             }
-            Ok(Signal::CtrlC) | Ok(Signal::CtrlD) => {
+            Ok(Signal::CtrlD) => {
                 let mut history_sync = FileBackedHistory::with_file(10_000, tmp_path.clone())
                     .expect("Failed to sync temp history");
                 let _ = history_sync.sync();
@@ -572,6 +572,9 @@ pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Resul
                     "InterruptedError".to_string(),
                     "Input was interrupted by user".to_string(),
                 ));
+            }
+            Ok(Signal::CtrlC) => {
+                std::process::exit(0);
             }
             Err(err) => {
                 return Err((

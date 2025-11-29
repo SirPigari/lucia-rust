@@ -8,10 +8,12 @@ Be free to fix them or add new ones.
 _Total TODOs found: 6_
 ---
 
+### [`src/interpreter.rs:5615:1`](../../../src/interpreter.rs#L5615) _(added by **SirPigari** on **2025-11-29**)_
+
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3069:1`](../../../src/interpreter.rs#L3069) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3070:1`](../../../src/interpreter.rs#L3070) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
@@ -22,8 +24,6 @@ _Total TODOs found: 6_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/interpreter.rs:5614:1`](../../../src/interpreter.rs#L5614) **(TODO not committed yet)**
 
 ---
 *Report generated automatically.*

@@ -134,7 +134,11 @@ fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Va
 }
 
 fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
-    let str_to_print = styledstr(args, interpreter);
+    let mut args = args.clone();
+    if args.get("end") == Some(&Value::String("".to_owned())) {
+        args.insert("end".to_string(), Value::String("\x1b[0m".to_string()));
+    }
+    let str_to_print = styledstr(&args, interpreter);
 
     print!("{}", match str_to_print {
         Value::String(s) => s,
