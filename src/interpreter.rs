@@ -11,7 +11,6 @@ use crate::env::runtime::utils::{
     unescape_string,
     to_static,
     create_function,
-    get_type_from_token_name,
     sanitize_alias,
     special_function_meta,
     check_version,
@@ -27,7 +26,6 @@ use crate::env::runtime::utils::{
     get_enum_idx,
     unescape_string_premium_edition,
     apply_format_spec,
-    remove_loc_keys,
     type_matches,
     generate_name_variants,
     escape_string,
@@ -48,7 +46,7 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, TypeNode};
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, get_loc, TypeNode, TypeDeclNode, PtrNode, ParamAST};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
@@ -281,10 +279,6 @@ impl Interpreter {
     }
 
     fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
-        let mut val = val.clone();
-        if val.is_statement() {
-            val = self.evaluate(&val.convert_to_statement());
-        }
         match val {
             Value::Int(i) => {
                 let idx = i.to_i64().map_err(|_| { self.raise("ConversionError", "Failed to convert Int to isize") })? as isize;
@@ -552,13 +546,8 @@ impl Interpreter {
                     err = Some(make_err("TypeError", &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), self.get_location_from_current_statement()));
                 }
                 let mut vars: HashMap<String, Variable> = HashMap::new();
-                for var in variables.iter() {
-                    if let Value::String(var_name) = var {
-                        vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value.get_type().display().to_string(), false, true, true));
-                    } else {
-                        status = false;
-                        err = Some(make_err("TypeError", &format!("Expected variable name to be a string, got '{}'", var.get_type().display()), self.get_location_from_current_statement()));
-                    }
+                for var_name in variables.iter() {
+                    vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value.get_type().display().to_string(), false, true, true));
                 }
                 let mut new_interpreter = Interpreter::new(
                     self.config.clone(),
@@ -570,8 +559,7 @@ impl Interpreter {
                 new_interpreter.variables.extend(vars);
                 new_interpreter.set_scope(&format!("{}+scope.{}", self.scope, alias_name));
                 for (i, cond) in conditions.iter().enumerate() {
-                    new_interpreter.current_statement = Some(cond.convert_to_statement());
-                    if !new_interpreter.evaluate(&cond.convert_to_statement()).is_truthy() {
+                    if !new_interpreter.evaluate(&cond).is_truthy() {
                         status = false;
                         err = Some(make_err("TypeError", &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), self.get_location_from_current_statement()));
                         break;
@@ -1140,18 +1128,7 @@ impl Interpreter {
                     return Err(err.clone());
                 }
 
-                let stmt = match statement {
-                    Statement::Statement { .. } => statement.clone(),
-                    _ => {
-                        return Err(Error::new(
-                            "InvalidStatement",
-                            "Expected a map. This is probably an issue with your installation. Try installing the latest stable version.",
-                            &self.file_path.to_string(),
-                        ));
-                    }
-                };
-
-                let value = self.evaluate(&stmt);
+                let value = self.evaluate(&statement);
 
                 if let Value::Error(err_type, err_msg, referr) = &value {
                     if let Some(referr) = referr {
@@ -1207,7 +1184,17 @@ impl Interpreter {
     fn get_location_from_current_statement(&self) -> Option<Location> {
         match &self.current_statement {
             Some(Statement { loc, .. }) => match loc {
-                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+                Some(loc) => Some(get_loc(*loc).set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn get_location_from_current_statement_id(&self) -> Option<usize> {
+        match &self.current_statement {
+            Some(Statement { loc, .. }) => match loc {
+                Some(loc) => Some(*loc),
                 None => None,
             },
             _ => None,
@@ -1217,7 +1204,7 @@ impl Interpreter {
     fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
         match &self.current_statement {
             Some(Statement { loc, .. }) => match loc {
-                Some(loc) => Some(loc.clone().set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
+                Some(loc) => Some(get_loc(*loc).set_lucia_source_loc(format!("{}:{}:{}", caller.file(), caller.line(), caller.column()))),
                 None => None,
             },
             _ => None,
@@ -1360,19 +1347,7 @@ impl Interpreter {
             )
         });
     
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        if statement.is_empty() {
-            return NULL;
-        }
-    
-        let Statement::Statement { keys, values, .. } = &statement else {
-            return self.raise("SyntaxError", to_static(format!("Expected a statement map, got {:?}", statement)));
-        };
-
-        if self.check_stop_flag() {
+        if self.err.is_some() || self.check_stop_flag() {
             return NULL;
         }
     
@@ -1380,11 +1355,11 @@ impl Interpreter {
             return NULL;
         }
     
-        let result = match statement.node {
+        let result = match statement.node.clone() {
             Node::If { condition, body, else_body } => self.handle_if(*condition, body, else_body),
             Node::For { iterable, body, variable } => self.handle_for_loop(*iterable, body, variable),
             Node::While { condition, body } => self.handle_while(*condition, body),
-            Node::TryCatch { body, catch_body, exception_vars } => self.handle_try(*body, catch_body, exception_vars),
+            Node::TryCatch { body, catch_body, exception_vars } => self.handle_try(body, catch_body, exception_vars),
             Node::Throw { node } => self.handle_throw(*node),
             Node::Forget { node } => self.handle_forget(*node),
             Node::Continue | Node::Break => self.handle_continue_and_break(&statement.node),
@@ -1393,17 +1368,17 @@ impl Interpreter {
             Node::Match { condition, cases } => self.handle_match(*condition, cases),
             Node::Group { body } => self.handle_group(body),
 
-            Node::FunctionDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => 
-                self.handle_function_declaration(name, pos_args, named_args, body, modifiers, *return_type, effect_flags),
-            Node::GeneratorDeclaration { name, pos_args, named_args, body, modifiers, return_type, effect_flags } => 
-                self.handle_generator_declaration(name, pos_args, named_args, body, modifiers, *return_type, effect_flags),
+            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
+                self.handle_function_declaration(name, args, body, modifiers, *return_type, effect_flags),
+            Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
+                self.handle_generator_declaration(name, args, body, modifiers, *return_type, effect_flags),
             Node::Return { value } => self.handle_return(*value),
 
-            Node::Import { name, alias, named_imports, modifiers, import_all, module_path_opt } => self.handle_import(name, alias, named_imports, modifiers, import_all, module_path_opt),
+            Node::Import { name, alias, named_imports, modifiers, import_all, module_path_opt } => self.handle_import(name, alias, named_imports, modifiers, import_all, module_path_opt.map(|b| *b)),
             Node::Export { names, aliases, modifiers_list } => self.handle_export(names, aliases, modifiers_list),
 
             Node::VariableDeclaration { name, val_stmt, var_type, modifiers, is_default: _ } => self.handle_variable_declaration(name, *val_stmt, *var_type, modifiers),
-            Node::Variable { name } => self.handle_variable(name),
+            Node::Variable { name } => self.handle_variable(&name),
             Node::Assignment { left, right } => self.handle_assignment(*left, *right),
             Node::UnpackAssignment { targets, stmt } => self.handle_unpack_assignment(targets, *stmt),
 
@@ -1412,81 +1387,29 @@ impl Interpreter {
             Node::Boolean { value } => self.handle_boolean(value),
 
             Node::Map { keys_stmts, values_stmts } => self.handle_map(keys_stmts, values_stmts),
-            Node::Iterable { elements } => self.handle_iterable(elements),
+            Node::Iterable { node } => self.handle_iterable(node),
             Node::Value { value } => self.handle_value(value),
 
             Node::Operation { left, operator, right } => self.handle_operation(*left, operator, *right),
             Node::UnaryOperation { operator, operand } => self.handle_unary_op(*operand, &operator),
-            Node::PrefixOperator { operator, operand } => self.handle_prefix_op(*operand, &operator),
+            Node::PrefixOperation { operator, operand } => self.handle_prefix_op(*operand, &operator),
             Node::Pipeline { initial_value, arguments } => self.handle_pipeline(*initial_value, arguments),
 
             Node::Call { name, pos_args, named_args } => self.handle_call(&name, pos_args, named_args),
             Node::MethodCall { object, method_name, pos_args, named_args } => self.handle_method_call(*object, &method_name, pos_args, named_args),
             Node::PropertyAccess { object, property_name } => self.handle_property_access(*object, &property_name),
             Node::IndexAccess { object, access } => self.handle_index_access(*object, *access),
+            
             Node::Type { node} => self.handle_type(node),
-            t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
-        };
+            Node::TypeConvert { node, target_type } => self.handle_type_conversion(*node, *target_type),
+            Node::TypeDeclaration { name, modifiers, node } => self.handle_type_declaration(name, modifiers, node),
 
-        let result = match statement_map.get(&*KEY_TYPE) {
-            Some(Value::String(t)) => match t.as_str() {
-                /// DONE
-                // "IF" => self.handle_if(statement_map),
-                // "FOR" => self.handle_for_loop(statement_map),
-                // "WHILE" => self.handle_while(statement_map),
-                // "TRY_CATCH" | "TRY" => self.handle_try(statement_map),
-                // "THROW" => self.handle_throw(statement_map),
-                // "FORGET" => self.handle_forget(statement_map),
-                // "CONTINUE" | "BREAK" => self.handle_continue_and_break(statement_map),
-                // "DEFER" => self.handle_defer(statement_map),
-                // "SCOPE" => self.handle_scope(statement_map),
-                // "MATCH" => self.handle_match(statement_map),
-                // "GROUP" => self.handle_group(statement_map),
+            Node::StructCreation { name, fields_ast, is_null } => self.handle_struct_creation(name, fields_ast, is_null),
+            Node::StructMethods { struct_name, methods_ast } => self.handle_struct_methods(struct_name, methods_ast),
+            Node::Pointer { ptr_node, value } => self.handle_pointer(ptr_node.clone(), *value),
 
-                // "FUNCTION_DECLARATION" => self.handle_function_declaration(statement_map),
-                // "GENERATOR_DECLARATION" => self.handle_generator_declaration(statement_map),
-                // "RETURN" => self.handle_return(statement_map),
-    
-                // "IMPORT" => self.handle_import(statement_map),
-                // "EXPORT" => self.handle_export(statement_map),
-
-                // TODO on these
-                "VARIABLE_DECLARATION" => self.handle_variable_declaration(statement_map),
-                "VARIABLE" => self.handle_variable(statement_map),
-                "ASSIGNMENT" => self.handle_assignment(statement_map),
-                "UNPACK_ASSIGN" => self.handle_unpack_assignment(statement_map),
-    
-                // "NUMBER" => self.handle_number(statement_map),
-                // "STRING" => self.handle_string(statement_map),
-                // "BOOLEAN" => self.handle_boolean(statement_map),
-    
-                // "TUPLE" => self.handle_tuple(statement_map),
-                // "MAP" => self.handle_map(statement_map),
-                // "ITERABLE" => self.handle_iterable(statement_map),
-                // "VALUE" => self.handle_value(statement_map),
-    
-                // "OPERATION" => self.handle_operation(statement_map),
-                // "UNARY_OPERATION" => self.handle_unary_op(statement_map),
-                // "PREFIX_OPERATOR" => self.handle_prefix_op(statement_map),
-                // "PIPELINE" => self.handle_pipeline(statement_map),
-    
-                // "CALL" => self.handle_call(statement_map),
-                // "METHOD_CALL" => self.handle_method_call(statement_map),
-                // "PROPERTY_ACCESS" => self.handle_property_access(statement_map),
-                // "INDEX_ACCESS" => self.handle_index_access(statement_map),
-    
-                // "TYPE" => self.handle_type(statement_map),
-                "TYPE_CONVERT" => self.handle_type_conversion(statement_map),
-                "TYPE_DECLARATION" => self.handle_type_declaration(statement_map),
-
-                "STRUCT_CREATION" => self.handle_struct_creation(statement_map),
-                "STRUCT_METHODS" => self.handle_struct_methods(statement_map),
-
-                "POINTER_REF" | "POINTER_DEREF" | "POINTER_ASSIGN" => self.handle_pointer(statement_map),
-    
-                _ => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t)),
-            },
-            _ => self.raise_with_help("RuntimeError", "Missing 'type' in statement map", to_static(format!("Statement: {:?}", statement_map))),
+            Node::Null => return NULL,
+            // t => self.raise("NotImplemented", &format!("Unsupported statement type: {}", t.name())),
         };
 
         if self.check_stop_flag() {
@@ -1530,98 +1453,111 @@ impl Interpreter {
     }
 
     fn handle_prefix_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
-        let operand_value = self.evaluate(&operand_stmt);
+        let operand_val = self.evaluate(&operand_stmt);
         if self.err.is_some() {
             return NULL;
         }
 
-        match operator.as_str() {
+        let mut is_var = false;
+        let mut var_name = "";
+
+        if let Node::Variable { name, .. } = &operand_stmt.node {
+            is_var = true;
+            var_name = name;
+        }
+
+        match operator {
             "++" => {
-                match operand_stmt.get_type().as_str() {
-                    "VARIABLE" => {
-                        let var_name = operand_stmt.get_name();
-                        if let Some(var) = self.variables.get_mut(&var_name) {
-                            let old_value = var.value.clone();
-                            match &old_value {
-                                Value::Int(i) => {
-                                    let new_value = Value::Int((i + Int::from_i64(1)).expect("Integer overflow"));
-                                    var.set_value(new_value.clone());
-                                    old_value
-                                }
-                                Value::Float(f) => {
-                                    let new_value = Value::Float((f + Float::from_f64(1.0)).expect("Float overflow"));
-                                    var.set_value(new_value.clone());
-                                    old_value
-                                }
-                                p if matches!(p, Value::Pointer(_)) => {
-                                    let mut p = p.clone();
-                                    while let Value::Pointer(inner_p) = p {
-                                        p = inner_p.lock().expect("Invalid pointer").0.clone();
-                                    }
-                                    return p;
-                                }
-                                _ => self.raise("TypeError", "Prefix ++ operator can only be applied to integers and floats"),
-                            }
-                        } else {
-                            self.raise("NameError", &format!("Variable '{}' not found for prefix ++ operator", var_name))
-                        }
-                    }
-                    _ => {
-                        match operand_value {
+                if is_var {
+                    if let Some(var) = self.variables.get_mut(var_name) {
+                        let old = var.value.clone();
+                        match &old {
                             Value::Int(i) => {
-                                Value::Int(i.abs())
+                                let new = Value::Int((i + Int::from_i64(1)).expect("int overflow"));
+                                var.set_value(new);
+                                return old;
                             }
                             Value::Float(f) => {
-                                Value::Float(f.abs())
+                                let new = Value::Float((f + Float::from_f64(1.0)).expect("float overflow"));
+                                var.set_value(new);
+                                return old;
                             }
-                            p if matches!(p, Value::Pointer(_)) => {
-                                let mut p = p;
-                                while let Value::Pointer(inner_p) = p {
-                                    p = inner_p.lock().expect("Invalid pointer").0.clone();
+                            Value::Pointer(_) => {
+                                let mut p = old;
+                                while let Value::Pointer(inner) = p {
+                                    p = inner.lock().expect("Invalid pointer").0.clone();
                                 }
                                 return p;
                             }
-                            _ => self.raise("TypeError", "Prefix ++ operator can only be applied to integers, floats and pointers"),
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    "Prefix ++ can only be applied to integers and floats"
+                                );
+                            }
                         }
                     }
+                    return self.raise(
+                        "NameError",
+                        &format!("Variable '{}' not found for prefix ++", var_name)
+                    );
+                }
+
+                match operand_val {
+                    Value::Int(i) => Value::Int(i.abs()),
+                    Value::Float(f) => Value::Float(f.abs()),
+                    mut p @ Value::Pointer(_) => {
+                        while let Value::Pointer(inner) = p {
+                            p = inner.lock().expect("Invalid pointer").0.clone();
+                        }
+                        p
+                    }
+                    _ => self.raise(
+                        "TypeError",
+                        "Prefix ++ can only be applied to integers, floats and pointers"
+                    ),
                 }
             }
+
             "--" => {
-                match operand_stmt.get_type().as_str() {
-                    "VARIABLE" => {
-                        let var_name = operand_stmt.get_name();
-                        if let Some(var) = self.variables.get_mut(&var_name) {
-                            let old_value = var.value.clone();
-                            match &old_value {
-                                Value::Int(i) => {
-                                    let new_value = Value::Int((i - Int::from_i64(1)).expect("Integer underflow"));
-                                    var.set_value(new_value.clone());
-                                    old_value
-                                }
-                                Value::Float(f) => {
-                                    let new_value = Value::Float((f - Float::from_f64(1.0)).expect("Float underflow"));
-                                    var.set_value(new_value.clone());
-                                    old_value
-                                }
-                                _ => self.raise("TypeError", "Prefix -- operator can only be applied to integers and floats"),
-                            }
-                        } else {
-                            self.raise("NameError", &format!("Variable '{}' not found for prefix -- operator", var_name))
-                        }
-                    }
-                    _ => {
-                        match operand_value {
+                if is_var {
+                    if let Some(var) = self.variables.get_mut(var_name) {
+                        let old = var.value.clone();
+                        match &old {
                             Value::Int(i) => {
-                                Value::Int(-i)
+                                let new = Value::Int((i - Int::from_i64(1)).expect("int underflow"));
+                                var.set_value(new);
+                                return old;
                             }
                             Value::Float(f) => {
-                                Value::Float(-f)
+                                let new = Value::Float((f - Float::from_f64(1.0)).expect("float underflow"));
+                                var.set_value(new);
+                                return old;
                             }
-                            _ => self.raise("TypeError", "Prefix -- operator can only be applied to integers and floats"),
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    "Prefix -- can only be applied to integers and floats"
+                                );
+                            }
                         }
                     }
+                    return self.raise(
+                        "NameError",
+                        &format!("Variable '{}' not found for prefix --", var_name)
+                    );
+                }
+
+                match operand_val {
+                    Value::Int(i) => Value::Int(-i),
+                    Value::Float(f) => Value::Float(-f),
+                    _ => self.raise(
+                        "TypeError",
+                        "Prefix -- can only be applied to integers and floats"
+                    ),
                 }
             }
+
             _ => self.raise("SyntaxError", &format!("Unknown prefix operator '{}'", operator)),
         }
     }
@@ -1632,81 +1568,116 @@ impl Interpreter {
             return NULL;
         }
 
-        for step_val in arguments.iter() {
+        for step_val in &arguments {
             if self.err.is_some() {
                 return NULL;
             }
 
-            match step_val.node {
-                Node::Call { .. } | Node::MethodCall { .. } => {},  // TODO
+            let wrapped_stmt = Statement {
+                node: Node::Value {
+                    value: current_val.clone(),
+                },
+                loc: alloc_loc(self.get_location_from_current_statement()),
+            };
+
+            match &step_val.node {
+                Node::Call { name, pos_args, named_args } => {
+                    let mut new_pos = Vec::with_capacity(pos_args.len() + 1);
+                    let mut replaced = false;
+
+                    for arg in pos_args.iter() {
+                        if let Node::Variable { name: var_name } = &arg.node {
+                            if var_name == "_" {
+                                new_pos.push(wrapped_stmt.clone());
+                                replaced = true;
+                                continue;
+                            }
+                        }
+                        new_pos.push(arg.clone());
+                    }
+
+                    if !replaced {
+                        new_pos.insert(0, wrapped_stmt.clone());
+                    }
+
+                    let mut new_named = HashMap::with_capacity(named_args.len());
+                    for (k, v) in named_args.iter() {
+                        if let Node::Variable { name: var_name } = &v.node {
+                            if var_name == "_" {
+                                new_named.insert(k.clone(), wrapped_stmt.clone());
+                                continue;
+                            }
+                        }
+                        new_named.insert(k.clone(), v.clone());
+                    }
+
+                    current_val = self.evaluate(&Statement {
+                        node: Node::Call {
+                            name: name.clone(),
+                            pos_args: new_pos,
+                            named_args: new_named,
+                        },
+                        loc: step_val.loc,
+                    });
+                }
+
+                Node::MethodCall { object, method_name, pos_args, named_args } => {
+                    let mut new_pos = Vec::with_capacity(pos_args.len() + 1);
+                    let mut replaced = false;
+
+                    for arg in pos_args.iter() {
+                        if let Node::Variable { name: var_name } = &arg.node {
+                            if var_name == "_" {
+                                new_pos.push(wrapped_stmt.clone());
+                                replaced = true;
+                                continue;
+                            }
+                        }
+                        new_pos.push(arg.clone());
+                    }
+
+                    if !replaced {
+                        new_pos.insert(0, wrapped_stmt.clone());
+                    }
+
+                    let mut new_named = HashMap::with_capacity(named_args.len());
+                    for (k, v) in named_args.iter() {
+                        if let Node::Variable { name: var_name } = &v.node {
+                            if var_name == "_" {
+                                new_named.insert(k.clone(), wrapped_stmt.clone());
+                                continue;
+                            }
+                        }
+                        new_named.insert(k.clone(), v.clone());
+                    }
+
+                    current_val = self.evaluate(&Statement {
+                        node: Node::MethodCall {
+                            object: object.clone(),
+                            method_name: method_name.clone(),
+                            pos_args: new_pos,
+                            named_args: new_named,
+                        },
+                        loc: step_val.loc,
+                    });
+                }
+
                 _ => {
                     self.variables.insert(
                         "_".to_string(),
-                        Variable::new("_".to_string(), current_val.clone(), "any".to_string(), true, false, false)
+                        Variable::new(
+                            "_".to_string(),
+                            current_val.clone(),
+                            "any".to_string(),
+                            true,
+                            false,
+                            false
+                        ),
                     );
+                    current_val = self.evaluate(step_val);
                 }
             }
 
-            let step_type = step_val.get_type();
-            if step_type.as_str() == "CALL" || step_type.as_str() == "METHOD_CALL" {
-                let mut arg_map: HashMap<Value, Value> = step_val.convert_to_hashmap();
-
-                let pos_key = if step_type.as_str() == "CALL" { "pos_arguments" } else { "pos_args" };
-                let named_key = if step_type.as_str() == "CALL" { "named_arguments" } else { "named_args" };
-
-                let val_wrapped = Statement {
-                    node: Node::Value {
-                        value: current_val.clone(),
-                    },
-                    loc: alloc_loc(self.get_location_from_current_statement()),
-                };
-
-                arg_map.entry(Value::String(pos_key.to_string()))
-                    .and_modify(|v| {
-                        if let Value::List(args) = v {
-                            let mut replaced_any = false;
-                            for a in args.iter_mut() {
-                                let stmt = a.convert_to_statement();
-                                if stmt.get_type() == "VARIABLE" && stmt.get_name() == "_" {
-                                    *a = val_wrapped.convert_to_map();
-                                    replaced_any = true;
-                                }
-                            }
-                            if !replaced_any {
-                                args.insert(0, val_wrapped.convert_to_map());
-                            }
-                        } else {
-                            *v = Value::List(vec![val_wrapped.convert_to_map()]);
-                        }
-                    })
-                    .or_insert_with(|| {
-                        Value::List(vec![val_wrapped.convert_to_map()])
-                    });
-
-                arg_map.entry(Value::String(named_key.to_string()))
-                    .and_modify(|v| {
-                        if let Value::Map { keys: _, values } = v {
-                            for val_idx in 0..values.len() {
-                                let stmt = values[val_idx].convert_to_statement();
-                                if stmt.get_type() == "VARIABLE" && stmt.get_name() == "_" {
-                                    values[val_idx] = val_wrapped.convert_to_map();
-                                }
-                            }
-                        } else {
-                            *v = Value::Map { keys: vec![], values: vec![] };
-                        }
-                    })
-                    .or_insert_with(|| Value::Map { keys: vec![], values: vec![] });
-
-                let new_statement = Statement::from_hashmap_values(&arg_map);
-                current_val = self.evaluate(&new_statement);
-            } else {
-                self.variables.insert(
-                    "_".to_string(),
-                    Variable::new("_".to_string(), current_val.clone(), "any".to_string(), true, false, false)
-                );
-                current_val = self.evaluate(&step_val);
-            }
             if self.err.is_some() {
                 return NULL;
             }
@@ -1727,40 +1698,30 @@ impl Interpreter {
         value
     }
 
-    fn handle_struct_methods(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let struct_name = match statement.get(&Value::String("struct_name".to_string())) {
-            Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'struct_name' in struct methods"),
-        };
-
-        let methods_ast = match statement.get(&Value::String("methods".to_string())) {
-            Some(Value::List(methods)) => methods,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'methods' in struct methods"),
-        };
-        let mut methods: HashMap<String, Value> = HashMap::new();
-
-        let mut struct_variable = match self.variables.get(struct_name) {
+    fn handle_struct_methods(&mut self, struct_name: String, methods_ast: Vec<Statement>) -> Value {
+        let mut struct_variable = match self.variables.get(&struct_name) {
             Some(v) => v.clone(),
             None => return self.raise("NameError", &format!("Struct '{}' is not defined", struct_name)),
         };
         let mut struct_value;
-
+        
         if let Value::Type(Type::Struct { .. }) = &struct_variable.value {
             struct_value = struct_variable.value.clone();
         } else {
             return self.raise("TypeError", &format!("'{}' is not a struct type", struct_name));
         }
-
+        
         let saved_variables = self.variables.clone();
+        let mut methods: HashMap<String, Value> = HashMap::with_capacity(methods_ast.len());
         self.variables.extend::<HashMap<String, Variable>>(HashMap::from_iter(vec![
             ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
         ]));
         for method in methods_ast {
             let mut m = method.node;
             let func;
-            if let Node::FunctionDeclaration { name, pos_args: pa, named_args: na, body, modifiers, return_type, effect_flags } = &mut m {
+            if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags } = &mut m {
                 modifiers.insert(0, "final".to_string());
-                func = self.handle_function_declaration(name, pa, na, body, modifiers, return_type, effect_flags);
+                func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags);
             } else {
                 return self.raise("TypeError", "Expected a function declaration in struct methods");
             }
@@ -1810,37 +1771,22 @@ impl Interpreter {
         Value::Null
     }
 
-    fn handle_struct_creation(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let struct_name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n,
-            _ => return self.raise("RuntimeError", "Missing or invalid 'name' in struct creation"),
-        };
+    fn handle_struct_creation(&mut self, struct_name: String, fields_ast: HashMap<String, Statement>, is_null: bool) -> Value {
+        let fields: HashMap<String, (Statement, Type)> = fields_ast.iter().map(|(k, v)| {
+            (k.clone(), (v.clone(), Type::new_simple("any")))
+        }).collect();
 
-        let fields: HashMap<String, (Box<Value>, Type)> = match statement.get(&Value::String("fields".to_string())) {
-            Some(Value::Map { keys, values }) => keys
-                .iter()
-                .zip(values.iter())
-                .map(|(k, v)| (k.to_string(), (Box::new(v.clone()), Type::new_simple("any"))))
-                .collect(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'fields' in struct creation"),
-        };
-
-        let mut new_fields = HashMap::new();
+        let mut new_fields = HashMap::with_capacity(fields.len());
         for (k, (v, ty)) in &fields {
-            let val = self.evaluate(&v.convert_to_statement());
-            new_fields.insert(k.clone(), (Box::new(val), ty.clone()));
+            let val = self.evaluate(&v);
             if self.err.is_some() {
                 return NULL;
             }
+            new_fields.insert(k.clone(), (Box::new(val), ty.clone()));
         }
         let fields = new_fields;
 
-        let is_null = match statement.get(&Value::String("is_null".to_string())) {
-            Some(Value::Boolean(b)) => *b,
-            _ => false,
-        };
-
-        let struct_ty = match self.variables.get(struct_name) {
+        let struct_ty = match self.variables.get(&struct_name) {
             Some(Variable { value: Value::Type(ty), .. }) => match ty {
                 Type::Struct { .. } => ty.clone(),
                 _ => return self.raise("TypeError", &format!("'{}' is not a struct type. ({})", struct_name, ty.display_simple())),
@@ -1937,13 +1883,14 @@ impl Interpreter {
             let mut is_final = None;
 
             for modifier in modifiers {
-                match modifier_str.as_str() {
+                match modifier.as_str() {
                     "public" => is_public = true,
+                    "private" => is_public = false,
                     "static" => is_static = Some(true),
                     "final" => is_final = Some(true),
                     "non-static" => is_static = Some(false),
                     "mutable" => is_final = Some(false),
-                    _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
+                    _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier)),
                 }
             }
 
@@ -1991,10 +1938,10 @@ impl Interpreter {
         result
     }
 
-    fn handle_generator_declaration(&mut self,
+    fn handle_generator_declaration(
+        &mut self,
         name: String,
-        pos_args: Vec<Value>,
-        named_args: Vec<(String, Value)>, 
+        args: Vec<ParamAST>,
         body: Vec<Statement>, 
         modifiers: Vec<String>, 
         return_type: Statement,
@@ -2009,129 +1956,55 @@ impl Interpreter {
         let mut is_final = false;
 
         for modifier in modifiers {
-            if let Value::String(modifier_str) = modifier {
-                match modifier_str.as_str() {
-                    "public" => is_public = true,
-                    "static" => is_static = true,
-                    "final" => is_final = true,
-                    "private" => is_public = false,
-                    "non-static" => is_static = false,
-                    "mutable" => is_final = false,
-                    _ => return self.raise("SyntaxError", &format!("Unknown generator modifier: {}", modifier_str)),
-                }
-            } else {
-                return self.raise("TypeError", "Generator modifiers must be strings");
+            match modifier.as_str() {
+                "public" => is_public = true,
+                "static" => is_static = true,
+                "final" => is_final = true,
+                "private" => is_public = false,
+                "non-static" => is_static = false,
+                "mutable" => is_final = false,
+                _ => return self.raise("SyntaxError", &format!("Unknown generator modifier: {}", modifier)),
             }
         }
 
-        let mut parameters = Vec::new();
-
-        for arg in pos_args {
-            if let Value::Map { keys, values } = arg {
-                let name = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::String(n) => n,
-                        _ => return self.raise("RuntimeError", "'name' must be a string in generator parameter"),
-                    },
-                    None => return self.raise("RuntimeError", "Missing 'name' in generator parameter"),
-                };
-
-                let type_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                    Some(pos) => {
-                        let type_val = &values[pos];
-                        match self.evaluate(&type_val.convert_to_statement()) {
-                            Value::Type(t) => t,
-                            _ => {
-                                self.raise("TypeError", "Expected 'var_type' to be a Type");
-                                return NULL;
-                            }
-                        }
-                    }
-                    None => return self.raise("RuntimeError", "Missing 'type' in generator parameter"),
-                };
-
-                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::List(l) => l.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else { None }
-                        }).collect(),
-                        _ => vec![],
-                    },
-                    None => vec![],
-                };
-
-                let is_variadic = match keys.iter().position(|k| k == &Value::String("variadic".to_string())) {
-                    Some(pos) => matches!(values[pos], Value::Boolean(true)),
-                    None => false,
-                };
-
-                if is_variadic {
-                    parameters.push(Parameter::variadic_optional(
-                        name.as_str(),
-                        "any",
-                        Value::List(vec![]),
-                    ).set_mods(mods));
-                } else {
-                    parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
-                }
-            } else {
-                return self.raise("TypeError", "Expected a map for generator parameter");
-            }
-        }
-
-        let named_args_hashmap = named_args.into_iter().collect::<HashMap<String, Value>>();
         
-        for (name_str, info) in named_args_hashmap {
-            if let Value::Map { keys, values } = info {
-                let type_val = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                    Some(pos) => &values[pos],
-                    None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
-                };
-        
-                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::List(l) => l.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        }).collect(),
-                        _ => vec![],
-                    },
-                    None => vec![],
-                };
+        let mut parameters = Vec::with_capacity(args.len());
 
-                let type_eval = match self.evaluate(&type_val.convert_to_statement()) {
+        for arg in args {
+            let type_value = match arg.ty {
+                Some(ty_stmt) => match self.evaluate(&ty_stmt) {
                     Value::Type(t) => t,
-                    _ => {
-                        self.raise("TypeError", "Expected 'var_type' to be a Type");
-                        return NULL;
-                    }
-                };
-        
-                let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
-                    Some(pos) => {
-                        let val = &values[pos];
-                        self.evaluate(&val.convert_to_statement())
-                    }
-                    None => NULL,
-                };
-        
-                parameters.push(Parameter::positional_optional_pt(
-                    name_str.as_str(),
-                    &type_eval,
-                    value,
-                ).set_mods(mods));
-            } else {
-                return self.raise("TypeError", "Expected a map for named argument");
+                    _ => return self.raise("RuntimeError", "Invalid 'type' in function parameter"),
+                },
+                None => Type::new_simple("any"),
+            };
+            if self.err.is_some() {
+                return NULL;
             }
-        }        
 
-        let body_formatted: Arc<Vec<Statement>> = Arc::new(body.iter().map(|v| v.convert_to_statement()).collect());
-        let ret_type = Arc::new(match self.evaluate(&return_type.convert_to_statement()) {
+            if arg.is_variadic {
+                parameters.push(Parameter::variadic_optional(
+                    arg.name.as_str(),
+                    "any",
+                    Value::List(vec![]),
+                ).set_mods(arg.modifiers.clone()));
+            } else if arg.default.is_some() {
+                let default_value = self.evaluate(&arg.default.unwrap());
+                if self.err.is_some() {
+                    return NULL;
+                }
+                parameters.push(Parameter::positional_optional_pt(
+                    arg.name.as_str(),
+                    &type_value,
+                    default_value,
+                ).set_mods(arg.modifiers.clone()));
+            } else {
+                parameters.push(Parameter::positional_pt(arg.name.as_str(), &type_value).set_mods(arg.modifiers.clone()));
+            }
+        }
+
+        let body_formatted: Arc<Vec<Statement>> = Arc::new(body);
+        let ret_type = Arc::new(match self.evaluate(&return_type) {
             Value::Type(t) => t,
             _ => {
                 self.raise("TypeError", "Expected 'return_type' to be a Type");
@@ -2182,8 +2055,8 @@ impl Interpreter {
             Value::Generator(generator)
         };
 
-        if self.variables.contains_key(name) && !name.starts_with("<") {
-            if let Some(var) = self.variables.get(name) {
+        if self.variables.contains_key(&name) && !name.starts_with("<") {
+            if let Some(var) = self.variables.get(&name) {
                 if var.is_final() {
                     return self.raise("AssigmentError", &format!("Cannot redefine final generator '{}'", name));
                 }
@@ -2211,94 +2084,39 @@ impl Interpreter {
                 is_final,
             ),
         );
-        self.variables.get(name)
+        self.variables.get(&name)
             .map_or(NULL, |var| var.value.clone())
     }
 
-    fn handle_type_declaration(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let name = match statement.get(&Value::String("name".to_string())) {
-            Some(Value::String(n)) => n.clone(),
-            _ => {
-                self.raise("RuntimeError", "Expected a string for 'name' in type declaration");
-                return NULL;
-            }
-        };
-
-        let type_kind = match statement.get(&Value::String("kind".to_string())) {
-            Some(Value::String(k)) => k.clone(),
-            _ => {
-                self.raise("RuntimeError", "Expected a string for 'kind' in type declaration");
-                return NULL;
-            }
-        };
-
-        let generics = match statement.get(&Value::String("generics".to_string())) {
-            Some(Value::List(g)) => g.iter().filter_map(|v| {
-                if let Value::String(s) = v {
-                    Some(s.clone())
-                } else { None }
-            }).collect(),
-            _ => vec![],
-        };
-
-        let variables = match statement.get(&Value::String("variables".to_string())) {
-            Some(Value::List(v)) => v.clone(),
-            _ => vec![],
-        };
-
-        let conditions = match statement.get(&Value::String("conditions".to_string())) {
-            Some(Value::List(c)) => c.clone(),
-            _ => vec![],
-        };
-
-        let modifiers = match statement.get(&Value::String("modifiers".to_string())) {
-            Some(Value::List(m)) => m.clone(),
-            _ => vec![],
-        };
-
+    fn handle_type_declaration(&mut self, name: String, modifiers: Vec<String>, type_decl: TypeDeclNode) -> Value {
         let mut is_public = false;
         let mut is_static = false;
         let mut is_final = false;
 
         for modifier in modifiers {
-            if let Value::String(modifier_str) = modifier {
-                match modifier_str.as_str() {
-                    "public" => is_public = true,
-                    "static" => is_static = true,
-                    "final" => is_final = true,
-                    "private" => is_public = false,
-                    "non-static" => is_static = false,
-                    "mutable" => is_final = false,
-                    _ => {
-                        self.raise("ModifierError", &format!("Unknown type modifier: {}", modifier_str));
-                        return NULL;
-                    }
-                }
-            } else {
-                self.raise("TypeError", "Type modifiers must be strings");
-                return NULL;
+            match modifier.as_str() {
+                "public" => is_public = true,
+                "static" => is_static = true,
+                "final" => is_final = true,
+                "private" => is_public = false,
+                "non-static" => is_static = false,
+                "mutable" => is_final = false,
+                _ => return self.raise("ModifierError", &format!("Unknown type modifier: {}", modifier)),
             }
         }
 
-        match type_kind.as_str() {
-            "alias" => {
-                let alias_type = match statement.get(&Value::String("alias".to_string())) {
-                    Some(Value::Map { .. }) => statement.get(&Value::String("alias".to_string())).unwrap(),
+        match type_decl {
+            TypeDeclNode::Alias { conditions, variables, base_type: bs_ty } => {
+                let base_type = match self.evaluate(&bs_ty) {
+                    Value::Type(t) => t,
                     _ => {
-                        self.raise("RuntimeError", "Expected a map for 'alias' in type declaration");
+                        self.raise("TypeError", "Expected base type to be a type");
                         return NULL;
                     }
                 };
-                let alias_evaluated = self.evaluate(&alias_type.convert_to_statement());
                 if self.err.is_some() {
                     return NULL;
                 }
-                let base_type = if let Value::Type(t) = alias_evaluated {
-                    t
-                } else {
-                    self.raise("TypeError", "Alias must evaluate to a Type");
-                    return NULL;
-                };
                 let alias_type = Value::Type(Type::Alias {
                     name: name.clone(),
                     base_type: Box::new(base_type),
@@ -2328,111 +2146,22 @@ impl Interpreter {
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
-            "enum" => {
-                let variants = match statement.get(&Value::String("variants".to_string())) {
-                    Some(Value::List(v)) => v,
-                    _ => {
-                        self.raise("RuntimeError", "Expected a list for 'variants' in enum declaration");
-                        return NULL;
+            TypeDeclNode::Enum { variants, wheres, generics } => {
+                let eval_wheres: Vec<(String, Value)> = wheres.iter().map(|(k, v)| {
+                    let val = self.evaluate(&v);
+                    if self.err.is_some() {
+                        return ("".to_string(), NULL);
                     }
-                };
+                    (k.clone(), val)
+                }).filter(|(k, _)| !k.is_empty()).collect();
                 if self.err.is_some() {
                     return NULL;
                 }
-                let wheres: Vec<(String, Value)> = match statement.get(&Value::String("wheres".to_string())) {
-                    Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
-                        if let Value::String(s) = k {
-                            (s, {
-                                let val = self.evaluate(&v.convert_to_statement());
-                                if self.err.is_some() {
-                                    return ("".to_string(), NULL);
-                                }
-                                val
-                            })
-                        } else {
-                            self.raise("RuntimeError", "Expected string keys in 'wheres' map");
-                            ("".to_string(), NULL)
-                        }
-                    }).filter(|(k, _)| !k.is_empty()).collect(),
-                    _ => vec![],
-                };
-                if self.err.is_some() {
-                    return NULL;
-                }
-                let mut variants_processed: Vec<(String, Statement, usize)> = Vec::new();
-                for v in variants {
-                    match v {
-                        Value::Map { keys, values } => {
-                            let n = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
-                                Some(pos) => match values.get(pos).cloned().unwrap_or(Value::Null) {
-                                    Value::String(s) => s,
-                                    _ => {
-                                        self.raise("RuntimeError", "Expected 'name' to be a string in enum variant");
-                                        return NULL;
-                                    }
-                                },
-                                None => {
-                                    self.raise("RuntimeError", "Expected 'name' in enum variant");
-                                    return NULL;
-                                }
-                            };
-                            let t = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                                Some(pos) => match values.get(pos).cloned().unwrap_or(Value::Null) {
-                                    Value::Map { keys, values } => {
-                                        let m = Value::Map { keys, values };
-                                        m.convert_to_statement()
-                                    }
-                                    Value::Null => Statement::Null,
-                                    _ => {
-                                        self.raise("RuntimeError", "Expected 'type' to be a map in enum variant");
-                                        return NULL;
-                                    }
-                                },
-                                None => {
-                                    self.raise("RuntimeError", "Expected 'type' in enum variant");
-                                    return NULL;
-                                }
-                            };
-                            let discriminant = match keys.iter().position(|k| k == &Value::String("discriminant".to_string())) {
-                                Some(pos) => values.get(pos).unwrap().convert_to_statement(),
-                                None => return self.raise("RuntimeError", "Expected 'discriminant' in enum variant"),
-                            };
-                            let usize_disc = match self.evaluate(&discriminant) {
-                                Value::Int(n) => match n.to_usize() {
-                                    Ok(u) => u,
-                                    Err(_) => {
-                                        self.raise_with_help("ValueError", "Discriminant integer too large in enum variant", &format!("expected in range between 0 and {}", usize::MAX));
-                                        return NULL;
-                                    }
-                                },
-                                _ => {
-                                    match discriminant {
-                                        Statement::Statement { loc, .. } => {
-                                            self.raise("TypeError", "Expected 'discriminant' to be an integer in enum variant");
-                                            if let Some(mut err) = self.err.take() {
-                                                err.loc = loc;
-                                                self.err = Some(err);
-                                            }
-                                            NULL
-                                        },
-                                        _ => self.raise("TypeError", "Expected 'discriminant' to be an integer in enum variant")
-                                    };
-                                    return NULL
-                                }
-                            };
-                            variants_processed.push((n, t, usize_disc));
-                        }
-                        _ => {
-                            self.raise("RuntimeError", "Expected a map for enum variant");
-                            return NULL;
-                        }
-                    };
-                };
                 let enum_type = Value::Type(Type::Enum {
                     name: name.clone(),
-                    variants: variants_processed,
+                    variants,
                     generics,
-                    wheres,
+                    wheres: eval_wheres,
                 });
                 if self.variables.contains_key(&name) {
                     if let Some(var) = self.variables.get(&name) {
@@ -2458,62 +2187,14 @@ impl Interpreter {
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
-            "struct" => {
-                let fields: Vec<(String, Statement, Vec<String>)> = match statement.get(&Value::String("properties".to_string())) {
-                    Some(Value::Map { keys, values }) => {
-                        keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
-                            if let Value::String(s) = k {
-                                if let Value::Tuple(vec) = v {
-                                    if vec.len() == 2 {
-                                        let map_value = &vec[0];
-                                        let list_value = &vec[1];
-
-                                        if let (Value::Map { keys, values }, Value::List(list)) = (map_value.clone(), list_value.clone()) {
-                                            let stmt = Value::Map { keys, values }.convert_to_statement();
-                                            let strs: Vec<String> = list.into_iter().filter_map(|v| {
-                                                if let Value::String(s) = v { Some(s) } else { None }
-                                            }).collect();
-                                            (s, stmt, strs)
-                                        } else {
-                                            self.raise("RuntimeError", "Expected (Map, List) in tuple");
-                                            (s, Statement::Null, vec![])
-                                        }
-                                    } else {
-                                        self.raise("RuntimeError", "Expected tuple of length 2");
-                                        (s, Statement::Null, vec![])
-                                    }
-                                } else {
-                                    self.raise("RuntimeError", "Expected a tuple in properties");
-                                    (s, Statement::Null, vec![])
-                                }
-                            } else {
-                                self.raise("RuntimeError", "Expected string keys in 'properties' map");
-                                ("".to_string(), Statement::Null, vec![])
-                            }
-                        }).filter(|(k, _, _)| !k.is_empty()).collect()
-                    },
-                    _ => {
-                        self.raise("RuntimeError", "Expected a map for 'properties' in struct declaration");
-                        return NULL;
+            TypeDeclNode::Struct { fields, wheres, generics } => {
+                let eval_wheres: Vec<(String, Value)> = wheres.iter().map(|(k, v)| {
+                    let val = self.evaluate(&v);
+                    if self.err.is_some() {
+                        return ("".to_string(), NULL);
                     }
-                };
-                let wheres: Vec<(String, Value)> = match statement.get(&Value::String("wheres".to_string())) {
-                    Some(Value::Map { keys, values }) => keys.iter().cloned().zip(values.iter().cloned()).map(|(k, v)| {
-                        if let Value::String(s) = k {
-                            (s, {
-                                let val = self.evaluate(&v.convert_to_statement());
-                                if self.err.is_some() {
-                                    return ("".to_string(), NULL);
-                                }
-                                val
-                            })
-                        } else {
-                            self.raise("RuntimeError", "Expected string keys in 'wheres' map");
-                            ("".to_string(), NULL)
-                        }
-                    }).filter(|(k, _)| !k.is_empty()).collect(),
-                    _ => vec![],
-                };
+                    (k.clone(), val)
+                }).filter(|(k, _)| !k.is_empty()).collect();
                 if self.err.is_some() {
                     return NULL;
                 }
@@ -2522,7 +2203,7 @@ impl Interpreter {
                     fields,
                     methods: vec![],
                     generics,
-                    wheres,
+                    wheres: eval_wheres,
                 });
                 if self.variables.contains_key(&name) {
                     if let Some(var) = self.variables.get(&name) {
@@ -2548,10 +2229,6 @@ impl Interpreter {
                 self.variables.get(&name)
                     .map_or(NULL, |var| var.value.clone())
             }
-            _ => {
-                self.raise("RuntimeError", "Unknown type kind in type declaration");
-                return NULL;
-            }
         }
     }
 
@@ -2565,159 +2242,132 @@ impl Interpreter {
             if match_result.1 {
                 break;
             }
-            if let Value::Map { keys, values } = case {
-                let style = match keys.iter().position(|k| k == &Value::String("style".to_string())) {
-                    Some(pos) => match values.get(pos) {
-                        Some(Value::String(s)) => s.as_str(),
-                        _ => {
-                            self.raise("RuntimeError", "Expected 'style' to be a string in match case");
-                            return NULL;
-                        }
-                    },
-                    None => {
-                        self.raise("RuntimeError", "Missing 'style' in match case");
+            match case {
+                MatchCase::Pattern { pattern, body, guard } => {
+                    let eval_cond = self.evaluate(&condition);
+                    if self.err.is_some() {
                         return NULL;
                     }
-                };
-
-                match case {
-                    MatchCase::Pattern { pattern, body, guard } => {
-                        let guard = match keys.iter().position(|k| k == &Value::String("guard".to_string())) {
-                            Some(pos) => values.get(pos).unwrap_or(&Value::Null),
-                            None => {
-                                self.raise("RuntimeError", "Expected 'guard' in match case");
-                                return NULL;
-                            }
-                        };
-
-                        let eval_cond = self.evaluate(&condition);
-                        if self.err.is_some() {
+                    let (matched, variables) = match check_pattern(&eval_cond, &pattern.to_value()) {
+                        Ok(matched) => matched,
+                        Err((err_ty, err_msg)) => {
+                            self.raise(&err_ty, &err_msg);
                             return NULL;
                         }
-                        let (matched, variables) = match check_pattern(&eval_cond, &pattern.to_value()) {
-                            Ok(matched) => matched,
-                            Err((err_ty, err_msg)) => {
-                                self.raise(&err_ty, &err_msg);
-                                return NULL;
-                            }
-                        };
+                    };
 
-                        let mut variables: FxHashMap<String, Variable> = FxHashMap::from_iter(variables.into_iter().map(|(k, v)| {
-                            (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
-                        }));
-                        let mut merged = self.variables.clone();
-                        merged.extend(variables);
-                        variables = merged;
+                    let mut variables: FxHashMap<String, Variable> = FxHashMap::from_iter(variables.into_iter().map(|(k, v)| {
+                        (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
+                    }));
+                    let mut merged = self.variables.clone();
+                    merged.extend(variables);
+                    variables = merged;
 
 
-                        if matched {
-                            let mut res = NULL;
-                            let mut cont = false;
-                            if let Some(g) = guard {
-                                let mut guard_interp = Interpreter::new(
-                                    self.config.clone(),
-                                    &self.file_path,
-                                    &self.cwd,
-                                    self.preprocessor_info.clone(),
-                                    &[],
-                                );
-                                guard_interp.variables.extend(variables.clone());
-                                let guard_result = guard_interp.evaluate(&g);
-                                if guard_interp.err.is_some() {
-                                    self.err = guard_interp.err.clone();
-                                    drop(guard_interp);
-                                    return NULL;
-                                }
-                                drop(guard_interp);
-                                if !guard_result.is_truthy() {
-                                    continue;
-                                }
-                            }
-                            let mut interp = Interpreter::new(
+                    if matched {
+                        let mut res = NULL;
+                        let mut cont = false;
+                        if let Some(g) = guard {
+                            let mut guard_interp = Interpreter::new(
                                 self.config.clone(),
                                 &self.file_path,
                                 &self.cwd,
                                 self.preprocessor_info.clone(),
                                 &[],
                             );
-                            interp.variables = variables;
-                            'outer: for stmt in body.iter() {
-                                let result = interp.evaluate(&stmt);
-                                if interp.err.is_some() {
-                                    self.err = interp.err.clone();
+                            guard_interp.variables.extend(variables.clone());
+                            let guard_result = guard_interp.evaluate(&g);
+                            if guard_interp.err.is_some() {
+                                self.err = guard_interp.err.clone();
+                                drop(guard_interp);
+                                return NULL;
+                            }
+                            drop(guard_interp);
+                            if !guard_result.is_truthy() {
+                                continue;
+                            }
+                        }
+                        let mut interp = Interpreter::new(
+                            self.config.clone(),
+                            &self.file_path,
+                            &self.cwd,
+                            self.preprocessor_info.clone(),
+                            &[],
+                        );
+                        interp.variables = variables;
+                        'outer: for stmt in body.iter() {
+                            let result = interp.evaluate(&stmt);
+                            if interp.err.is_some() {
+                                self.err = interp.err.clone();
+                                return NULL;
+                            }
+                            match interp.state {
+                                State::Continue => {
+                                    cont = true;
+                                    interp.state = State::Normal;
+                                    break 'outer;
+                                }
+                                State::Break => {
+                                    interp.state = State::Normal;
+                                    self.variables.extend(interp.variables.clone());
+                                    drop(interp);
                                     return NULL;
                                 }
-                                match interp.state {
-                                    State::Continue => {
-                                        cont = true;
-                                        interp.state = State::Normal;
-                                        break 'outer;
-                                    }
-                                    State::Break => {
-                                        interp.state = State::Normal;
-                                        self.variables.extend(interp.variables.clone());
-                                        drop(interp);
-                                        return NULL;
-                                    }
-                                    _ => {}
-                                }
-                                res = result;
+                                _ => {}
                             }
-                            self.variables.extend(interp.variables.clone());
-                            drop(interp);
-                            if cont {
-                                match_result = (Some(NULL), false);
-                            } else {
-                                match_result = (Some(res), true);
-                            }
+                            res = result;
+                        }
+                        self.variables.extend(interp.variables.clone());
+                        drop(interp);
+                        if cont {
+                            match_result = (Some(NULL), false);
+                        } else {
+                            match_result = (Some(res), true);
                         }
                     }
-                    MatchCase::Literal { patterns, body } => {
-                        let mut matched = false;
-                        for p in patterns {
-                            if self.evaluate(&condition) == self.evaluate(&p) {
-                                matched = true;
-                                break;
-                            }
-                        }
-
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-
-                        if matched {
-                            let mut res = NULL;
-                            let mut cont = false;
-                            'outer: for stmt in body.iter() {
-                                let result = self.evaluate(&stmt);
-                                if self.err.is_some() {
-                                    return NULL;
-                                }
-                                match self.state {
-                                    State::Continue => {
-                                        cont = true;
-                                        self.state = State::Normal;
-                                        break 'outer;
-                                    },
-                                    State::Break => {
-                                        self.state = State::Normal;
-                                        return NULL
-                                    },
-                                    _ => {}
-                                }
-                                res = result;
-                            }
-                            if cont {
-                                match_result = (Some(NULL), false);
-                            } else {
-                                match_result = (Some(res), true);
-                            }
-                        }
-                    }
-                    _ => return self.raise("RuntimeError", "Invalid style in 'match' statement"),
                 }
-            } else {
-                self.raise("RuntimeError", "Invalid case in 'match' statement - expected map");
+                MatchCase::Literal { patterns, body } => {
+                    let mut matched = false;
+                    for p in patterns {
+                        if self.evaluate(&condition) == self.evaluate(&p) {
+                            matched = true;
+                            break;
+                        }
+                    }
+
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+
+                    if matched {
+                        let mut res = NULL;
+                        let mut cont = false;
+                        'outer: for stmt in body.iter() {
+                            let result = self.evaluate(&stmt);
+                            if self.err.is_some() {
+                                return NULL;
+                            }
+                            match self.state {
+                                State::Continue => {
+                                    cont = true;
+                                    self.state = State::Normal;
+                                    break 'outer;
+                                },
+                                State::Break => {
+                                    self.state = State::Normal;
+                                    return NULL
+                                },
+                                _ => {}
+                            }
+                            res = result;
+                        }
+                        if cont {
+                            match_result = (Some(NULL), false);
+                        } else {
+                            match_result = (Some(res), true);
+                        }
+                    }
+                }
             }
         }
 
@@ -2733,20 +2383,8 @@ impl Interpreter {
     }
 
     fn handle_scope(&mut self, body: Vec<Statement>, name: Option<String>, locals: Vec<String>, is_local: bool) -> Value {
-        let name = match name{
-            Some(v) => {
-                let n = self.evaluate(&v);
-                if self.err.is_some() {
-                    return NULL;
-                }
-                match n {
-                    Value::String(s) => s,
-                    _ => {
-                        self.raise("TypeError", "Expected scope name to be a string");
-                        return NULL;
-                    }
-                }
-            }
+        let name = match name {
+            Some(v) => v,
             None => self.scope.clone(),
         };
 
@@ -2768,15 +2406,7 @@ impl Interpreter {
             return result;
         }
 
-        let new_file_path = match name {
-            Some(v) => {
-                self.file_path.clone() + &format!("+scope.{}", v)
-            }
-            None => {
-                self.file_path.clone()
-            }
-        };
-
+        let new_file_path = self.file_path.clone() + &format!("+scope.{}", name);
 
         self.stack.push((
             new_file_path.clone(),
@@ -2798,13 +2428,13 @@ impl Interpreter {
         scope_interpreter.set_scope(&name.clone());
 
         for local in locals.iter() {
-            if let Some(val) = self.variables.get(var_name) {
-                scope_interpreter.variables.insert(var_name.clone(), val.clone());
+            if let Some(val) = self.variables.get(local.as_str()) {
+                scope_interpreter.variables.insert(local.clone(), val.clone());
             } else {
                 self.stack.pop();
                 self.raise(
                     "NameError",
-                    &format!("Variable '{}' is not defined in the outer scope", var_name),
+                    &format!("Variable '{}' is not defined in the outer scope", local),
                 );
                 return NULL;
             }
@@ -2818,7 +2448,7 @@ impl Interpreter {
             return NULL;
         }
 
-        let res = scope_interpreter.interpret(stmts, true);
+        let res = scope_interpreter.interpret(body, true);
 
         if let Some(err) = scope_interpreter.err {
             self.stack.pop();
@@ -2897,17 +2527,13 @@ impl Interpreter {
         NULL
     }
 
-    fn handle_pointer(&mut self, statement: HashMap<Value, Value>) -> Value {
-        let pointer_type = statement.get(&Value::String("type".to_string())).unwrap_or(&NULL);
-        let value_opt = statement.get(&Value::String("value".to_string())).unwrap_or(&NULL);
-
-        if *pointer_type == Value::String("POINTER_ASSIGN".to_string()) {
-            if self.err.is_some() {
-                self.err = None;
-            }
+    fn handle_pointer(&mut self, ptr_op_type: PtrNode, value_stmt: Statement) -> Value {
+        // why? i have no idea
+        if matches!(ptr_op_type, PtrNode::PointerAssign { .. }) && self.err.is_some() {
+            self.err = None;
         }
 
-        let value = self.evaluate(&value_opt.convert_to_statement());
+        let value = self.evaluate(&value_stmt);
 
         if !self.config.allow_unsafe {
             return self.raise_with_help(
@@ -2918,82 +2544,70 @@ impl Interpreter {
         }
 
         if self.err.is_some() {
-            return NULL;
+            return Value::Null;
         }
 
-        match pointer_type {
-            Value::String(t) if t == "POINTER_REF" => {
-                let ref_level = match statement.get(&Value::String("ptr_level".to_string())) {
-                    Some(Value::Int(n)) => match n.to_usize() {
-                        Ok(u) => u,
-                        Err(_) => {
-                            self.raise_with_help("ValueError", "Pointer level integer too large", &format!("expected in range between 0 and {}", usize::MAX));
-                            return NULL;
-                        }
-                    },
-                    _ => {
-                        self.raise("TypeError", "Expected 'ptr_level' to be an integer for pointer reference");
-                        return NULL;
-                    }
-                };
+        match ptr_op_type {
+            PtrNode::PointerRef { ref_level } => {
                 match value {
-                    Value::Type(mut t) => {
-                        Value::Type(t.set_reference(ref_level).unmut())
-                    }
-                    _ => {
-                        Value::Pointer(Arc::new(Mutex::new((value, ref_level))))
-                    }
+                    Value::Type(mut t) => Value::Type(t.set_reference(ref_level).unmut()),
+                    _ => Value::Pointer(Arc::new(Mutex::new((value, ref_level)))),
                 }
             }
 
-            Value::String(t) if t == "POINTER_DEREF" => {
-                if let Value::Pointer(ptr_arc) = value {
-                    let mut inner = ptr_arc.lock().unwrap();
-                    if inner.1 > 1 {
-                        inner.1 -= 1;
-                        Value::Pointer(ptr_arc.clone())
+            PtrNode::PointerDeref { deref_level } => {
+                let mut current = value;
+                let mut remaining = deref_level;
+
+                while remaining > 0 {
+                    let arc_clone = match current {
+                        Value::Pointer(ref ptr_arc) => ptr_arc.clone(),
+                        _ => {
+                            self.raise("TypeError", "Expected a pointer reference for dereferencing");
+                            return Value::Null;
+                        }
+                    };
+
+                    let guard = arc_clone.lock().unwrap();
+                    current = guard.0.clone();
+                    drop(guard);
+
+                    remaining -= 1;
+                }
+
+                current
+            }
+
+            PtrNode::PointerAssign { target: target_stmt, assign_level } => {
+                let mut target = self.evaluate(&target_stmt);
+                if self.err.is_some() {
+                    return Value::Null;
+                }
+
+                let mut remaining = assign_level;
+
+                loop {
+                    let arc_clone = match target {
+                        Value::Pointer(ref ptr_arc) => ptr_arc.clone(),
+                        _ => {
+                            self.raise("TypeError", "Expected pointer reference for assignment");
+                            return Value::Null;
+                        }
+                    };
+
+                    let mut guard = arc_clone.lock().unwrap();
+
+                    if remaining > 1 {
+                        remaining -= 1;
+                        target = guard.0.clone();
+                        drop(guard);
                     } else {
-                        inner.0.clone()
+                        let old_count = guard.1;
+                        *guard = (value.clone(), old_count);
+                        drop(guard);
+                        return Value::Pointer(arc_clone);
                     }
-                } else {
-                    self.raise("TypeError", "Expected a pointer reference for dereferencing");
-                    NULL
                 }
-            }
-
-            Value::String(t) if t == "POINTER_ASSIGN" => {
-                let left = self.evaluate(
-                    &statement
-                        .get(&Value::String("left".to_string()))
-                        .unwrap_or(&NULL)
-                        .convert_to_statement(),
-                );
-                if self.err.is_some() {
-                    return NULL;
-                }
-                let right = self.evaluate(
-                    &statement
-                        .get(&Value::String("right".to_string()))
-                        .unwrap_or(&NULL)
-                        .convert_to_statement(),
-                );
-                if self.err.is_some() {
-                    return NULL;
-                }
-
-                if let Value::Pointer(ref ptr_arc) = left {
-                    let mut inner = ptr_arc.lock().unwrap();
-                    let _old = std::mem::replace(&mut *inner, (right.clone(), 0));
-                    left.clone()
-                } else {
-                    self.raise("TypeError", "Expected pointer reference for assignment");
-                    NULL
-                }
-            }
-
-            _ => {
-                self.raise("SyntaxError", "Invalid pointer type");
-                NULL
             }
         }
     }
@@ -3073,7 +2687,7 @@ impl Interpreter {
         for (i, target) in targets.iter().enumerate() {
             let val = value_list[i].clone();
         
-            match target.node {
+            match &target.node {
                 Node::Variable { name } => {
                     if let Some(var) = self.variables.get_mut(name.as_str()) {
                         var.set_value(val);
@@ -3119,9 +2733,9 @@ impl Interpreter {
 
                     let _ = self.handle_variable_declaration(
                         name.clone(),
-                        val_stmt,
-                        var_type.clone(),
-                        modifiers,
+                        *val_stmt.clone(),
+                        *var_type.clone(),
+                        modifiers.to_vec(),
                     );
                     if self.err.is_some() {
                         return NULL;
@@ -3363,32 +2977,17 @@ impl Interpreter {
         }
     }
 
-    pub fn handle_type_conversion(&mut self, statement: HashMap<Value, Value>) -> Value {
-        if self.err.is_some() {
-            return NULL;
-        }
-        
-        let value_opt = match statement.get(&Value::String("value".to_string())) {
-            Some(v) => v,
-            None => return self.raise("RuntimeError", "Missing 'value' in type conversion statement"),
-        };
-
-        let value = self.evaluate(&value_opt.convert_to_statement());
+    pub fn handle_type_conversion(&mut self, stmt: Statement, target_type_opt: Statement) -> Value {
         if self.err.is_some() {
             return NULL;
         }
 
-        let target_type_opt = match statement.get(&Value::String("to".to_string())) {
-            Some(Value::Map { keys, values }) => {
-                Value::Map {
-                    keys: keys.clone(),
-                    values: values.clone(),
-                }
-            }
-            _ => return self.raise("RuntimeError", "Missing or invalid 'to' in type conversion statement"),
-        };
+        let value = self.evaluate(&stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
 
-        let binding = self.evaluate(&target_type_opt.convert_to_statement());
+        let binding = self.evaluate(&target_type_opt);
         if self.err.is_some() {
             return NULL;
         }
@@ -3574,13 +3173,11 @@ impl Interpreter {
             return NULL;
         }
 
-        let alias: &str = match alias {
-            Some(a) => a.as_str(),
-            None => {
-                let last_segment: &str = name_parts.last().map(|s| *s).unwrap_or(base_name.as_str());
-                last_segment
-            }
+        let alias_owned = match alias {
+            Some(a) => a.clone(),
+            None => name_parts.last().cloned().unwrap_or(&base_name).to_owned(),
         };
+        let alias: &str = &alias_owned;
 
         if !is_valid_alias(&alias) {
             return self.raise_with_help(
@@ -3602,7 +3199,7 @@ impl Interpreter {
         let mut is_static = true;
 
         for modifier in &modifiers {
-            match modifier_str.as_str() {
+            match modifier.as_str() {
                 "public" => is_public = true,
                 "final" => is_final = true,
                 "static" => is_static = true,
@@ -3610,7 +3207,7 @@ impl Interpreter {
                 "mutable" => is_final = false,
                 "non-static" => is_static = false,
                 _ => {
-                    self.raise("SyntaxError", &format!("Unknown import modifier '{}'", modifier_str));
+                    self.raise("SyntaxError", &format!("Unknown import modifier '{}'", modifier));
                     return NULL;
                 }
             }
@@ -4382,12 +3979,11 @@ impl Interpreter {
         self.state = State::Normal;
 
         // Tailcall optimization (TCO)
-        if stmt.get_type() == "CALL" {
-            let func_name = stmt.get_value("name").unwrap_or(Value::Null).to_string();
+        if let Node::Call { ref name, .. } = stmt.node {
             let len = self.stack.frames.len();
             for i in (0..len).rev() {
                 let frame = &self.stack.frames[i];
-                if frame.stack_type == StackType::FunctionCall && frame.file_path == func_name {
+                if frame.stack_type == StackType::FunctionCall && frame.file_path == *name {
                     self.state = State::TCO(stmt);
                     return NULL;
                 }
@@ -4408,13 +4004,13 @@ impl Interpreter {
     fn handle_function_declaration(
         &mut self, 
         name: String, 
-        pos_args: Vec<Value>, 
-        named_args: Vec<(String, Value)>, 
+        args: Vec<ParamAST>,
         body: Vec<Statement>, 
         modifiers: Vec<String>, 
         return_type: Statement,
         effect_flags: EffectFlags,
     ) -> Value {
+        let mut name = name;
         let mut return_type_str = match self.evaluate(&return_type) {
             Value::Type(t) => t,
             _ => return self.raise("RuntimeError", "Invalid 'return_type' in function declaration"),
@@ -4444,116 +4040,39 @@ impl Interpreter {
             }
         }
 
-        let mut parameters = Vec::new();
+        let mut parameters = Vec::with_capacity(args.len());
 
-        for arg in pos_args {
-            if let Value::Map { keys, values } = arg {
-                let name = match keys.iter().position(|k| k == &Value::String("name".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::String(n) => n,
-                        _ => return self.raise("RuntimeError", "'name' must be a string in function parameter"),
-                    },
-                    None => return self.raise("RuntimeError", "Missing 'name' in function parameter"),
-                };
-
-                let type_value = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                    Some(pos) => {
-                        let type_val = &values[pos];
-                        match self.evaluate(&type_val.convert_to_statement()) {
-                            Value::Type(t) => t,
-                            _ => {
-                                if self.err.is_some() {
-                                    return NULL;
-                                }
-                                return self.raise("RuntimeError", "Invalid 'type' in function parameter");
-                            },
-                        }
-                    }
-                    None => return self.raise("RuntimeError", "Missing 'type' in function parameter"),
-                };
-
-                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::List(l) => l.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else { None }
-                        }).collect(),
-                        _ => vec![],
-                    },
-                    None => vec![],
-                };
-
-                let is_variadic = match keys.iter().position(|k| k == &Value::String("variadic".to_string())) {
-                    Some(pos) => matches!(values[pos], Value::Boolean(true)),
-                    None => false,
-                };
-
-                if is_variadic {
-                    parameters.push(Parameter::variadic_optional(
-                        name.as_str(),
-                        "any",
-                        Value::List(vec![]),
-                    ).set_mods(mods));
-                } else {
-                    parameters.push(Parameter::positional_pt(name.as_str(), &type_value).set_mods(mods));
-                }
-            } else {
-                return self.raise("TypeError", "Expected a map for function parameter");
-            }
-        }
-        
-        let named_args_hashmap = named_args.into_iter().collect::<HashMap<_, _>>();
-        
-        for (name_str, info) in named_args_hashmap {
-            if let Value::Map { keys, values } = info {
-                let type_val = match keys.iter().position(|k| k == &Value::String("type".to_string())) {
-                    Some(pos) => &values[pos],
-                    None => return self.raise("RuntimeError", "Missing 'type' in named argument"),
-                };
-        
-                let mods = match keys.iter().position(|k| k == &Value::String("modifiers".to_string())) {
-                    Some(pos) => match &values[pos] {
-                        Value::List(l) => l.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        }).collect(),
-                        _ => vec![],
-                    },
-                    None => vec![],
-                };
-
-                let type_eval = match self.evaluate(&type_val.convert_to_statement()) {
+        for arg in args {
+            let type_value = match arg.ty {
+                Some(ty_stmt) => match self.evaluate(&ty_stmt) {
                     Value::Type(t) => t,
-                    _ => return self.raise("RuntimeError", "Invalid 'type' in named argument"),
-                };
+                    _ => return self.raise("RuntimeError", "Invalid 'type' in function parameter"),
+                },
+                None => Type::new_simple("any"),
+            };
+            if self.err.is_some() {
+                return NULL;
+            }
 
+
+            if arg.is_variadic {
+                parameters.push(Parameter::variadic_optional(
+                    arg.name.as_str(),
+                    "any",
+                    Value::List(vec![]),
+                ).set_mods(arg.modifiers.clone()));
+            } else if arg.default.is_some() {
+                let default_value = self.evaluate(&arg.default.unwrap());
                 if self.err.is_some() {
                     return NULL;
                 }
-        
-                let value = match keys.iter().position(|k| k == &Value::String("value".to_string())) {
-                    Some(pos) => {
-                        let val = &values[pos];
-                        self.evaluate(&val.convert_to_statement())
-                    }
-                    None => NULL,
-                };
-
-                if self.err.is_some() {
-                    return NULL;
-                }
-                
                 parameters.push(Parameter::positional_optional_pt(
-                    name_str.as_str(),
-                    &type_eval,
-                    value,
-                ).set_mods(mods));
+                    arg.name.as_str(),
+                    &type_value,
+                    default_value,
+                ).set_mods(arg.modifiers.clone()));
             } else {
-                return self.raise("TypeError", "Expected a map for named argument");
+                parameters.push(Parameter::positional_pt(arg.name.as_str(), &type_value).set_mods(arg.modifiers.clone()));
             }
         }
 
@@ -4562,7 +4081,7 @@ impl Interpreter {
             let id: usize = self.internal_storage.lambda_counter;
             self.internal_storage.lambda_counter = id + 1;
             lambda_name = name.replace("{id}", &id.to_string());
-            name = &lambda_name;
+            name = lambda_name;
         }
 
         let metadata = FunctionMetadata {
@@ -4577,8 +4096,8 @@ impl Interpreter {
             effects: effect_flags,
         };
 
-        if self.variables.contains_key(name) && !name.starts_with("<") {
-            if let Some(var) = self.variables.get(name) {
+        if self.variables.contains_key(&name) && !name.starts_with("<") {
+            if let Some(var) = self.variables.get(&name) {
                 if var.is_final() {
                     return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
                 }
@@ -4612,7 +4131,7 @@ impl Interpreter {
                 is_final,
             ),
         );
-        self.variables.get(name)
+        self.variables.get(&name)
             .map_or(NULL, |var| var.value.clone())
     }
 
@@ -4803,24 +4322,9 @@ impl Interpreter {
     }
 
     fn handle_forget(&mut self, stmt: Statement) -> Value {
-        let value_map = match value {
-            Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-            _ => return self.raise("RuntimeError", "Expected a map for forget value"),
-        };
-    
-        let value_type = match value_map.get(&Value::String("type".to_string())) {
-            Some(Value::String(t)) => t.as_str(),
-            _ => return self.raise("RuntimeError", "Missing or invalid 'type' in forget value"),
-        };
-    
-        match value_type {
-            "VARIABLE" => {
-                let name = match value_map.get(&Value::String("name".to_string())) {
-                    Some(Value::String(n)) => n,
-                    _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable forget"),
-                };
-
-                match self.variables.remove(name) {
+        match stmt.node {
+            Node::Variable { name, .. } => {
+                match self.variables.remove(&name) {
                     Some(value) => {
                         self.debug_log(
                             format_args!("<Variable '{}' forgotten>", name)
@@ -4834,80 +4338,133 @@ impl Interpreter {
                 }
             }
 
-            "INDEX_ACCESS" => {
-                let object_val = match value_map.get(&Value::String("object".to_string())) {
-                    Some(v) => self.evaluate(&Value::convert_to_statement(v)),
-                    None => return self.raise("RuntimeError", "Missing 'object' in index access forget"),
-                };
-                let variable_name = match value_map.get(&Value::String("object".to_string())) {
-                    Some(Value::Map { keys, values }) => {
-                        let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                        match obj_map.get(&Value::String("type".to_string())) {
-                            Some(Value::String(t)) if t == "VARIABLE" => {
-                                match obj_map.get(&Value::String("name".to_string())) {
-                                    Some(Value::String(name)) => Some(name.clone()),
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
+            Node::IndexAccess { object, access } => {
+                let object_val = self.evaluate(&*object);
+                if self.err.is_some() { return NULL; }
+
+                let variable_name = match &object.node {
+                    Node::Variable { name, .. } => Some(name.clone()),
                     _ => None,
                 };
 
-                let access_val = match value_map.get(&Value::String("access".to_string())) {
-                    Some(v) => v,
-                    None => return self.raise("RuntimeError", "Missing 'access' in index access forget"),
-                };
-                let access_hashmap = match access_val {
-                    Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-                    _ => return self.raise("RuntimeError", "Expected a map for index access forget"),
-                };
-                let start_val_opt = access_hashmap.get(&Value::String("start".to_string()));
-                let end_val_opt = access_hashmap.get(&Value::String("end".to_string()));
+                let (start_idx, end_idx) = match &*access {
+                    AccessType::Single { index } => {
+                        let idx_val = self.evaluate(&index);
+                        if self.err.is_some() { return NULL; }
 
-                let len = match &object_val {
-                    Value::String(s) => s.chars().count(),
-                    Value::List(l) => l.len(),
-                    Value::Bytes(b) => b.len(),
-                    Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten."),
-                    Value::Map { keys, values } => {
-                        if keys.len() != values.len() {
-                            return self.raise("TypeError", "Map keys and values must have the same length");
-                        }
-                        keys.len()
+                        let end_val = match self.to_index(&idx_val, match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable, cannot forget indexes."),
+                            Value::Map { keys, values } => {
+                                if keys.len() != values.len() {
+                                    return self.raise("TypeError", "Map keys and values must have the same length");
+                                }
+                                keys.len()
+                            }
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }) {
+                            Ok(i) => i + 1,
+                            Err(e) => return e,
+                        };
+
+                        let start = match self.to_index(&idx_val, end_val) {
+                            Ok(i) => i,
+                            Err(e) => return e,
+                        };
+
+                        (start, end_val)
                     }
-                    _ => return self.raise("TypeError", "Object not indexable"),
-                };
 
-                let start_val = match start_val_opt {
-                    Some(v) => self.evaluate(&v.convert_to_statement()),
-                    None => NULL,
-                };
-                let end_val = match end_val_opt {
-                    Some(v) => self.evaluate(&v.convert_to_statement()),
-                    None => NULL,
-                };
+                    AccessType::Range { start, end } => {
+                        let s = self.evaluate(&start);
+                        if self.err.is_some() { return NULL; }
 
-                let start_idx = if start_val == NULL {
-                    0
-                } else {
-                    match self.to_index(&start_val, len) {
-                        Ok(i) => i,
-                        Err(e) => return e,
+                        let e = self.evaluate(&end);
+                        if self.err.is_some() { return NULL; }
+
+                        let start = if s == NULL { 0 } else { match self.to_index(&s, match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }) { Ok(i) => i, Err(e) => return e } };
+
+                        let end = if e == NULL { start + 1 } else { match self.to_index(&e, match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }) { Ok(i) => i, Err(e) => return e } };
+
+                        (start, end)
+                    }
+
+                    AccessType::ToEnd { start } => {
+                        let s = self.evaluate(&start);
+                        if self.err.is_some() { return NULL; }
+
+                        let start_idx = match self.to_index(&s, match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }) {
+                            Ok(i) => i,
+                            Err(e) => return e,
+                        };
+
+                        let end_idx = match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        };
+
+                        (start_idx, end_idx)
+                    }
+
+                    AccessType::ToStart { end } => {
+                        let e = self.evaluate(&end);
+                        if self.err.is_some() { return NULL; }
+
+                        let end_idx = match self.to_index(&e, match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        }) {
+                            Ok(i) => i,
+                            Err(e) => return e,
+                        };
+
+                        (0, end_idx)
+                    }
+
+                    AccessType::Full => {
+                        let end_idx = match &object_val {
+                            Value::String(s) => s.chars().count(),
+                            Value::List(l) => l.len(),
+                            Value::Bytes(b) => b.len(),
+                            Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
+                            Value::Map { keys, .. } => keys.len(),
+                            _ => return self.raise("TypeError", "Object not indexable"),
+                        };
+                        (0, end_idx)
                     }
                 };
 
-                let end_idx = if end_val == NULL {
-                    start_idx + 1
-                } else {
-                    match self.to_index(&end_val, len) {
-                        Ok(i) => i,
-                        Err(e) => return e,
-                    }
-                };                
-
-                if start_idx > end_idx || end_idx > len {
+                if start_idx > end_idx {
                     return self.raise("IndexError", "Invalid slice indices");
                 }
 
@@ -4923,11 +4480,16 @@ impl Interpreter {
                         Value::Bytes(new_bytes)
                     }
                     Value::String(_) => {
-                        return self.raise("TypeError", "Cannot forget slice on immutable string");
+                        return self.raise_with_help(
+                            "TypeError",
+                            "Cannot forget slice on immutable string",
+                            to_static(format!(
+                                "You can use bytes instead of a string, or do: {}",
+                                wrap_in_help(&format!("new_string := old_string[..{}] + old_string[{}..]", start_idx, end_idx), &self.config)
+                            ))
+                        );
                     }
-                    Value::Tuple(_) => {
-                        return self.raise("TypeError", "Tuples are immutable, their indexes cannot be forgotten.");
-                    }
+                    Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
                     Value::Map { keys, values } => {
                         let mut new_keys = keys.clone();
                         let mut new_values = values.clone();
@@ -4949,105 +4511,137 @@ impl Interpreter {
                 changed_value
             }
 
-            "TUPLE" => {
-                let items_val = match value_map.get(&Value::String("items".to_string())) {
-                    Some(v) => v,
-                    None => return self.raise("RuntimeError", "Missing 'items' in tuple forget"),
+            Node::Iterable { node } => {
+                let tuple_items = match node {
+                    IterableNode::Tuple { elements } => elements,
+                    IterableNode::List { .. } => {
+                        return self.raise_with_help(
+                            "ValueError",
+                            "Cannot use type 'list' in forget",
+                            "Did you mean to use 'tuple'?",
+                        )
+                    }
+                    _ => return self.raise("RuntimeError", "Unsupported iterable type in forget"),
                 };
 
-                let items = match items_val {
-                    Value::List(list) => list,
-                    _ => return self.raise("RuntimeError", "'items' must be a list in tuple forget"),
-                };
+                let mut names = Vec::with_capacity(tuple_items.len());
+                let mut stack = Vec::with_capacity(8);
 
-                let mut results = Vec::new();
-                let mut names = Vec::new();
-                
-                fn extract_names(item: &Value, names: &mut Vec<String>) -> Result<(), String> {
-                    let item_map = match item {
-                        Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect::<HashMap<_, _>>(),
-                        _ => return Err("Expected a map for tuple forget item".to_string()),
-                    };
+                for stmt in &tuple_items {
+                    stack.push(stmt);
+                }
 
-                    match item_map.get(&Value::String("type".to_string())) {
-                        Some(Value::String(n)) => match n.as_str() {
-                            "VARIABLE" => {
-                                if let Some(Value::String(name)) = item_map.get(&Value::String("name".to_string())) {
-                                    names.push(name.clone());
-                                    Ok(())
-                                } else {
-                                    Err("Missing or invalid 'name' in tuple forget item".to_string())
-                                }
-                            }
-                            "TUPLE" => {
-                                if let Some(Value::List(items)) = item_map.get(&Value::String("items".to_string())) {
-                                    for sub_item in items {
-                                        extract_names(sub_item, names)?;
+                while let Some(stmt) = stack.pop() {
+                    match &stmt.node {
+                        Node::Variable { name, .. } => {
+                            names.push(name.clone());
+                        }
+                        Node::Iterable { node } => {
+                            match node {
+                                IterableNode::Tuple { elements } => {
+                                    for s in elements.iter().rev() {
+                                        stack.push(to_static(s.clone()));
                                     }
-                                    Ok(())
-                                } else {
-                                    Err("Missing or invalid 'items' in tuple forget item".to_string())
                                 }
+                                _ => return self.raise("RuntimeError", "Unsupported iterable type in forget"),
                             }
-                            _ => Ok(()),
-                        },
-                        _ => Err("Missing or invalid 'type' in tuple forget item".to_string()),
+                        }
+                        _ => return self.raise("RuntimeError", "Invalid item in tuple forget, expected variable or iterable"),
                     }
                 }
 
-                for item in items {
-                    let mut stmt = HashMap::new();
-                    stmt.insert(Value::String("type".to_string()), Value::String("FORGET".to_string()));
-                    stmt.insert(Value::String("value".to_string()), item.clone());
-                    let name = match extract_names(&item, &mut names) {
-                        Ok(_) => item,
-                        Err(e) => return self.raise("RuntimeError", &e),
-                    };
-                    names.push(name.to_string());
-                    let forgotten_value = self.handle_forget(stmt);
-                    results.push(forgotten_value);
+                let mut results = Vec::with_capacity(names.len());
+
+                let mut name_iter = names.into_iter();
+
+                fn walk_forget(
+                    this: &mut Interpreter,
+                    stmt: &Statement,
+                    name_iter: &mut impl Iterator<Item=String>,
+                    out: &mut Vec<Value>,
+                ) {
+                    match &stmt.node {
+                        Node::Variable { .. } => {
+                            let name = name_iter.next().unwrap();
+                            let tmp = Statement {
+                                node: Node::Variable { name },
+                                loc: stmt.loc.clone(),
+                            };
+                            out.push(this.handle_forget(tmp));
+                        }
+                        Node::Iterable { node } => {
+                            if let IterableNode::Tuple { elements } = node {
+                                for sub in elements {
+                                    walk_forget(this, sub, name_iter, out);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                for stmt in &tuple_items {
+                    walk_forget(self, &stmt, &mut name_iter, &mut results);
                 }
 
                 Value::Tuple(results)
             }
 
-            "POINTER_DEREF" => {
-                let value = match value_map.get(&Value::String("value".to_string())) {
-                    Some(v) => v,
-                    None => return self.raise("RuntimeError", "Missing 'value' in pointer deref forget"),
-                };
-                let evaluated_value = self.evaluate(&Value::convert_to_statement(value));
+            Node::Pointer { ptr_node, value } => {
+                let mut current = self.evaluate(&*value);
                 if self.err.is_some() {
                     return NULL;
                 }
-                match evaluated_value {
-                    Value::Pointer(ptr) => {
-                        let mut inner = ptr.lock().unwrap();
 
-                        let old_value = std::mem::replace(&mut *inner, (Value::Null, 0));
-
-                        drop(old_value);
-
-                        Value::Null
+                let deref_level = match ptr_node {
+                    PtrNode::PointerDeref { deref_level } => deref_level,
+                    PtrNode::PointerRef { .. } => {
+                        return self.raise("TypeError", "Cannot forget a pointer reference");
                     }
-                    _ => return self.raise("TypeError", "Expected a pointer for pointer deref forget"),
-                }   
+                    PtrNode::PointerAssign { .. } => {
+                        return self.raise("TypeError", "Cannot forget a pointer assignment");
+                    }
+                };
+
+                let mut level = deref_level;
+
+                while level > 0 {
+                    match current {
+                        Value::Pointer(ref arc_ptr) => {
+                            current = {
+                                let mut guard = arc_ptr.lock().unwrap();
+
+                                if guard.1 > 1 {
+                                    guard.1 -= 1;
+                                    Value::Pointer(arc_ptr.clone())
+                                } else {
+                                    std::mem::replace(&mut guard.0, Value::Null)
+                                }
+                            };
+                        }
+                        _ => {
+                            return self.raise("TypeError", "Expected pointer for deref forget");
+                        }
+                    }
+
+                    level -= 1;
+                }
+
+                Value::Null
             }
 
-            _ => self.raise("RuntimeError", &format!("Unsupported forget value type: {}", value_type)),
+            n => self.raise("RuntimeError", &format!("Cannot forget {}", n.name())),
         }
     }
 
     fn handle_type(&mut self, type_kind: TypeNode) -> Value {
-        let default_type = Value::String("any".to_string());
-    
         let type_: Type = match type_kind {
             TypeNode::Simple { base: type_name, ptr_level, is_maybe} => {
-                match self.variables.get(s.as_str()) {
+                match self.variables.get(type_name.as_str()) {
                     Some(val) => match &val.value {
-                        Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
+                        Value::Type(t) => t.clone().set_reference(ptr_level).set_maybe_type(is_maybe).unmut(),
                         _ => {
-                            self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "If you meant to assign a value, use ':=' instead of ':'");
+                            self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", type_name), "If you meant to assign a value, use ':=' instead of ':'");
                             return NULL;
                         }
                     },
@@ -5056,7 +4650,7 @@ impl Interpreter {
                             "TypeError",
                             &format!(
                                 "Invalid type '{}'. Valid types are: {}, ...",
-                                s,
+                                type_name,
                                 VALID_TYPES[0..5].join(", ")
                             ),
                         );
@@ -5084,9 +4678,9 @@ impl Interpreter {
                 Type::Union(types)
             }
     
-            TypeNode::Function { parameter_types, return_type }=> {
-                let mut elements: Vec<Type> = Vec::new();
-                for p in parameter_types {
+            TypeNode::Function { parameters_types, return_type }=> {
+                let mut elements: Vec<Type> = Vec::with_capacity(parameters_types.len());
+                for p in parameters_types {
                     match self.handle_type(p) {
                         Value::Type(t) => elements.push(t),
                         _ => {
@@ -5095,11 +4689,12 @@ impl Interpreter {
                         }
                     }
                 };
-                let return_type: Type = if let Value::Type(t) = self.handle_type(*return_type) {
-                    t
-                } else {
-                    self.raise("TypeError", &format!("Invalid function return type '{}'", return_type_val));
-                    return NULL;
+                let return_type: Type = match self.handle_type(*return_type) {
+                    Value::Type(t) => t,
+                    t => {
+                        self.raise("TypeError", &format!("Invalid function return type '{}'", t.get_type().display_simple()));
+                        return NULL;
+                    }
                 };
 
                 Type::Function {
@@ -5108,9 +4703,9 @@ impl Interpreter {
                 }
             }
 
-            TypeNode::Generator { parameter_types, yield_type } => {
-                let mut elements: Vec<Type> = Vec::with_capacity(parameter_types.len());
-                for p in parameter_types {
+            TypeNode::Generator { parameters_types, yield_type } => {
+                let mut elements: Vec<Type> = Vec::with_capacity(parameters_types.len());
+                for p in parameters_types {
                     match self.handle_type(p) {
                         Value::Type(t) => elements.push(t),
                         _ => {
@@ -5120,11 +4715,12 @@ impl Interpreter {
                     }
                 };
 
-                let yield_type: Box<Type> = if let Value::Type(t) = self.handle_type(*yield_type) {
-                    Box::new(t)
-                } else {
-                    self.raise("TypeError", &format!("Invalid generator return type '{}'", return_type_val));
-                    return NULL;
+                let yield_type: Box<Type> = match self.handle_type(*yield_type) {
+                    Value::Type(t) => Box::new(t),
+                    t => {
+                        self.raise("TypeError", &format!("Invalid generator return type '{}'", t.get_type().display_simple()));
+                        return NULL;
+                    }
                 };
 
                 Type::Generator {
@@ -5134,54 +4730,41 @@ impl Interpreter {
             }
     
             TypeNode::Generics { base_type, generics_types } => {
-                let base = {
-                    let mut s = base_type.as_str();
-                    let mut ref_level = 0;
-                    let mut is_maybe = false;
-                    while s.starts_with('&') || s.starts_with('?') {
-                        if s.starts_with('&') {
-                            ref_level += 1;
-                            s = &s[1..];
-                        } else if s.starts_with('?') {
-                            is_maybe = true;
-                            s = &s[1..];
-                        }
-                    }
-                    match self.variables.get(s) {
-                        Some(val) => match &val.value {
-                            Value::Type(t) => t.clone().set_reference(ref_level).set_maybe_type(is_maybe).unmut(),
-                            _ => {
-                                self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", s), "Indexing is not valid in this context. Try using it in a different expression.");
-                                return NULL;
-                            }
-                        },
-                        None => {
-                            self.raise("TypeError", &format!("Invalid base type '{}'", s));
-                            return NULL;
-                        }
-                    }
-                };
+                let base = self.handle_type(*base_type);
+                if self.err.is_some() {
+                    return NULL;
+                }
 
                 let mut elements = Vec::with_capacity(generics_types.len());
                 let mut elements_raw = Vec::with_capacity(generics_types.len());
                 for gt in generics_types {
-                    match self.handle_type(gt) {
-                        Value::Type(t) => { elements_raw.push(Statement { node: Node::Type { node: gt }, loc: self.get_location_from_current_statement()}); elements.push(t) },
+                    match self.handle_type(gt.clone() ) {
+                        Value::Type(t) => { elements_raw.push(Statement { node: Node::Type { node: gt }, loc: self.get_location_from_current_statement_id()}); elements.push(t) },
                         _ => {
                             self.raise("TypeError", "Indexed type elements must be valid types");
                             return NULL;
                         }
                     }
                 }
+                if self.err.is_some() {
+                    return NULL;
+                }
 
-                match base {
-                    Type::Simple { ref name, .. } if name == "list" || name == "tuple" || name == "map" => {
+                let base_type = if let Value::Type(ref t) = base {
+                    t
+                } else {
+                    self.raise("TypeError", &format!("Invalid base type '{}'", base.get_type().display_simple()));
+                    return NULL;
+                };
+
+                match &base_type {
+                    Type::Simple { name, .. } if name == "list" || name == "tuple" || name == "map" => {
                         Type::Indexed {
-                            base_type: Box::new(base),
+                            base_type: Box::new(base_type.clone()),
                             elements: elements,
                         }
                     }
-                    Type::Struct { ref name, fields, methods, generics: s_generics, wheres } => {
+                    Type::Struct { name, fields, methods, generics: s_generics, wheres } => {
                         let generics_map: HashMap<String, Statement> = s_generics.iter()
                             .cloned()
                             .zip(elements_raw.iter().cloned())
@@ -5278,7 +4861,7 @@ impl Interpreter {
                             wheres: wheres.clone(),
                         }
                     }
-                    Type::Enum { ref name, variants, generics: s_generics, wheres } => {
+                    Type::Enum { name, variants, generics: s_generics, wheres } => {
                         let generics_map: HashMap<String, Statement> = s_generics.iter()
                             .cloned()
                             .zip(elements_raw.iter().cloned())
@@ -5383,18 +4966,25 @@ impl Interpreter {
                         }
                     }
                     _ => {
-                        return self.raise("TypeError", &format!("Invalid generic type '{}'", base.display_simple()));
+                        return self.raise("TypeError", &format!("Invalid generic type '{}'", base.get_type().display_simple()));
                     }
                 }
             }
 
-            TypeNode::Impl { impls, joins } => {
+            TypeNode::Impl { impls: impls_ast, joins } => {
                 let mut impls: Vec<(String, Box<Type>, Vec<String>)> = Vec::new();
-                for (name, args, mods, return_type) in impls {
+                for (name, args, mods, return_type) in impls_ast {
                     let vars_clone = self.variables.clone();
                     self.variables.insert("Self".to_string(), Variable::new("Self".to_string(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true));
                     
-                    let return_type = self.handle_type(*return_type);
+                    let return_type = match self.handle_type(*return_type) {
+                        Value::Type(t) => t,
+                        _ => {
+                            self.raise("TypeError", "Impl return type must be a valid type");
+                            self.variables = vars_clone;
+                            return NULL;
+                        }
+                    };
                     if self.err.is_some() {
                         self.variables = vars_clone;
                         return NULL;
@@ -5422,12 +5012,12 @@ impl Interpreter {
                         return_type: Box::new(return_type),
                     }), mods));
                 }
-                for join in joins_ast {
-                    if !self.variables.contains_key(join) {
-                        self.raise("NameError", &format!("Type '{}' not defined", s));
+                for join in joins {
+                    if !self.variables.contains_key(&join) {
+                        self.raise("NameError", &format!("Type '{}' not defined", join));
                         return NULL;
                     }
-                    if let Some(var) = self.variables.get(s) {
+                    if let Some(var) = self.variables.get(&join) {
                         if let Value::Type(t) = &var.value {
                             if let Ok((_, inner)) = get_inner_type(t) {
                                 match inner {
@@ -5437,16 +5027,16 @@ impl Interpreter {
                                         }
                                     }
                                     _ => {
-                                        self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
+                                        self.raise("TypeError", &format!("Type '{}' is not an impl type", join));
                                         return NULL;
                                     }
                                 }
                             } else {
-                                self.raise("TypeError", &format!("Type '{}' is not an impl type", s));
+                                self.raise("TypeError", &format!("Type '{}' is not an impl type", join));
                                 return NULL;
                             }
                         } else {
-                            self.raise("TypeError", &format!("'{}' is a variable name, not a type", s));
+                            self.raise("TypeError", &format!("'{}' is a variable name, not a type", join));
                             return NULL;
                         }
                     }
@@ -5454,6 +5044,11 @@ impl Interpreter {
                 Type::Impl {
                     implementations: impls,
                 }
+            }
+
+            TypeNode::Variadics { .. } => {
+                self.raise("TypeError", "Variadic types cannot be used in type declarations");
+                return NULL;
             }
         };
         return Value::Type(type_);
@@ -5470,10 +5065,7 @@ impl Interpreter {
         if let Some(stmts) = stmts_to_run {
             let mut result = NULL;
             for stmt in stmts {
-                if !stmt.is_statement() {
-                    continue;
-                }
-                result = self.evaluate(&stmt.convert_to_statement());
+                result = self.evaluate(&stmt);
                 if self.err.is_some() {
                     return NULL;
                 }
@@ -5484,9 +5076,14 @@ impl Interpreter {
         NULL
     }
 
-    fn handle_try(&mut self, body: Vec<Statement>, catch_body_opt: Option<Vec<Statement>>, exception_vars_opt: Option<Vec<String>>) -> Value {
+    fn handle_try(
+        &mut self,
+        body: Vec<Statement>,
+        catch_body_opt: Option<Vec<Statement>>,
+        exception_vars_opt: Option<Vec<String>>,
+    ) -> Value {
+        let is_try_catch = catch_body_opt.is_some();
         let catch_body: &[Statement] = catch_body_opt.as_deref().unwrap_or(&[]);
-        let mut is_try_catch = !catch_body.is_empty();
 
         let exception_vars: &[String] = if is_try_catch {
             match exception_vars_opt.as_deref() {
@@ -5504,13 +5101,10 @@ impl Interpreter {
                             "Use '_' to ignore caught exception(s)",
                         );
                     }
-                    let mut seen = std::collections::HashSet::new();
+                    let mut seen = std::collections::HashSet::with_capacity(vars.len());
                     for name in vars {
                         if !seen.insert(name) {
-                            return self.raise(
-                                "NameError",
-                                &format!("Duplicate exception variable name '{}'", name),
-                            );
+                            return self.raise("NameError", &format!("Duplicate exception variable name '{}'", name));
                         }
                     }
                     vars
@@ -5548,19 +5142,81 @@ impl Interpreter {
                     err = *ref_err;
                 }
 
-                for (i, name) in exception_vars.iter().enumerate() {
-                    if let Value::String(var_name) = name {
-                        let val = match i {
-                            0 => Value::String(err.error_type.clone()),
-                            1 => Value::String(err.msg.clone()),
-                            2 => Value::String(err.help.clone().unwrap_or_default()),
-                            _ => continue,
-                        };
+                match exception_vars.len() {
+                    1 => {
+                        let mut tuple_vals = vec![
+                            Value::String(err.error_type.clone()),
+                            Value::String(err.msg.clone()),
+                        ];
+                        if let Some(help) = &err.help {
+                            tuple_vals.push(Value::String(help.clone()));
+                        }
+                        let val = Value::Tuple(tuple_vals);
                         self.variables.insert(
-                            var_name.clone(),
-                            Variable::new(var_name.clone(), val, "str".to_string(), false, true, true),
+                            exception_vars[0].clone(),
+                            Variable::new(exception_vars[0].clone(), val, "tuple".to_string(), false, true, true),
                         );
                     }
+                    2 => {
+                        self.variables.insert(
+                            exception_vars[0].clone(),
+                            Variable::new(
+                                exception_vars[0].clone(),
+                                Value::String(err.error_type.clone()),
+                                "str".to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                        self.variables.insert(
+                            exception_vars[1].clone(),
+                            Variable::new(
+                                exception_vars[1].clone(),
+                                Value::String(err.msg.clone()),
+                                "str".to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                    }
+                    3 => {
+                        self.variables.insert(
+                            exception_vars[0].clone(),
+                            Variable::new(
+                                exception_vars[0].clone(),
+                                Value::String(err.error_type.clone()),
+                                "str".to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                        self.variables.insert(
+                            exception_vars[1].clone(),
+                            Variable::new(
+                                exception_vars[1].clone(),
+                                Value::String(err.msg.clone()),
+                                "str".to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                        self.variables.insert(
+                            exception_vars[2].clone(),
+                            Variable::new(
+                                exception_vars[2].clone(),
+                                err.help.clone().map_or(NULL, |h| Value::String(h)),
+                                "str".to_string(),
+                                false,
+                                true,
+                                true,
+                            ),
+                        );
+                    }
+                    _ => {}
                 }
 
                 let mut err_result = NULL;
@@ -5585,6 +5241,7 @@ impl Interpreter {
 
     fn handle_assignment(&mut self, left: Statement, right: Statement) -> Value {
         let right_value = self.evaluate(&right);
+        let loc_id = left.loc.clone();
 
         if self.err.is_some() {
             return NULL;
@@ -5593,7 +5250,7 @@ impl Interpreter {
         match left.node {
             Node::Variable { name } => {
                 let expected_type: Type = {
-                    let var = match self.variables.get(name) {
+                    let var = match self.variables.get(&name) {
                         Some(v) => v,
                         None => {
                             let suggestion = if let Value::Null = right_value {
@@ -5648,7 +5305,7 @@ impl Interpreter {
                     }
                 }
     
-                let var = self.variables.get_mut(name).unwrap();
+                let var = self.variables.get_mut(&name).unwrap();
     
                 if var.is_final() {
                     return self.raise(
@@ -5660,8 +5317,7 @@ impl Interpreter {
                 var.set_value(right_value);
                 var.value.clone()
             }
-            // TODO
-            "INDEX_ACCESS" => {
+            Node::IndexAccess { object, access } => {
                 fn value_to_usize(val: &Value) -> Result<usize, Value> {
                     match val {
                         Value::Int(i) => {
@@ -5678,28 +5334,15 @@ impl Interpreter {
                     }
                 }
 
-                fn get_single_index_from_map(interpreter: &mut Interpreter, index_map: &Value) -> Result<Value, (String, String)> {
-                    if let Value::Map { keys, values } = index_map {
-                        let mut start_val = None;
-                        let mut end_val = None;
+                fn get_single_index_from_access(interpreter: &mut Interpreter, access: &AccessType) -> Result<Value, (String, String)> {
+                    if let AccessType::Single { index } = access {
+                        let evaluated_index = interpreter.evaluate(&index);
+                        if interpreter.err.is_some() {
+                            let err = interpreter.err.take().unwrap();
 
-                        for (k, v) in keys.iter().zip(values.iter()) {
-                            if let Value::String(s) = k {
-                                if s == "start" { start_val = Some(v.clone()); }
-                                else if s == "end" { end_val = Some(v.clone()); }
-                            }
+                            return Err((err.error_type.to_owned(), err.msg.to_owned()));
                         }
-
-                        match (start_val, end_val) {
-                            (Some(start), Some(end)) => {
-                                if start == end {
-                                    Ok(interpreter.evaluate(&start.convert_to_statement()))
-                                } else {
-                                    Err(("IndexError".to_string(), "Slice assignment requires 'start' and 'end' to be equal".to_string()))
-                                }
-                            }
-                            _ => Err(("RuntimeError".to_string(), "Missing 'start' or 'end' in index access assignment".to_string())),
-                        }
+                        Ok(evaluated_index)
                     } else {
                         Err(("TypeError".to_string(), "Index access must be a map with 'start' and 'end' keys".to_string()))
                     }
@@ -5787,76 +5430,31 @@ impl Interpreter {
                     }
                 }
 
-                let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
-                    Some(v) => v.clone(),
-                    None => return self.raise("RuntimeError", "Missing 'object' in index access assignment"),
-                };
-
-                let access_val = match left_hashmap.get(&Value::String("access".to_string())) {
-                    Some(v) => v.clone(),
-                    None => return self.raise("RuntimeError", "Missing 'access' in index access assignment"),
-                };
-
-                let index_access = match get_single_index_from_map(self, &access_val) {
+                let index_access = match get_single_index_from_access(self, &access) {
                     Ok(idx) => idx,
                     Err((k, msg)) => return self.raise(&k, &msg),
                 };
 
-                let current_obj = object_val;
+                let mut current_obj = object;
 
-                loop {
-                    let object_type = match &current_obj {
-                        Value::Map { keys, values } => {
-                            let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                            match obj_map.get(&Value::String("type".to_string())) {
-                                Some(Value::String(s)) => s.clone(),
-                                Some(_) => { self.raise("RuntimeError", "Expected 'type' to be a String"); "".to_string() }
-                                None => { self.raise("RuntimeError", "Missing 'type' field"); "".to_string() }
-                            }
-                        }
-                        _ => { self.raise("RuntimeError", "Expected a Map value"); "".to_string() }
-                    };
-
+                'l: loop {
                     if self.err.is_some() { return NULL; }
 
-                    match object_type.as_str() {
-                        "VARIABLE" => {
-                            let var_name = match &current_obj {
-                                Value::Map { keys, values } => {
-                                    let obj_map: HashMap<_, _> = keys.iter().cloned().zip(values.iter().cloned()).collect();
-                                    match obj_map.get(&Value::String("name".to_string())) {
-                                        Some(Value::String(name)) => name.clone(),
-                                        _ => return self.raise("RuntimeError", "Missing or invalid 'name' in variable assignment"),
-                                    }
-                                }
-                                _ => return self.raise("RuntimeError", "Expected a Map value for variable assignment"),
-                            };
-                            return assign_index(self, &var_name, index_access, right_value);
+                    match &current_obj.node {
+                        Node::Variable { name } => {
+                            return assign_index(self, name, index_access, right_value);
                         }
-                        "INDEX_ACCESS" => {
-                            let obj_map: HashMap<_, _> = match &current_obj {
-                                Value::Map { keys, values } => keys.iter().cloned().zip(values.iter().cloned()).collect(),
-                                _ => return self.raise("RuntimeError", "Expected a Map for nested index access assignment"),
-                            };
-
-                            let inner_obj = match obj_map.get(&Value::String("object".to_string())) {
-                                Some(v) => v.clone(),
-                                None => return self.raise("RuntimeError", "Missing 'object' in nested index access assignment"),
-                            };
-
-                            let inner_access = match obj_map.get(&Value::String("access".to_string())) {
-                                Some(v) => v.clone(),
-                                None => return self.raise("RuntimeError", "Missing 'access' in nested index access assignment"),
-                            };
-
-                            let inner_index = match get_single_index_from_map(self, &inner_access) {
+                        Node::IndexAccess { object: inner_object, access: inner_access } => {
+                            let inner_index = match get_single_index_from_access(self, &inner_access) {
                                 Ok(v) => v,
                                 Err((k, msg)) => return self.raise(&k, &msg),
                             };
 
-                            let inner_name = match inner_obj.convert_to_statement().get_value("name") {
-                                Some(Value::String(n)) => n.clone(),
-                                _ => return self.raise("RuntimeError", "Cannot determine variable name from nested object"),
+                            let inner_name = if let Node::Variable { name } = &inner_object.node {
+                                name.clone()
+                            } else {
+                                current_obj = inner_object.clone();
+                                continue 'l;
                             };
 
                             let var = match self.variables.get(&inner_name) {
@@ -5939,34 +5537,20 @@ impl Interpreter {
                             return assign_index(self, &inner_name, inner_index, container_at_outer_index);
                         }
                         _ => {
-                            self.raise("TypeError", &format!("Unsupported object type for index assignment: {}", object_type));
+                            self.raise("TypeError", &format!("Assignment for {} is unsupported", current_obj.node.name()));
                             return NULL;
                         }
                     }
                 }
             }
-            "PROPERTY_ACCESS" => {
-                let object_val = match left_hashmap.get(&Value::String("object".to_string())) {
-                    Some(v) => self.evaluate(&v.convert_to_statement()),
-                    None => return self.raise("RuntimeError", "Missing 'object' in property access assignment"),
-                };
+            Node::PropertyAccess { object, property_name } => {
+                let object_val = self.evaluate(&object);
                 if self.err.is_some() {
                     return NULL;
                 }
-                let property_name = match left_hashmap.get(&Value::String("property".to_string())) {
-                    Some(Value::String(n)) => n,
-                    _ => return self.raise("RuntimeError", "Missing or invalid 'property' in property access assignment"),
-                };
-                let var_name = match left_hashmap.get(&Value::String("object".to_string())) {
-                    Some(v) => match v.convert_to_statement().get_value("name") {
-                        Some(Value::String(n)) => n.clone(),
-                        _ => return self.raise("ValueError", "Cannot determine variable name from object in property access assignment"),
-                    },
-                    None => return self.raise("RuntimeError", "Missing 'object' in property access assignment"),
-                };
                 let o = match object_val {
                     Value::Struct(mut s) => {
-                        let is_final = s.get_field_mods(property_name)
+                        let is_final = s.get_field_mods(&property_name)
                             .map_or(false, |(_, _, f)| f);
 
                         if is_final {
@@ -5976,7 +5560,7 @@ impl Interpreter {
                             );
                         }
 
-                        if let Some((box_val, expected_type)) = s.fields.get_mut(property_name) {
+                        if let Some((box_val, expected_type)) = s.fields.get_mut(&property_name) {
                             let (is_valid, err) = self.check_type(&right_value, &expected_type);
 
                             if !is_valid {
@@ -6014,6 +5598,12 @@ impl Interpreter {
                 if self.err.is_some() {
                     return NULL;
                 }
+                let var_name = match &object.node {
+                    Node::Variable { name } => name.clone(),
+                    _ => {
+                        return self.raise("TypeError", "Can only assign to properties of variables");
+                    }
+                };
                 if self.variables.contains_key(&var_name) {
                     let var = self.variables.get_mut(&var_name).unwrap();
                     var.set_value(o);
@@ -6021,75 +5611,81 @@ impl Interpreter {
                 NULL
             }
             // fuck my parser
-            "POINTER_DEREF" => {
-                let left_value = left_hashmap
-                    .get(&Value::String("value".to_string()))
-                    .cloned()
-                    .unwrap_or(NULL);
-
-                let mut loc = Location {
-                    file: self.file_path.clone(),
-                    lucia_source_loc: "<unknown>".into(),
-                    line_string: "".to_string(),
-                    line_number: 0,
-                    range: (0, 0),
+            // TODO
+            Node::Pointer { value, ptr_node } => {
+                match ptr_node {
+                    PtrNode::PointerDeref { deref_level } => {
+                        let result = self.evaluate(
+                            &Statement {
+                                node: Node::Pointer {
+                                    value: Box::new(right.clone()),
+                                    ptr_node: PtrNode::PointerAssign { 
+                                        target: value,
+                                        assign_level: deref_level,
+                                    }
+                                },
+                                loc: loc_id,
+                            }
+                        );
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        return result;
+                    }
+                    PtrNode::PointerRef { .. } => return self.raise("TypeError", "Cannot assign to pointer referencing"),
+                    PtrNode::PointerAssign { .. } => return self.raise("TypeError", "Cannot assign to pointer assignment"),
                 };
-
-                if let Some(Value::Map { keys, values }) = left_hashmap.get(&Value::String("_loc".to_string())) {
-                    let loc_map: std::collections::HashMap<_, _> =
-                        keys.iter().cloned().zip(values.iter().cloned()).collect();
-
-                    if let Some(Value::String(f)) = loc_map.get(&Value::String("_file".to_string())) {
-                        loc.file = f.clone();
-                    }
-                    if let Some(Value::String(ls)) = loc_map.get(&Value::String("_line_string".to_string())) {
-                        loc.line_string = ls.clone();
-                    }
-                    if let Some(Value::Int(i)) = loc_map.get(&Value::String("_line_number".to_string())) {
-                        loc.line_number = i.to_i64().unwrap_or(0).max(0) as usize;
-                    }
-                    if let Some(Value::Tuple(vals)) = loc_map.get(&Value::String("_range".to_string())) {
-                        if let (Some(Value::Int(start)), Some(Value::Int(end))) = (vals.get(0), vals.get(1)) {
-                            let start = start.to_i64().unwrap_or(0).max(0) as usize;
-                            let end = end.to_i64().unwrap_or(0).max(0) as usize;
-                            loc.range = (start, end);
-                        }                        
-                    }
-                    if let Some(Value::String(lucia_source_loc)) = loc_map.get(&Value::String("_lucia_source_loc".to_string())) {
-                        loc.lucia_source_loc = lucia_source_loc.clone();
-                    }
-                }
-
-                let result = self.evaluate(
-                    &Statement::Statement {
-                        keys: vec![
-                            Value::String("type".to_string()),
-                            Value::String("left".to_string()),
-                            Value::String("right".to_string()),
-                        ],
-                        values: vec![
-                            Value::String("POINTER_ASSIGN".to_string()),
-                            left_value,
-                            right.clone(),
-                        ],
-                        loc: Some(loc),
-                    }
-                );
-
-                if self.err.is_some() {
-                    return NULL;
-                }
-
-                result
             }
-            _ => self.raise("TypeError", &format!("Cannot assign to type '{}'", get_type_from_token_name(left_type))),
+            n => self.raise("TypeError", &format!("Cannot assign to {}", n.name())),
         }
     }
 
     fn handle_index_access(&mut self, object_stmt: Statement, access_type: AccessType) -> Value {
         let object_val = self.evaluate(&object_stmt);
-        if self.err.is_some() {
-            return NULL;
+        if self.err.is_some() { return NULL; }
+
+        if let Value::Map { keys, values } = &object_val {
+            if let AccessType::Single { index } = access_type {
+                let key_val = self.evaluate(&index);
+                if self.err.is_some() { return NULL; }
+
+                if let Some(pos) = keys.iter().position(|k| k == &key_val) {
+                    return values[pos].clone();
+                } else {
+                    return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(&key_val)));
+                }
+            } else {
+                return self.raise("TypeError", "Maps only support single key access");
+            }
+        }
+
+        if let Value::Type(t) = &object_val {
+            match t {
+                Type::Enum { variants, .. } => {
+                    if let AccessType::Single { index } = access_type {
+                        let index_val = self.evaluate(&index);
+                        if self.err.is_some() { return NULL; }
+                        let idx = match self.to_index(&index_val, usize::MAX) {
+                            Ok(i) => i,
+                            Err(e) => return e,
+                        };
+                        for (name, ty, i) in variants {
+                            if *i == idx {
+                                if *ty != Statement::Null {
+                                    return self.raise("TypeError", &format!("Enum variant '{}' requires associated value", name));
+                                }
+                                return Value::Enum(Enum::new(t.clone(), (i.clone(), NULL)));
+                            }
+                        }
+                        return self.raise("AttributeError", &format!("Enum variant not found at index '{}'", index_val));
+                    } else {
+                        return self.raise("TypeError", "Enum variant access requires a single variant name");
+                    }
+                }
+                _ => {
+                    return self.raise("TypeError", &format!("Type '{}' is not indexable", t.display_simple()));
+                }
+            }
         }
 
         let len = match &object_val {
@@ -6097,142 +5693,73 @@ impl Interpreter {
             Value::List(l) => l.len(),
             Value::Bytes(b) => b.len(),
             Value::Tuple(t) => t.len(),
-            Value::Map { keys, values } => {
-                if keys.len() != values.len() {
-                    return self.raise("TypeError", "Map keys and values must have the same length");
-                }
-                keys.len()
-            }
-            Value::Struct(s) => {
-                if find_struct_method(&s, None, "op_index", &[s.get_type(), Type::new_simple("int")], &Type::new_simple("any")).is_ok() {
-                    usize::MAX
-                } else {
-                    return self.raise("TypeError", "Struct not indexable");
-                }
-            }
-            Value::Type(t) => {
-                if let Type::Enum { variants, .. } = t {
-                    variants.iter().max_by_key(|x| x.2).map(|x| x.2).unwrap_or(variants.len())
-                } else {
-                    return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple()));
-                }
-            }
             _ => return self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
         };
 
-        let to_index = |val: &Value| -> Result<usize, Value> {
-            match val {
-                Value::Int(i) => {
-                    let idx = i.to_i64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
-                    else { Err(self.raise("IndexError", "Index out of range")) }
-                }
-                Value::Float(f) => {
-                    if !f.is_integer_like() {
-                        return Err(self.raise("ConversionError", "Float index must have zero fractional part"));
-                    }
-                    let idx = f.to_f64().map_err(|_| self.raise("IndexError", "Index out of range"))? as isize;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
-                    else { Err(self.raise("IndexError", "Index out of range")) }
-                }
-                Value::String(s) => {
-                    let idx: isize = s.parse().map_err(|_| self.raise("IndexError", "Index out of range"))?;
-                    let adjusted = if idx < 0 { len as isize + idx } else { idx };
-                    if adjusted >= 0 && (adjusted as usize) <= len { Ok(adjusted as usize) }
-                    else { Err(self.raise("IndexError", "Index out of range")) }
-                }
-                _ => Err(self.raise("TypeError", "Index must be int, float, or string representing a number")),
-            }
-        };
-
-        match access_type {
+        let (start_idx, end_idx, is_single) = match access_type {
             AccessType::Single { index } => {
                 let idx_val = self.evaluate(&index);
                 if self.err.is_some() { return NULL; }
-
-                match &object_val {
-                    Value::Map { keys, values } => {
-                        for (k, v) in keys.iter().zip(values.iter()) {
-                            if k == &idx_val {
-                                return v.clone();
-                            }
-                        }
-                        return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(&idx_val)));
-                    }
-                    Value::String(s) => {
-                        let chars: Vec<char> = s.chars().collect();
-                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
-                        chars.get(idx).map(|c| Value::String(c.to_string()))
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
-                    }
-                    Value::List(l) => {
-                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
-                        l.get(idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
-                    }
-                    Value::Bytes(b) => {
-                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
-                        b.get(idx).map(|&b| Value::Int((b as i64).into()))
-                            .unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
-                    }
-                    Value::Tuple(t) => {
-                        let idx = match to_index(&idx_val) { Ok(i) => i, Err(e) => return e };
-                        t.get(idx).cloned().unwrap_or_else(|| self.raise("IndexError", "Index out of range"))
-                    }
-                    Value::Struct(s) => {
-                        let mut var = Variable::new_pt(s.name().to_string(), object_val.clone(), object_val.get_type(), false, false, false);
-                        if let Ok(method) = find_struct_method(&s, None, "op_index", &[s.get_type(), idx_val.get_type()], &Type::new_simple("any")) {
-                            if method.is_static() {
-                                return self.raise("TypeError", "Cannot call static method 'op_index' on struct instance");
-                            }
-                            self.call_function(&method, vec![idx_val], HashMap::new(), Some((None, Some(&mut var))))
-                        } else {
-                            self.raise("TypeError", "Struct not indexable")
-                        }
-                    }
-                    _ => self.raise("TypeError", &format!("'{}' not indexable", object_val.get_type().display_simple())),
-                }
+                let idx = match self.to_index(&idx_val, len) {
+                    Ok(i) => i,
+                    Err(e) => return e,
+                };
+                (idx, idx + 1, true)
             }
-
             AccessType::Range { start, end } => {
-                // Evaluate start/end expressions
-                let start_val = self.evaluate(&start);
-                let end_val = self.evaluate(&end);
+                let s_val = self.evaluate(&start);
+                let e_val = self.evaluate(&end);
                 if self.err.is_some() { return NULL; }
-
-                let start_idx = match &object_val {
-                    Value::String(_) | Value::List(_) | Value::Bytes(_) | Value::Tuple(_) => to_index(&start_val).unwrap_or(0),
-                    _ => 0,
-                };
-                let end_idx = match &object_val {
-                    Value::String(_) | Value::List(_) | Value::Bytes(_) | Value::Tuple(_) => to_index(&end_val).unwrap_or(len),
-                    _ => len,
-                };
-
-                // Handle reversed slices
-                if start_idx > end_idx {
-                    return match &object_val {
-                        Value::String(s) => s.chars().skip(end_idx).take(start_idx - end_idx).rev().collect::<String>().into(),
-                        Value::List(l) => Value::List(l.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
-                        Value::Bytes(b) => Value::Bytes(b.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
-                        Value::Tuple(t) => Value::Tuple(t.get(end_idx..start_idx).unwrap_or(&[]).to_vec().into_iter().rev().collect()),
-                        _ => return self.raise("TypeError", "Object not sliceable"),
-                    };
-                }
-
-                // Normal slice
-                match &object_val {
-                    Value::String(s) => s.chars().skip(start_idx).take(end_idx - start_idx).collect::<String>().into(),
-                    Value::List(l) => Value::List(l.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
-                    Value::Bytes(b) => Value::Bytes(b.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
-                    Value::Tuple(t) => Value::Tuple(t.get(start_idx..end_idx).unwrap_or(&[]).to_vec()),
-                    _ => self.raise("TypeError", "Object not sliceable"),
-                }
+                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len).unwrap_or(0) };
+                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len).unwrap_or(len) };
+                (s_idx, e_idx, false)
             }
+            AccessType::ToStart { end } => {
+                let e_val = self.evaluate(&end);
+                if self.err.is_some() { return NULL; }
+                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len).unwrap_or(len) };
+                (0, e_idx, false)
+            }
+            AccessType::ToEnd { start } => {
+                let s_val = self.evaluate(&start);
+                if self.err.is_some() { return NULL; }
+                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len).unwrap_or(0) };
+                (s_idx, len, false)
+            }
+            AccessType::Full => (0, len, false),
+        };
+
+        if start_idx > end_idx || end_idx > len {
+            return match &object_val {
+                Value::String(_) => self.raise("IndexError", &format!("String slice out of bounds: [{}..{}] in string of length {}", start_idx, end_idx, len)),
+                Value::List(_) => self.raise("IndexError", &format!("List slice out of bounds: [{}..{}] in list of length {}", start_idx, end_idx, len)),
+                Value::Bytes(_) => self.raise("IndexError", &format!("Bytes slice out of bounds: [{}..{}] in bytes of length {}", start_idx, end_idx, len)),
+                Value::Tuple(_) => self.raise("IndexError", &format!("Tuple slice out of bounds: [{}..{}] in tuple of length {}", start_idx, end_idx, len)),
+                _ => self.raise("TypeError", "Object not sliceable"),
+            };
+        }
+
+        match &object_val {
+            Value::String(s) => {
+                let chars: Vec<char> = s.chars().skip(start_idx).take(end_idx - start_idx).collect();
+                if is_single { Value::String(chars[0].to_string()) } else { Value::String(chars.into_iter().collect()) }
+            }
+            Value::List(l) => {
+                let slice = l.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
+                if is_single { slice.into_iter().next().unwrap_or(NULL) } else { Value::List(slice) }
+            }
+            Value::Bytes(b) => {
+                let slice = b.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
+                if is_single { slice.get(0).map(|&v| Value::Int(v.into())).unwrap_or(NULL) } else { Value::Bytes(slice) }
+            }
+            Value::Tuple(t) => {
+                let slice = t.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
+                if is_single { slice.into_iter().next().unwrap_or(NULL) } else { Value::Tuple(slice) }
+            }
+            _ => self.raise("TypeError", "Object not sliceable"),
         }
     }
-    
+
     fn handle_variable_declaration(&mut self, name: String, val_stmt: Statement, var_type: Statement, modifiers: Vec<String>) -> Value {
         let value = self.evaluate(&val_stmt);
         if self.err.is_some() {
@@ -6254,13 +5781,14 @@ impl Interpreter {
         let mut is_final = false;
 
         for modifier in modifiers {
-            match modifier_str.as_str() {
+            match modifier.as_str() {
                 "public" => is_public = true,
+                "private" => is_public = false,
                 "static" => is_static = true,
                 "final" => is_final = true,
                 "non-static" => is_static = false,
                 "mutable" => is_final = false,
-                _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier_str)),
+                _ => return self.raise("ModifierError", &format!("Unknown modifier: {}", modifier)),
             }
         }
 
@@ -6286,7 +5814,7 @@ impl Interpreter {
         value   
     }
 
-    fn handle_variable(&mut self, name: String) -> Value {
+    fn handle_variable(&mut self, name: &str) -> Value {
         if self.err.is_some() {
             return NULL;
         }
@@ -6427,7 +5955,7 @@ impl Interpreter {
     }
     
     fn handle_for_loop(&mut self, iterable: Statement, body: Vec<Statement>, variable: PathElement) -> Value {
-        let iterable_value = self.evaluate(&iterable.convert_to_statement());
+        let iterable_value = self.evaluate(&iterable);
         if self.err.is_some() { return NULL; }
         if !iterable_value.is_iterable() {
             return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
@@ -6517,7 +6045,7 @@ impl Interpreter {
             }
             IterableNode::ListCompletion { seed, end, pattern_flag, range_mode, is_infinite: is_inf } => {
                 let evaluated_seed: Vec<Value> = seed.into_iter().map(|map_val| {
-                    let r = self.evaluate(&map_val.convert_to_statement());
+                    let r = self.evaluate(&map_val);
                     if self.err.is_some() {
                         NULL
                     } else {
@@ -6535,7 +6063,7 @@ impl Interpreter {
                     RangeModeType::Value => Value::List(vec![
                         Value::List(evaluated_seed.clone()),
                         evaluated_end.clone(),
-                        Value::String(range_mode.display()),
+                        Value::String(range_mode.to_string()),
                         Value::Boolean(pattern_flag),
                     ]),
                     RangeModeType::Length => {
@@ -6559,7 +6087,7 @@ impl Interpreter {
                         Value::List(vec![
                             Value::List(evaluated_seed.clone()),
                             Value::Int(Int::from_i64(length_usize as i64)),
-                            Value::String(range_mode.display()),
+                            Value::String(range_mode.to_string()),
                             Value::Boolean(pattern_flag),
                         ])
                     }
@@ -6975,7 +6503,7 @@ impl Interpreter {
             IterableNode::ListComprehension { for_clauses, map_expression } => {
                 fn eval_nested(
                     interpreter: &mut Interpreter,
-                    clauses: &[Value],
+                    clauses: &[(PathElement, Statement, Vec<Statement>)],
                     depth: usize,
                     result: &mut Vec<Value>,
                     map_expression: &Statement
@@ -6987,31 +6515,22 @@ impl Interpreter {
                         return;
                     }
 
-                    let clause = match &clauses[depth] {
-                        Value::List(lst) if lst.len() == 3 => lst,
-                        _ => {
-                            interpreter.raise("RuntimeError", "Each for clause must be a list of 3 elements: pattern, iterable, filters");
-                            return;
-                        }
-                    };
+                    let clause = &clauses[depth];
 
-                    let pattern = &clause[0];
-                    let iterable = interpreter.evaluate(&clause[1].convert_to_statement());
+                    let pattern = &clause.0;
+                    let iterable = interpreter.evaluate(&clause.1);
                     if interpreter.err.is_some() { return; }
                     if !iterable.is_iterable() {
                         interpreter.raise("TypeError", &format!("Value of type '{}' is not iterable", iterable.get_type().display_simple()));
                         return;
                     }
 
-                    let filter_conditions: Vec<Statement> = match &clause[2] {
-                        Value::List(lst) => lst.iter().map(|c| c.convert_to_statement()).collect(),
-                        _ => vec![],
-                    };
+                    let filter_conditions: Vec<Statement> = clause.2.clone();
 
                     for item in iterable.iter() {
                         if interpreter.check_stop_flag() { return; }
 
-                        let bindings = match check_pattern(&item, pattern) {
+                        let bindings = match check_pattern(&item, &pattern.to_value()) {
                             Ok((true, new_bindings)) => new_bindings,
                             Ok((false, _)) => {
                                 interpreter.raise("ValueError", "Pattern did not match item in list comprehension");
@@ -7163,8 +6682,8 @@ impl Interpreter {
             true,
             true,
         );
-        let mut variable_name: Option<String> = if object.convert_to_statement().get_type() == "VARIABLE" {
-            object.convert_to_statement().get_value("name").and_then(|v| v.to_string().into())
+        let mut variable_name: Option<String> = if let Node::Variable { name, ..} = &object_stmt.node {
+            Some(name.clone())
         } else {
             None
         };
@@ -9911,14 +9430,14 @@ impl Interpreter {
         result
     }
     
-    fn handle_string(&mut self, value: String, mods: Vec<String>) -> Value {
+    fn handle_string(&mut self, value: String, mods: Vec<char>) -> Value {
         let mut modified_string = value;
         let mut is_raw = false;
         let mut is_bytes = false;
 
         for modifier in mods {
-            match modifier.as_str() {
-                "f" => {
+            match modifier {
+                'f' => {
                     let mut output = String::new();
                     let mut chars = modified_string.chars().peekable();
 
@@ -10023,10 +9542,7 @@ impl Interpreter {
                             self.debug_log(
                                 format_args!(
                                     "Generated f-string statement: {}",
-                                    parsed.iter().map(|stmt| {
-                                        let cleaned = remove_loc_keys(&stmt.convert_to_map());
-                                        format_value(&cleaned)
-                                    }).collect::<Vec<String>>().join(", ")
+                                    parsed.iter().map(|stmt| stmt.format_for_debug()).collect::<Vec<String>>().join(", ")
                                 )
                             );
 
@@ -10067,8 +9583,8 @@ impl Interpreter {
 
                     modified_string = output;
                 }
-                "r" => is_raw = true,
-                "b" => is_bytes = true,
+                'r' => is_raw = true,
+                'b' => is_bytes = true,
                 _ => return self.raise("RuntimeError", &format!("Unknown string modifier: {}", modifier)),
             }
         }

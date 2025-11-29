@@ -116,7 +116,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme, TypeCheckerConfig, Libs};
-use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, remove_loc_keys};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string};
 use crate::env::runtime::repl::read_input;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -468,84 +468,13 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
     let ast_path = format!("{}.ast.json", base_path);
     let i_path = format!("{}.i.json", base_path);
 
-    let full_data: Vec<Value> = tokens.iter()
-        .map(|stmt| stmt.convert_to_map())
+    let data: Vec<String> = tokens.iter()
+        .map(|stmt| stmt.format_for_debug())
         .collect();
 
-    let cleaned_data: Vec<Value> = full_data.iter()
-        .map(|value| {
-            match value {
-                Value::Map { keys, values } => {
-                    let mut new_keys = Vec::new();
-                    let mut new_values = Vec::new();
-                    for (k, v) in keys.iter().zip(values.iter()) {
-                        if let Value::String(s) = k {
-                            if s == "_loc" {
-                                continue;
-                            }
-                        }
-                        let cleaned_value = match v {
-                            Value::Map { .. } | Value::List(_) | Value::Tuple(_) => {
-                                let mut stack = vec![v.clone()];
-                                let mut cleaned = v.clone();
-                                while let Some(cur) = stack.pop() {
-                                    cleaned = match cur {
-                                        Value::Map { keys, values } => {
-                                            let mut k2 = Vec::new();
-                                            let mut v2 = Vec::new();
-                                            for (kk, vv) in keys.iter().zip(values.iter()) {
-                                                if let Value::String(ss) = kk {
-                                                    if ss == "_line" || ss == "_column" {
-                                                        continue;
-                                                    }
-                                                }
-                                                k2.push(kk.clone());
-                                                v2.push(vv.clone());
-                                                stack.push(vv.clone());
-                                            }
-                                            Value::Map { keys: k2, values: v2 }
-                                        }
-                                        Value::List(list) => {
-                                            Value::List(list.iter().map(|x| x.clone()).collect())
-                                        }
-                                        Value::Tuple(tuple) => {
-                                            Value::Tuple(tuple.iter().map(|x| x.clone()).collect())
-                                        }
-                                        _ => cur.clone(),
-                                    };
-                                }
-                                cleaned
-                            }
-                            _ => v.clone(),
-                        };
+    let json_i = serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&format!("[{}]", data.join(","))).unwrap()).unwrap();
 
-                        new_keys.push(k.clone());
-                        new_values.push(cleaned_value);
-                    }
-                    Value::Map { keys: new_keys, values: new_values }
-                }
-                _ => value.clone(),
-            }
-        })
-        .collect();
-
-    let json_i = match serde_json::to_string_pretty(&full_data) {
-        Ok(j) => j,
-        Err(e) => {
-            print_colored(
-                &format!(
-                    "{}Failed to serialize full AST: {}",
-                    hex_to_ansi(&config.color_scheme.exception, use_colors),
-                    e
-                ),
-                &config.color_scheme.exception,
-                use_colors,
-            );
-            return;
-        }
-    };
-
-    let json_ast = match serde_json::to_string_pretty(&cleaned_data) {
+    let json_ast = match serde_json::to_string_pretty(&tokens) {
         Ok(j) => j,
         Err(e) => {
             print_colored(
@@ -1131,10 +1060,7 @@ fn execute_file(
                     "Statements: [{}]",
                     statements
                         .iter()
-                        .map(|stmt| {
-                            let cleaned = remove_loc_keys(&stmt.convert_to_map());
-                            format_value(&cleaned)
-                        })
+                        .map(|stmt| stmt.format_for_debug())
                         .collect::<Vec<String>>()
                         .join(", ")
                 ),
@@ -1844,24 +1770,15 @@ fn repl(
         let mut interpreter_clone = interpreter.clone();
         let statements_clone = statements.clone();
         let loc = statements.iter().rev().find_map(|stmt| {
-            if let Statement { node, loc } = stmt {
-                let found = match node {
-                    Node::For { .. }
-                    | Node::While { .. }
-                    | Node::Call { .. } => true,
-                    _ => false,
-                };
-                if found {
-                    loc.clone()
-                } else {
-                    None
-                }
+            let found = matches!(stmt.node, Node::For { .. } | Node::While { .. } | Node::Call { .. });
+            if found {
+                stmt.loc.clone()
             } else {
                 None
             }
         }).or_else(|| {
             statements.iter().rev().find_map(|stmt| {
-                let Statement { loc, .. } = stmt;
+                stmt.loc.clone()
             })
         });
 

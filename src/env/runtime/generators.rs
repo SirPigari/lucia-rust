@@ -1,7 +1,7 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::statements::Statement;
+use crate::env::runtime::statements::{Statement, Node};
 use crate::interpreter::Interpreter;
-use crate::env::runtime::internal_structs::State;
+use crate::env::runtime::internal_structs::{State, PathElement};
 use crate::env::runtime::utils::{to_static, check_pattern};
 use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::variables::Variable;
@@ -395,13 +395,13 @@ impl PartialOrd for CustomGenerator {
 #[derive(Clone)]
 enum LoopType {
     While {
-        condition: Value,
-        body: Vec<Value>,
+        condition: Statement,
+        body: Vec<Statement>,
     },
     For {
-        var: Value,
+        var: PathElement,
         iterable: Vec<Value>,
-        body: Vec<Value>,
+        body: Vec<Statement>,
         index: usize,
         body_pc: usize,
         saved_var: Vec<Variable>,
@@ -438,14 +438,14 @@ impl Iterator for CustomGenerator {
                             continue;
                         }
 
-                        if !self.interpreter.evaluate(&condition.convert_to_statement()).is_truthy() {
+                        if !self.interpreter.evaluate(&condition).is_truthy() {
                             self.loop_stack.pop();
                             self.index += 1;
                             continue;
                         }
 
                         let stmt = body[pc].clone();
-                        let result = self.interpreter.evaluate(&stmt.convert_to_statement());
+                        let result = self.interpreter.evaluate(&stmt);
 
                         if self.interpreter.err.is_some() {
                             self.done = true;
@@ -494,7 +494,7 @@ impl Iterator for CustomGenerator {
                         let item = iterable[*index].clone();
 
                         if saved_var.is_empty() {
-                            if let Ok((_, bindings)) = check_pattern(&item, var) {
+                            if let Ok((_, bindings)) = check_pattern(&item, &var.to_value()) {
                                 for name in bindings.keys() {
                                     if let Some(existing) = self.interpreter.variables.get(name) {
                                         saved_var.push(existing.clone());
@@ -503,7 +503,7 @@ impl Iterator for CustomGenerator {
                             }
                         }
 
-                        let bindings = match check_pattern(&item, var) {
+                        let bindings = match check_pattern(&item, &var.to_value()) {
                             Ok((true, vars)) => vars,
                             Ok((false, _)) => {
                                 self.interpreter.raise("ValueError", "Item did not match for-loop variable pattern");
@@ -533,7 +533,7 @@ impl Iterator for CustomGenerator {
                         }
 
                         let stmt = body[*body_pc].clone();
-                        let result = self.interpreter.evaluate(&stmt.convert_to_statement());
+                        let result = self.interpreter.evaluate(&stmt);
 
                         if self.interpreter.err.is_some() {
                             self.done = true;
@@ -581,28 +581,25 @@ impl Iterator for CustomGenerator {
 
             let statement = self.body[self.index].clone();
 
-            match statement.get_type().as_str() {
-                "WHILE" => {
-                    let data = statement.convert_to_hashmap();
-                    let condition = data.get(&Value::String("condition".to_string())).cloned().unwrap_or(Value::Null);
-                    let body = data.get(&Value::String("body".to_string()))
-                        .and_then(|v| match v {
-                            Value::List(l) => Some(l.clone()),
-                            _ => None,
-                        }).unwrap_or(vec![]);
-
+            match statement.node {
+                Node::While { condition, body } => {
                     self.loop_stack.push(Frame {
-                        loop_type: LoopType::While { condition, body },
+                        loop_type: LoopType::While { condition: *condition, body },
                         while_pc: 0,
                     });
                 }
 
-                "FOR" => {
-                    let data = statement.convert_to_hashmap();
-
-                    let iterable_val = data.get(&Value::String("iterable".to_string()))
-                        .map(|v| self.interpreter.evaluate(&v.convert_to_statement()))
-                        .unwrap_or(Value::Null);
+                Node::For { iterable, body, variable } => {
+                    let iterable_val = self.interpreter.evaluate(&iterable);
+                    if self.interpreter.err.is_some() {
+                        self.done = true;
+                        let err = self.interpreter.err.take().unwrap();
+                        return Some(Value::Error(
+                            to_static(err.error_type),
+                            to_static(err.msg),
+                            err.ref_err.map(|boxed| *boxed),
+                        ));
+                    }
 
                     if !iterable_val.is_iterable() {
                         self.done = true;
@@ -610,17 +607,6 @@ impl Iterator for CustomGenerator {
                     }
 
                     let iterable_vec = iterable_val.iterable_to_vec();
-
-                    let variable = match data.get(&Value::String("variable".to_string())) {
-                        Some(v) => v.clone(),
-                        None => Value::Null,
-                    };
-
-                    let body = data.get(&Value::String("body".to_string()))
-                        .and_then(|v| match v {
-                            Value::List(l) => Some(l.clone()),
-                            _ => None,
-                        }).unwrap_or(vec![]);
 
                     self.loop_stack.push(Frame {
                         loop_type: LoopType::For {

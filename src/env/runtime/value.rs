@@ -1,11 +1,9 @@
 use crate::env::runtime::types::{Float, Int, Type};
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::generators::Generator;
-use crate::env::runtime::statements::Statement;
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::utils::{format_float, format_int, fix_path, format_value, MAX_PTR};
-use crate::env::runtime::tokens::Location;
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -53,7 +51,11 @@ impl PartialEq for Value {
             (String(a), String(b)) => a == b,
             (Boolean(a), Boolean(b)) => a == b,
             (Null, Null) => true,
-            (Map { keys: ak, values: av }, Map { keys: bk, values: bv }) => ak == bk && av == bv,
+            (Map { keys: ak, values: av }, Map { keys: bk, values: bv }) => {
+                let hm1 = ak.iter().zip(av.iter()).collect::<HashMap<_, _>>();
+                let hm2 = bk.iter().zip(bv.iter()).collect::<HashMap<_, _>>();
+                hm1 == hm2
+            }
             (Tuple(a), Tuple(b)) => a == b,
             (List(a), List(b)) => a == b,
             (Bytes(a), Bytes(b)) => a == b,
@@ -493,90 +495,6 @@ impl Hash for Value {
 }
 
 impl Value {
-    pub fn convert_to_statement(&self) -> Statement {
-        match self {
-            Value::Map { keys, values } => {
-                let mut loc: Option<Location> = None;
-    
-                let mut new_keys = Vec::new();
-                let mut new_values = Vec::new();
-    
-                for (i, key) in keys.iter().enumerate() {
-                    if let Value::String(s) = key {
-                        if s == "_loc" {
-                            if let Some(Value::Map { keys: loc_keys, values: loc_values }) = values.get(i) {
-                                let mut file = String::new();
-                                let mut line_string = String::new();
-                                let mut line_number = 0;
-                                let mut range = (0, 0);
-                                let mut lucia_source_loc = String::new();
-    
-                                for (k, v) in loc_keys.iter().zip(loc_values.iter()) {
-                                    match (k, v) {
-                                        (Value::String(s), Value::String(val)) if s == "_file" => {
-                                            file = val.clone();
-                                        }
-                                        (Value::String(s), Value::String(val)) if s == "_line_string" => {
-                                            line_string = val.clone();
-                                        }
-                                        (Value::String(s), Value::Int(n)) if s == "_line_number" => {
-                                            line_number = n.to_i64().unwrap_or(0) as usize;
-                                        }
-                                        (Value::String(s), Value::Tuple(vs)) if s == "_range" && vs.len() == 2 => {
-                                            if let (Value::Int(start), Value::Int(end)) = (&vs[0], &vs[1]) {
-                                                range = (
-                                                    start.to_i64().unwrap_or(0) as usize,
-                                                    end.to_i64().unwrap_or(0) as usize,
-                                                );
-                                            }
-                                        }
-                                        (Value::String(s), Value::String(val)) if s == "_lucia_source_loc" => {
-                                            lucia_source_loc = val.clone();
-                                        }
-                                        _ => {}
-                                    }
-                                }
-    
-                                loc = Some(Location {
-                                    file,
-                                    line_string,
-                                    line_number,
-                                    range,
-                                    lucia_source_loc,
-                                });
-                            }
-                            continue;
-                        }
-                    }
-    
-                    new_keys.push(key.clone());
-                    if let Some(value) = values.get(i) {
-                        new_values.push(value.clone());
-                    }
-                }
-    
-                Statement::Statement {
-                    keys: new_keys,
-                    values: new_values,
-                    loc,
-                }
-            }
-    
-            Value::Null => Statement::Statement {
-                keys: vec![
-                    Value::String("type".to_string()),
-                    Value::String("value".to_string()),
-                ],
-                values: vec![
-                    Value::String("BOOLEAN".to_string()),
-                    Value::String("null".to_string()),
-                ],
-                loc: None,
-            },
-    
-            _ => Statement::Null,
-        }
-    }
     pub fn from_json(val: &serde_json::Value) -> Self {
         match val {
             serde_json::Value::Null => Value::Null,
@@ -853,13 +771,6 @@ impl Value {
                 Ok(f) => f.is_nan(),
                 Err(_) => false,
             },
-            _ => false,
-        }
-    }
-    pub fn is_statement(&self) -> bool {
-        match self {
-            Value::Map { keys, .. } => { keys.iter().any(|k| matches!(k, Value::String(s) if s == "type"))},
-            Value::Null => true,
             _ => false,
         }
     }

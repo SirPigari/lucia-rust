@@ -140,6 +140,15 @@ impl EffectFlags {
         }
         names
     }
+
+    pub fn display(&self) -> String {
+        let names = self.get_names();
+        if names.is_empty() {
+            "PURE".to_string()
+        } else {
+            names.join(" | ")
+        }
+    }
 }
 
 impl BitOr for EffectFlags {
@@ -181,7 +190,7 @@ impl Not for EffectFlags {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum PathElement {
     Path {
         segments: Vec<String>,       // a.b.c
