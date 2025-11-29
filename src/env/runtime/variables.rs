@@ -1348,6 +1348,61 @@ impl Variable {
                         None,
                     )
                 };
+                let all = {
+                    let function_signature = parse_type("function[any] -> any | null");
+                    let interpreter_clone = interpreter.clone();
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "all",
+                        move |args| {
+                            let function: Option<_> = match args.get("f") {
+                                Some(Value::Function(func)) => Some(func.clone()),
+                                Some(Value::Null) | None => None,
+                                _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                            };
+
+                            let items = match &val_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+
+                            for item in &items {
+                                let result = if let Some(function) = &function {
+                                    let mut interp = interpreter_clone.clone();
+                                    let res = interp.call_function(
+                                        function,
+                                        vec![item.clone()],
+                                        std::collections::HashMap::default(),
+                                        None,
+                                    );
+
+                                    if interp.err.is_some() {
+                                        return interp.err.take().unwrap().to_value();
+                                    }
+
+                                    res
+                                } else {
+                                    item.clone()
+                                };
+
+                                match result {
+                                    Value::Boolean(b) => {
+                                        if !b {
+                                            return Value::Boolean(false);
+                                        }
+                                    }
+                                    _ => return Value::Error("TypeError", "Function must return a boolean", None),
+                                }
+                            }
+
+                            Value::Boolean(true)
+                        },
+                        vec![Parameter::positional_optional_pt("f", &function_signature, Value::Null)],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -1464,6 +1519,17 @@ impl Variable {
                     Variable::new(
                         "sort".to_string(),
                         sort,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "all".to_string(),
+                    Variable::new(
+                        "all".to_string(),
+                        all,
                         "function".to_string(),
                         false,
                         true,

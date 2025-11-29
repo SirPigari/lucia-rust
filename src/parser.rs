@@ -3696,6 +3696,10 @@ impl Parser {
                     if let Some(Token(kind, seg, _)) = self.token().cloned() {
                         if kind == "IDENTIFIER" {
                             self.next();
+                            if RESERVED_KEYWORDS.contains(&seg.as_str()) {
+                                self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used in paths", seg));
+                                return None;
+                            }
                             segments.push(seg.clone());
                         } else {
                             self.raise("SyntaxError", "Expected identifier after '.'");

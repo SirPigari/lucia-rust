@@ -6,9 +6,13 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
-use crate::env::runtime::utils::MAX_PTR;
+use crate::env::runtime::utils::{MAX_PTR, supports_color};
 use crate::env::runtime::modules::Module;
 use crate::{insert_native_fn, insert_native_var};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
+use crossterm::event::{poll, read, Event, KeyCode};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{make_native_fn_pt, make_native_static_fn_pt, insert_native_fn_pt};
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,7 +22,9 @@ use std::sync::Mutex;
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
-use std::{path::Path, io::Read};
+use std::{path::Path, io::Read, time::{Instant, Duration}};
+#[cfg(not(target_arch = "wasm32"))]
+use once_cell::sync::Lazy;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::statements::Statement;
@@ -31,6 +37,9 @@ use std::env::consts;
 use crate::env::runtime::utils::to_static;
 #[cfg(not(target_arch = "wasm32"))]
 use sys_info;
+
+#[cfg(not(target_arch = "wasm32"))]
+static LAST_KEY_TIME_AND_CODE: Lazy<Mutex<(Instant, Option<KeyCode>)>> = Lazy::new(|| Mutex::new((Instant::now(), None)));
 
 #[cfg(not(target_arch = "wasm32"))]
 fn wrap_string_fn<F>(func: F) -> impl Fn(&HashMap<String, Value>) -> Value
@@ -750,6 +759,309 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
     map
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn create_terminal_map() -> HashMap<String, Variable> {
+    let mut map = HashMap::new();
+
+    insert_native_fn!(map, "isatty", |args: &HashMap<String, Value>| -> Value {
+        let fd = match args.get("fd") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'fd' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'fd' to be an integer", None),
+        };
+
+        let res = unsafe { libc::isatty(fd as libc::c_int) };
+        Value::Boolean(res != 0)
+    }, vec![Parameter::positional("fd", "int")], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "supports_color", |_: &HashMap<String, Value>| -> Value {
+        Value::Boolean(supports_color())
+    }, vec![], "bool", EffectFlags::IO);
+
+    insert_native_fn!(map, "get_terminal_size", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::terminal::size() {
+            Ok((cols, rows)) => {
+                Value::Tuple(vec![
+                    Value::Int(Int::from_i64(cols as i64)),
+                    Value::Int(Int::from_i64(rows as i64)),
+                ])
+            }
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "tuple", EffectFlags::IO);
+    insert_native_fn!(map, "clear_screen", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+
+    insert_native_fn!(map, "reset_screen", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::Purge),
+            crossterm::cursor::MoveTo(0,0)
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "beep", |_: &HashMap<String, Value>| -> Value {
+        let mut out = std::io::stdout();
+        match crossterm::execute!(out, crossterm::style::Print("\x07")) {
+            Ok(_) => {
+                let _ = out.flush();
+                Value::Boolean(true)
+            },
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "hide_cursor", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::Hide
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "show_cursor", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::Show
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "flush", |args: &HashMap<String, Value>| -> Value {
+        let fd = match args.get("fd") {
+            Some(Value::Int(i)) => match i.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid fd integer", None),
+            },
+            _ => 1,
+        };
+
+        match fd {
+            1 => match std::io::stdout().flush() {
+                Ok(_) => Value::Boolean(true),
+                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            },
+            2 => match std::io::stderr().flush() {
+                Ok(_) => Value::Boolean(true),
+                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            },
+            _ => Value::Error("OSError", Box::leak(Box::new("Only fd 0, 1, 2 are supported".to_string())), None),
+        }
+    }, vec![Parameter::positional_optional("fd", "int", Value::Int(Int::from(1)))], "bool", EffectFlags::IO);
+    
+    let key_enum = Type::Enum {
+        name: "KeyCode".to_string(),
+        variants: vec![
+            ("Up".to_string(), Statement::Null, 0),
+            ("Down".to_string(), Statement::Null, 1),
+            ("Left".to_string(), Statement::Null, 2),
+            ("Right".to_string(), Statement::Null, 3),
+            ("Enter".to_string(), Statement::Null, 4),
+            ("Esc".to_string(), Statement::Null, 5),
+            ("Char".to_string(), Statement::make_value(Value::Type(Type::new_simple("str"))), 6),
+            ("Space".to_string(), Statement::Null, 7),
+            ("Backspace".to_string(), Statement::Null, 8),
+            ("Tab".to_string(), Statement::Null, 9),
+            ("Delete".to_string(), Statement::Null, 10),
+            ("Insert".to_string(), Statement::Null, 11),
+            ("Home".to_string(), Statement::Null, 12),
+            ("End".to_string(), Statement::Null, 13),
+            ("PageUp".to_string(), Statement::Null, 14),
+            ("PageDown".to_string(), Statement::Null, 15),
+            ("F1".to_string(), Statement::Null, 16),
+            ("F2".to_string(), Statement::Null, 17),
+            ("F3".to_string(), Statement::Null, 18),
+            ("F4".to_string(), Statement::Null, 19),
+            ("F5".to_string(), Statement::Null, 20),
+            ("F6".to_string(), Statement::Null, 21),
+            ("F7".to_string(), Statement::Null, 22),
+            ("F8".to_string(), Statement::Null, 23),
+            ("F9".to_string(), Statement::Null, 24),
+            ("F10".to_string(), Statement::Null, 25),
+            ("F11".to_string(), Statement::Null, 26),
+            ("F12".to_string(), Statement::Null, 27),
+            ("None".to_string(), Statement::Null, 28),
+            ("Other".to_string(), Statement::make_value(Value::Type(Type::new_simple("str"))), 29),
+        ],
+        generics: Vec::new(),
+        wheres: Vec::new(),
+    };
+    insert_native_var!(map, "KeyCode", Value::Type(key_enum.clone()), "type");
+
+    let key_enum_clone = key_enum.clone();
+    insert_native_fn_pt!(map, "read_key", move |args: &HashMap<String, Value>| -> Value {
+        let timeout_ms = match args.get("timeout") {
+            Some(Value::Int(int)) => match int.to_i64() { Ok(v) => v, Err(_) => return Value::Error("TypeError", "Invalid 'timeout' integer value", None) },
+            _ => 0,
+        };
+        let blocking = match args.get("blocking") {
+            Some(Value::Boolean(b)) => *b,
+            _ => true,
+        };
+
+        let poll_timeout = if blocking { Duration::from_secs(1000) } else { Duration::from_millis(timeout_ms as u64) };
+
+        let key_event_opt = match poll(poll_timeout) {
+            Ok(true) => match read() {
+                Ok(Event::Key(k)) => Some(k),
+                _ => None,
+            },
+            Ok(false) => None,
+            Err(_) => None,
+        };
+
+        if let Some(key_event) = key_event_opt {
+            let now = Instant::now();
+            let mut last = LAST_KEY_TIME_AND_CODE.lock().unwrap();
+            if let Some(last_code) = last.1 {
+                if last_code == key_event.code && now.duration_since(last.0) < Duration::from_millis(timeout_ms as u64) {
+                    return Value::Enum(Enum::new(key_enum_clone.clone(), (27, Value::Null)));
+                }
+            }
+            *last = (now, Some(key_event.code));
+
+            let key_enum = match key_event.code {
+                KeyCode::Up => Enum::new(key_enum_clone.clone(), (0, Value::Null)),
+                KeyCode::Down => Enum::new(key_enum_clone.clone(), (1, Value::Null)),
+                KeyCode::Left => Enum::new(key_enum_clone.clone(), (2, Value::Null)),
+                KeyCode::Right => Enum::new(key_enum_clone.clone(), (3, Value::Null)),
+                KeyCode::Enter => Enum::new(key_enum_clone.clone(), (4, Value::Null)),
+                KeyCode::Esc => Enum::new(key_enum_clone.clone(), (5, Value::Null)),
+                KeyCode::Char(c) if c == ' ' => Enum::new(key_enum_clone.clone(), (7, Value::Null)), // Space
+                KeyCode::Char(c) => Enum::new(key_enum_clone.clone(), (6, Value::String(c.to_string()))),
+                KeyCode::Backspace => Enum::new(key_enum_clone.clone(), (8, Value::Null)),
+                KeyCode::Tab => Enum::new(key_enum_clone.clone(), (9, Value::Null)),
+                KeyCode::Delete => Enum::new(key_enum_clone.clone(), (10, Value::Null)),
+                KeyCode::Insert => Enum::new(key_enum_clone.clone(), (11, Value::Null)),
+                KeyCode::Home => Enum::new(key_enum_clone.clone(), (12, Value::Null)),
+                KeyCode::End => Enum::new(key_enum_clone.clone(), (13, Value::Null)),
+                KeyCode::PageUp => Enum::new(key_enum_clone.clone(), (14, Value::Null)),
+                KeyCode::PageDown => Enum::new(key_enum_clone.clone(), (15, Value::Null)),
+                KeyCode::F(n) if (1..=12).contains(&n) => Enum::new(key_enum_clone.clone(), (15 + n as usize, Value::Null)),
+                _ => Enum::new(key_enum_clone.clone(), (29, Value::String(format!("{:?}", key_event.code)))),
+            };
+            return Value::Enum(key_enum);
+        }
+
+        Value::Enum(Enum::new(key_enum_clone.clone(), (27, Value::Null)))
+    }, vec![
+        Parameter::positional_optional("timeout", "int", Value::Int(Int::from(0))),
+        Parameter::positional_optional("blocking", "bool", Value::Boolean(true))
+    ], &key_enum, EffectFlags::IO);
+    insert_native_fn!(map, "move_cursor", |args: &HashMap<String, Value>| -> Value {
+        let x = match args.get("x") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v as u16,
+                Err(_) => return Value::Error("TypeError", "Invalid 'x' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'x' to be an integer", None),
+        };
+        let y = match args.get("y") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v as u16,
+                Err(_) => return Value::Error("TypeError", "Invalid 'y' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'y' to be an integer", None),
+        };
+
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::cursor::MoveTo(x, y)
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![
+        Parameter::positional("x", "int"),
+        Parameter::positional("y", "int")
+    ], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "get_cursor_position", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::cursor::position() {
+            Ok((x, y)) => {
+                Value::Tuple(vec![
+                    Value::Int(Int::from_i64(x as i64)),
+                    Value::Int(Int::from_i64(y as i64)),
+                ])
+            }
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![], "tuple", EffectFlags::IO);
+    insert_native_fn!(map, "enable_raw_mode", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::terminal::enable_raw_mode() {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "disable_raw_mode", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::terminal::disable_raw_mode() {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "clear_line", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
+        ) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "flush_input_buffer", |_: &HashMap<String, Value>| -> Value {
+        match crossterm::event::poll(std::time::Duration::from_millis(0)) {
+            Ok(_) => {
+                while crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+                    let _ = crossterm::event::read();
+                }
+                Value::Boolean(true)
+            }
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "scroll", |args: &HashMap<String, Value>| -> Value {
+        let lines = match args.get("lines") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v as i16,
+                Err(_) => return Value::Error("TypeError", "Invalid 'lines' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'lines' to be an integer", None),
+        };
+
+        if lines > 0 {
+            match crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::ScrollDown(lines as u16)
+            ) {
+                Ok(_) => Value::Boolean(true),
+                Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            }
+        } else {
+            match crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::ScrollUp(lines.abs() as u16)
+            ) {
+                Ok(_) => Value::Boolean(true),
+                Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            }
+        }
+    }, vec![
+        Parameter::positional("lines", "int")
+    ], "bool", EffectFlags::IO);
+
+    map
+}
+
 pub fn register(config: &Config) -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -906,6 +1218,22 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         state: None,
         path: PathBuf::from("os/subprocess"),
     };
+
+    // terminal
+    #[cfg(not(target_arch = "wasm32"))]
+    let terminal_module = Module {
+        name: "terminal".to_string(),
+        properties: create_terminal_map(),
+        parameters: Vec::new(),
+        is_public: true,
+        is_static: true,
+        is_final: true,
+        state: None,
+        path: PathBuf::from("os/terminal"),
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    insert_native_var!(map, "terminal", Value::Module(terminal_module), "module");
 
     #[cfg(not(target_arch = "wasm32"))]
     insert_native_var!(map, "subprocess", Value::Module(subprocess_module), "module");

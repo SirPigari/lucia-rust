@@ -42,6 +42,12 @@ a[1][1] = 43
 assert_eq!(a[1][1], 43)
 assert_eq!(a, ([42, [2, 43], 4]))
 
+a := [10, [20, 30, [40, 50]]]
+a[1][0] = 42
+assert_eq!(a, ([10, [42, 30, [40, 50]]]))
+a[1][2][1] = 40
+assert_eq!(a, ([10, [42, 30, [40, 40]]]))
+
 m: map[str, map[str, int]] = {"outer": {"inner": 10}}
 assert_eq!(m["outer"]["inner"], 10)
 m["outer"]["inner"] = 42

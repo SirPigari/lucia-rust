@@ -5,10 +5,8 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 6_
+_Total TODOs found: 5_
 ---
-
-### [`src/interpreter.rs:5615:1`](../../../src/interpreter.rs#L5615) _(added by **SirPigari** on **2025-11-29**)_
 
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'

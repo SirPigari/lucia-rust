@@ -287,7 +287,7 @@ impl Interpreter {
                 if adjusted >= 0 && (adjusted as usize) < len {
                     Ok(adjusted as usize)
                 } else {
-                    Err(Value::Error("IndexError", "Index out of range", None))
+                    Err(self.raise("IndexError", &format!("Index '{}' out of range", adjusted)))
                 }
             }
             Value::String(s) => {
@@ -297,22 +297,22 @@ impl Interpreter {
                 if adjusted >= 0 && (adjusted as usize) < len {
                     Ok(adjusted as usize)
                 } else {
-                    Err(self.raise("IndexError", "Index out of range"))
+                    Err(self.raise("IndexError", &format!("Index '{}' out of range", adjusted)))
                 }
             }            
             Value::Float(f) => {
                 if !f.is_integer_like() {
-                    return Err(Value::Error("IndexError", "Float index must have zero fractional part", None));
+                    return Err(self.raise("IndexError", "Float index must have zero fractional part"));
                 }
                 let idx = f.to_f64().map_err(|_| { self.raise("ConversionError", "Failed to convert Float to isize") })? as isize;
                 let adjusted = if idx < 0 { len as isize + idx } else { idx };
                 if adjusted >= 0 && (adjusted as usize) < len {
                     Ok(adjusted as usize)
                 } else {
-                    Err(Value::Error("IndexError", "Index out of range", None))
+                    Err(self.raise("IndexError", &format!("Index '{}' out of range", adjusted)))
                 }
             }
-            _ => Err(Value::Error("IndexError", "Index must be Int, String or Float with no fraction", None)),
+            _ => Err(self.raise("IndexError", "Index must be Int, String or Float with no fraction")),
         }
     }
 
@@ -5318,231 +5318,128 @@ impl Interpreter {
                 var.set_value(right_value);
                 var.value.clone()
             }
-            Node::IndexAccess { object, access } => {
+            Node::IndexAccess { .. } => {
                 fn value_to_usize(val: &Value) -> Result<usize, Value> {
                     match val {
                         Value::Int(i) => {
                             let v = i.to_i64().map_err(|_| Value::Error("TypeError", "Index must be integer", None))?;
-                            if v >= 0 { Ok(v as usize) } 
-                            else { Err(Value::Error("TypeError", "Index must be non-negative", None)) }
+                            if v >= 0 { Ok(v as usize) } else { Err(Value::Error("TypeError", "Index must be non-negative", None)) }
                         }
                         Value::Float(f) => {
                             let v = f.to_f64().map_err(|_| Value::Error("TypeError", "Index must be number", None))?;
-                            if v.fract() == 0.0 && v >= 0.0 { Ok(v as usize) } 
-                            else { Err(Value::Error("TypeError", "Index must be non-negative whole number", None)) }
+                            if v.fract() == 0.0 && v >= 0.0 { Ok(v as usize) } else { Err(Value::Error("TypeError", "Index must be non-negative whole number", None)) }
                         }
                         _ => Err(Value::Error("TypeError", "Index must be integer or whole float", None)),
                     }
                 }
 
-                fn get_single_index_from_access(interpreter: &mut Interpreter, access: &AccessType) -> Result<Value, (String, String)> {
+                fn get_single_index(interpreter: &mut Interpreter, access: &AccessType) -> Result<Value, (String, String)> {
                     if let AccessType::Single { index } = access {
-                        let evaluated_index = interpreter.evaluate(&index);
-                        if interpreter.err.is_some() {
-                            let err = interpreter.err.take().unwrap();
-
+                        let val = interpreter.evaluate(index);
+                        if let Some(err) = interpreter.err.take() {
                             return Err((err.error_type.to_owned(), err.msg.to_owned()));
                         }
-                        Ok(evaluated_index)
+                        Ok(val)
                     } else {
-                        Err(("TypeError".to_string(), "Index access must be a map with 'start' and 'end' keys".to_string()))
+                        Err(("TypeError".to_string(), "Only single index access supported".to_string()))
                     }
                 }
 
-                fn assign_index(interpreter: &mut Interpreter, variable_name: &str, index_access: Value, right_value: Value) -> Value {
-                    let var = match interpreter.variables.get_mut(variable_name) {
-                        Some(v) => v,
-                        None => return interpreter.raise("NameError", &format!("Variable '{}' not found for index assignment", variable_name)),
-                    };
-
-                    if var.is_final() {
-                        return interpreter.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", variable_name));
+                fn assign_nested(container: &mut Value, indices: &[Value], right_value: Value) -> Result<(), Value> {
+                    if indices.is_empty() {
+                        *container = right_value;
+                        return Ok(());
                     }
 
-                    match &mut var.value {
+                    let current_index = &indices[0];
+
+                    match container {
                         Value::List(l) => {
-                            let index = match value_to_usize(&index_access) {
-                                Ok(i) => i,
-                                Err(v) => return v,
-                            };
-                            if index >= l.len() {
-                                return interpreter.raise("IndexError", "List index out of range");
-                            }
-                            l[index] = right_value;
-                            var.value.clone()
+                            let idx = value_to_usize(current_index)?;
+                            if idx >= l.len() { return Err(Value::Error("IndexError", "List index out of range", None)); }
+                            assign_nested(&mut l[idx], &indices[1..], right_value)?;
                         }
                         Value::Tuple(t) => {
-                            let index = match value_to_usize(&index_access) {
-                                Ok(i) => i,
-                                Err(v) => return v,
-                            };
-                            if index >= t.len() {
-                                return interpreter.raise("IndexError", "Tuple index out of range");
+                            let idx = value_to_usize(current_index)?;
+                            if idx >= t.len() { return Err(Value::Error("IndexError", "Tuple index out of range", None)); }
+                            assign_nested(&mut t[idx], &indices[1..], right_value)?;
+                        }
+                        Value::Map { keys, values } => {
+                            match keys.iter().position(|k| k == current_index) {
+                                Some(pos) => assign_nested(&mut values[pos], &indices[1..], right_value)?,
+                                None => {
+                                    keys.push(current_index.clone());
+                                    values.push(Value::Null);
+                                    assign_nested(values.last_mut().unwrap(), &indices[1..], right_value)?;
+                                }
                             }
-                            t[index] = right_value;
-                            var.value.clone()
+                        }
+                        Value::String(s) => {
+                            if indices.len() != 1 { return Err(Value::Error("TypeError", "Cannot index deeper into a string", None)); }
+                            let idx = value_to_usize(current_index)?;
+                            if idx >= s.len() { return Err(Value::Error("IndexError", "String index out of range", None)); }
+                            let replacement = right_value.to_string();
+                            if replacement.chars().count() != 1 { return Err(Value::Error("TypeError", "String assignment must be a single character", None)); }
+                            let mut chars: Vec<char> = s.chars().collect();
+                            chars[idx] = replacement.chars().next().unwrap();
+                            *s = chars.into_iter().collect();
                         }
                         Value::Bytes(b) => {
-                            let index = match value_to_usize(&index_access) {
-                                Ok(i) => i,
-                                Err(v) => return v,
-                            };
-                            if index >= b.len() {
-                                return interpreter.raise("IndexError", "Bytes index out of range");
-                            }
-                            let val_as_u8 = match right_value {
+                            if indices.len() != 1 { return Err(Value::Error("TypeError", "Cannot index deeper into bytes", None)); }
+                            let idx = value_to_usize(current_index)?;
+                            if idx >= b.len() { return Err(Value::Error("IndexError", "Bytes index out of range", None)); }
+                            let byte_val = match right_value {
                                 Value::Int(i) => i.to_i64().unwrap_or(0) as u8,
                                 Value::Float(f) => f.to_f64().unwrap_or(0.0) as u8,
                                 Value::String(s) => s.parse::<u8>().unwrap_or(0),
-                                _ => return interpreter.raise("TypeError", "Expected numeric value for byte assignment"),
+                                _ => return Err(Value::Error("TypeError", "Expected numeric value for byte assignment", None)),
                             };
-                            b[index] = val_as_u8;
-                            var.value.clone()
+                            b[idx] = byte_val;
                         }
-                        Value::String(s) => {
-                            let index = match value_to_usize(&index_access) {
-                                Ok(i) => i,
-                                Err(v) => return v,
-                            };
-                            if index >= s.len() {
-                                return interpreter.raise("IndexError", "String index out of range");
+                        _ => return Err(Value::Error("TypeError", "Object not indexable", None)),
+                    }
+
+                    Ok(())
+                }
+
+                fn collect_indices(interpreter: &mut Interpreter, stmt: &Statement) -> Result<(String, Vec<Value>), (String, String)> {
+                    let mut indices = vec![];
+                    let mut current_stmt = stmt;
+
+                    loop {
+                        match &current_stmt.node {
+                            Node::Variable { name } => return Ok((name.clone(), indices)),
+                            Node::IndexAccess { object, access } => {
+                                let idx = get_single_index(interpreter, access)?;
+                                indices.push(idx);
+                                current_stmt = object;
                             }
-                            let mut chars: Vec<char> = s.chars().collect();
-                            let replacement_str = right_value.to_string();
-                            if replacement_str.chars().count() != 1 {
-                                return interpreter.raise("TypeError", "String assignment must be a single character");
-                            }
-                            chars[index] = replacement_str.chars().next().unwrap();
-                            *s = chars.into_iter().collect();
-                            var.value.clone()
+                            _ => return Err(("TypeError".to_string(), "Invalid assignment target".to_string())),
                         }
-                        Value::Map { keys, values } => {
-                            let key = index_access.clone();
-                            match keys.iter().position(|k| k == &key) {
-                                Some(idx) => values[idx] = right_value,
-                                None => {
-                                    keys.push(key);
-                                    values.push(right_value);
-                                }
-                            }
-                            var.value.clone()
-                        }
-                        _ => interpreter.raise("TypeError", "Object not indexable for index assignment"),
                     }
                 }
 
-                let index_access = match get_single_index_from_access(self, &access) {
-                    Ok(idx) => idx,
+                let (var_name, mut indices) = match collect_indices(self, &left) {
+                    Ok(v) => v,
                     Err((k, msg)) => return self.raise(&k, &msg),
                 };
 
-                let mut current_obj = object;
+                indices.reverse();
 
-                'l: loop {
-                    if self.err.is_some() { return NULL; }
+                let var = match self.variables.get_mut(&var_name) {
+                    Some(v) => v,
+                    None => return self.raise("NameError", &format!("Variable '{}' not found", var_name)),
+                };
 
-                    match &current_obj.node {
-                        Node::Variable { name } => {
-                            return assign_index(self, name, index_access, right_value);
-                        }
-                        Node::IndexAccess { object: inner_object, access: inner_access } => {
-                            let inner_index = match get_single_index_from_access(self, &inner_access) {
-                                Ok(v) => v,
-                                Err((k, msg)) => return self.raise(&k, &msg),
-                            };
-
-                            let inner_name = if let Node::Variable { name } = &inner_object.node {
-                                name.clone()
-                            } else {
-                                current_obj = inner_object.clone();
-                                continue 'l;
-                            };
-
-                            let var = match self.variables.get(&inner_name) {
-                                Some(v) => v,
-                                None => return self.raise("NameError", &format!("Variable '{}' not found for nested index assignment", inner_name)),
-                            };
-
-                            if var.is_final() {
-                                return self.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", inner_name));
-                            }
-
-                            let mut container_at_outer_index = match &var.value {
-                                Value::List(l) => {
-                                    let outer_index = match value_to_usize(&inner_index) {
-                                        Ok(i) => i,
-                                        Err(v) => return v,
-                                    };
-                                    if outer_index >= l.len() {
-                                        return self.raise("IndexError", "List index out of range");
-                                    }
-                                    l[outer_index].clone()
-                                }
-                                Value::Tuple(t) => {
-                                    let outer_index = match value_to_usize(&inner_index) {
-                                        Ok(i) => i,
-                                        Err(v) => return v,
-                                    };
-                                    if outer_index >= t.len() {
-                                        return self.raise("IndexError", "Tuple index out of range");
-                                    }
-                                    t[outer_index].clone()
-                                }
-                                Value::Map { keys, values } => {
-                                    match keys.iter().position(|k| k == &inner_index) {
-                                        Some(idx) => {
-                                            let container = values[idx].clone();
-                                            container
-                                        },
-                                        None => return self.raise("KeyError", &format!("Key '{}' not found in map", inner_index.to_string())),
-                                    }
-                                }
-                                _ => return self.raise("TypeError", "Object not indexable for nested index assignment"),
-                            };
-
-                            match &mut container_at_outer_index {
-                                Value::List(inner_list) => {
-                                    let inner_idx = match value_to_usize(&inner_index) {
-                                        Ok(i) => i,
-                                        Err(v) => return v,
-                                    };
-                                    if inner_idx >= inner_list.len() {
-                                        return self.raise("IndexError", "Inner list index out of range");
-                                    }
-                                    inner_list[inner_idx] = right_value;
-                                }
-                                Value::Tuple(inner_tuple) => {
-                                    let inner_idx = match value_to_usize(&inner_index) {
-                                        Ok(i) => i,
-                                        Err(v) => return v,
-                                    };
-                                    if inner_idx >= inner_tuple.len() {
-                                        return self.raise("IndexError", "Inner tuple index out of range");
-                                    }
-                                    inner_tuple[inner_idx] = right_value;
-                                }
-                                Value::Map { keys, values } => {
-                                    match keys.iter().position(|k| k == &index_access) {
-                                        Some(idx) => {
-                                            values[idx] = right_value
-                                        },
-                                        None => {
-                                            keys.push(index_access);
-                                            values.push(right_value);
-                                        }
-                                    }
-                                }
-                                _ => return self.raise("TypeError", "Inner object not indexable for nested assignment"),
-                            }
-
-                            return assign_index(self, &inner_name, inner_index, container_at_outer_index);
-                        }
-                        _ => {
-                            self.raise("TypeError", &format!("Assignment for {} is unsupported", current_obj.node.name()));
-                            return NULL;
-                        }
-                    }
+                if var.is_final() {
+                    return self.raise("AssignmentError", &format!("Cannot assign to final variable '{}'", var_name));
                 }
+
+                if let Err(err) = assign_nested(&mut var.value, &indices, right_value) {
+                    return self.raise("TypeError", &format!("{}", err));
+                }
+
+                var.value.clone()
             }
             Node::PropertyAccess { object, property_name } => {
                 let object_val = self.evaluate(&object);
@@ -5612,7 +5509,6 @@ impl Interpreter {
                 NULL
             }
             // fuck my parser
-            // TODO
             Node::Pointer { value, ptr_node } => {
                 match ptr_node {
                     PtrNode::PointerDeref { deref_level } => {

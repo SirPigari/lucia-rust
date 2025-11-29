@@ -1,218 +1,108 @@
-#config debug = false
-
-import time
-import random
-import collections  // for clear_terminal
+import (*) from os.terminal
+import (sleep) from time
 
 // Conway's game of life in Lucia
 // made by Markofwitch 2025, the developer of Lucia
-// code inspired by https://github.com/mwharrisjr/Game-of-Life/
+// code inspired by https://gitlab.com/tsoding/porth/-/blob/master/examples/gol.porth
 // Game originally created by John Conway in 1970
 
-// glider
-// small spaceship
-final glider: list = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
-    [0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-]
+#config debug = false  // to hide debug info in terminal
 
-// block
-// still life
-final block: list = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-]
+sleep(500)
 
+typedef Grid = list[list[bool; 20]; 20]
 
-// beacon
-// period 2 oscillator
-final beacon: list = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-]
+final width: int = 20
+final height: int = 20
 
-// custom
-// empty grid do whatever you want
-final custom: list = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-]
+mutable grid: Grid = array(height, array(width, false))
+mutable iteration: int = 0
+mutable x: int = 0
+mutable y: int = 0
 
-fun create_initial_grid(rows: int, cols: int) -> list:
-    // set use to null to get a random grid, or to one of the predefined patterns
-    use: ?list = null
-    if (use && len(use) == rows && len(use[0]) == cols):
-        return use
+fun main():
+    enable_raw_mode()
+    flush_input_buffer()
+    mutable running: bool = true
+    while (running):
+        hide_cursor()
+        draw(grid, x, y, f"Conway's Game of Life - Use Arrow Keys to Move, Space to Toggle Cell, Enter to Run, Esc to Exit.")
+        flush()
+
+        key := read_key(timeout=150)
+        match key:
+            KeyCode.Esc -> running = false,
+            KeyCode.Up -> if y > 0: y -= 1 end,
+            KeyCode.Down -> if y < height - 1: y += 1 end,
+            KeyCode.Left -> if x > 0: x -= 1 end,
+            KeyCode.Right -> if x < width - 1: x += 1 end,
+            KeyCode.Space -> grid[y][x] = !grid[y][x],
+            KeyCode.Enter -> run_simulation(),
+            KeyCode.None -> null,
+            _ -> null,
+        end
     end
-    grid: list = []
-    for (row in [0..rows - 1]):
-        row_list: list = []
-        for (col in [0..cols - 1]):
-            if (random.randint(0, 7) == 0):
-                // append doesnt take a mutable ref so it returns a new list
-                row_list = row_list.append(1)
+    disable_raw_mode()
+    show_cursor()
+    exit(0)
+end
+
+fun draw(grid: Grid, cx: int, cy: int, t: str) -> void:
+    clear_screen()
+    move_cursor(0, 0)
+    print(t)
+    for y in [0..height - 1]:
+        for x in [0..width - 1]:
+            c := if grid[y][x] then ' # ' else ' . '
+            if x == cx && y == cy:
+                styledprint(c, reverse=true, end="")
             else:
-                row_list = row_list.append(0)
+                print(c, end="")
             end
         end
-        grid = grid.append(row_list)
+        print("\n")
     end
-    return grid
 end
 
-fun print_grid(rows: int, cols: int, grid: list, generation: int) -> void:
-    collections.clear_terminal()
-    output_str: str = "Generation " + str(generation) + " - To exit the program press <Ctrl-C>\n\r"
-    for (row in [0..rows - 1]):
-        for (col in [0..cols - 1]):
-            if (grid[row][col] == 0):
-                output_str += ". "
-            else:
-                output_str += "@ "
+fun run_simulation():
+    mutable last_iter: Grid = grid
+    while true:
+        mutable next: Grid = array(height, array(width, false))
+
+        for y in [0..height - 1]:
+            for x in [0..width - 1]:
+                n: int = 0
+
+                for dy in [-1, 0, 1]:
+                    for dx in [-1, 0, 1]:
+                        if dx == 0 && dy == 0:
+                            continue
+                        end
+                        ny: int = y + dy
+                        nx: int = x + dx
+
+                        if nx >= 0 && nx < width && ny >= 0 && ny < height && grid[ny][nx]:
+                            n += 1
+                        end
+                    end
+                end
+
+                next[y][x] = match (grid[y][x], n):
+                    (true, 2) | (_, 3) -> true,
+                    _ -> false,
+                end
             end
         end
-        output_str += "\n\r"
-    end
-    print(output_str, end="")
-end
-
-fun get_live_neighbors(row: int, col: int, rows: int, cols: int, grid: list) -> int:
-    life_sum: int = 0
-    for (i in [-1, 0, 1]):
-        for (j in [-1, 0, 1]):
-            if (!((i == 0) && (j == 0))):
-                life_sum += grid[(row + i + rows) % rows][(col + j + cols) % cols]
-            end
+        grid = next
+        iteration++
+        draw(grid, 999, 999, f"Conway's Game of Life - Running Simulation ({iteration}) (Press Esc to Stop)")
+        flush()
+        if (read_key() == KeyCode.Esc) || grid.all((row) => row.all((cell) => !cell)) || (grid == last_iter):
+            exit(0)
         end
-    end
-    return life_sum
-end
-
-// nested index access bug here
-// using temp variables as a workaround
-fun create_next_grid(rows: int, cols: int, grid: list) -> list:
-    mutable temp: list = []
-    // no list references so this is the RIGHT way
-    next_grid := array(rows, array(cols, 0))
-
-    for (row in [0..rows - 1]):
-        for (col in [0..cols - 1]):
-            live_neighbors: int = get_live_neighbors(row, col, rows, cols, grid)
-
-            if (live_neighbors < 2 || live_neighbors > 3):
-                temp = next_grid[row]
-                temp[col] = 0
-                next_grid[row] = temp
-                // next_grid[row][col] = 0
-            else if (live_neighbors == 3 && grid[row][col] == 0):
-                temp = next_grid[row]
-                temp[col] = 1
-                next_grid[row] = temp
-                // next_grid[row][col] = 1
-            else:
-                temp = next_grid[row]
-                temp[col] = grid[row][col]
-                next_grid[row] = temp
-                // next_grid[row][col] = grid[row][col]
-            end
-        end
-    end
-
-    return next_grid
-end
-
-fun grid_changing(rows: int, cols: int, grid: list, nextGrid: list) -> bool:
-    for (row in [0..rows - 1]):
-        for (col in [0..cols - 1]):
-            if (grid[row][col] != nextGrid[row][col]):
-                return true
-            end
-        end
-    end
-    return false
-end
-
-fun get_integer_value(prompt: str, low: int, high: int) -> int:
-    while (true):
-        input_str: str = input(prompt)
-        try:
-            value: int = int(input_str)
-        catch (e):
-            print("Input was not a valid integer value.")
-            continue
-        end
-        if (value < low || value > high):
-            print("Input was not inside the bounds (value < " + str(low) + " or value > " + str(high) + ").")
-            continue
-        end
-        return value
+        flush_input_buffer()
+        last_iter = grid
     end
 end
 
-fun run_game() -> void:
-    collections.clear_terminal()
-    print("Conway's Game of Life in Lucia\n")
-    print("@ - live cell\n. - dead cell\n")
-    rows: int = get_integer_value("Enter the number of rows (10-60): ", 10, 60)
-    cols: int = get_integer_value("Enter the number of cols (10-118): ", 10, 118)
-
-    generations: int = 5000
-
-    current_generation: list = create_initial_grid(rows, cols)
-    next_generation: ?list = null
-
-    for (generation in [1..generations]):
-        if next_generation isnt void:
-            if (!grid_changing(rows, cols, current_generation, next_generation)):
-                break
-            end
-        end
-        print_grid(rows, cols, current_generation, generation)
-        next_generation = create_next_grid(rows, cols, current_generation)
-        // sleep is in MILLISECONDS for clarity because milliseconds are superior to seconds
-        time.sleep(100)
-        (current_generation, next_generation) = (next_generation, current_generation)
-    end
-
-    print_grid(rows, cols, current_generation, generations)
-    print("<Enter> to exit or r to run again: ", end="")
-    out: str = input()
-    if (out == "r"):
-        run_game()
-    end
-    null
-end
-
-run_game()
+main()
