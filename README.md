@@ -73,9 +73,12 @@ If you don't want to donate, but still want to help:
 
 ## Roadmap
 
-- [x] Rewrite basics to Rust  
-- [x] Make almost full support for any code from Python version  
-- [x] Develop a package manager for better module integration (lym)  
+- [x] Rewrite to Rust  
+- [x] Optimize lexer  
+- [x] Optimize AST  
+- [ ] Optimize parser  
+- [ ] Optimize function calls
+- [ ] Optimize interpreter  
 - [ ] Do all [TODOs](src/env/Docs/todos.md)
 
 ---
