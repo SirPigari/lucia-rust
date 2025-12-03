@@ -166,6 +166,33 @@ struct MacroMetadata {
     raw: bool, // true if macro is raw (no processing)
 }
 
+#[derive(Debug, Clone, PartialEq, Copy)]
+enum OverloadStrategy {
+    Runtime,
+    Static,
+    Hybrid,
+}
+
+#[derive(Debug, Clone)]
+struct OverloadVariant {
+    param_types: HashMap<String, String>, // TYPE_NAMES
+    return_type: Option<String>, // RETURN_TYPE_NAME
+    body: Vec<Token>, // BODY_TOKENS
+}
+
+#[derive(Debug, Clone)]
+struct OverloadFunctionMetadata {
+    name: String,
+    parameters: Vec<String>,
+    strategy: OverloadStrategy,
+    coerces: HashMap<String, String>, // TYPE -> COERCE_TO_TYPE
+    default: Option<Vec<Token>>,
+    opt: bool,
+    variants: Vec<OverloadVariant>,
+    wildcard: Option<OverloadVariant>,
+    _static_map: Option<HashMap<Vec<String>, OverloadVariant>>
+}
+
 pub struct Preprocessor {
     lib_dir: PathBuf,
     defines: HashMap<String, Token>, // IDENTIFIER -> TOKEN
@@ -1144,6 +1171,304 @@ impl Preprocessor {
                         push_tokens_from_value(precompiled_val, &mut result, loc_token)?;
 
                         continue;
+                    }
+
+                    // TODO: finish
+                    "overload" => {
+                        if i >= tokens.len() {
+                            return Err(create_err("#overload missing function name", &tokens[i]));
+                        }
+
+                        result.push(Token("IDENTIFIER".to_string(), "warn".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token("STRING".to_string(), "\"#overload is experimental and may not work as expected.\"".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+
+                        let mut overload_metadata = OverloadFunctionMetadata {
+                            name: "".to_owned(),
+                            parameters: Vec::new(),
+                            strategy: OverloadStrategy::Runtime,
+                            coerces: HashMap::default(),
+                            default: None,
+                            opt: false,
+                            variants: Vec::new(),
+                            wildcard: None,
+                            _static_map: None,
+                        };
+
+                        while i < tokens.len() && tokens[i].0 == "OPERATOR" && tokens[i].1 == "#" {
+                            i += 1;
+                            if i >= tokens.len() {
+                                return Err(create_err("Unexpected end after '#'", &tokens[i - 1]));
+                            }
+
+                            match tokens[i].1.as_str() {
+                                "O" => overload_metadata.opt = true,
+                                "strategy" => {
+                                    i += 1;
+                                    if i >= tokens.len() || tokens[i].1 != "(" {
+                                        return Err(create_err("Expected '(' after #strategy", &tokens[i]));
+                                    }
+                                    i += 1;
+                                    if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
+                                        return Err(create_err("Expected strategy identifier", &tokens[i]));
+                                    }
+                                    match tokens[i].1.as_str() {
+                                        "runtime" => overload_metadata.strategy = OverloadStrategy::Runtime,
+                                        "static"  => overload_metadata.strategy = OverloadStrategy::Static,
+                                        "hybrid"  => overload_metadata.strategy = OverloadStrategy::Hybrid,
+                                        other => return Err(create_err(&format!("Unknown strategy '{}'", other), &tokens[i])),
+                                    }
+                                    i += 1;
+                                    if i >= tokens.len() || tokens[i].1 != ")" {
+                                        return Err(create_err("Expected ')' after #strategy argument", &tokens[i]));
+                                    }
+                                }
+                                "coerces" | "coerce" => {
+                                    i += 1;
+                                    if i >= tokens.len() || tokens[i].1 != "(" {
+                                        return Err(create_err("Expected '(' after #coerces", &tokens[i]));
+                                    }
+                                    i += 1;
+                                    let mut coerces = HashMap::default();
+                                    while i < tokens.len() && tokens[i].1 != ")" {
+                                        if tokens[i].0 != "IDENTIFIER" {
+                                            return Err(create_err("Expected type name in #coerces", &tokens[i]));
+                                        }
+                                        let from_type = tokens[i].1.clone();
+                                        i += 1;
+                                        if i >= tokens.len() || tokens[i].1 != "->" {
+                                            return Err(create_err("Expected '->' in #coerces", &tokens[i]));
+                                        }
+                                        i += 1;
+                                        if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
+                                            return Err(create_err("Expected target type in #coerces", &tokens[i]));
+                                        }
+                                        let to_type = tokens[i].1.clone();
+                                        coerces.insert(from_type, to_type);
+                                        i += 1;
+                                        if i < tokens.len() && tokens[i].1 == "," { i += 1; }
+                                    }
+                                    if i >= tokens.len() || tokens[i].1 != ")" {
+                                        return Err(create_err("Expected ')' after #coerces", &tokens[i]));
+                                    }
+                                    overload_metadata.coerces = coerces;
+                                }
+                                "default" => {
+                                    i += 1;
+                                    if i >= tokens.len() || tokens[i].1 != "(" {
+                                        return Err(create_err("Expected '(' after #default", &tokens[i]));
+                                    }
+                                    i += 1;
+                                    let mut default_tokens = Vec::new();
+                                    while i < tokens.len() && tokens[i].1 != ")" {
+                                        default_tokens.push(tokens[i].clone());
+                                        i += 1;
+                                    }
+                                    if i >= tokens.len() || tokens[i].1 != ")" {
+                                        return Err(create_err("Expected ')' after #default", &tokens[i]));
+                                    }
+                                    overload_metadata.default = Some(default_tokens);
+                                }
+                                other => return Err(create_err(&format!("Unknown #overload attribute '{}'", other), &tokens[i])),
+                            }
+                            i += 1;
+                        }
+
+                        if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
+                            return Err(create_err("Expected function name after #overload", &tokens[i]));
+                        }
+                        overload_metadata.name = tokens[i].1.clone();
+                        i += 1;
+
+                        if i >= tokens.len() || tokens[i].1 != "(" {
+                            return Err(create_err("Expected '(' after function name", &tokens[i]));
+                        }
+                        i += 1;
+                        while i < tokens.len() && tokens[i].1 != ")" {
+                            if tokens[i].0 != "IDENTIFIER" {
+                                return Err(create_err("Expected parameter name", &tokens[i]));
+                            }
+                            overload_metadata.parameters.push(tokens[i].1.clone());
+                            i += 1;
+                            if i < tokens.len() && tokens[i].1 == "," { i += 1; }
+                        }
+                        if i >= tokens.len() || tokens[i].1 != ")" {
+                            return Err(create_err("Expected ')' after parameters", &tokens[i]));
+                        }
+                        i += 1;
+
+                        if i >= tokens.len() || tokens[i].1 != ":" {
+                            return Err(create_err("Expected ':' at start of overload variants", &tokens[i]));
+                        }
+                        i += 1;
+
+                        while i+1 < tokens.len() && tokens[i].1 != "#" && tokens[i].1 != "endoverload" {
+                            let mut param_types = HashMap::default();
+                            
+                            while i < tokens.len() && tokens[i].1 != "->" {
+                                if tokens[i].0 != "IDENTIFIER" {
+                                    return Err(create_err("Expected parameter name in overload variant", &tokens[i]));
+                                }
+                                let param_name = tokens[i].1.clone();
+                                i += 1;
+                                
+                                if i >= tokens.len() || tokens[i].1 != ":" {
+                                    return Err(create_err("Expected ':' after parameter name", &tokens[i]));
+                                }
+                                i += 1;
+
+                                if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
+                                    return Err(create_err("Expected type after ':' in parameter", &tokens[i]));
+                                }
+                                let type_name = tokens[i].1.clone();
+                                i += 1;
+
+                                let type_name = if type_name == "_" {
+                                    if i + 1 < tokens.len() && tokens[i].1 == "as" {
+                                        i += 1;
+                                        if tokens[i].0 != "IDENTIFIER" {
+                                            return Err(create_err("Expected identifier after 'as' in wildcard param", &tokens[i]));
+                                        }
+                                        // let param_name = tokens[i].1.clone();
+                                        i += 1;
+                                        "_".to_string()
+                                    } else {
+                                        "_".to_string()
+                                    }
+                                } else {
+                                    type_name
+                                };
+
+                                param_types.insert(param_name, type_name);
+
+                                if i < tokens.len() && tokens[i].1 == "," { i += 1; }
+                            }
+
+                            if i >= tokens.len() || tokens[i].1 != "->" {
+                                return Err(create_err("Expected '->' in overload variant", &tokens[i]));
+                            }
+                            i += 1;
+
+                            let mut return_type = None;
+                            if i < tokens.len() && tokens[i].0 == "IDENTIFIER" {
+                                return_type = Some(tokens[i].1.clone());
+                                i += 1;
+                            }
+                            if i >= tokens.len() || tokens[i].1 != ":" {
+                                return Err(create_err("Expected ':' before overload variant body", &tokens[i]));
+                            }
+                            i += 1;
+
+                            let mut body_tokens = Vec::new();
+                            while i < tokens.len() && tokens[i].1 != "end" {
+                                body_tokens.push(tokens[i].clone());
+                                i += 1;
+                            }
+                            if i >= tokens.len() || tokens[i].1 != "end" {
+                                return Err(create_err("Expected 'end' after overload variant body", &tokens[i]));
+                            }
+                            i += 1;
+
+                            let variant = OverloadVariant {
+                                param_types,
+                                return_type,
+                                body: body_tokens,
+                            };
+
+                            if variant.param_types.values().any(|v| v == "_") {
+                                overload_metadata.wildcard = Some(variant.clone());
+                            } else {
+                                overload_metadata.variants.push(variant);
+                            }
+                        }
+
+                        if i+1 >= tokens.len() || tokens[i+1].1 != "endoverload" {
+                            return Err(create_err("Expected 'endoverload'", &tokens[i]));
+                        }
+                        i += 1;
+
+                        if overload_metadata.default.is_none() && overload_metadata.wildcard.is_none() {
+                            return Err(create_err("Overload must have default or wildcard", &tokens[i - 1]));
+                        }
+
+                        if overload_metadata.default.is_some() && overload_metadata.wildcard.is_some() {
+                            return Err(create_err("Overload cannot have both default and wildcard", &tokens[i - 1]));
+                        }
+
+                        if !overload_metadata.opt {
+                            for variant in overload_metadata.variants.iter() {
+                                result.push(Token("IDENTIFIER".to_string(), "fun".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token("IDENTIFIER".to_string(), format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string())), tokens[i - 1].2.clone()));
+                                result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                                for (param_name, type_name) in overload_metadata.parameters.iter().zip(variant.param_types.keys()) {
+                                    result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
+                                    result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                                    result.push(Token("IDENTIFIER".to_string(), variant.param_types.get(type_name).unwrap().clone(), tokens[i - 1].2.clone()));
+                                    result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                                }
+                                result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                                if let Some(ret_type) = &variant.return_type {
+                                    result.push(Token("OPERATOR".to_string(), "->".to_string(), tokens[i - 1].2.clone()));
+                                    result.push(Token("IDENTIFIER".to_string(), ret_type.clone(), tokens[i - 1].2.clone()));
+                                }
+                                result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                                for t in variant.body.iter().cloned() {
+                                    result.push(t);
+                                }
+                                result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
+                            }
+                        }
+                        result.push(Token("IDENTIFIER".to_string(), "final".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token("IDENTIFIER".to_string(), "fun".to_string(), tokens[i - 1].2.clone()));
+                        if overload_metadata.strategy == OverloadStrategy::Static {
+                            result.push(Token("IDENTIFIER".to_string(), "static".to_string(), tokens[i - 1].2.clone()));
+                        }
+                        result.push(Token("IDENTIFIER".to_string(), overload_metadata.name.clone(), tokens[i - 1].2.clone()));
+                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                        for param_name in overload_metadata.parameters.iter() {
+                            result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
+                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                        }
+                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                        for variant in overload_metadata.variants.iter() {
+                            result.push(Token("IDENTIFIER".to_string(), "if".to_string(), tokens[i - 1].2.clone()));
+                            for (param_name, _) in overload_metadata.parameters.iter().zip(variant.param_types.keys()) {
+                                result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
+                                result.push(Token("OPERATOR".to_string(), "is".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token("IDENTIFIER".to_string(), variant.param_types.get(param_name).unwrap().clone(), tokens[i - 1].2.clone()));
+                                result.push(Token("OPERATOR".to_string(), "&&".to_string(), tokens[i - 1].2.clone()));
+                            }
+                            result.pop();
+                            result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                            if overload_metadata.opt {
+                                for t in variant.body.iter().cloned() {
+                                    result.push(t);
+                                }
+                            } else {
+                                result.push(Token("IDENTIFIER".to_string(), "return".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token("IDENTIFIER".to_string(), format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string())), tokens[i - 1].2.clone()));
+                                result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                                for param_name in overload_metadata.parameters.iter() {
+                                    result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
+                                    result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                                }
+                                result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                            }
+                            result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
+                        }
+                        if overload_metadata.wildcard.is_some() {
+                            for t in overload_metadata.wildcard.as_ref().unwrap().body.iter().cloned() {
+                                result.push(t);
+                            }
+                        }
+                        if overload_metadata.default.is_some() {
+                            for t in overload_metadata.default.as_ref().unwrap().iter().cloned() {
+                                result.push(t);
+                            }
+                        }
+                        result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
                     }
 
                     _ => {

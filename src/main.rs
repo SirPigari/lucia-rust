@@ -472,7 +472,13 @@ fn dump_ast(tokens: Vec<&Statement>, dump_dir: &str, filename: &str, config: &Co
         .map(|stmt| stmt.format_for_debug())
         .collect();
 
-    let json_i = serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&format!("[{}]", data.join(","))).unwrap()).unwrap();
+    let json_i = match serde_json::from_str::<serde_json::Value>(&format!("[{}]", data.join(","))) {
+        Ok(val) => match serde_json::to_string_pretty(&val) {
+            Ok(pretty) => pretty,
+            Err(e) => format!("[\"Failed to serialize: {}\"]", e),
+        },
+        Err(e) => format!("[\"Failed to serialize: {}\"]", e),
+    };
 
     let json_ast = match serde_json::to_string_pretty(&tokens) {
         Ok(j) => j,

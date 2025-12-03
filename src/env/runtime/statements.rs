@@ -1,6 +1,6 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
-use crate::env::runtime::utils::format_value;
+use crate::env::runtime::utils::{format_value, unescape_string_literal};
 use std::collections::HashMap;
 use crate::env::runtime::tokens::Location;
 use serde::{Serialize, Deserialize};
@@ -585,18 +585,18 @@ impl Statement {
             Node::Group { body } => format!(", \"body\": [{}]",
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
             ),
-            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{:?}\", \"body\": [{}]",
+            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{}\", \"body\": [{}]",
                 name,
                 args.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
-                modifiers.join(", "),
+                modifiers.into_iter().map(|m| format!("{:?}", m)).collect::<Vec<String>>().join(", "),
                 return_type.format_for_debug(),
                 effect_flags.display(),
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
             ),
-            Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{:?}\", \"body\": [{}]",
+            Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{}\", \"body\": [{}]",
                 name,
                 args.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
-                modifiers.join(", "),
+                modifiers.into_iter().map(|m| format!("{:?}", m)).collect::<Vec<String>>().join(", "),
                 return_type.format_for_debug(),
                 effect_flags.display(),
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
@@ -632,8 +632,8 @@ impl Statement {
                 stmt.format_for_debug()
             ),
             Node::Number { value } => format!(", \"value\": \"{}\"", value),
-            Node::String { value, mods } => format!(", \"value\": \"{}\", \"mods\": [{}]",
-                value,
+            Node::String { value, mods } => format!(", value: \"{}\", \"mods\": [{}]",
+                unescape_string_literal(value).unwrap_or(value.clone()),
                 mods.iter()
                     .map(|c| c.to_string())
                     .collect::<Vec<String>>()

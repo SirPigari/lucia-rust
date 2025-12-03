@@ -216,6 +216,32 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+#[cfg(windows)]
+unsafe extern "system" {
+    fn SetDllDirectoryA(lpPathName: *const i8) -> i32;
+}
+
+#[cfg(windows)]
+fn set_dll_directory(args: &HashMap<String, Value>) -> Value {
+    let path = match args.get("path") {
+        Some(Value::String(s)) => s,
+        _ => return libload_error("Expected path: str"),
+    };
+
+    let c_path = match CString::new(path.as_str()) {
+        Ok(c) => c,
+        Err(_) => return libload_error("Failed to create CString from path"),
+    };
+
+    unsafe {
+        if SetDllDirectoryA(c_path.as_ptr()) == 0 {
+            return libload_error("Failed to set DLL directory");
+        }
+    }
+
+    Value::Null
+}
+
 struct CallbackData {
     body: Box<Vec<Statement>>,
     interp_ptr: *mut Interpreter,
@@ -975,6 +1001,16 @@ pub fn register() -> HashMap<String, Variable> {
         "unload_lib",
         unload_lib,
         vec![Parameter::positional("lib", "any")],
+        "void",
+        EffectFlags::UNSAFE
+    );
+
+    #[cfg(windows)]
+    insert_native_fn!(
+        map,
+        "set_dll_directory",
+        set_dll_directory,
+        vec![Parameter::positional("path", "str")],
         "void",
         EffectFlags::UNSAFE
     );

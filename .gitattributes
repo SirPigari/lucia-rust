@@ -3,3 +3,4 @@ Makefile linguist-language=Text
 *.lucia linguist-language=Lucia
 target/* linguist-generated=true
 src/env/bin/* linguist-generated=true
+src/env/Docs/todos.md merge=ours

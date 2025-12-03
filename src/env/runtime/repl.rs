@@ -40,6 +40,7 @@ impl Completer for ReplCompleter {
         if ends_with_ws || trimmed_empty || last_line_is_empty {
             return vec![
                 Suggestion {
+                    match_indices: None,
                     value: String::from("    "),
                     description: None,
                     style: None,
@@ -75,11 +76,14 @@ impl Completer for ReplCompleter {
                         pos - span_line.len() - ws_count,
                         pos,
                     );
+                    let matched_len = span_line.len();
+                    let match_indices = Some((0..matched_len).collect::<Vec<usize>>());
 
                     let value = cand.clone();
 
                     if value.len() > (span.end - span.start) {
                         out.push(Suggestion {
+                            match_indices,
                             value,
                             description: None,
                             style: None,
