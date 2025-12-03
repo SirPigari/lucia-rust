@@ -525,7 +525,6 @@ pub fn unescape_string(s: &str) -> Result<String, String> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn get_type_from_statement(stmt: &Statement) -> Option<String> {
     match &stmt.node {
         Node::Type { node } => {

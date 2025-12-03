@@ -51,7 +51,7 @@ use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
-use crate::env::runtime::libs::STD_LIBS;
+use crate::env::runtime::libs::{STD_LIBS, get_lib_names};
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement};
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -1357,16 +1357,16 @@ impl Interpreter {
         }
     
         let result = match statement.node.clone() {
-            Node::If { condition, body, else_body } => self.handle_if(*condition, body, else_body),
-            Node::For { iterable, body, variable } => self.handle_for_loop(*iterable, body, variable),
-            Node::While { condition, body } => self.handle_while(*condition, body),
+            Node::If { condition, body, else_body } => self.handle_if(*condition, &body, else_body.as_deref()),
+            Node::For { iterable, body, variable } => self.handle_for_loop(*iterable, &body, variable),
+            Node::While { condition, body } => self.handle_while(*condition, &body),
             Node::TryCatch { body, catch_body, exception_vars } => self.handle_try(body, catch_body, exception_vars),
             Node::Throw { node } => self.handle_throw(*node),
             Node::Forget { node } => self.handle_forget(*node),
             Node::Continue | Node::Break => self.handle_continue_and_break(&statement.node),
             Node::Defer { body } => self.handle_defer(body),
             Node::Scope { body, name, locals, is_local } => self.handle_scope(body, name, locals, is_local),
-            Node::Match { condition, cases } => self.handle_match(*condition, cases),
+            Node::Match { condition, cases } => self.handle_match(*condition, &cases),
             Node::Group { body } => self.handle_group(body),
 
             Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
@@ -2233,109 +2233,93 @@ impl Interpreter {
         }
     }
 
-    fn handle_match(&mut self, condition: Statement, cases: Vec<MatchCase>) -> Value {
+    fn handle_match(&mut self, condition: Statement, cases: &[MatchCase]) -> Value {
         if self.err.is_some() {
             return NULL;
         }
 
-        let mut match_result: (Option<Value>, bool) = (None, false);
-        for case in cases.iter() {
-            if match_result.1 {
-                break;
-            }
+        let cond_val = self.evaluate(&condition);
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        for case in cases {
             match case {
                 MatchCase::Pattern { pattern, body, guard } => {
-                    let eval_cond = self.evaluate(&condition);
-                    if self.err.is_some() {
-                        return NULL;
-                    }
-                    let (matched, variables) = match check_pattern(&eval_cond, &pattern.to_value()) {
-                        Ok(matched) => matched,
-                        Err((err_ty, err_msg)) => {
-                            self.raise(&err_ty, &err_msg);
-                            return NULL;
-                        }
+                    let (matched, variables) = match check_pattern(&cond_val, &pattern.to_value()) {
+                        Ok(m) => m,
+                        Err((etype, emsg)) => return self.raise(&etype, &emsg),
                     };
 
-                    let mut variables: FxHashMap<String, Variable> = FxHashMap::from_iter(variables.into_iter().map(|(k, v)| {
-                        (k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true))
-                    }));
-                    let mut merged = self.variables.clone();
-                    merged.extend(variables);
-                    variables = merged;
+                    if !matched {
+                        continue;
+                    }
 
+                    let mut temp_vars = self.variables.clone();
+                    for (k, v) in variables {
+                        temp_vars.insert(k.clone(), Variable::new(k, v.clone(), v.type_name().to_string(), false, true, true));
+                    }
 
-                    if matched {
-                        let mut res = NULL;
-                        let mut cont = false;
-                        if let Some(g) = guard {
-                            let mut guard_interp = Interpreter::new(
-                                self.config.clone(),
-                                &self.file_path,
-                                &self.cwd,
-                                self.preprocessor_info.clone(),
-                                &[],
-                            );
-                            guard_interp.variables.extend(variables.clone());
-                            let guard_result = guard_interp.evaluate(&g);
-                            if guard_interp.err.is_some() {
-                                self.err = guard_interp.err.clone();
-                                drop(guard_interp);
-                                return NULL;
-                            }
-                            drop(guard_interp);
-                            if !guard_result.is_truthy() {
-                                continue;
-                            }
-                        }
-                        let mut interp = Interpreter::new(
+                    if let Some(g) = guard {
+                        let mut guard_interp = Interpreter::new(
                             self.config.clone(),
                             &self.file_path,
                             &self.cwd,
                             self.preprocessor_info.clone(),
                             &[],
                         );
-                        interp.variables = variables;
-                        'outer: for stmt in body.iter() {
-                            let result = interp.evaluate(&stmt);
-                            if interp.err.is_some() {
-                                self.err = interp.err.clone();
-                                return NULL;
-                            }
-                            match interp.state {
-                                State::Continue => {
-                                    cont = true;
-                                    interp.state = State::Normal;
-                                    break 'outer;
-                                }
-                                State::Break => {
-                                    interp.state = State::Normal;
-                                    self.variables.extend(interp.variables.clone());
-                                    drop(interp);
-                                    return NULL;
-                                }
-                                _ => {}
-                            }
-                            res = result;
+                        guard_interp.variables = temp_vars.clone();
+                        let guard_result = guard_interp.evaluate(g);
+                        if guard_interp.err.is_some() {
+                            self.err = guard_interp.err.clone();
+                            return NULL;
                         }
-                        self.variables.extend(interp.variables.clone());
-                        drop(interp);
-                        if cont {
-                            match_result = (Some(NULL), false);
-                        } else {
-                            match_result = (Some(res), true);
-                        }
-                    }
-                }
-                MatchCase::Literal { patterns, body } => {
-                    let mut matched = false;
-                    for p in patterns {
-                        if self.evaluate(&condition) == self.evaluate(&p) {
-                            matched = true;
-                            break;
+                        if !guard_result.is_truthy() {
+                            continue;
                         }
                     }
 
+                    let mut interp = Interpreter::new(
+                        self.config.clone(),
+                        &self.file_path,
+                        &self.cwd,
+                        self.preprocessor_info.clone(),
+                        &[],
+                    );
+                    interp.variables = temp_vars;
+                    let mut cont = false;
+                    let mut res = NULL;
+
+                    for stmt in body {
+                        res = interp.evaluate(stmt);
+                        if interp.err.is_some() {
+                            self.err = interp.err.clone();
+                            return NULL;
+                        }
+
+                        match interp.state {
+                            State::Continue => {
+                                cont = true;
+                                interp.state = State::Normal;
+                                break;
+                            }
+                            State::Break => {
+                                interp.state = State::Normal;
+                                self.variables.extend(interp.variables);
+                                return NULL;
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    self.variables.extend(interp.variables);
+                    if !cont {
+                        return res;
+                    }
+                }
+
+                MatchCase::Literal { patterns, body } => {
+                    let matched = patterns.iter().any(|p| cond_val == self.evaluate(p));
                     if self.err.is_some() {
                         return NULL;
                     }
@@ -2343,44 +2327,36 @@ impl Interpreter {
                     if matched {
                         let mut res = NULL;
                         let mut cont = false;
-                        'outer: for stmt in body.iter() {
-                            let result = self.evaluate(&stmt);
+
+                        for stmt in body {
+                            res = self.evaluate(stmt);
                             if self.err.is_some() {
                                 return NULL;
                             }
+
                             match self.state {
                                 State::Continue => {
                                     cont = true;
                                     self.state = State::Normal;
-                                    break 'outer;
-                                },
+                                    break;
+                                }
                                 State::Break => {
                                     self.state = State::Normal;
-                                    return NULL
-                                },
+                                    return NULL;
+                                }
                                 _ => {}
                             }
-                            res = result;
                         }
-                        if cont {
-                            match_result = (Some(NULL), false);
-                        } else {
-                            match_result = (Some(res), true);
+
+                        if !cont {
+                            return res;
                         }
                     }
                 }
             }
         }
 
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        if match_result.0.is_none() {
-            return self.raise_with_help("ValueError", "No value matched cases in match statement", "Add a '_ -> ...' case");
-        }
-
-        match_result.0.unwrap_or(NULL)
+        self.raise_with_help("ValueError", "No value matched cases in match statement", "Add a '_ -> ...' case")
     }
 
     fn handle_scope(&mut self, body: Vec<Statement>, name: Option<String>, locals: Vec<String>, is_local: bool) -> Value {
@@ -2501,10 +2477,15 @@ impl Interpreter {
         return NULL;
     }
 
-    fn handle_while(&mut self, condition: Statement, body: Vec<Statement>) -> Value {
-        while self.evaluate(&condition).is_truthy() {
-            for stmt in &body {
-                let result = self.evaluate(&stmt);
+    fn handle_while(&mut self, condition: Statement, body: &[Statement]) -> Value {
+        loop {
+            let cond_val = self.evaluate(&condition);
+            if self.err.is_some() || !cond_val.is_truthy() {
+                break;
+            }
+
+            for stmt in body {
+                let result = self.evaluate(stmt);
                 if self.err.is_some() {
                     return NULL;
                 }
@@ -2512,15 +2493,10 @@ impl Interpreter {
                     return result;
                 }
             }
+
             match self.state {
-                State::Break => {
-                    self.state = State::Normal;
-                    break;
-                }
-                State::Continue => {
-                    self.state = State::Normal;
-                    continue;
-                }
+                State::Break => { self.state = State::Normal; break; },
+                State::Continue => { self.state = State::Normal; },
                 _ => {}
             }
         }
@@ -3472,19 +3448,19 @@ impl Interpreter {
                     }
                 }
             };
-    
+                
             let mut resolved_module_path: Option<PathBuf> = None;
             let module_variants = generate_name_variants(&base_name);
-    
-            for variant in module_variants {
-                let candidate_dir = base_module_path.join(&variant);
+
+            for variant in &module_variants {
+                let candidate_dir = base_module_path.join(variant);
 
                 if candidate_dir.exists() && candidate_dir.is_dir() {
                     resolved_module_path = Some(candidate_dir);
                     break;
                 } else {
                     let extensions = [".lc", ".lucia", ".rs", ""];
-                    for ext in extensions.iter() {
+                    for ext in &extensions {
                         let candidate_file = base_module_path.join(format!("{}{}", variant, ext));
                         if candidate_file.exists() && candidate_file.is_file() {
                             resolved_module_path = Some(candidate_file);
@@ -3497,7 +3473,23 @@ impl Interpreter {
                     break;
                 }
             }
-    
+
+            if resolved_module_path.is_none() {
+                let lib_names_map = get_lib_names();
+
+                for variant in &module_variants {
+                    if let Some(original_name) = lib_names_map.get(&Arc::from(variant.as_str())) {
+                        let candidate_dir = libs_dir.join(&**original_name);
+                        dbg!(&candidate_dir);
+
+                        if candidate_dir.exists() && candidate_dir.is_dir() {
+                            resolved_module_path = Some(candidate_dir);
+                            break;
+                        }
+                    }
+                }
+            }
+
             if resolved_module_path.is_none() {
                 let mut candidates = vec![];
                 if let Ok(entries) = fs::read_dir(&base_module_path) {
@@ -5055,26 +5047,30 @@ impl Interpreter {
         return Value::Type(type_);
     }
 
-    fn handle_if(&mut self, condition: Statement, body: Vec<Statement>, else_body: Option<Vec<Statement>>) -> Value {
+    fn handle_if(&mut self, condition: Statement, body: &[Statement], else_body: Option<&[Statement]>) -> Value {
         let condition_value = self.evaluate(&condition);
         if self.err.is_some() {
             return NULL;
         }
-    
-        let stmts_to_run = if condition_value.is_truthy() { Some(body) } else { else_body };
-    
+
+        let stmts_to_run = if condition_value.is_truthy() {
+            Some(body)
+        } else {
+            else_body
+        };
+
         if let Some(stmts) = stmts_to_run {
             let mut result = NULL;
             for stmt in stmts {
-                result = self.evaluate(&stmt);
+                result = self.evaluate(stmt);
                 if self.err.is_some() {
                     return NULL;
                 }
             }
-            return result;
+            result
+        } else {
+            NULL
         }
-    
-        NULL
     }
 
     fn handle_try(
@@ -5851,26 +5847,27 @@ impl Interpreter {
         }
     }
     
-    fn handle_for_loop(&mut self, iterable: Statement, body: Vec<Statement>, variable: PathElement) -> Value {
+    fn handle_for_loop(&mut self, iterable: Statement, body: &[Statement], variable: PathElement) -> Value {
         let iterable_value = self.evaluate(&iterable);
         if self.err.is_some() { return NULL; }
         if !iterable_value.is_iterable() {
-            return self.raise("TypeError", &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name()));
+            return self.raise(
+                "TypeError",
+                &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name())
+            );
         }
 
-        let mut result = NULL;
-
         let variable_pattern = variable.to_value();
+        let mut result = NULL;
 
         for item in iterable_value.iter() {
             if self.check_stop_flag() { return NULL; }
 
-            if let Value::Error(err_type, err_msg, ref_err) = item {
-                if let Some(re) = ref_err {
-                    self.err = Some(Error::with_ref(err_type, err_msg, re.clone(), &self.file_path.clone()));
-                } else {
-                    self.err = Some(Error::new(err_type, err_msg, &self.file_path.clone()));
-                }
+            if let Value::Error(ref err_type, ref err_msg, ref ref_err) = item {
+                self.err = Some(match ref_err {
+                    Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
+                    None => Error::new(err_type, err_msg, &self.file_path),
+                });
                 return NULL;
             }
 
@@ -5880,32 +5877,33 @@ impl Interpreter {
                 Err((etype, emsg)) => return self.raise(&etype, &emsg),
             };
 
-            let previous_vars: Vec<Option<Variable>> = bindings.keys()
-                .map(|name| self.variables.get(name).cloned())
-                .collect();
+            let mut prev_vars: Vec<Option<Variable>> = Vec::with_capacity(bindings.len());
+            for name in bindings.keys() {
+                prev_vars.push(self.variables.remove(name));
+            }
 
             for (name, val) in &bindings {
                 self.variables.insert(name.clone(), Variable::new_pt(
-                    name.clone(),
-                    val.clone(),
-                    val.get_type(),
-                    false, true, true,
+                    name.clone(), val.clone(), val.get_type(), false, true, true,
                 ));
             }
 
-            for stmt in &body {
-                result = self.evaluate(&stmt);
-
+            for stmt in body {
+                result = self.evaluate(stmt);
                 if self.err.is_some() || self.is_returning {
-                    for (name, prev_var) in bindings.keys().zip(previous_vars.iter()) {
-                        match prev_var { Some(var) => self.variables.insert(name.clone(), var.clone()), None => self.variables.remove(name) };
+                    for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
+                        if let Some(var) = prev_var {
+                            self.variables.insert(name.clone(), var.clone());
+                        }
                     }
                     return result;
                 }
             }
 
-            for (name, prev_var) in bindings.keys().zip(previous_vars.iter()) {
-                match prev_var { Some(var) => self.variables.insert(name.clone(), var.clone()), None => self.variables.remove(name) };
+            for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
+                if let Some(var) = prev_var {
+                    self.variables.insert(name.clone(), var.clone());
+                }
             }
 
             match self.state {

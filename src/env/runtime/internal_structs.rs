@@ -332,6 +332,10 @@ impl LibRegistry {
         self.inner.read().ok()?.get(name).cloned()
     }
 
+    pub fn contains(&self, name: &str) -> bool {
+        self.inner.read().ok().map_or(false, |inner| inner.contains_key(name))
+    }
+
     pub fn set_all(&self, new_libs: HashMap<String, LibInfo>) {
         if let Ok(mut inner) = self.inner.write() {
             *inner = new_libs;

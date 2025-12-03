@@ -6,7 +6,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
-use crate::env::runtime::utils::{MAX_PTR, supports_color};
+use crate::env::runtime::utils::{MAX_PTR};
 use crate::env::runtime::modules::Module;
 use crate::{insert_native_fn, insert_native_var};
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,7 +34,7 @@ use crate::env::runtime::types::Type;
 #[cfg(not(target_arch = "wasm32"))]
 use std::env::consts;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::env::runtime::utils::to_static;
+use crate::env::runtime::utils::{to_static, supports_color};
 #[cfg(not(target_arch = "wasm32"))]
 use sys_info;
 

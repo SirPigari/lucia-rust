@@ -10,7 +10,9 @@ use crate::env::runtime::config::Config;
 use std::path::Path;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-use std::sync::RwLock;
+use std::sync::{RwLock, Arc};
+#[cfg(not(target_arch = "wasm32"))]
+use {bincode::{Encode, Decode}, serde::{Serialize, Deserialize}, sha2::{Sha256, Digest}, std::path::PathBuf};
 
 use crate::VERSION;
 
@@ -261,6 +263,199 @@ pub fn check_project_deps(
     }
 
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
+pub fn is_in_std_libs(lib_name: &str) -> bool {
+    _STD_LIBS.contains_key(lib_name)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, PartialEq, Eq, Hash)]
+struct LibName {
+    manifest_hash: String,
+    manifest_path: PathBuf,
+    names: Vec<String>,
+    original_name: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static LIB_NAMES: Lazy<HashMap<Arc<str>, Arc<str>>> = Lazy::new(|| build_final_map(load_or_generate_cache()));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn _get_lib_names_raw() -> Vec<LibName> {
+    let exe = std::env::current_exe().expect("Failed to get exe path");
+    let parent = exe.parent().expect("Exe has no parent").to_path_buf();
+    let grandparent = parent.parent().expect("Exe parent has no parent").to_path_buf();
+    let libs_dir = grandparent.join("libs");
+
+    let mut out = Vec::new();
+
+    for entry in fs::read_dir(&libs_dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let folder_name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(v) => v.to_string(),
+            None => continue,
+        };
+
+        if is_in_std_libs(&folder_name) {
+            continue;
+        }
+
+        let manifest_path = path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+
+        let manifest_data = fs::read(&manifest_path).unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_data).unwrap();
+
+        let name = manifest.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let names_extra = manifest.get("names")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut hasher = Sha256::new();
+        hasher.update(&manifest_data);
+        let hash = format!("{:x}", hasher.finalize());
+
+        let mut names = Vec::new();
+        names.push(name.clone());
+        names.extend(names_extra);
+
+        out.push(LibName {
+            manifest_hash: hash,
+            manifest_path,
+            names,
+            original_name: folder_name,
+        });
+    }
+
+    out
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cache_file_path() -> PathBuf {
+    let exe = std::env::current_exe().expect("Failed to get exe path");
+    let parent = exe.parent().expect("Exe has no parent").to_path_buf();
+    let grandparent = parent.parent().expect("Exe parent has no parent").to_path_buf();
+    grandparent.join(".cache").join("lib_names.bin")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_or_generate_cache() -> Vec<LibName> {
+    let cache_path = cache_file_path();
+
+    if !cache_path.exists() {
+        fs::create_dir_all(cache_path.parent().unwrap()).ok();
+        let fresh = _get_lib_names_raw();
+        write_cache(&cache_path, &fresh);
+        return fresh;
+    }
+
+    let cached_bin = fs::read(&cache_path).unwrap_or_else(|_| Vec::new());
+
+    if cached_bin.len() < 8 {
+        return Vec::new();
+    }
+
+    let len_bytes: [u8; 8] = cached_bin[0..8].try_into().unwrap();
+    let compressed_len = u64::from_le_bytes(len_bytes) as usize;
+
+    if cached_bin.len() < 8 + compressed_len {
+        return Vec::new();
+    }
+
+    let compressed_data = &cached_bin[8..8 + compressed_len];
+
+    let decompressed = match zstd::bulk::decompress(compressed_data, 10_000_000) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+
+    let (mut cached, _) = bincode::decode_from_slice::<Vec<LibName>, _>(
+        &decompressed,
+        bincode::config::standard().with_little_endian().with_no_limit(),
+    ).unwrap_or((Vec::new(), 0));
+
+    let mut changed = false;
+    for entry in &mut cached {
+        if !entry.manifest_path.exists() {
+            changed = true;
+            break;
+        }
+
+        let data = match fs::read(&entry.manifest_path) {
+            Ok(v) => v,
+            Err(_) => { changed = true; break; }
+        };
+
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let new_hash = format!("{:x}", hasher.finalize());
+
+        if new_hash != entry.manifest_hash {
+            changed = true;
+            break;
+        }
+    }
+
+    if changed {
+        let fresh = _get_lib_names_raw();
+        write_cache(&cache_path, &fresh);
+        return fresh;
+    }
+
+    cached
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_cache(path: &PathBuf, data: &Vec<LibName>) {
+    let encoded = bincode::encode_to_vec(data, bincode::config::standard().with_little_endian().with_no_limit()).unwrap();
+    let compressed = zstd::bulk::compress(&encoded, 9).unwrap();
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&compressed.len().to_le_bytes());
+    buffer.extend_from_slice(&compressed);
+    fs::write(path, buffer).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_final_map(v: Vec<LibName>) -> HashMap<Arc<str>, Arc<str>> {
+    let mut map = HashMap::new();
+
+    for lib in v {
+        let orig: Arc<str> = Arc::from(lib.original_name.as_str());
+        for name in lib.names {
+            map.insert(Arc::from(name.as_str()), orig.clone());
+        }
+    }
+
+    map
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_lib_names() -> HashMap<Arc<str>, Arc<str>> {
+    LIB_NAMES.clone()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn get_lib_names() -> HashMap<Arc<str>, Arc<str>> {
+    HashMap::default()
 }
 
 // ------- Macros -------

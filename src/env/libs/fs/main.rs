@@ -13,97 +13,9 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::insert_native_fn;
 
-use hound::{WavWriter, WavSpec, SampleFormat};
-use symphonia::core::audio::{SampleBuffer};
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::default::get_probe;
-
 // This module provides file system operations and utilities.
 // It includes functions for reading and writing files, checking file existence, and manipulating file paths.
 // Lucia version 2.0.0, module: fs@0.4.0
-
-fn convert_audio_file(input: &str, output: &str) -> Result<(), String> {
-    let file = File::open(input).map_err(|e| e.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let probed = get_probe()
-        .format(
-            &Default::default(),
-            mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
-        )
-        .map_err(|e| e.to_string())?;
-    let mut format = probed.format;
-
-    let track = format
-        .default_track()
-        .ok_or_else(|| "no default track".to_string())?;
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| e.to_string())?;
-
-    let spec = WavSpec {
-        channels: track
-            .codec_params
-            .channels
-            .ok_or_else(|| "unknown channel count".to_string())?
-            .count() as u16,
-        sample_rate: track
-            .codec_params
-            .sample_rate
-            .ok_or_else(|| "unknown sample rate".to_string())?,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut writer =
-        WavWriter::create(Path::new(output), spec).map_err(|e| e.to_string())?;
-    let mut sample_buf: Option<SampleBuffer<i16>> = None;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break,
-        };
-
-        let decoded = decoder.decode(&packet).map_err(|e| e.to_string())?;
-        let buf = match &mut sample_buf {
-            Some(buf) => {
-                buf.copy_interleaved_ref(decoded);
-                buf
-            }
-            None => {
-                let spec = *decoded.spec();
-                let capacity = decoded.capacity() as u64;
-                let _ = sample_buf.insert(SampleBuffer::<i16>::new(capacity, spec));
-                sample_buf.as_mut().unwrap()
-            }
-        };
-
-        for sample in buf.samples() {
-            writer.write_sample(*sample).map_err(|e| e.to_string())?;
-        }
-    }
-
-    writer.finalize().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn convert_audio_file_handler(args: &HashMap<String, Value>) -> Value {
-    if let (Some(Value::String(input)), Some(Value::String(output))) =
-        (args.get("input"), args.get("output"))
-    {
-        match convert_audio_file(input, output) {
-            Ok(_) => Value::Null,
-            Err(e) => Value::Error("ConversionError", to_static(e), None),
-        }
-    } else {
-        Value::Error("TypeError", "expected 'input' and 'output' as strings", None)
-    }
-}
 
 fn fix_path_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
@@ -539,17 +451,6 @@ pub fn register() -> HashMap<String, Variable> {
         ],
         "str",
         EffectFlags::PURE
-    );
-    insert_native_fn!(
-        map,
-        "convert_audio_file",
-        convert_audio_file_handler,
-        vec![
-            Parameter::positional("input", "str"),
-            Parameter::positional("output", "str")
-        ],
-        "void",
-        EffectFlags::IO
     );
     insert_native_fn!(
         map,
