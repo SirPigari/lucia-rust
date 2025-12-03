@@ -3480,8 +3480,7 @@ impl Interpreter {
                 for variant in &module_variants {
                     if let Some(original_name) = lib_names_map.get(&Arc::from(variant.as_str())) {
                         let candidate_dir = libs_dir.join(&**original_name);
-                        dbg!(&candidate_dir);
-
+                        
                         if candidate_dir.exists() && candidate_dir.is_dir() {
                             resolved_module_path = Some(candidate_dir);
                             break;
