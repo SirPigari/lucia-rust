@@ -65,3 +65,7 @@ mutable a: int = 10
 #push ( [ ("IDENTIFIER", "a"), ("OPERATOR", "="), ("NUMBER", "69") ] )
 
 assert_eq!(a, 69)
+
+#ifdef UNDEFINED
+    #error "This should not be triggered"
+#endif

@@ -236,6 +236,9 @@ else
 	@cd $(subst \,/,$(TARGET_DIR)) && $(RUN) $(LUCIA_FLAGS)
 endif
 
+check:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) check --bin lucia
+
 install:
 	@cd $(LUCIA_DIR) && $(CARGO_ENV) install --path . --bin lucia
 	@echo Lucia installed system-wide. You can now run 'lucia' from anywhere.
@@ -255,4 +258,5 @@ help:
 	@echo deps            - Install dependencies (Unix only)
 	@echo help            - Show this help message
 	@echo lucia           - Run Lucia with specified flags
+	@echo check           - Check the project
 	@echo install         - Install Lucia system-wide

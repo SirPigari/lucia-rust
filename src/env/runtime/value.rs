@@ -15,7 +15,8 @@ use bincode::{
     de::{BorrowDecode, Decode, Decoder},
     error::{EncodeError, DecodeError},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::cmp::Ordering;
 
 #[derive(Clone)]
@@ -66,8 +67,8 @@ impl PartialEq for Value {
             (Enum(a), Enum(b)) => a == b,
             (Struct(a), Struct(b)) => a == b,
             (Pointer(a), Pointer(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
+                let a_lock = a.lock();
+                let b_lock = b.lock();
                 *a_lock == *b_lock
             }
             (Error(ac, am, _), Error(bc, bm, _)) => ac == bc && am == bm,
@@ -94,8 +95,8 @@ impl PartialOrd for Value {
             (Enum(a), Enum(b)) => a.partial_cmp(b),
             (Struct(a), Struct(b)) => a.partial_cmp(b),
             (Pointer(a), Pointer(b)) => {
-                let a_lock = a.lock().unwrap();
-                let b_lock = b.lock().unwrap();
+                let a_lock = a.lock();
+                let b_lock = b.lock();
                 a_lock.partial_cmp(&*b_lock)
             }
             _ => None,
@@ -337,7 +338,9 @@ impl Encode for Value {
             }
             Pointer(ptr) => {
                 12u8.encode(encoder)?;
-                ptr.encode(encoder)
+                // Lock and encode the inner tuple
+                let inner = ptr.lock();
+                inner.encode(encoder)
             }
         }
     }
@@ -488,7 +491,7 @@ impl Hash for Value {
             }
             Value::Pointer(ptr) => {
                 4u8.hash(state);
-                ptr.lock().unwrap().hash(state);
+                ptr.lock().hash(state);
             }
         }
     }
@@ -587,10 +590,10 @@ impl Value {
             Value::Pointer(arc) => {
                 let mut ptr_level = 1;
                 let mut temp_arc = arc.clone();
-                let mut t = temp_arc.lock().unwrap().0.get_type();
+                let mut t = temp_arc.lock().0.get_type();
                 loop {
                     let next = {
-                        let guard = temp_arc.lock().unwrap();
+                        let guard = temp_arc.lock();
                         match &*guard {
                             (Value::Pointer(inner_arc), _) => {
                                 ptr_level += 1;
@@ -659,7 +662,7 @@ impl Value {
             Value::Error(_, _, _) => true,
             Value::Pointer(p) => {
                 Arc::strong_count(p) > 0 && {
-                    let inner = p.lock().unwrap();
+                    let inner = p.lock();
                     !inner.0.is_null()
                 }
             }
@@ -833,7 +836,7 @@ impl Value {
                 format!("Value: {}\nType: '{}'\nFull type: '{}'", format_value(self), self.get_type().display_simple(), self.get_type().display())
             }
             Value::Pointer(arc) => {
-                let inner = arc.lock().unwrap();
+                let inner = arc.lock();
                 format!("Type: '{}'\nPointer to:\n{}\nPointer depth: {}", self.get_type().display_simple(), format_value(&inner.0), &inner.1)
             }
             Value::Error(..) => {

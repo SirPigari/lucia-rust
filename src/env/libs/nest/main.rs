@@ -1,7 +1,8 @@
 // TODO
 // Implement the 'nest' module with HTTP client and server utilities
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use crate::env::runtime::config::{Config, get_from_config};
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;

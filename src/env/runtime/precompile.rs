@@ -12,7 +12,7 @@ use std::fs;
 use regex::Regex;
 use std::path::PathBuf;
 use once_cell::sync::OnceCell;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 
 static INTERPRETER: OnceCell<Mutex<Interpreter>> = OnceCell::new();
@@ -211,7 +211,7 @@ pub fn interpret(input: &str) -> Result<Value, Error> {
         &[],
     )));
     
-    let mut interpreter = interpreter_mutex.lock().unwrap();
+    let mut interpreter = interpreter_mutex.lock();
     interpreter.interpret(ast, false)
 }
 
@@ -252,7 +252,7 @@ pub fn _precompile(tokens: Vec<Token>) -> Result<(Value, Option<Location>), Erro
             (internal_path_ref.clone(), internal_path_ref.clone(), true),
             &[],
         )));
-        let mut interpreter = interpreter_mutex.lock().unwrap();
+        let mut interpreter = interpreter_mutex.lock();
         match interpreter.interpret(ast, false) {
             Ok(value) => value,
             Err(e) => {
@@ -277,10 +277,10 @@ pub fn precompile(tokens: Vec<Token>) -> Result<Vec<Token>, Error> {
     let (result, loc) = _precompile(tokens)?;
     fn get_token(value: &Value, loc: Option<Location>) -> Option<Token> {
         match value {
-            Value::Int(n) => Some(Token("NUMBER".into(), n.to_string(), loc)),
-            Value::Float(f) => Some(Token("NUMBER".into(), f.to_string(), loc)),
-            Value::Boolean(b) => Some(Token("BOOLEAN".into(), b.to_string(), loc)),
-            Value::String(s) => Some(Token("STRING".into(), format!("{:?}", s), loc)),
+            Value::Int(n) => Some(Token("NUMBER".into(), n.to_string().into(), loc)),
+            Value::Float(f) => Some(Token("NUMBER".into(), f.to_string().into(), loc)),
+            Value::Boolean(b) => Some(Token("BOOLEAN".into(), b.to_string().into(), loc)),
+            Value::String(s) => Some(Token("STRING".into(), format!("{:?}", s).into(), loc)),
             Value::Null => Some(Token("BOOLEAN".into(), "null".into(), loc)),
             _ => None,
         }

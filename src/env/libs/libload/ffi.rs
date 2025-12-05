@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use crate::env::runtime::value::Value;
 
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 static STORED_ARGS: Lazy<Mutex<Vec<StoredValue>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
@@ -154,7 +154,7 @@ impl LuciaFfiFn {
 
         let cif = Cif::new(ffi_arg_types.clone(), ffi_ret_type);
 
-        let mut stored_args = STORED_ARGS.lock().unwrap();
+        let mut stored_args = STORED_ARGS.lock();
         stored_args.clear();
 
         let ffi_args: Result<Vec<Arg>, String> = args.iter().zip(self.arg_types.iter()).map(|(v, t)| {
@@ -210,7 +210,7 @@ impl LuciaFfiFn {
                     }
                 }
                 (Value::Pointer(ptr_arc), ValueType::Ptr) => {
-                    let val_ref = ptr_arc.lock().unwrap();
+                    let val_ref = ptr_arc.lock();
 
                     if let (Value::Int(raw_val), _) = &*val_ref {
                         let raw_usize = raw_val.to_i64().unwrap_or(0) as usize;

@@ -8,6 +8,9 @@ Be free to fix them or add new ones.
 _Total TODOs found: 6_
 ---
 
+### [`src/env/runtime/preprocessor.rs:1179:1`](../../../src/env/runtime/preprocessor.rs#L1179) _(added by **SirPigari** on **2025-12-03**)_
+- finish
+
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
@@ -22,9 +25,6 @@ _Total TODOs found: 6_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/env/runtime/preprocessor.rs:1176:1`](../../../src/env/runtime/preprocessor.rs#L1176) **(TODO not committed yet)**
-- finish
 
 ---
 *Report generated automatically.*

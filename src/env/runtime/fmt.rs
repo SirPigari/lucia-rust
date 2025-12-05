@@ -7,7 +7,7 @@ const INDENT: &str = "    ";
 
 pub fn format_tokens(tokens: &[&Token]) -> String {
     let tokens: Vec<(String, String)> = tokens.iter()
-        .map(|Token(kind, value, _)| (kind.clone(), value.clone()))
+        .map(|Token(kind, value, _)| (kind.to_string(), value.to_string()))
         .filter(|(kind, _)| kind != "EOF")
         .collect();
 

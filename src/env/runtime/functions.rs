@@ -9,7 +9,7 @@ use crate::env::runtime::variables::Variable;
 use crate::env::runtime::utils::format_value;
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer};
 use rustc_hash::FxHashMap;

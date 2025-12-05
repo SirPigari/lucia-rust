@@ -1,4 +1,5 @@
-use crate::env::runtime::tokens::{Location, Token};
+use crate::env::runtime::tokens::{Location, Token, TK_IDENTIFIER, TK_STRING, TK_RAW_STRING, TK_NUMBER, TK_BOOLEAN, TK_OPERATOR, TK_SEPARATOR, TK_INVALID, TK_EOF};
+use std::borrow::Cow;
 
 pub struct Lexer<'a> {
     code: &'a str,
@@ -17,15 +18,15 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn make_token(&self, kind: &str, text: &str, start: usize, end: usize) -> Token {
+    fn make_token(&self, kind: &'static str, text: &str, start: usize, end: usize) -> Token {
         let line_number = match self.line_offsets.binary_search(&start) {
             Ok(l) => l,
             Err(l) => if l == 0 { 0 } else { l - 1 },
         };
         let line_offset = self.line_offsets[line_number];
-        Token(
-            kind.to_string(),
-            text.to_string(),
+        Token::new_static(
+            kind,
+            Cow::Owned(text.to_string()),
             Some(Location::new(
                 self.file_path.to_string(),
                 self.code[line_offset..]
@@ -180,19 +181,19 @@ impl<'a> Lexer<'a> {
                     }
 
                     let token_kind = if raw {
-                        "RAW_STRING"
+                        TK_RAW_STRING
                     } else if closed {
-                        "STRING"
+                        TK_STRING
                     } else {
-                        "INVALID"
+                        TK_INVALID
                     };
 
-                    if token_kind == "INVALID" {
+                    if token_kind == TK_INVALID {
                         let mut invalid_pos = pos;
                         while invalid_pos < local_end {
                             let c_len = self.code[invalid_pos..].chars().next().unwrap().len_utf8();
                             tokens.push(self.make_token(
-                                "INVALID",
+                                TK_INVALID,
                                 &self.code[invalid_pos..invalid_pos + c_len],
                                 invalid_pos,
                                 invalid_pos + c_len,
@@ -222,7 +223,7 @@ impl<'a> Lexer<'a> {
             // BOOLEAN
             for &b in &["true", "false", "null"] {
                 if slice.starts_with(b) {
-                    tokens.push(self.make_token("BOOLEAN", b, pos, pos + b.len()));
+                    tokens.push(self.make_token(TK_BOOLEAN, b, pos, pos + b.len()));
                     pos += b.len();
                     continue 'outer;
                 }
@@ -273,7 +274,7 @@ impl<'a> Lexer<'a> {
                 if matched {
                     rel_end = tmp_rel_end;
                     let end = start + rel_end;
-                    tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                    tokens.push(self.make_token(TK_NUMBER, &self.code[start..end], start, end));
                     pos = end;
                     continue;
                 }
@@ -295,7 +296,7 @@ impl<'a> Lexer<'a> {
                         consume_while(&mut tmp, &mut tmp_rel_end, |ch| digits.contains(ch));
                         rel_end = tmp_rel_end;
                         let end = start + rel_end;
-                        tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                        tokens.push(self.make_token(TK_NUMBER, &self.code[start..end], start, end));
                         pos = end;
                         continue;
                     }
@@ -337,7 +338,7 @@ impl<'a> Lexer<'a> {
                 }
 
                 let end = start + rel_end;
-                tokens.push(self.make_token("NUMBER", &self.code[start..end], start, end));
+                tokens.push(self.make_token(TK_NUMBER, &self.code[start..end], start, end));
                 pos = end;
                 continue;
             }
@@ -356,7 +357,7 @@ impl<'a> Lexer<'a> {
                     };
 
                     if before_ok && after_ok {
-                        tokens.push(self.make_token("OPERATOR", op, pos, pos + op.len()));
+                        tokens.push(self.make_token(TK_OPERATOR, op, pos, pos + op.len()));
                         pos += op.len();
                         matched = true;
                         break;
@@ -367,7 +368,7 @@ impl<'a> Lexer<'a> {
 
             // -li operator
             if slice.starts_with("-li") {
-                tokens.push(self.make_token("OPERATOR", "-li", pos, pos + 3));
+                tokens.push(self.make_token(TK_OPERATOR, "-li", pos, pos + 3));
                 pos += 3;
                 continue;
             }
@@ -376,7 +377,7 @@ impl<'a> Lexer<'a> {
             let mut op_matched = false;
             for &op in &symbol_operators {
                 if slice.starts_with(op) {
-                    tokens.push(self.make_token("OPERATOR", op, pos, pos + op.len()));
+                    tokens.push(self.make_token(TK_OPERATOR, op, pos, pos + op.len()));
                     pos += op.len();
                     op_matched = true;
                     break;
@@ -388,7 +389,7 @@ impl<'a> Lexer<'a> {
             let mut sep_matched = false;
             for &sep in &separators {
                 if slice.starts_with(sep) {
-                    tokens.push(self.make_token("SEPARATOR", sep, pos, pos + sep.len()));
+                    tokens.push(self.make_token(TK_SEPARATOR, sep, pos, pos + sep.len()));
                     pos += sep.len();
                     sep_matched = true;
                     break;
@@ -405,7 +406,7 @@ impl<'a> Lexer<'a> {
                             end += ch.len_utf8();
                         } else { break; }
                     }
-                    tokens.push(self.make_token("IDENTIFIER", &self.code[pos..end], pos, end));
+                    tokens.push(self.make_token(TK_IDENTIFIER, &self.code[pos..end], pos, end));
                     pos = end;
                     continue;
                 }
@@ -414,7 +415,7 @@ impl<'a> Lexer<'a> {
             // INVALID
             if let Some(c) = slice.chars().next() {
                 tokens.push(self.make_token(
-                    "INVALID",
+                    TK_INVALID,
                     &self.code[pos..pos + c.len_utf8()],
                     pos,
                     pos + c.len_utf8(),
@@ -423,7 +424,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        tokens.push(Token("EOF".into(), "\0".into(), tokens.last().and_then(|t| t.2.clone())));
+        tokens.push(Token::new_static(TK_EOF, Cow::Borrowed("\0"), tokens.last().and_then(|t| t.2.clone())));
         tokens
     }
 }

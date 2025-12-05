@@ -408,11 +408,11 @@ fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config)
         .take_while(|t| t.0 != "EOF")
         .map(|t| {
             let escaped_val = if t.0 == "STRING" {
-                escape_string(&t.1).unwrap_or_else(|_| t.1.clone()).replace("%", "%%")
+                escape_string(&t.1).unwrap_or_else(|_| t.1.to_string()).replace("%", "%%")
             } else if t.0 == "SEPARATOR" && t.1 == "\\" {
                 "\\\\".to_string()
             } else {
-                t.1.clone()
+                t.1.to_string()
             };
             format!("  (\"{}\", \"{}\")", t.0, escaped_val)
         })

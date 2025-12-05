@@ -250,7 +250,7 @@ impl Checker {
         builtins.insert("styledstr".to_string(), Variable::new(ValueType::Function(native::styledstr_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
         builtins.insert("array".to_string(), Variable::new(ValueType::Function(native::array_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
         builtins.insert("complex".to_string(), Variable::new(ValueType::Function(native::complex_fn().metadata().clone()), Type::new_simple("any"), false, true, true, true, None));
-        builtins.extend(special_function_meta().into_iter().map(|(k, v)| (k.to_string(), Variable::new(ValueType::Function(v), Type::new_simple("any"), false, true, true, true, None))));
+        builtins.extend(special_function_meta().into_iter().map(|(k, v)| (k.to_string(), Variable::new(ValueType::Function(v.clone()), Type::new_simple("any"), false, true, true, true, None))));
         for (var, val) in builtins {
             this.state.defined_vars.insert(var.to_string(), val);
         }

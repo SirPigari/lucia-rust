@@ -9,7 +9,8 @@ use crate::env::runtime::functions::Function;
 
 use std::cmp::Ordering;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 
 fn add(a: &Value, b: &Value) -> Option<Value> {
@@ -82,16 +83,16 @@ pub struct Generator {
 
 impl PartialEq for Generator {
     fn eq(&self, other: &Self) -> bool {
-        let a = self.inner.lock().unwrap();
-        let b = other.inner.lock().unwrap();
+        let a = self.inner.lock();
+        let b = other.inner.lock();
         *a == *b
     }
 }
 
 impl PartialOrd for Generator {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let a = self.inner.lock().unwrap();
-        let b = other.inner.lock().unwrap();
+        let a = self.inner.lock();
+        let b = other.inner.lock();
         a.partial_cmp(&b)
     }
 }
@@ -120,7 +121,7 @@ impl Generator {
     }
 
     pub fn name(&self) -> Option<&'static str> {
-        let name = self.inner.lock().unwrap().name.clone()?;
+        let name = self.inner.lock().name.clone()?;
         Some(to_static(name))
     }
 
@@ -129,7 +130,7 @@ impl Generator {
     }
 
     pub fn make_iter(&self) -> Box<dyn Iterator<Item = Value> + Send + Sync> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
 
         if inner.is_static {
             if inner.has_iterated {
@@ -149,7 +150,7 @@ impl Generator {
     }
 
     pub fn next(&self) -> Option<Value> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         if inner.is_static {
             if inner.has_iterated {
                 return Some(Value::Error(
@@ -168,7 +169,7 @@ impl Generator {
     }
 
     pub fn peek(&self) -> Option<Value> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         if inner.is_static {
             if inner.has_iterated {
                 return Some(Value::Error(
@@ -187,7 +188,7 @@ impl Generator {
     }
 
     pub fn take(&self, count: usize) -> Vec<Value> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
 
         if inner.is_static {
             if inner.has_iterated {
@@ -207,28 +208,28 @@ impl Generator {
     }
 
     pub fn is_done(&self) -> bool {
-        match &self.inner.lock().unwrap().kind {
+        match &self.inner.lock().kind {
             GeneratorType::Native(native) => native.iter.is_done(),
             GeneratorType::Custom(custom) => custom.done,
         }
     }
 
     pub fn get_size(&self) -> usize {
-        match &self.inner.lock().unwrap().kind {
+        match &self.inner.lock().kind {
             GeneratorType::Native(native) => native.get_size(),
             GeneratorType::Custom(custom) => custom.get_size(),
         }
     }
 
     pub fn is_infinite(&self) -> bool {
-        match &self.inner.lock().unwrap().kind {
+        match &self.inner.lock().kind {
             GeneratorType::Native(native) => native.iter.is_infinite(),
             GeneratorType::Custom(custom) => custom.body.is_empty(),
         }
     }
 
     pub fn to_vec(&self) -> Vec<Value> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
 
         if inner.is_static {
             if inner.has_iterated {
@@ -248,21 +249,21 @@ impl Generator {
     }
 
     pub fn get_yield_type(&self) -> Option<Type> {
-        match &self.inner.lock().unwrap().kind {
+        match &self.inner.lock().kind {
             GeneratorType::Native(_) => None, // Native generators do not have a yield type
             GeneratorType::Custom(custom) => Some(custom.ret_type.clone()),
         }
     }
 
     pub fn get_parameter_types(&self) -> Option<Vec<Type>> {
-        match &self.inner.lock().unwrap().kind {
+        match &self.inner.lock().kind {
             GeneratorType::Native(_) => None, // Native generators do not have parameter types
             GeneratorType::Custom(_) => None, // TODO: Implement this
         }
     }
 
     pub fn deep_clone(&self) -> Self {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         let kind_clone = match &inner.kind {
             GeneratorType::Native(native) => GeneratorType::Native(native.clone()),
             GeneratorType::Custom(custom) => GeneratorType::Custom(custom.clone()),
@@ -290,8 +291,8 @@ impl Generator {
                 None => "unknown".to_string(),
             },
             self.is_done(),
-            self.inner.lock().unwrap().has_iterated,
-            self.inner.lock().unwrap().is_static,
+            self.inner.lock().has_iterated,
+            self.inner.lock().is_static,
             self.is_infinite()
         )
     }
@@ -299,7 +300,7 @@ impl Generator {
 
 impl fmt::Debug for Generator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         f.debug_struct("Generator")
             .field("name", &inner.name)
             .field("kind", &inner.kind)
@@ -494,7 +495,7 @@ impl Iterator for CustomGenerator {
                         let item = iterable[*index].clone();
 
                         if saved_var.is_empty() {
-                            if let Ok((_, bindings)) = check_pattern(&item, &var.to_value()) {
+                            if let Ok((_, bindings)) = check_pattern(&item, &var) {
                                 for name in bindings.keys() {
                                     if let Some(existing) = self.interpreter.variables.get(name) {
                                         saved_var.push(existing.clone());
@@ -503,7 +504,7 @@ impl Iterator for CustomGenerator {
                             }
                         }
 
-                        let bindings = match check_pattern(&item, &var.to_value()) {
+                        let bindings = match check_pattern(&item, &var) {
                             Ok((true, vars)) => vars,
                             Ok((false, _)) => {
                                 self.interpreter.raise("ValueError", "Item did not match for-loop variable pattern");
@@ -917,7 +918,7 @@ impl Iterator for FilterIter {
             return None;
         }
 
-        let mut interpreter = self.interpreter.lock().unwrap();
+        let mut interpreter = self.interpreter.lock();
 
         while let Some(val) = self.generator.next() {
             let result = interpreter.call_function(
@@ -954,7 +955,7 @@ impl Iterator for MapIter {
             return None;
         }
 
-        let mut interpreter = self.interpreter.lock().unwrap();
+        let mut interpreter = self.interpreter.lock();
 
         if let Some(val) = self.generator.next() {
             let result = interpreter.call_function(

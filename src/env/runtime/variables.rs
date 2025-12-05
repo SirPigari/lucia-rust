@@ -7,7 +7,8 @@ use crate::env::runtime::types::{Float, Int, Type};
 use imagnum::{create_int, create_float};
 use serde::{Serialize, Deserialize};
 use crate::interpreter::Interpreter;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use bincode::{Encode, Decode};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
@@ -72,7 +73,7 @@ impl Variable {
                 move |_args| {
                     match &val_clone {
                         Value::Pointer(inner_arc) => {
-                            let inner_guard = inner_arc.lock().unwrap();
+                            let inner_guard = inner_arc.lock();
                             let (inner_value, counter) = &*inner_guard;
                             let cloned_value = inner_value.clone();
                             Value::Pointer(Arc::new(Mutex::new((cloned_value, *counter))))
@@ -1039,7 +1040,7 @@ impl Variable {
                         "append",
                         move |args| {
                             if let Some(item) = args.get("item") {
-                                let mut locked = self_arc.lock().unwrap();
+                                let mut locked = self_arc.lock();
                                 if let Value::List(list) = &mut locked.value {
                                     list.push(item.clone());
                                     return Value::List(list.clone()); // return self for chaining
@@ -1060,7 +1061,7 @@ impl Variable {
                         "extend",
                         move |args| {
                             if let Some(Value::List(to_extend)) = args.get("item") {
-                                let mut locked = self_arc.lock().unwrap();
+                                let mut locked = self_arc.lock();
                                 if let Value::List(list) = &mut locked.value {
                                     list.extend(to_extend.clone());
                                     return Value::List(list.clone());
@@ -1080,7 +1081,7 @@ impl Variable {
                     make_native_method(
                         "into",
                         move |args| {
-                            let locked = self_arc.lock().unwrap();
+                            let locked = self_arc.lock();
                             let type_ = args
                                 .get("ty")
                                 .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
@@ -1307,7 +1308,7 @@ impl Variable {
                                 let mut keys = Vec::with_capacity(items.len());
 
                                 if let Some(function) = function {
-                                    let mut interp_guard = interpreter_arc.lock().unwrap();
+                                    let mut interp_guard = interpreter_arc.lock();
                                     for item in &items {
                                         let key_res = interp_guard.call_function(
                                             &function,

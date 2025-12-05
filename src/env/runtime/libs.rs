@@ -10,7 +10,8 @@ use crate::env::runtime::config::Config;
 use std::path::Path;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-use std::sync::{RwLock, Arc};
+use parking_lot::RwLock;
+use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use {bincode::{Encode, Decode}, serde::{Serialize, Deserialize}, sha2::{Sha256, Digest}, std::path::PathBuf};
 
@@ -188,7 +189,7 @@ pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo
         .map_err(|e| (format!("Failed to parse libs JSON: {}", e), false))?;
 
     STD_LIBS.set_all(parsed.clone());
-    LIBS_JSON.write().unwrap().set_all(libs);
+    LIBS_JSON.write().set_all(libs);
 
     Ok((parsed, dirty_libs))
 }

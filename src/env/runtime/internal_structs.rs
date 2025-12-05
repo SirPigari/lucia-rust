@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use core::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign, Not};
 use bincode::{Encode, Decode};
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::functions::Function;
@@ -204,26 +204,6 @@ pub enum PathElement {
 }
 
 impl PathElement {
-    pub fn to_value(&self) -> Value {
-        match self {
-            PathElement::Path { segments, args } => {
-                let seg_values = segments.iter().map(|s| Value::String(s.clone())).collect();
-                let arg_values = args.iter().map(|a| a.to_value()).collect();
-                Value::Map {
-                    keys: vec![Value::String("segments".into()), Value::String("args".into())],
-                    values: vec![Value::List(seg_values), Value::List(arg_values)],
-                }
-            }
-            PathElement::List(elems) => Value::List(elems.iter().map(|e| e.to_value()).collect()),
-            PathElement::Tuple(elems) => Value::Tuple(elems.iter().map(|e| e.to_value()).collect()),
-            PathElement::Literal(value) => value.clone(),
-            PathElement::Union(elems) => Value::Map {
-                keys: vec![Value::String("union".into())],
-                values: elems.iter().map(|e| e.to_value()).collect(),
-            },
-        }
-    }
-
     pub fn display(&self) -> String {
         match self {
             PathElement::Path { segments, args } => {
@@ -329,25 +309,19 @@ impl LibRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<LibInfo> {
-        self.inner.read().ok()?.get(name).cloned()
+        self.inner.read().get(name).cloned()
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.inner.read().ok().map_or(false, |inner| inner.contains_key(name))
+        self.inner.read().contains_key(name)
     }
 
     pub fn set_all(&self, new_libs: HashMap<String, LibInfo>) {
-        if let Ok(mut inner) = self.inner.write() {
-            *inner = new_libs;
-        }
+        *self.inner.write() = new_libs;
     }
 
     pub fn keys(&self) -> Vec<String> {
-        if let Ok(inner) = self.inner.read() {
-            inner.keys().cloned().collect()
-        } else {
-            Vec::new()
-        }
+        self.inner.read().keys().cloned().collect()
     }
 }
 

@@ -17,7 +17,7 @@ use crossterm::event::{poll, read, Event, KeyCode};
 use crate::{make_native_fn_pt, make_native_static_fn_pt, insert_native_fn_pt};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::structs_and_enums::{Struct, Enum};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
@@ -112,7 +112,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     unsafe {
         let arc_ptr = ptr as *const Mutex<Value>;
         let arc_ref: Arc<Mutex<Value>> = Arc::from_raw(arc_ptr);
-        let val = arc_ref.lock().unwrap().clone();
+        let val = arc_ref.lock().clone();
         std::mem::forget(arc_ref);
         val
     }
@@ -132,7 +132,7 @@ fn panic_handler(args: &HashMap<String, Value>) -> Value {
 
 #[cfg(unix)]
 fn create_signal_map() -> HashMap<String, Variable> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(23);
     insert_native_var!(map, "SIGHUP",    Value::Int(Int::from_i64(1)),  "int");
     insert_native_var!(map, "SIGINT",    Value::Int(Int::from_i64(2)),  "int");
     insert_native_var!(map, "SIGQUIT",   Value::Int(Int::from_i64(3)),  "int");
@@ -183,7 +183,7 @@ fn create_signal_map() -> HashMap<String, Variable> {
 
 #[cfg(windows)]
 fn create_signal_map() -> HashMap<String, Variable> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(7);
     insert_native_var!(map, "SIGABRT", Value::Int(Int::from_i64(6)),  "int");
     insert_native_var!(map, "SIGFPE",  Value::Int(Int::from_i64(8)),  "int");
     insert_native_var!(map, "SIGILL",  Value::Int(Int::from_i64(4)),  "int");
@@ -251,7 +251,7 @@ fn create_signal_map() -> HashMap<String, Variable> {
 
 #[cfg(target_arch = "wasm32")]
 fn create_signal_map() -> HashMap<String, Variable> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(7);
     insert_native_var!(map, "SIGABRT", Value::Int(Int::from_i64(6)),  "int");
     insert_native_var!(map, "SIGFPE",  Value::Int(Int::from_i64(8)),  "int");
     insert_native_var!(map, "SIGILL",  Value::Int(Int::from_i64(4)),  "int");
@@ -269,7 +269,7 @@ fn create_signal_map() -> HashMap<String, Variable> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn create_subprocess_map() -> HashMap<String, Variable> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(7);
 
     let mut process_output_struct = Type::Struct {
         name: "ProcessOutput".to_string(),
@@ -923,7 +923,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
 
         if let Some(key_event) = key_event_opt {
             let now = Instant::now();
-            let mut last = LAST_KEY_TIME_AND_CODE.lock().unwrap();
+            let mut last = LAST_KEY_TIME_AND_CODE.lock();
             if let Some(last_code) = last.1 {
                 if last_code == key_event.code && now.duration_since(last.0) < Duration::from_millis(timeout_ms as u64) {
                     return Value::Enum(Enum::new(key_enum_clone.clone(), (27, Value::Null)));

@@ -22,6 +22,7 @@ fancy-regex = { version = "0.16.2", optional = true }
 bincode = "2.0.1"
 zstd = "0.13.3"
 rustc-hash = "2.1.1"
+parking_lot = "0.12.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 crossterm = "0.29.0"

@@ -7,6 +7,7 @@ use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
 use crate::env::runtime::utils::RESERVED_KEYWORDS;
 use std::collections::HashMap;
+use std::borrow::Cow;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -179,7 +180,7 @@ impl Parser {
     }
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
-        let mut statements = Vec::new();
+        let mut statements = Vec::with_capacity(self.tokens.len() / 4);
         while let Some(_) = self.token().cloned() {
             let stmt = self.parse_expression();
             if self.err.is_some() {
@@ -211,7 +212,7 @@ impl Parser {
         }
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
-            match (tok.0.as_str(), tok.1.as_str()) {
+            match (tok.0.as_ref(), tok.1.as_ref()) {
                 ("SEPARATOR", "[") => {
                     self.next();
 
@@ -372,7 +373,7 @@ impl Parser {
                         if self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "}") {
                             value = Statement {
                                 node: Node::Variable {
-                                    name: name.clone(),
+                                    name: name.to_string(),
                                 },
                                 loc: alloc_loc(self.get_loc())
                             };
@@ -386,7 +387,7 @@ impl Parser {
                                 return Statement::Null;
                             }
                         }
-                        fields.insert(name, value);
+                        fields.insert(name.to_string(), value);
                         if self.token_is("SEPARATOR", ",") {
                             self.next();
                         }
@@ -434,7 +435,7 @@ impl Parser {
                             expr = Statement {
                                 node: Node::MethodCall {
                                     object: Box::new(expr),
-                                    method_name: property_token.1,
+                                    method_name: property_token.1.to_string(),
                                     pos_args,
                                     named_args,
                                 },
@@ -444,7 +445,7 @@ impl Parser {
                             expr = Statement {
                                 node: Node::PropertyAccess {
                                     object: Box::new(expr),
-                                    property_name: property_token.1,
+                                    property_name: property_token.1.to_string(),
                                 },
                                 loc: alloc_loc(self.get_loc()),
                             };
@@ -457,7 +458,7 @@ impl Parser {
                     let loc = self.get_loc();
                     if self.token_is("SEPARATOR", ":") {
                         self.next();
-                        let mut body = vec![];
+                        let mut body = Vec::with_capacity(8);
                         while let Some(tok) = self.token() {
                             if tok.0 == "IDENTIFIER" && tok.1 == "end" {
                                 break;
@@ -499,13 +500,13 @@ impl Parser {
                 ("IDENTIFIER", "where") => {
                     self.next();
                     let loc = self.get_loc();
-                    let mut body: Vec<Statement> = Vec::new();
+                    let mut body: Vec<Statement> = Vec::with_capacity(8);
                     enum ThenOp {
                         Call(String, Vec<Statement>, HashMap<String, Statement>),
                         Op(String, Statement)
                     }
-                    let mut then_body: Vec<ThenOp> = Vec::new();
-                    let mut variable_names: Vec<String> = vec![];
+                    let mut then_body: Vec<ThenOp> = Vec::with_capacity(8);
+                    let mut variable_names: Vec<String> = Vec::with_capacity(8);
                     if self.token_is("SEPARATOR", ":") {
                         self.next();
                     }
@@ -577,7 +578,7 @@ impl Parser {
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
-                            then_body.push(ThenOp::Op(op, right));
+                            then_body.push(ThenOp::Op(op.to_string(), right));
                         } else {
                             let then_expr = self.parse_expression();
                             if self.err.is_some() {
@@ -860,7 +861,7 @@ impl Parser {
         while let Some(tok_ref) = self.token() {
             let tok = tok_ref.clone();
 
-            match (tok.0.as_str(), tok.1.as_str()) {
+            match (tok.0.as_ref(), tok.1.as_ref()) {
                 ("IDENTIFIER", "as") => {
                     self.next();
                     let type_conv = self.parse_type();
@@ -1064,7 +1065,7 @@ impl Parser {
             let tok_opt = self.token().cloned();
 
             let (tok_type, op_str) = match tok_opt {
-                Some(Token(ref ttype, ref val, _)) => (ttype.as_str(), val.as_str()),
+                Some(Token(ref ttype, ref val, _)) => (ttype.as_ref(), val.as_ref()),
                 None => break,
             };
 
@@ -1099,7 +1100,7 @@ impl Parser {
                 }
                 if let Some(prev_tok) = self.tokens.get(self.pos - 1) {
                     if prev_tok.0 == "SEPARATOR" {
-                        if ["\\", "(", "[", "{"].contains(&prev_tok.1.as_str()) {
+                        if ["\\", "(", "[", "{"].contains(&prev_tok.1.as_ref()) {
                             break;
                         }
                     }
@@ -1129,7 +1130,7 @@ impl Parser {
                 let next_tok_opt = self.token().cloned();
 
                 let (next_tok_type, next_op_str) = match next_tok_opt {
-                    Some(Token(ref ttype, ref val, _)) => (ttype.as_str(), val.as_str()),
+                    Some(Token(ref ttype, ref val, _)) => (ttype.as_ref(), val.as_ref()),
                     None => break,
                 };
 
@@ -1173,8 +1174,8 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Statement {
         let expr = match self.token().cloned() {
-            Some(token) => match token.0.as_str() {
-                "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_str()) => {
+            Some(token) => match token.0.as_ref() {
+                "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_ref()) => {
                     self.parse_type()
                 }
 
@@ -1239,8 +1240,8 @@ impl Parser {
                     }
                 }
 
-                "OPERATOR" if ["--", "++"].contains(&token.1.as_str()) => {
-                    let operator = token.1.to_owned();
+                "OPERATOR" if ["--", "++"].contains(&token.1.as_ref()) => {
+                    let operator = token.1.to_string();
                     let loc = self.get_loc();
                     self.next();
                     if !is_valid_token(&self.token().cloned()) {
@@ -1259,8 +1260,8 @@ impl Parser {
                     }
                 }
 
-                "OPERATOR" if ["+", "-", "!", "~", "nein", "isnt", "isn't", "not", "bnot"].contains(&token.1.as_str()) => {
-                    let operator = token.1.clone();
+                "OPERATOR" if ["+", "-", "!", "~", "nein", "isnt", "isn't", "not", "bnot"].contains(&token.1.as_ref()) => {
+                    let operator = token.1.to_string();
                     self.next();
                     if !is_valid_token(&self.token().cloned()) {
                         let loc = self.get_loc().unwrap();
@@ -1347,8 +1348,8 @@ impl Parser {
                     let loc = self.get_loc();
                     self.next();
 
-                    let mut keys = Vec::new();
-                    let mut values = Vec::new();
+                    let mut keys = Vec::with_capacity(8);
+                    let mut values = Vec::with_capacity(8);
 
                     while let Some(next_token) = self.token() {
                         if next_token.0 == "SEPARATOR" && next_token.1 == "}" {
@@ -1444,7 +1445,7 @@ impl Parser {
                         self.next();
                         let mut functions: Vec<Statement> = Vec::new();
                         while !self.token_is("IDENTIFIER", "end") {
-                            if !["public", "private", "static", "non-static", "final", "mutable", "fun"].contains(&self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone()).1.as_str()) {
+                            if !["public", "private", "static", "non-static", "final", "mutable", "fun"].contains(&self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone()).1.as_ref()) {
                                 self.raise("SyntaxError", "Expected function definition in methods block");
                                 return Statement::Null;
                             }
@@ -1800,7 +1801,7 @@ impl Parser {
                             loop {
                                 if let Some(tok) = self.token() {
                                     if tok.0 == "IDENTIFIER" {
-                                        exception_vars.push(tok.1.clone());
+                                        exception_vars.push(tok.1.to_string());
                                         self.next();
 
                                         if let Some(tok) = self.token() {
@@ -1857,15 +1858,15 @@ impl Parser {
                         node: Node::TryCatch {
                             body,
                             catch_body: if has_catch { Some(catch_body) } else { None },
-                            exception_vars: if exception_vars.is_empty() { None } else { Some(exception_vars.clone()) },
+                            exception_vars: if exception_vars.is_empty() { None } else { Some(exception_vars.iter().map(|s| s.to_string()).collect()) },
                         },
                         loc: alloc_loc(loc),
                     }
                 }
 
-                "IDENTIFIER" if ["struct", "enum"].contains(&token.1.as_str()) && !([Some(":="), Some(":"), Some("="), Some(","), Some("\0"), Some(""), Some(" ")].contains(&self.peek(1).map(|tok| tok.1.as_str()))) => {
+                "IDENTIFIER" if ["struct", "enum"].contains(&token.1.as_ref()) && !([Some(":="), Some(":"), Some("="), Some(","), Some("\0"), Some(""), Some(" ")].contains(&self.peek(1).map(|tok| tok.1.as_ref()))) => {
                     let next_name = self.peek(1)
-                        .and_then(|tok| if tok.0.as_str() == "IDENTIFIER" { Some(tok.1.as_str()) } else { None })
+                        .and_then(|tok| if tok.0.as_ref() == "IDENTIFIER" { Some(tok.1.as_ref()) } else { None })
                         .unwrap_or("Name");
 
                     return self.raise_with_help(
@@ -1875,13 +1876,13 @@ impl Parser {
                     );
                 }
 
-                "IDENTIFIER" if ["fun", "gen", "typedef", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) => {
+                "IDENTIFIER" if ["fun", "gen", "typedef", "import", "public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_ref()) => {
                     let mut modifiers: Vec<String> = vec![];
 
-                    if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_str()) {
+                    if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_ref()) {
                         while let Some(tok) = self.token() {
-                            if tok.0 == "IDENTIFIER" && ["public", "private", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str()) {
-                                modifiers.push(tok.1.clone());
+                            if tok.0 == "IDENTIFIER" && ["public", "private", "static", "non-static", "final", "mutable"].contains(&tok.1.as_ref()) {
+                                modifiers.push(tok.1.to_string());
                                 self.next();
                             } else {
                                 break;
@@ -1894,12 +1895,12 @@ impl Parser {
                         return Statement::Null;
                     }
 
-                    match self.token().cloned().unwrap_or_default().1.as_str() {
+                    match self.token().cloned().unwrap_or_default().1.as_ref() {
                         x if ["fun", "gen"].contains(&x) => {
                             self.next();
-                            let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1 } else { "".to_string() }).unwrap_or_default();
+                            let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1.to_string() } else { "".to_string() }).unwrap_or_default();
                             let is_function = x == "fun";
-                            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                            if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a {} name", name, if is_function { "function" } else { "generator" }));
                                 return Statement::Null;
                             }
@@ -1918,9 +1919,9 @@ impl Parser {
                                 let mut is_variadic = false;
 
                                 while current_tok.0 == "IDENTIFIER" &&
-                                    ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_str())
+                                    ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_ref())
                                 {
-                                    param_modifiers.push(current_tok.1.clone());
+                                    param_modifiers.push(current_tok.1.to_string());
                                     self.next();
                                     if let Some(tok) = self.token() {
                                         current_tok = tok.clone();
@@ -1933,9 +1934,9 @@ impl Parser {
                                     if let Some(tok) = self.token() {
                                         current_tok = tok.clone();
                                         if current_tok.0 == "IDENTIFIER" &&
-                                        ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_str())
+                                        ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_ref())
                                         {
-                                            param_modifiers.push(current_tok.1.clone());
+                                            param_modifiers.push(current_tok.1.to_string());
                                             self.next();
                                             if let Some(tok2) = self.token() { current_tok = tok2.clone(); }
                                         }
@@ -1969,7 +1970,7 @@ impl Parser {
                                         let def_val = self.parse_expression();
                                         if self.err.is_some() { return Statement::Null; }
                                         parameters.push(ParamAST {
-                                            name: arg_name,
+                                            name: arg_name.to_string(),
                                             ty: Some(arg_type),
                                             default: Some(def_val),
                                             modifiers: param_modifiers,
@@ -1977,7 +1978,7 @@ impl Parser {
                                         });
                                     } else {
                                         parameters.push(ParamAST {
-                                            name: arg_name,
+                                            name: arg_name.to_string(),
                                             ty: Some(arg_type),
                                             default: None,
                                             modifiers: param_modifiers,
@@ -2037,7 +2038,7 @@ impl Parser {
                             }
 
                             let mut uses_the_goofy_ahh_arrow_just_to_separate_type_from_the_exlamation_mark_so_the_preprocessor_understands = false;
-                            if self.token_is("OPERATOR", "<") && self.peek(1).map(|t| t.1.as_str()) == Some("!") {
+                            if self.token_is("OPERATOR", "<") && self.peek(1).map(|t| t.1.as_ref()) == Some("!") {
                                 uses_the_goofy_ahh_arrow_just_to_separate_type_from_the_exlamation_mark_so_the_preprocessor_understands = true;
                                 self.next();
                             }
@@ -2051,7 +2052,7 @@ impl Parser {
                                             self.raise("SyntaxError", "Expected effect name in effect specification");
                                             return Statement::Null;
                                         }
-                                        match effect_token.1.to_lowercase().as_str() {
+                                        match effect_token.1.to_lowercase().as_ref() {
                                             "pure" => { effect_flags |= EffectFlags::PURE; },
                                             "io" => { effect_flags |= EffectFlags::IO; },
                                             "state" => { effect_flags |= EffectFlags::STATE; },
@@ -2167,10 +2168,10 @@ impl Parser {
                                 return Statement::Null;
                             }
 
-                            let name = type_token.1.clone();
+                            let name = type_token.1.to_string();
                             let name_loc = type_token.2.clone();
 
-                            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                            if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a type name", name));
                                 return Statement::Null;
                             }
@@ -2186,7 +2187,7 @@ impl Parser {
                                         self.raise("SyntaxError", "Expected generic parameter");
                                         return Statement::Null;
                                     }
-                                    generics.push(gen_token.1.clone());
+                                    generics.push(gen_token.1.to_string());
                                     self.next();
 
                                     if self.token_is("SEPARATOR", ",") {
@@ -2211,7 +2212,7 @@ impl Parser {
                                         return Statement::Null;
                                     }
 
-                                    variables.push(var_token.1.clone());
+                                    variables.push(var_token.1.to_string());
                                     self.next();
 
                                     if self.token_is("SEPARATOR", ",") {
@@ -2373,7 +2374,7 @@ impl Parser {
                                             value
                                         };
 
-                                        variants.push((variant_name, variant_type, discriminant));
+                                        variants.push((variant_name.to_string(), variant_type, discriminant));
 
                                         if self.token_is("SEPARATOR", ",") {
                                             self.next();
@@ -2407,9 +2408,9 @@ impl Parser {
                                         while self.token().map_or(false, |t| {
                                             t.0 == "IDENTIFIER" &&
                                             ["public","private","static","non-static","final","mutable"]
-                                                .contains(&t.1.as_str())
+                                                .contains(&t.1.as_ref())
                                         }) {
-                                            mods.push(self.token().unwrap().1.clone());
+                                            mods.push(self.token().unwrap().1.to_string());
                                             self.next();
                                         }
 
@@ -2432,7 +2433,7 @@ impl Parser {
                                             return Statement::Null;
                                         }
 
-                                        fields.push((field_name, field_type, mods));
+                                        fields.push((field_name.to_string(), field_type, mods));
 
                                         if self.token_is("SEPARATOR", ",") {
                                             self.next();
@@ -2492,7 +2493,7 @@ impl Parser {
                                             return Statement::Null;
                                         }
 
-                                        where_list.push((ident, type_));
+                                        where_list.push((ident.to_string(), type_));
                                     }
 
                                     if self.token_is("SEPARATOR", ",") {
@@ -2743,17 +2744,17 @@ impl Parser {
                             Statement {
                                 node: Node::Import {
                                     name: module_name_final,
-                                    alias: alias.map(|a| a.1),
+                                    alias: alias.map(|a| a.1.to_string()),
                                     named_imports: if is_named_import {
                                         let converted: Vec<Value> = named_imports
                                             .into_iter()
                                             .map(|(name, alias)| {
                                                 let mut keys = vec![Value::String("name".to_string())];
-                                                let mut values = vec![Value::String(name)];
+                                                let mut values = vec![Value::String(name.to_string())];
 
                                                 if let Some(alias) = alias {
                                                     keys.push(Value::String("alias".to_string()));
-                                                    values.push(Value::String(alias));
+                                                    values.push(Value::String(alias.to_string()));
                                                 }
                                                 Value::Map { keys, values }
                                             })
@@ -2770,7 +2771,7 @@ impl Parser {
                             }
                         }
                         _ => {
-                            let name = self.token().cloned().map(|tok| tok.1).unwrap_or_default();
+                            let name = self.token().cloned().map(|tok| tok.1.to_string()).unwrap_or_default();
                             self.next();
                             if self.token_is("SEPARATOR", ":") {
                                 self.next();
@@ -2794,7 +2795,7 @@ impl Parser {
                                 }
                                 return Statement {
                                     node: Node::VariableDeclaration {
-                                        name,
+                                        name: name.to_string(),
                                         var_type: Box::new(type_),
                                         val_stmt: Box::new(value),
                                         modifiers,
@@ -2807,7 +2808,7 @@ impl Parser {
                             } else {
                                 return Statement {
                                     node: Node::Variable {
-                                        name,
+                                        name: name.to_string(),
                                     },
                                     loc: alloc_loc(self.get_loc()),
                                 };
@@ -2822,9 +2823,9 @@ impl Parser {
                     let mut global_modifiers: Vec<String> = vec![];
                     while let Some(tok) = self.token() {
                         if tok.0 == "IDENTIFIER"
-                            && ["public", "static", "non-static", "final", "mutable"].contains(&tok.1.as_str())
+                            && ["public", "static", "non-static", "final", "mutable"].contains(&tok.1.as_ref())
                         {
-                            global_modifiers.push(tok.1.clone());
+                            global_modifiers.push(tok.1.to_string());
                             self.next();
                         } else {
                             break;
@@ -2843,9 +2844,9 @@ impl Parser {
                             while let Some(tok) = self.token() {
                                 if tok.0 == "IDENTIFIER"
                                     && ["public", "static", "non-static", "final", "mutable"]
-                                        .contains(&tok.1.as_str())
+                                        .contains(&tok.1.as_ref())
                                 {
-                                    item_modifiers.push(tok.1.clone());
+                                    item_modifiers.push(tok.1.to_string());
                                     self.next();
                                 } else {
                                     break;
@@ -2861,7 +2862,7 @@ impl Parser {
                                 return Statement::Null;
                             }
 
-                            names.push(name_token.1.clone());
+                            names.push(name_token.1.to_string());
                             modifiers_list.push(item_modifiers);
                             self.next();
 
@@ -2881,9 +2882,9 @@ impl Parser {
                         while let Some(tok) = self.token() {
                             if tok.0 == "IDENTIFIER"
                                 && ["public", "static", "non-static", "final", "mutable"]
-                                    .contains(&tok.1.as_str())
+                                    .contains(&tok.1.as_ref())
                             {
-                                item_modifiers.push(tok.1.clone());
+                                item_modifiers.push(tok.1.to_string());
                                 self.next();
                             } else {
                                 break;
@@ -2899,7 +2900,7 @@ impl Parser {
                             return Statement::Null;
                         }
 
-                        names.push(name_token.1.clone());
+                        names.push(name_token.1.to_string());
                         modifiers_list.push(item_modifiers);
                         self.next();
                     }
@@ -2919,7 +2920,7 @@ impl Parser {
                                     self.raise("SyntaxError", "Expected identifier in alias tuple");
                                     return Statement::Null;
                                 }
-                                alias_names.push(alias_token.1.clone());
+                                alias_names.push(alias_token.1.to_string());
                                 self.next();
 
                                 if i != names.len() - 1 {
@@ -2947,7 +2948,7 @@ impl Parser {
                                 self.raise("SyntaxError", "Expected identifier after 'as'");
                                 return Statement::Null;
                             }
-                            aliases = vec![alias_token.1.clone()];
+                            aliases = vec![alias_token.1.to_string()];
                             self.next();
                         }
                     }
@@ -2969,7 +2970,7 @@ impl Parser {
 
                 "IDENTIFIER" if token.1 == "return" => {
                     self.next();
-                    if ["end"].contains(&self.token().map(|t| t.1.as_str()).unwrap_or("")) {
+                    if ["end"].contains(&self.token().map(|t| t.1.as_ref()).unwrap_or("")) {
                         return Statement {
                             node: Node::Return {
                                 value: Box::new(
@@ -3079,7 +3080,7 @@ impl Parser {
 
                     let name_opt = match self.token() {
                         Some(token) if token.0 == "IDENTIFIER" => {
-                            let name = token.1.clone();
+                            let name = token.1.to_string();
                             self.next();
                             Some(name)
                         }
@@ -3093,7 +3094,7 @@ impl Parser {
                         while !self.token_is("SEPARATOR", ")") {
                             match self.token() {
                                 Some(tok) if tok.0 == "IDENTIFIER" => {
-                                    locals.push(tok.1.clone());
+                                    locals.push(tok.1.to_string());
                                     self.next();
                                 }
                                 Some(tok) if tok.0 == "SEPARATOR" && tok.1 == "," => {
@@ -3688,7 +3689,7 @@ impl Parser {
     pub fn parse_path(&mut self) -> Option<PathElement> {
         let mut left = match self.token().cloned() {
             Some(Token(kind, val, _)) if kind == "IDENTIFIER" => {
-                let mut segments: Vec<String> = vec![val.clone()];
+                let mut segments: Vec<String> = vec![val.to_string()];
                 self.next();
 
                 while self.token_is("SEPARATOR", ".") {
@@ -3696,11 +3697,11 @@ impl Parser {
                     if let Some(Token(kind, seg, _)) = self.token().cloned() {
                         if kind == "IDENTIFIER" {
                             self.next();
-                            if RESERVED_KEYWORDS.contains(&seg.as_str()) {
+                            if RESERVED_KEYWORDS.contains(&seg.as_ref()) {
                                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used in paths", seg));
                                 return None;
                             }
-                            segments.push(seg.clone());
+                            segments.push(seg.to_string());
                         } else {
                             self.raise("SyntaxError", "Expected identifier after '.'");
                             return None;
@@ -3813,7 +3814,7 @@ impl Parser {
 
             Some(Token(kind, val, _)) if kind == "BOOLEAN" => {
                 self.next();
-                match val.as_str() {
+                match val.as_ref() {
                     "true" => PathElement::Literal(Value::Boolean(true)),
                     "false" => PathElement::Literal(Value::Boolean(false)),
                     "null" => PathElement::Literal(Value::Null),
@@ -3848,7 +3849,7 @@ impl Parser {
         let mut is_maybe = false;
     
         while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "&&") || self.token_is("OPERATOR", "??") {
-            match self.token().cloned().unwrap().1.as_str() {
+            match self.token().cloned().unwrap().1.as_ref() {
                 "&" => {
                     ptr_level += 1;
                 }
@@ -3933,7 +3934,7 @@ impl Parser {
         }
         self.next();
     
-        let name = token.1;
+        let name = token.1.to_string();
     
         Some((
             name.clone(),
@@ -3961,7 +3962,7 @@ impl Parser {
             while is_valid_token(&self.token().cloned()) {
                 match self.token().cloned() {
                     Some(Token(ref t, ref v, _)) if t == "IDENTIFIER" && (v == "static" || v == "final" || v == "mutable" || v == "non-static") => {
-                        mods.push(v.clone());
+                        mods.push(v.to_string());
                         self.next();
                     }
                     _ => break,
@@ -3972,11 +3973,11 @@ impl Parser {
                 self.raise("SyntaxError", "Expected function name after 'impl'");
                 return Statement::Null;
             }
-            let func_name = name_token.unwrap().1;
+            let func_name = name_token.unwrap().1.to_string();
             self.next();
 
             if !self.token_is("SEPARATOR", "[") {
-                joins.push(func_name.clone());
+                joins.push(func_name.to_string());
                 if self.token_is("OPERATOR", "+") {
                     self.next();
                     continue;
@@ -4028,7 +4029,7 @@ impl Parser {
             };
 
             impls.push((
-                func_name,
+                func_name.to_string(),
                 arg_types,
                 mods,
                 Box::new(ret_type_node),
@@ -4303,8 +4304,8 @@ impl Parser {
         let loc = self.get_loc();
 
         if token.0 == "IDENTIFIER" {
-            let name = token.1.clone();
-            if RESERVED_KEYWORDS.contains(&name.as_str()) {
+            let name = token.1.to_string();
+            if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a variable name", name));
                 return Statement::Null;
             }
@@ -4312,7 +4313,7 @@ impl Parser {
             if self.token_is("SEPARATOR", ":") && self.parse_var_decl {
                 self.next();
                 let type_token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
-                if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR" || (type_token.0 == "SEPARATOR" && ["(", "<", "["].contains(&type_token.1.as_str()))) {
+                if !(type_token.0 == "IDENTIFIER" || type_token.0 == "OPERATOR" || (type_token.0 == "SEPARATOR" && ["(", "<", "["].contains(&type_token.1.as_ref()))) {
                     self.raise("SyntaxError", "Expected type after ':'");
                     return Statement::Null;
                 }
@@ -4340,7 +4341,7 @@ impl Parser {
                     loc: alloc_loc(loc),
                 };
             } else if self.token_is("OPERATOR", ":=") && self.parse_var_decl {
-                let name = token.1.clone();
+                let name = token.1.to_string();
                 self.next();
                 let type_ = Statement {
                     node: Node::Type {
@@ -4363,7 +4364,7 @@ impl Parser {
                 }
                 return Statement {
                     node: Node::VariableDeclaration {
-                        name,
+                        name: name.to_string(),
                         var_type: Box::new(type_),
                         val_stmt: Box::new(value),
                         modifiers: vec![],
@@ -4374,7 +4375,7 @@ impl Parser {
             } else {
                 return Statement {
                     node: Node::Variable {
-                        name: name.clone(),
+                        name: name.to_string(),
                     },
                     loc: alloc_loc(loc),
                 };
@@ -4391,8 +4392,8 @@ impl Parser {
         let token_type = token.0.clone();
         let token_value = token.1.clone();        
         let next_token = self.peek(1);
-        let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| "".to_string());
-        let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| "".to_string());
+        let next_token_type = next_token.map(|t| t.0.clone()).unwrap_or_else(|| Cow::Borrowed(""));
+        let next_token_value = next_token.map(|t| t.1.clone()).unwrap_or_else(|| Cow::Borrowed(""));
         
         if token_type == "SEPARATOR" && token_value == "(" {
             let mut values = Vec::new();
@@ -4429,7 +4430,7 @@ impl Parser {
             self.next();
             return Statement {
                 node: Node::Number {
-                    value: token_value.to_owned(),
+                    value: token_value.to_string(),
                 },
                 loc: alloc_loc(loc),
             };
@@ -4459,7 +4460,7 @@ impl Parser {
             } else {
                 return Statement {
                     node: Node::String {
-                        value: token_value.to_owned(),
+                        value: token_value.to_string(),
                         mods: Vec::new(),
                     },
                     loc: alloc_loc(loc),
@@ -4482,7 +4483,7 @@ impl Parser {
         
                 return Statement {
                     node: Node::String {
-                        value: literal_str.to_owned(),
+                        value: literal_str.to_string(),
                         mods
                     },
                     loc: alloc_loc(loc),
@@ -4490,7 +4491,7 @@ impl Parser {
             } else {
                 return Statement {
                     node: Node::String {
-                        value: token_value.to_owned(),
+                        value: token_value.to_string(),
                         mods: Vec::new(),
                     },
                     loc: alloc_loc(loc),
@@ -4509,7 +4510,7 @@ impl Parser {
             self.next();
             return Statement {
                 node: Node::Boolean {
-                    value: match token_value.as_str() {
+                    value: match token_value.as_ref() {
                         "true" => Some(true),
                         "false" => Some(false),
                         "null" => None,
@@ -4691,7 +4692,7 @@ impl Parser {
                 return Statement::Null;
             }
         };
-        let name = token.1.to_owned();
+        let name = token.1.to_string();
         if self.err.is_some() {
             return Statement::Null;
         }
@@ -4714,7 +4715,7 @@ impl Parser {
         if pos_args.is_empty() && named_args.is_empty() {
             return Statement {
                 node: Node::Call {
-                    name,
+                    name: name.to_string(),
                     pos_args: Vec::new(),
                     named_args: HashMap::new(),
                 },
@@ -4724,7 +4725,7 @@ impl Parser {
 
         Statement {
             node: Node::Call {
-                name,
+                name: name.to_string(),
                 pos_args,
                 named_args,
             },
@@ -4751,8 +4752,8 @@ impl Parser {
     
             if let Some(Token(t_type, t_val, _)) = &next_token {
                 if t_type == "OPERATOR" && t_val == "=" {
-                    let name = current_token.1;
-                    if RESERVED_KEYWORDS.contains(&name.as_str()) {
+                    let name = current_token.1.to_string();
+                    if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                         self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a named argument", name));
                         return (vec![], HashMap::default());
                     }
@@ -4762,7 +4763,7 @@ impl Parser {
                     if self.err.is_some() {
                         return (vec![], HashMap::default());
                     }
-                    named_args.insert(name, value);
+                    named_args.insert(name.to_string(), value);
                     seen_named = true;
                 } else {
                     if seen_named {

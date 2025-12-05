@@ -64,7 +64,7 @@ use reqwest;
 #[cfg(not(target_arch = "wasm32"))]
 use serde_urlencoded;
 use std::io::{stdout, Write};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::panic::Location as PanicLocation;
 use rustc_hash::FxHashMap;
 use serde::{Serialize, Deserialize};
@@ -111,7 +111,7 @@ impl Interpreter {
             state: State::Normal,
             stack: Stack::new(),
             current_statement: None,
-            variables: FxHashMap::default(),
+            variables: FxHashMap::with_capacity_and_hasher(32, Default::default()),
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
             preprocessor_info,
@@ -432,7 +432,7 @@ impl Interpreter {
                         }
                     }
                     Value::Pointer(ptr) => {
-                        let ptr_val = ptr.lock().unwrap();
+                        let ptr_val = ptr.lock();
                         self.check_type(&ptr_val.0, expected);
                     }
                     _ => {
@@ -546,7 +546,7 @@ impl Interpreter {
                     status = false;
                     err = Some(make_err("TypeError", &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), self.get_location_from_current_statement()));
                 }
-                let mut vars: HashMap<String, Variable> = HashMap::new();
+                let mut vars: HashMap<String, Variable> = HashMap::with_capacity(variables.len());
                 for var_name in variables.iter() {
                     vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value.get_type().display().to_string(), false, true, true));
                 }
@@ -815,7 +815,7 @@ impl Interpreter {
 
         let headers = match args.get("headers") {
             Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values.iter()) {
                     if let Value::String(key) = k {
                         if let Value::String(value) = v {
@@ -830,7 +830,7 @@ impl Interpreter {
 
         let params = match args.get("params") {
             Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values.iter()) {
                     if let Value::String(key) = k {
                         if let Value::String(value) = v {
@@ -845,7 +845,7 @@ impl Interpreter {
 
         let data = match args.get("data") {
             Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values.iter()) {
                     if let Value::String(key) = k {
                         if let Value::String(value) = v {
@@ -897,7 +897,7 @@ impl Interpreter {
 
         let headers_map = match args.get("headers") {
             Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::with_capacity(keys.len());
                 for (k, v) in keys.iter().zip(values.iter()) {
                     if let (Value::String(k), Value::String(v)) = (k, v) {
                         map.insert(k.clone(), v.clone());
@@ -1044,13 +1044,13 @@ impl Interpreter {
             &vec![],
         )));
 
-        shared_interpreter.lock().unwrap().stack = self.stack.clone();
-        let result = shared_interpreter.lock().unwrap().interpret(statements, true);
-        self.stack = shared_interpreter.lock().unwrap().stack.clone();
+        shared_interpreter.lock().stack = self.stack.clone();
+        let result = shared_interpreter.lock().interpret(statements, true);
+        self.stack = shared_interpreter.lock().stack.clone();
 
-        let properties = shared_interpreter.lock().unwrap().variables.clone();
+        let properties = shared_interpreter.lock().variables.clone();
 
-        if let Some(err) = shared_interpreter.lock().unwrap().err.clone() {
+        if let Some(err) = shared_interpreter.lock().err.clone() {
             self.raise_with_ref(
                 "ImportError",
                 &format!("Error while importing '{}'", path.display()),
@@ -1486,7 +1486,7 @@ impl Interpreter {
                             Value::Pointer(_) => {
                                 let mut p = old;
                                 while let Value::Pointer(inner) = p {
-                                    p = inner.lock().expect("Invalid pointer").0.clone();
+                                    p = inner.lock().0.clone();
                                 }
                                 return p;
                             }
@@ -1509,7 +1509,7 @@ impl Interpreter {
                     Value::Float(f) => Value::Float(f.abs()),
                     mut p @ Value::Pointer(_) => {
                         while let Value::Pointer(inner) = p {
-                            p = inner.lock().expect("Invalid pointer").0.clone();
+                            p = inner.lock().0.clone();
                         }
                         p
                     }
@@ -2246,7 +2246,7 @@ impl Interpreter {
         for case in cases {
             match case {
                 MatchCase::Pattern { pattern, body, guard } => {
-                    let (matched, variables) = match check_pattern(&cond_val, &pattern.to_value()) {
+                    let (matched, variables) = match check_pattern(&cond_val, &pattern) {
                         Ok(m) => m,
                         Err((etype, emsg)) => return self.raise(&etype, &emsg),
                     };
@@ -2545,7 +2545,7 @@ impl Interpreter {
                         }
                     };
 
-                    let guard = arc_clone.lock().unwrap();
+                    let guard = arc_clone.lock();
                     current = guard.0.clone();
                     drop(guard);
 
@@ -2572,7 +2572,7 @@ impl Interpreter {
                         }
                     };
 
-                    let mut guard = arc_clone.lock().unwrap();
+                    let mut guard = arc_clone.lock();
 
                     if remaining > 1 {
                         remaining -= 1;
@@ -4601,7 +4601,7 @@ impl Interpreter {
                     match current {
                         Value::Pointer(ref arc_ptr) => {
                             current = {
-                                let mut guard = arc_ptr.lock().unwrap();
+                                let mut guard = arc_ptr.lock();
 
                                 if guard.1 > 1 {
                                     guard.1 -= 1;
@@ -5856,7 +5856,6 @@ impl Interpreter {
             );
         }
 
-        let variable_pattern = variable.to_value();
         let mut result = NULL;
 
         for item in iterable_value.iter() {
@@ -5870,7 +5869,7 @@ impl Interpreter {
                 return NULL;
             }
 
-            let bindings = match check_pattern(&item, &variable_pattern) {
+            let bindings = match check_pattern(&item, &variable) {
                 Ok((true, vars)) => vars,
                 Ok((false, _)) => return self.raise("ValueError", "Item did not match for-loop variable pattern"),
                 Err((etype, emsg)) => return self.raise(&etype, &emsg),
@@ -6424,7 +6423,7 @@ impl Interpreter {
                     for item in iterable.iter() {
                         if interpreter.check_stop_flag() { return; }
 
-                        let bindings = match check_pattern(&item, &pattern.to_value()) {
+                        let bindings = match check_pattern(&item, &pattern) {
                             Ok((true, new_bindings)) => new_bindings,
                             Ok((false, _)) => {
                                 interpreter.raise("ValueError", "Pattern did not match item in list comprehension");
@@ -7783,7 +7782,7 @@ impl Interpreter {
             self.stack = new_interpreter.stack;
         } else if let Function::CustomMethod(func) = func {
             let interpreter_arc = func.get_interpreter();
-            let mut interpreter = interpreter_arc.lock().unwrap();
+            let mut interpreter = interpreter_arc.lock();
             interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
             interpreter.internal_storage.in_function = true;
 
@@ -8127,7 +8126,7 @@ impl Interpreter {
             };
 
             if let Value::Pointer(lp) = &left_test {
-                let (l_val, _) = lp.lock().unwrap().clone();
+                let (l_val, _) = lp.lock().clone();
                 left_test = l_val;
             }
 
@@ -8157,12 +8156,12 @@ impl Interpreter {
 
         let (left, right) = match (&left, &right) {
             (Value::Pointer(lp), Value::Pointer(rp)) => {
-                let (l_val, _) = lp.lock().unwrap().clone();
-                let (r_val, _) = rp.lock().unwrap().clone();
+                let (l_val, _) = lp.lock().clone();
+                let (r_val, _) = rp.lock().clone();
                 (l_val, r_val)
             }
             // (Value::Pointer(lp), r) => {
-            //     let l_val = lp.lock().unwrap().clone();
+            //     let l_val = lp.lock().clone();
             //     (l_val, r.clone())
             // }
             // (l, Value::Pointer(rp)) => {

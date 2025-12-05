@@ -3,12 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::tokens::{Token, Location, TK_OPERATOR, TK_IDENTIFIER, TK_STRING, TK_SEPARATOR, TK_BOOLEAN, TK_NUMBER};
 use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path, escape_string, get_inner_string};
 use crate::env::runtime::precompile::{precompile, precompile_to_value};
 use crate::env::runtime::types::Float;
 use crate::env::runtime::value::Value;
 use std::ops::{Add, Sub, Mul, Div, Rem};
+use std::borrow::Cow;
 #[cfg(feature = "preprocessor_include_std")]
 use once_cell::sync::Lazy;
 
@@ -247,9 +248,9 @@ impl Preprocessor {
         tokens: Vec<Token>,
         current_dir: &Path,
     ) -> Result<Vec<Token>, Error> {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(tokens.len());
         let mut i = 0;
-        let mut skip_stack = Vec::new();
+        let mut skip_stack = Vec::with_capacity(8);
         let mut skipping = false;
         let mut last_normal_token_location: Option<Location> = None;
 
@@ -269,14 +270,14 @@ impl Preprocessor {
                     ));
                 }
 
-                if &tokens[i].0 != "IDENTIFIER" {
+                if !["IDENTIFIER", "SEPARATOR"].contains(&tokens[i].0.as_ref()){
                     return Err(create_err("Expected IDENTIFIER for preprocessor directive name", &tokens[i]));
                 }
                 
                 let directive = &tokens[i].1;
                 i += 1;
 
-                match directive.as_str() {
+                match directive.as_ref() {
                     "macro" => {
                         if i >= tokens.len() {
                             return Err(create_err("#macro missing NAME", &tokens[i]));
@@ -302,7 +303,7 @@ impl Preprocessor {
                                     &tokens[i - 1],
                                 ));
                             }
-                            match tokens[i].1.as_str() {
+                            match tokens[i].1.as_ref() {
                                 "group" => {
                                     macro_metadata.grouping_enabled = true;
                                 }
@@ -325,7 +326,7 @@ impl Preprocessor {
                                     if i >= tokens.len() {
                                         return Err(create_err("Expected directive after 'no'", &tokens[i]));
                                     }
-                                    match tokens[i].1.as_str() {
+                                    match tokens[i].1.as_ref() {
                                         "mangle" => {
                                             macro_metadata.mangling_enabled = false;
                                         }
@@ -435,7 +436,7 @@ impl Preprocessor {
                             i += 1;
                         }
 
-                        let mut args: Vec<(String, Option<Token>)> = Vec::new();
+                        let mut args: Vec<(String, Option<Token>)> = Vec::with_capacity(4);
 
                         let mut bracket = BracketType::Round;
                         if i < tokens.len()
@@ -467,7 +468,9 @@ impl Preprocessor {
                                     {
                                         is_variadic = true;
                                         i += 1;
-                                        name.push_str("...");
+                                        let mut name_owned = name.to_string();
+                                        name_owned.push_str("...");
+                                        name = Cow::Owned(name_owned);
                                     }
 
                                     let mut default_val = None;
@@ -482,7 +485,7 @@ impl Preprocessor {
 
                                         i += 2;
                                         let mut depth = 1;
-                                        let mut val_tokens = Vec::new();
+                                        let mut val_tokens = Vec::with_capacity(8);
 
                                         while i < tokens.len() {
                                             if tokens[i].1 == def_open {
@@ -505,7 +508,7 @@ impl Preprocessor {
                                         default_val = val_tokens.into_iter().next();
                                     }
 
-                                    args.push((name, default_val));
+                                    args.push((name.to_string(), default_val));
 
                                     if is_variadic && i < tokens.len()
                                         && matches!(tokens[i], Token(ref a, ref b, _) if a == "SEPARATOR" && b == ",")
@@ -554,7 +557,7 @@ impl Preprocessor {
 
                         i += 1;
 
-                        let mut body_tokens = Vec::new();
+                        let mut body_tokens = Vec::with_capacity(16);
                         while i < tokens.len() {
                             if tokens[i].0 == "OPERATOR" && tokens[i].1 == "#" && i + 1 < tokens.len() {
                                 if i + 1 < tokens.len() && ((tokens[i + 1].0 == "IDENTIFIER") && (tokens[i + 1].1 == "endmacro")) {
@@ -569,7 +572,7 @@ impl Preprocessor {
                         macro_metadata.args = args;
                         macro_metadata.body = body_tokens;
 
-                        self.macros.entry(name_token.1.clone()).or_default().insert(bracket, macro_metadata);
+                        self.macros.entry(name_token.1.to_string()).or_default().insert(bracket, macro_metadata);
                         continue;
                     }
 
@@ -585,7 +588,7 @@ impl Preprocessor {
                             i += 1;
                         }
 
-                        let mut precompile_tokens = Vec::new();
+                        let mut precompile_tokens = Vec::with_capacity(16);
 
                         while i < tokens.len() {
                             if tokens[i].1 == "#" && i + 1 < tokens.len() && tokens[i + 1].1 == "endprecompile" {
@@ -625,13 +628,13 @@ impl Preprocessor {
 
                         let next_token = &tokens[i];
 
-                        if special_words.contains(&next_token.1.as_str()) {
-                            let value = Token("BOOLEAN".to_string(), "null".to_string(), last_normal_token_location.clone());
-                            self.defines.insert(name_token.1.clone(), value);
+                        if special_words.contains(&next_token.1.as_ref()) {
+                            let value = Token::new_static(TK_BOOLEAN, Cow::Borrowed("null"), last_normal_token_location.clone());
+                            self.defines.insert(name_token.1.to_string(), value);
                         } else {
                             let value = tokens[i].clone();
                             i += 1;
-                            self.defines.insert(name_token.1.clone(), value);
+                            self.defines.insert(name_token.1.to_string(), value);
                         }
 
                         continue;
@@ -649,7 +652,7 @@ impl Preprocessor {
                             return Err(create_err("#undef NAME must be IDENTIFIER", &tokens[i]));
                         }
                         
-                        self.defines.remove(&name_token.1);
+                        self.defines.remove(name_token.1.as_ref());
                         continue;
                     }
 
@@ -665,7 +668,7 @@ impl Preprocessor {
                             return Err(create_err("#ifdef NAME must be IDENTIFIER", &tokens[i]));
                         }
                         
-                        let cond = self.defines.contains_key(&name_token.1);
+                        let cond = self.defines.contains_key(name_token.1.as_ref());
                         skip_stack.push(skipping);
                         skipping = !cond;
                         continue;
@@ -683,7 +686,7 @@ impl Preprocessor {
                             return Err(create_err("#ifndef NAME must be IDENTIFIER", &tokens[i]));
                         }
                         
-                        let cond = !self.defines.contains_key(&name_token.1);
+                        let cond = !self.defines.contains_key(name_token.1.as_ref());
                         skip_stack.push(skipping);
                         skipping = !cond;
                         continue;
@@ -727,7 +730,7 @@ impl Preprocessor {
 
                         let included_path = if tokens[i].0 == "OPERATOR" && tokens[i].1 == "<" {
                             i += 1;
-                            let mut path_parts = Vec::new();
+                            let mut path_parts = Vec::with_capacity(3);
 
                             while i < tokens.len() && !(tokens[i].0 == "OPERATOR" && tokens[i].1 == ">") {
                                 path_parts.push(tokens[i].1.clone());
@@ -805,15 +808,15 @@ impl Preprocessor {
                         }
 
                         let included_in = vec![
-                            Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
-                            Token("IDENTIFIER".to_string(), "define".to_string(), last_normal_token_location.clone()),
-                            Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
-                            Token("STRING".to_string(), included_path.display().to_string(), last_normal_token_location.clone()),
+                            Token::new_static(TK_OPERATOR, Cow::Borrowed("#"), last_normal_token_location.clone()),
+                            Token::new_static(TK_IDENTIFIER, Cow::Borrowed("define"), last_normal_token_location.clone()),
+                            Token::new_static(TK_IDENTIFIER, Cow::Borrowed("INCLUDE"), last_normal_token_location.clone()),
+                            Token::new_static(TK_STRING, Cow::Owned(included_path.display().to_string()), last_normal_token_location.clone()),
                         ];
                         let included_out = vec![
-                            Token("OPERATOR".to_string(), "#".to_string(), last_normal_token_location.clone()),
-                            Token("IDENTIFIER".to_string(), "undef".to_string(), last_normal_token_location.clone()),
-                            Token("IDENTIFIER".to_string(), "INCLUDE".to_string(), last_normal_token_location.clone()),
+                            Token::new_static(TK_OPERATOR, Cow::Borrowed("#"), last_normal_token_location.clone()),
+                            Token::new_static(TK_IDENTIFIER, Cow::Borrowed("undef"), last_normal_token_location.clone()),
+                            Token::new_static(TK_IDENTIFIER, Cow::Borrowed("INCLUDE"), last_normal_token_location.clone()),
                         ];
 
                         if cfg!(not(target_arch = "wasm32")) && included_path.is_dir() {
@@ -917,46 +920,46 @@ impl Preprocessor {
 
                         if tokens[i].1 == "." {
                             i += 1;
-                            let key = if i < tokens.len() && tokens[i].0 == "IDENTIFIER" {
-                                tokens[i].1.clone()
+                            let key = if i < tokens.len() && tokens[i].0.as_ref() == TK_IDENTIFIER {
+                                tokens[i].1.to_string()
                             } else {
                                 return Err(create_err("Expected IDENTIFIER after '#config.'", &tokens[i]));
                             };
                             i += 1;
                             let loc = last_normal_token_location.clone();
 
-                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                            result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_cfg__"), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), loc.clone()));
+                            result.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", key)), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
                             // 0x6767 = 26471
-                            result.push(Token("NUMBER".to_string(), "26471".to_string(), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            result.push(Token::new_static(TK_NUMBER, Cow::Borrowed("26471"), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), loc));
                             continue;
                         }
 
-                        let key = tokens[i].1.clone();
+                        let key = tokens[i].1.to_string();
                         i += 1;
 
                         if key == "reset" {
                             if i >= tokens.len() {
                                 return Err(create_err("#config reset requires a key", &tokens[i]));
                             }
-                            let reset_key = tokens[i].1.clone();
+                            let reset_key = tokens[i].1.to_string();
                             i += 1;
 
                             let loc = last_normal_token_location.clone();
 
-                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                            result.push(Token("STRING".to_string(), format!("\"{}\"", reset_key), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_cfg__"), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), loc.clone()));
+                            result.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", reset_key)), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
                             // 0x6969 = 26985
-                            result.push(Token("NUMBER".to_string(), "26985".to_string(), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            result.push(Token::new_static(TK_NUMBER, Cow::Borrowed("26985"), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), loc));
                             continue;
                         } else {
-                            if i >= tokens.len() || tokens[i].1 != "=" {
+                            if i >= tokens.len() || tokens[i].1.as_ref() != "=" {
                                 return Err(create_err("Missing '=' after #config key", &tokens[i]));
                             }
                             i += 1;
@@ -969,12 +972,12 @@ impl Preprocessor {
 
                             let loc = last_normal_token_location.clone();
 
-                            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                            result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_cfg__"), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), loc.clone()));
+                            result.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", key)), loc.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
                             result.push(value);
-                            result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), loc));
                             continue;
                         }
                     }
@@ -1046,22 +1049,22 @@ impl Preprocessor {
 
                         let loc = last_normal_token_location.clone();
                         let defs: Vec<CHeaderSignature> = get_defs_from_c_header(&link_header, &link_lib).map_err(|e| create_err(&format!("Failed to parse C header '{}': {}", link_header.display(), e), &tokens[i - 1]))?;
-                        result.push(Token("IDENTIFIER".to_string(), "import".to_string(), loc.clone()));
-                        result.push(Token("IDENTIFIER".to_string(), "libload".to_string(), loc.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("import"), loc.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("libload"), loc.clone()));
                         let mut loaded_libs = HashSet::default();
                         for def in defs {
                             if !loaded_libs.contains(&def.library_name) {
                                 for t in generate_library_definition(&def.library_name, &link_lib, &loc) {
-                                    result.push(Token(t.0, t.1, loc.clone()));
+                                    result.push(Token::new_owned(t.0.to_string(), t.1.to_string(), loc.clone()));
                                 }
                                 loaded_libs.insert(def.library_name.clone());
                             }
                             let (get_fn_tokens, final_fn_tokens) = generate_lsign_from_c_sign(&def);
                             for t in get_fn_tokens {
-                                result.push(Token(t.0, t.1, loc.clone()));
+                                result.push(Token::new_owned(t.0.to_string(), t.1.to_string(), loc.clone()));
                             }
                             for t in final_fn_tokens {
-                                result.push(Token(t.0, t.1, loc.clone()));
+                                result.push(Token::new_owned(t.0.to_string(), t.1.to_string(), loc.clone()));
                             }
                         }
                     }
@@ -1073,10 +1076,10 @@ impl Preprocessor {
                     }
 
                     "[" | "!" => {
-                        let is_negated = tokens[i - 1].1 == "!";
+                        let is_negated = tokens[i - 1].1.as_ref() == "!";
 
                         if is_negated {
-                            if i >= tokens.len() || tokens[i].1 != "[" {
+                            if i >= tokens.len() || tokens[i].1.as_ref() != "[" {
                                 return Err(create_err("Expected '[' after '!'", &tokens[i]));
                             }
                             i += 1;
@@ -1086,22 +1089,22 @@ impl Preprocessor {
                             return Err(create_err("Expected key inside brackets", &tokens[i]));
                         }
 
-                        let key = tokens[i].1.clone();
+                        let key = tokens[i].1.to_string();
                         i += 1;
 
-                        if i >= tokens.len() || tokens[i].1 != "]" {
+                        if i >= tokens.len() || tokens[i].1.as_ref() != "]" {
                             return Err(create_err("Expected closing ']' after key", &tokens[i]));
                         }
                         i += 1;
 
                         let loc = last_normal_token_location.clone();
 
-                        result.push(Token("IDENTIFIER".to_string(), "00__set_dir__".to_string(), loc.clone()));
-                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                        result.push(Token("STRING".to_string(), format!("\"{}\"", key), loc.clone()));
-                        result.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
-                        result.push(Token("BOOLEAN".to_string(), if is_negated { "false" } else { "true" }.to_string(), loc.clone()));
-                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), loc));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_dir__"), loc.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), loc.clone()));
+                        result.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", key)), loc.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
+                        result.push(Token::new_static(TK_BOOLEAN, if is_negated { Cow::Borrowed("false") } else { Cow::Borrowed("true") }, loc.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), loc));
                         continue;
                     }
 
@@ -1147,7 +1150,7 @@ impl Preprocessor {
                                     if v.len() == 2 {
                                         match (&v[0], &v[1]) {
                                             (Value::String(t_type), Value::String(t_value)) => {
-                                                tokens.push(Token(t_type.clone(), t_value.clone(), token_ref.2.clone()));
+                                                tokens.push(Token::new_owned(t_type.clone(), t_value.clone(), token_ref.2.clone()));
                                             }
                                             _ => {
                                                 for item in v {
@@ -1179,10 +1182,10 @@ impl Preprocessor {
                             return Err(create_err("#overload missing function name", &tokens[i]));
                         }
 
-                        result.push(Token("IDENTIFIER".to_string(), "warn".to_string(), tokens[i - 1].2.clone()));
-                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
-                        result.push(Token("STRING".to_string(), "\"#overload is experimental and may not work as expected.\"".to_string(), tokens[i - 1].2.clone()));
-                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("warn"), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_STRING, Cow::Borrowed("\"#overload is experimental and may not work as expected.\""), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), tokens[i - 1].2.clone()));
 
                         let mut overload_metadata = OverloadFunctionMetadata {
                             name: "".to_owned(),
@@ -1202,7 +1205,7 @@ impl Preprocessor {
                                 return Err(create_err("Unexpected end after '#'", &tokens[i - 1]));
                             }
 
-                            match tokens[i].1.as_str() {
+                            match tokens[i].1.as_ref() {
                                 "O" => overload_metadata.opt = true,
                                 "strategy" => {
                                     i += 1;
@@ -1213,7 +1216,7 @@ impl Preprocessor {
                                     if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
                                         return Err(create_err("Expected strategy identifier", &tokens[i]));
                                     }
-                                    match tokens[i].1.as_str() {
+                                    match tokens[i].1.as_ref() {
                                         "runtime" => overload_metadata.strategy = OverloadStrategy::Runtime,
                                         "static"  => overload_metadata.strategy = OverloadStrategy::Static,
                                         "hybrid"  => overload_metadata.strategy = OverloadStrategy::Hybrid,
@@ -1244,8 +1247,9 @@ impl Preprocessor {
                                         if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
                                             return Err(create_err("Expected target type in #coerces", &tokens[i]));
                                         }
-                                        let to_type = tokens[i].1.clone();
-                                        coerces.insert(from_type, to_type);
+                                        let to_type = tokens[i].1.to_string();
+                                        let from_type_str = from_type.to_string();
+                                        coerces.insert(from_type_str, to_type);
                                         i += 1;
                                         if i < tokens.len() && tokens[i].1 == "," { i += 1; }
                                     }
@@ -1278,7 +1282,7 @@ impl Preprocessor {
                         if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
                             return Err(create_err("Expected function name after #overload", &tokens[i]));
                         }
-                        overload_metadata.name = tokens[i].1.clone();
+                        overload_metadata.name = tokens[i].1.to_string();
                         i += 1;
 
                         if i >= tokens.len() || tokens[i].1 != "(" {
@@ -1289,7 +1293,7 @@ impl Preprocessor {
                             if tokens[i].0 != "IDENTIFIER" {
                                 return Err(create_err("Expected parameter name", &tokens[i]));
                             }
-                            overload_metadata.parameters.push(tokens[i].1.clone());
+                            overload_metadata.parameters.push(tokens[i].1.to_string());
                             i += 1;
                             if i < tokens.len() && tokens[i].1 == "," { i += 1; }
                         }
@@ -1321,10 +1325,10 @@ impl Preprocessor {
                                 if i >= tokens.len() || tokens[i].0 != "IDENTIFIER" {
                                     return Err(create_err("Expected type after ':' in parameter", &tokens[i]));
                                 }
-                                let type_name = tokens[i].1.clone();
+                                let type_name_raw = tokens[i].1.clone();
                                 i += 1;
 
-                                let type_name = if type_name == "_" {
+                                let type_name = if type_name_raw == "_" {
                                     if i + 1 < tokens.len() && tokens[i].1 == "as" {
                                         i += 1;
                                         if tokens[i].0 != "IDENTIFIER" {
@@ -1337,10 +1341,10 @@ impl Preprocessor {
                                         "_".to_string()
                                     }
                                 } else {
-                                    type_name
+                                    type_name_raw.to_string()
                                 };
 
-                                param_types.insert(param_name, type_name);
+                                param_types.insert(param_name.to_string(), type_name);
 
                                 if i < tokens.len() && tokens[i].1 == "," { i += 1; }
                             }
@@ -1352,7 +1356,7 @@ impl Preprocessor {
 
                             let mut return_type = None;
                             if i < tokens.len() && tokens[i].0 == "IDENTIFIER" {
-                                return_type = Some(tokens[i].1.clone());
+                                return_type = Some(tokens[i].1.to_string());
                                 i += 1;
                             }
                             if i >= tokens.len() || tokens[i].1 != ":" {
@@ -1398,65 +1402,65 @@ impl Preprocessor {
 
                         if !overload_metadata.opt {
                             for variant in overload_metadata.variants.iter() {
-                                result.push(Token("IDENTIFIER".to_string(), "fun".to_string(), tokens[i - 1].2.clone()));
-                                result.push(Token("IDENTIFIER".to_string(), format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string())), tokens[i - 1].2.clone()));
-                                result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("fun"), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string()))), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), tokens[i - 1].2.clone()));
                                 for (param_name, type_name) in overload_metadata.parameters.iter().zip(variant.param_types.keys()) {
-                                    result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
-                                    result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
-                                    result.push(Token("IDENTIFIER".to_string(), variant.param_types.get(type_name).unwrap().clone(), tokens[i - 1].2.clone()));
-                                    result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(param_name.clone()), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(variant.param_types.get(type_name).unwrap().clone()), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), tokens[i - 1].2.clone()));
                                 }
-                                result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), tokens[i - 1].2.clone()));
                                 if let Some(ret_type) = &variant.return_type {
-                                    result.push(Token("OPERATOR".to_string(), "->".to_string(), tokens[i - 1].2.clone()));
-                                    result.push(Token("IDENTIFIER".to_string(), ret_type.clone(), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("->"), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(ret_type.clone()), tokens[i - 1].2.clone()));
                                 }
-                                result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), tokens[i - 1].2.clone()));
                                 for t in variant.body.iter().cloned() {
                                     result.push(t);
                                 }
-                                result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("end"), tokens[i - 1].2.clone()));
                             }
                         }
-                        result.push(Token("IDENTIFIER".to_string(), "final".to_string(), tokens[i - 1].2.clone()));
-                        result.push(Token("IDENTIFIER".to_string(), "fun".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("final"), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("fun"), tokens[i - 1].2.clone()));
                         if overload_metadata.strategy == OverloadStrategy::Static {
-                            result.push(Token("IDENTIFIER".to_string(), "static".to_string(), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("static"), tokens[i - 1].2.clone()));
                         }
-                        result.push(Token("IDENTIFIER".to_string(), overload_metadata.name.clone(), tokens[i - 1].2.clone()));
-                        result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(overload_metadata.name.clone()), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), tokens[i - 1].2.clone()));
                         for param_name in overload_metadata.parameters.iter() {
-                            result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
-                            result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(param_name.clone()), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), tokens[i - 1].2.clone()));
                         }
-                        result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
-                        result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), tokens[i - 1].2.clone()));
                         for variant in overload_metadata.variants.iter() {
-                            result.push(Token("IDENTIFIER".to_string(), "if".to_string(), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("if"), tokens[i - 1].2.clone()));
                             for (param_name, _) in overload_metadata.parameters.iter().zip(variant.param_types.keys()) {
-                                result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
-                                result.push(Token("OPERATOR".to_string(), "is".to_string(), tokens[i - 1].2.clone()));
-                                result.push(Token("IDENTIFIER".to_string(), variant.param_types.get(param_name).unwrap().clone(), tokens[i - 1].2.clone()));
-                                result.push(Token("OPERATOR".to_string(), "&&".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(param_name.clone()), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("is"), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(variant.param_types.get(param_name).unwrap().clone()), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("&&"), tokens[i - 1].2.clone()));
                             }
                             result.pop();
-                            result.push(Token("SEPARATOR".to_string(), ":".to_string(), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), tokens[i - 1].2.clone()));
                             if overload_metadata.opt {
                                 for t in variant.body.iter().cloned() {
                                     result.push(t);
                                 }
                             } else {
-                                result.push(Token("IDENTIFIER".to_string(), "return".to_string(), tokens[i - 1].2.clone()));
-                                result.push(Token("IDENTIFIER".to_string(), format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string())), tokens[i - 1].2.clone()));
-                                result.push(Token("SEPARATOR".to_string(), "(".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("return"), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(format!("01__{}_{}_{}__", overload_metadata.name.clone(), variant.param_types.values().map(|v| v.clone()).collect::<Vec<_>>().join("_"), variant.return_type.clone().unwrap_or_else(|| "void".to_string()))), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), tokens[i - 1].2.clone()));
                                 for param_name in overload_metadata.parameters.iter() {
-                                    result.push(Token("IDENTIFIER".to_string(), param_name.clone(), tokens[i - 1].2.clone()));
-                                    result.push(Token("SEPARATOR".to_string(), ",".to_string(), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(param_name.clone()), tokens[i - 1].2.clone()));
+                                    result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), tokens[i - 1].2.clone()));
                                 }
-                                result.push(Token("SEPARATOR".to_string(), ")".to_string(), tokens[i - 1].2.clone()));
+                                result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), tokens[i - 1].2.clone()));
                             }
-                            result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
+                            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("end"), tokens[i - 1].2.clone()));
                         }
                         if overload_metadata.wildcard.is_some() {
                             for t in overload_metadata.wildcard.as_ref().unwrap().body.iter().cloned() {
@@ -1468,7 +1472,21 @@ impl Preprocessor {
                                 result.push(t);
                             }
                         }
-                        result.push(Token("IDENTIFIER".to_string(), "end".to_string(), tokens[i - 1].2.clone()));
+                        result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("end"), tokens[i - 1].2.clone()));
+                    }
+
+                    "error" => {
+                        if i >= tokens.len() {
+                            return Err(create_err("#error requires a message", &tokens[i]));
+                        }
+                        if !skipping {
+                            // do not
+                            let message = to_static(tokens[i].1.clone()).trim_start_matches('"').trim_end_matches('"');
+                            return Err(create_err(&message, &tokens[i]));
+                        } else {
+                            i += 1;
+                            continue;
+                        }
                     }
 
                     _ => {
@@ -1496,7 +1514,7 @@ impl Preprocessor {
                 } else if !skipping
                     && i + 3 < tokens.len()
                     && matches!(tokens[i], Token(ref a, _, _) if a == "NUMBER")
-                    && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && ["+", "-", "*"].contains(&b.as_str()))
+                    && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && ["+", "-", "*"].contains(&b.as_ref()))
                     && matches!(tokens[i + 2], Token(ref a, _, _) if a == "NUMBER")
                     && matches!(tokens[i + 3], Token(ref a, _, _) if a != "OPERATOR")
                     && (i == 0 || matches!(tokens[i - 1], Token(ref a, _, _) if a != "OPERATOR"))
@@ -1537,10 +1555,10 @@ impl Preprocessor {
                         }
                     }
 
-                    let folded: Option<String> = if "+-*/%^".contains(op.as_str()) {
+                    let folded: Option<String> = if "+-*/%^".contains(op.as_ref()) {
                         if let (Some((li, lf)), Some((ri, rf))) = (parse_number(left), parse_number(right)) {
                             if let (Some(l), Some(r)) = (li, ri) {
-                                match op.as_str() {
+                                match op.as_ref() {
                                     "+" => l.checked_add(r).map(|v| v.to_string()),
                                     "-" => l.checked_sub(r).map(|v| v.to_string()),
                                     "*" => if l != 6 && r != 9 { l.checked_mul(r).map(|v| v.to_string()) } else { None },
@@ -1567,7 +1585,7 @@ impl Preprocessor {
                                     _ => None,
                                 }
                             } else if let (Some(lf), Some(rf)) = (lf, rf) {
-                                let res: Result<Float, i8> = match op.as_str() {
+                                let res: Result<Float, i8> = match op.as_ref() {
                                     "+" => lf.add(rf),
                                     "-" => lf.sub(rf),
                                     "*" => lf.mul(rf),
@@ -1586,7 +1604,7 @@ impl Preprocessor {
                     } else { None };
 
                     if let Some(val) = folded {
-                        result.push(Token("NUMBER".into(), val, tokens[i].2.clone()));
+                        result.push(Token::new_static(TK_NUMBER, Cow::Owned(val), tokens[i].2.clone()));
                     } else {
                         result.push(tokens[i].clone());
                         result.push(tokens[i + 1].clone());
@@ -1606,7 +1624,7 @@ impl Preprocessor {
                     }
                 
                     if token.0 == "IDENTIFIER" {
-                        if let Some(def) = self.defines.get(&token.1) {
+                        if let Some(def) = self.defines.get(token.1.as_ref()) {
                             token = def.clone();
                         }
                     }
@@ -1633,10 +1651,10 @@ impl Preprocessor {
         let mut i = 0;
 
         if depth > MAX_MACRO_RECURSION_DEPTH {
-            result.push(Token("IDENTIFIER".to_string(), "throw".to_string(), call_loc.clone()));
-            result.push(Token("STRING".to_string(), "Macro recursion limit exceeded".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), "from".to_string(), call_loc.clone()));
-            result.push(Token("STRING".to_string(), "RecursionError".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("throw"), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("Macro recursion limit exceeded"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("from"), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("RecursionError"), call_loc.clone()));
         }
 
         while i < tokens.len() {
@@ -1663,7 +1681,7 @@ impl Preprocessor {
                 }
 
                 if token.0 == "IDENTIFIER" {
-                    if let Some(def) = self.defines.get(&token.1) {
+                    if let Some(def) = self.defines.get(token.1.as_ref()) {
                         token = def.clone();
                     }
                 }
@@ -1810,7 +1828,7 @@ impl Preprocessor {
 
                 for (vi, rest_arg) in args_values.iter().enumerate().skip(idx) {
                     if vi != idx {
-                        variadic_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
+                        variadic_tokens.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), call_loc.clone()));
                     }
                     variadic_tokens.extend(rest_arg.clone());
                 }
@@ -1847,10 +1865,10 @@ impl Preprocessor {
                         let file = fix_path(call_loc.as_ref().map(|loc| loc.file.as_str()).unwrap_or("<unknown>").to_string());
                         let column = call_loc.as_ref().map(|loc| loc.range.1).unwrap_or(0);
 
-                        let replacement_token = match next_token.1.as_str() {
-                            "line" => Some(Token("NUMBER".to_string(), format!("{}", line), call_loc.clone())),
-                            "file" => Some(Token("STRING".to_string(), format!("\"{}\"", file), call_loc.clone())),
-                            "column" => Some(Token("NUMBER".to_string(), format!("{}", column), call_loc.clone())),
+                        let replacement_token = match next_token.1.as_ref() {
+                            "line" => Some(Token::new_static(TK_NUMBER, Cow::Owned(format!("{}", line)), call_loc.clone())),
+                            "file" => Some(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", file)), call_loc.clone())),
+                            "column" => Some(Token::new_static(TK_NUMBER, Cow::Owned(format!("{}", column)), call_loc.clone())),
                             _ => None,
                         };
                         if let Some(rep) = replacement_token {
@@ -1893,15 +1911,15 @@ impl Preprocessor {
                     let arg_name = if body[body_i].1.ends_with("...") {
                         &body[body_i].1[..body[body_i].1.len() - 3]
                     } else {
-                        body[body_i].1.as_str()
+                        body[body_i].1.as_ref()
                     };
 
                     if let Some(replacement) = replacement_map.get(arg_name) {
                         let joined = join_tokens_sep(replacement, sep);
                         let loc = token.2.clone().or(None);
-                        expanded_tokens.push(Token(
-                            "STRING".to_string(),
-                            format!("\"{}\"", joined),
+                        expanded_tokens.push(Token::new_static(
+                            TK_STRING,
+                            Cow::Owned(format!("\"{}\"", joined)),
                             loc,
                         ));
                     } else {
@@ -1918,24 +1936,24 @@ impl Preprocessor {
                     let arg_name = if body[body_i].1.ends_with("...") {
                         &body[body_i].1[..body[body_i].1.len() - 3]
                     } else {
-                        body[body_i].1.as_str()
+                        body[body_i].1.as_ref()
                     };
 
                     if let Some(replacement) = replacement_map.get(arg_name) {
-                        let tokens: Vec<(String, String)> = replacement.into_iter().map(|t| (t.0.clone(), t.1.clone())).collect();
+                        let tokens: Vec<(String, String)> = replacement.into_iter().map(|t| (t.0.to_string(), t.1.to_string())).collect();
                         let loc = token.2.clone().or(None);
                         for (i, t) in tokens.iter().enumerate() {
-                            expanded_tokens.push(Token("SEPARATOR".to_string(), "(".to_string(), loc.clone()));
-                            expanded_tokens.push(Token("STRING".to_string(), format!("\"{}\"", t.0), loc.clone()));
-                            expanded_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                            expanded_tokens.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), loc.clone()));
+                            expanded_tokens.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", t.0)), loc.clone()));
+                            expanded_tokens.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
                             if t.0 == "STRING" {
-                                expanded_tokens.push(Token("STRING".to_string(), t.1.clone(), loc.clone()));
+                                expanded_tokens.push(Token::new_static(TK_STRING, Cow::Owned(t.1.clone()), loc.clone()));
                             } else {
-                                expanded_tokens.push(Token("STRING".to_string(), format!("\"{}\"", t.1), loc.clone()));
+                                expanded_tokens.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", t.1)), loc.clone()));
                             }
-                            expanded_tokens.push(Token("SEPARATOR".to_string(), ")".to_string(), loc.clone()));
+                            expanded_tokens.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), loc.clone()));
                             if i < tokens.len() - 1 {
-                                expanded_tokens.push(Token("SEPARATOR".to_string(), ",".to_string(), loc.clone()));
+                                expanded_tokens.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), loc.clone()));
                             }
                         }
                     } else {
@@ -1947,7 +1965,7 @@ impl Preprocessor {
                         return Err(create_err(&format!("Expected IDENTIFIER after $, got {}", next_token.0), &tokens[i]));
                     }
 
-                    if let Some(replacement) = replacement_map.get(next_token.1.as_str()) {
+                    if let Some(replacement) = replacement_map.get(next_token.1.as_ref()) {
                         expanded_tokens.extend(replacement.clone());
                     } else {
                         return Err(create_err(&format!("Unknown macro argument ${}", next_token.1), &tokens[i]));
@@ -1974,41 +1992,41 @@ impl Preprocessor {
                 Err(_) => warning_msg.replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"),
             };
 
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), "warn".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-            result.push(Token("STRING".to_string(), format!("\"{}\"", warning_str), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("warn"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Owned(format!("\"{}\"", warning_str)), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
         }
 
         if grouping_enabled {
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
         }
 
         let unsafe_macro_output = format!("__unsafe_macro_output_{}", call_loc.as_ref().map(|loc| loc.line_number * loc.range.0 / loc.range.1).unwrap_or(0));
 
         if is_unsafe {
-            result.push(Token("IDENTIFIER".to_string(), "scope".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-            result.push(Token("OPERATOR".to_string(), "*".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ":".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("scope"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("*"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), call_loc.clone()));
             
-            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-            result.push(Token("STRING".to_string(), "\"allow_unsafe\"".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
-            result.push(Token("BOOLEAN".to_string(), "true".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_cfg__"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("\"allow_unsafe\""), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), call_loc.clone()));
+            result.push(Token::new_static(TK_BOOLEAN, Cow::Borrowed("true"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
             
-            result.push(Token("IDENTIFIER".to_string(), "final".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), unsafe_macro_output.to_owned(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ":".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), "auto".to_string(), call_loc.clone()));
-            result.push(Token("OPERATOR".to_string(), "=".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("final"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(unsafe_macro_output.to_owned()), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("auto"), call_loc.clone()));
+            result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("="), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
         }
 
         if mangling_enabled {
@@ -2022,20 +2040,20 @@ impl Preprocessor {
         }
 
         if is_unsafe {
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), "end".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), "00__set_cfg__".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), "(".to_string(), call_loc.clone()));
-            result.push(Token("STRING".to_string(), "\"allow_unsafe\"".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ",".to_string(), call_loc.clone()));
-            result.push(Token("NUMBER".to_string(), "26985".to_string(), call_loc.clone()));
-            result.push(Token("SEPARATOR".to_string(), ")".to_string(), call_loc.clone()));
-            result.push(Token("IDENTIFIER".to_string(), unsafe_macro_output, call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("end"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("00__set_cfg__"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("\"allow_unsafe\""), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(","), call_loc.clone()));
+            result.push(Token::new_static(TK_NUMBER, Cow::Borrowed("26985"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(unsafe_macro_output), call_loc.clone()));
         }
 
         if grouping_enabled {
-            result.push(Token("SEPARATOR".to_string(), "\\".to_string(), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
         }
 
         let consumed = i - start_i;
@@ -2050,18 +2068,18 @@ impl Preprocessor {
         while i < tokens.len() {
             let t = &tokens[i];
 
-            if t.0 == "IDENTIFIER" && !KEYWORDS.contains(&t.1.as_str()) {
+            if t.0 == "IDENTIFIER" && !KEYWORDS.contains(&t.1.as_ref()) {
                 if let Some(next) = tokens.get(i + 1) {
-                    match next.1.as_str() {
+                    match next.1.as_ref() {
                         ":=" | "in" => {
-                            declared.insert(t.1.clone());
+                            declared.insert(t.1.to_string());
                             i += 2;
                             continue;
                         }
                         ":" => {
                             if let Some(eq) = tokens.get(i + 3) {
                                 if eq.1 == "=" {
-                                    declared.insert(t.1.clone());
+                                    declared.insert(t.1.to_string());
                                     i += 4;
                                     continue;
                                 }
@@ -2076,7 +2094,7 @@ impl Preprocessor {
                 let mut level = 1;
                 let mut j = i + 1;
                 while j < tokens.len() && level > 0 {
-                    match tokens[j].1.as_str() {
+                    match tokens[j].1.as_ref() {
                         "(" => level += 1,
                         ")" => level -= 1,
                         _ => {}
@@ -2088,8 +2106,8 @@ impl Preprocessor {
                     if a.1 == ":=" || a.1 == "=" {
                         for k in i + 1..j - 1 {
                             let tok = &tokens[k];
-                            if tok.0 == "IDENTIFIER" && !KEYWORDS.contains(&tok.1.as_str()) {
-                                declared.insert(tok.1.clone());
+                            if tok.0 == "IDENTIFIER" && !KEYWORDS.contains(&tok.1.as_ref()) {
+                                declared.insert(tok.1.to_string());
                             }
                         }
                         i = j + 1;
@@ -2104,7 +2122,7 @@ impl Preprocessor {
         let mut result = Vec::with_capacity(tokens.len());
         for token in tokens {
             if token.0 == "IDENTIFIER" {
-                let og = &token.1;
+                let og = token.1.as_ref();
                 if og == "_" || !declared.contains(og) {
                     result.push(token.clone());
                     continue;
@@ -2125,7 +2143,7 @@ impl Preprocessor {
                         self.mangle_context.mangle(og, &name)
                     });
 
-                result.push(Token("IDENTIFIER".to_string(), mangled, token.2.clone()));
+                result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(mangled), token.2.clone()));
             } else {
                 result.push(token.clone());
             }
@@ -2185,9 +2203,9 @@ fn expand_macros_in_default_string(
 
     replaced.push_str(rest);
 
-    Token(
-        "STRING".to_string(),
-        format!("f{}{}{}", quote_char, replaced, quote_char),
+    Token::new_static(
+        TK_STRING,
+        Cow::Owned(format!("f{}{}{}", quote_char, replaced, quote_char)),
         token.2.clone(),
     )
 }
@@ -2210,7 +2228,7 @@ fn join_tokens_sep(tokens: &[Token], sep: &str) -> String {
         }
 
         if token.0 == "SEPARATOR" {
-            match token.1.as_str() {
+            match token.1.as_ref() {
                 "(" => depth += 1,
                 ")" => if depth > 0 { depth -= 1; },
                 _ => {}
@@ -2219,7 +2237,7 @@ fn join_tokens_sep(tokens: &[Token], sep: &str) -> String {
 
         if i + 1 < tokens.len() {
             let next = &tokens[i + 1];
-            let skip_space = match (token.1.as_str(), next.1.as_str()) {
+            let skip_space = match (token.1.as_ref(), next.1.as_ref()) {
                 (_, ")") | (_, ",") | ("(", _) => true,
                 _ => false,
             };

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 
 use libc::{c_char, c_void, size_t};
 
@@ -94,7 +95,7 @@ pub fn register() -> HashMap<String, Variable> {
 
 fn ptr_from_value_pointer(v: &Value) -> Result<*mut c_void, Value> {
     match v {
-        Value::Pointer(arc_val) => match &*arc_val.lock().unwrap() {
+        Value::Pointer(arc_val) => match &*arc_val.lock() {
             (Value::Int(i), _) => Ok(i.to_i64().unwrap() as usize as *mut c_void),
             _ => Err(Value::Error("TypeError", "Expected inner pointer as Int", None)),
         },

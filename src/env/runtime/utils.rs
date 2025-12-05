@@ -1,13 +1,14 @@
 use std::io;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{stdout, Write};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use crate::env::runtime::config::{Config};
 use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
-use std::sync::{Mutex, Arc};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
 use crate::env::runtime::statements::{Statement, Node, TypeNode, PtrNode, IterableNode};
 use crate::env::runtime::structs_and_enums::Struct;
@@ -20,7 +21,7 @@ use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
-use crate::env::runtime::internal_structs::EffectFlags;
+use crate::env::runtime::internal_structs::{EffectFlags, PathElement};
 use crate::interpreter::Interpreter;
 use regex::Regex;
 
@@ -79,7 +80,7 @@ pub fn supports_color() -> bool {
 pub fn supports_color() -> bool {
     use std::io::IsTerminal;
     let is_tty = std::io::stdout().is_terminal();
-    let term = std::env::var("TERM").unwrap_or_default();
+    let term = std::env::var("TERM").unwrap_or_default().to_lowercase();
     let not_dumb = term != "dumb";
 
     is_tty && not_dumb
@@ -207,30 +208,34 @@ pub fn to_static<T: Clone + Send + Sync + 'static>(value: T) -> &'static T {
 }
 
 pub fn levenshtein_distance(a: &str, b: &str) -> usize {
-    let mut costs = vec![0; b.len() + 1];
-    for j in 0..=b.len() {
-        costs[j] = j;
-    }
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
 
-    for (i, ca) in a.chars().enumerate() {
+    if a.is_empty() { return b.len(); }
+    if b.is_empty() { return a.len(); }
+
+    let mut costs: Vec<usize> = (0..=b.len()).collect();
+
+    for (i, ca) in a.iter().enumerate() {
         let mut last = i;
         costs[0] = i + 1;
-        for (j, cb) in b.chars().enumerate() {
+
+        for (j, cb) in b.iter().enumerate() {
             let old = costs[j + 1];
             let cost = if ca == cb {
                 0
-            } else if ca.eq_ignore_ascii_case(&cb) {
+            } else if ca.to_ascii_lowercase() == cb.to_ascii_lowercase() {
                 1
             } else {
                 2
             };
-            costs[j + 1] = std::cmp::min(
-                std::cmp::min(costs[j] + 1, costs[j + 1] + 1),
-                last + cost,
-            );
+
+            costs[j + 1] = (costs[j].min(costs[j + 1]).min(last + cost)) + 0;
+            costs[j + 1] = (costs[j] + 1).min(costs[j + 1] + 1).min(last + cost);
             last = old;
         }
     }
+
     costs[b.len()]
 }
 
@@ -267,7 +272,7 @@ pub fn clear_terminal() -> Result<(), io::Error> {
 }
 
 static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::new();
+    let mut m = HashMap::with_capacity_and_hasher(18, Default::default());
     m.insert("black", "\x1b[30m");
     m.insert("red", "\x1b[31m");
     m.insert("green", "\x1b[32m");
@@ -291,11 +296,12 @@ static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
 
 pub fn hex_to_ansi_bg(hex_color: &str, use_colors: bool) -> String {
     if !use_colors {
-        return "".to_string();
+        return String::new();
     }
 
-    if let Some(ansi) = COLOR_MAP.get(hex_color.to_lowercase().replace(' ', "_").as_str()) {
-        return ansi.to_string().replace("[3", "[4");
+    let normalized = hex_color.to_lowercase().replace(' ', "_");
+    if let Some(ansi) = COLOR_MAP.get(normalized.as_str()) {
+        return ansi.replace("[3", "[4");
     }
 
     let hex = if hex_color.starts_with('#') { &hex_color[1..] } else if hex_color.starts_with("0x") { &hex_color[2..] } else { hex_color };
@@ -312,11 +318,12 @@ pub fn hex_to_ansi_bg(hex_color: &str, use_colors: bool) -> String {
 
 pub fn hex_to_ansi(hex_color: &str, use_colors: bool) -> String {
     if !use_colors {
-        return "".to_string();
+        return String::new();
     }
 
-    if let Some(ansi) = COLOR_MAP.get(hex_color.to_lowercase().replace(' ', "_").as_str()) {
-        return ansi.to_string();
+    let normalized = hex_color.to_lowercase().replace(' ', "_");
+    if let Some(ansi) = COLOR_MAP.get(normalized.as_str()) {
+        return (*ansi).to_string();
     }
 
     let hex = if hex_color.starts_with('#') { &hex_color[1..] } else if hex_color.starts_with("0x") { &hex_color[2..] } else { hex_color };
@@ -478,7 +485,6 @@ pub fn escape_string(s: &str) -> Result<String, String> {
         })
 }
 
-
 pub fn unescape_string(s: &str) -> Result<String, String> {
     if s.len() < 2 {
         return Err("String too short to unescape".into());
@@ -570,7 +576,7 @@ pub fn get_inner_string(s: &str) -> Result<String, String> {
 }
 
 pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
-    let mut result = String::new();
+    let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
     while let Some(c) = chars.next() {
@@ -646,7 +652,7 @@ pub fn make_native_method<F>(
     state: Option<String>
 ) -> Value
 where
-    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
+    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
 {
     let method = NativeMethod {
         func: Arc::new(func),
@@ -677,7 +683,7 @@ pub fn make_native_method_pt<F>(
     state: Option<String>
 ) -> Value
 where
-    F: Fn(&HashMap<String, Value>) -> Value + Send + Sync + 'static,
+    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
 {
     let method = NativeMethod {
         func: Arc::new(func),
@@ -893,7 +899,7 @@ fn strip_extension(name: &str) -> &str {
 pub fn sanitize_alias(alias: &str) -> String {
     let alias = strip_extension(alias);
 
-    let mut result = String::new();
+    let mut result = String::with_capacity(alias.len());
     let mut chars = alias.chars();
 
     if let Some(first) = chars.next() {
@@ -924,8 +930,12 @@ pub fn sanitize_alias(alias: &str) -> String {
     }
 }
 
-pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
-    let mut map = HashMap::default();
+static SPECIAL_FUNCTION_MAP: Lazy<HashMap<String, FunctionMetadata>> = Lazy::new(|| {
+    generate_special_function_meta()
+});
+
+fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
+    let mut map = HashMap::with_capacity_and_hasher(9, Default::default());
 
     map.insert(
         "exit".to_string(),
@@ -1070,6 +1080,10 @@ pub fn special_function_meta() -> HashMap<String, FunctionMetadata> {
     return map;
 }
 
+pub fn special_function_meta() -> &'static HashMap<String, FunctionMetadata> {
+    &SPECIAL_FUNCTION_MAP
+}
+
 fn version_to_tuple(v: &str) -> Option<(u64, u64, u64)> {
     let parts: Vec<&str> = v.split('.').collect();
     if parts.len() != 3 {
@@ -1206,9 +1220,10 @@ pub fn get_precedence(op: &str) -> u8 {
     }
 }
 
+#[inline(always)]
 pub fn is_valid_token(token: &Option<Token>) -> bool {
     match token {
-        Some(t) => match t.0.as_str() {
+        Some(t) => match t.0.as_ref() {
             "EOF" | "EOL" => false,
             _ => true,
         },
@@ -1335,6 +1350,7 @@ pub fn convert_value_to_type(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[inline(always)]
 pub fn ctrl_t_pressed() -> bool {
     if event::poll(Duration::from_millis(0)).unwrap_or(false) {
         if let event::Event::Key(event::KeyEvent { code, modifiers, .. }) = event::read().unwrap() {
@@ -1346,6 +1362,7 @@ pub fn ctrl_t_pressed() -> bool {
     false
 }
 
+#[inline(always)]
 pub fn wrap_in_help(text: &str, config: &Config) -> String {
     format!(
         "{}{}{}",
@@ -1544,6 +1561,7 @@ pub fn is_number_parentheses(n: &str) -> bool {
     chars.peek().is_none()
 }
 
+#[inline(always)]
 pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
     match value {
         Type::Simple { .. } => Ok((value.display_simple(), value.clone())),
@@ -1558,181 +1576,131 @@ pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
 
 pub fn check_pattern(
     value: &Value,
-    pattern: &Value,
+    pattern: &PathElement,
 ) -> Result<(bool, HashMap<String, Value>), (String, String)> {
-    let mut variables: HashMap<String, Value> = HashMap::default();
-
-    fn inner(
-        value: &Value,
-        pat: &Value,
-        vars: &mut HashMap<String, Value>,
-    ) -> Result<bool, (String, String)> {
-        // Union pattern
-        if let Value::Map { keys, values: pats } = pat {
-            if keys.len() == 1 && keys[0] == Value::String("union".into()) {
-                if !pats.is_empty() {
-                    for subpat in pats {
-                        let mut local_vars = vars.clone();
-                        if inner(value, subpat, &mut local_vars)? {
-                            *vars = local_vars;
-                            return Ok(true);
-                        }
-                    }
-                    return Ok(false);
-                }
-            }
-        }
-
-        // Handle wildcard '_'
-        if let Value::Map { values, .. } = pat {
-            if let Value::List(p_segments) = &values[0] {
-                if p_segments.len() == 1 {
-                    if let Value::String(s) = &p_segments[0] {
-                        if s == "_" {
-                            return Ok(true);
-                        }
-                    }
-                }
-            }
-        }
-
-        match (value, pat) {
-            // Primitive match
-            (Value::Int(a), Value::Int(b)) if a == b => Ok(true),
-            (Value::Float(a), Value::Float(b)) if a == b => Ok(true),
-            (Value::Boolean(a), Value::Boolean(b)) if a == b => Ok(true),
-            (Value::String(a), Value::String(b)) if a == b => Ok(true),
-
-            // Tuple match
-            (val, Value::Tuple(p_elems)) if val.is_iterable() => {
-                let iter = val.iter().collect::<Vec<_>>();
-                if p_elems.len() != iter.len() { return Ok(false); }
-                for (p, c) in p_elems.iter().zip(iter.iter()) {
-                    if !inner(c, p, vars)? { return Ok(false); }
-                }
-                Ok(true)
-            }
-
-            // List match
-            (Value::List(c_elems), Value::List(p_elems)) => {
-                if c_elems.len() != p_elems.len() { return Ok(false); }
-                for (c, p) in c_elems.iter().zip(p_elems.iter()) {
-                    if !inner(c, p, vars)? { return Ok(false); }
-                }
-                Ok(true)
-            }
-
-            // Enum matching
-            (Value::Enum(cond_enum), Value::Map { keys: p_keys, values: p_vals }) => {
-                if p_keys.len() != 2 || p_vals.len() != 2 { return Ok(false); }
-
-                let p_segments = match &p_vals[0] { Value::List(l) => l, _ => return Ok(false) };
-                let p_args: &Vec<Value> = match &p_vals[1] { Value::List(l) => l, _ => return Ok(false) };
-                if p_segments.is_empty() { return Ok(false); }
-
-                let pat_variant_name = match &p_segments[p_segments.len() - 1] {
-                    Value::String(s) => s,
-                    _ => return Ok(false),
-                };
-
-                let variant_name = match get_variant_name(&cond_enum.ty, cond_enum.variant.0) {
-                    Some(name) => name,
-                    None => return Ok(false),
-                };
-                if variant_name != *pat_variant_name {
-                    if p_segments.len() == 1 && p_args.is_empty() {
-                        let val = Value::Enum(cond_enum.clone());
-                        if let Value::String(var_name) = &p_segments[0] {
-                            if var_name != "_" {
-                                if let Some(existing) = vars.get(var_name) {
-                                    if *existing != val {
-                                        return Ok(false);
-                                    }
-                                } else {
-                                    vars.insert(var_name.clone(), val);
-                                }
-                            }
-                            return Ok(true);
-                        }
-                    }
-                    return Ok(false);
-                }
-
-                match &*cond_enum.variant.1 {
-                    Value::Tuple(payload_elems) => {
-                        if payload_elems.len() != p_args.len() { return Ok(false); }
-
-                        for (payload, arg_pat) in payload_elems.iter().zip(p_args.iter()) {
-                            if let Value::Map { values, .. } = arg_pat {
-                                if let Value::List(segs) = &values[0] {
-                                    if segs.len() == 1 {
-                                        if let Value::String(var_name) = &segs[0] {
-                                            if get_variant_name(&cond_enum.ty, cond_enum.variant.0)
-                                                .as_deref() != Some(var_name)
-                                            {
-                                                if let Some(existing) = vars.get(var_name) {
-                                                    if existing != payload {
-                                                        return Ok(false);
-                                                    }
-                                                } else {
-                                                    vars.insert(var_name.clone(), payload.clone());
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if !inner(payload, arg_pat, vars)? { return Ok(false); }
-                        }
-                        Ok(true)
-                    }
-                    Value::Null => {
-                        Ok(true)
-                    }
-                    other_val => {
-                        if p_args.len() == 1 {
-                            inner(other_val, &p_args[0], vars)
-                        } else {
-                            Ok(false)
-                        }
-                    }
-                }
-            }
-
-            // Single-segment path pattern -> bind variable
-            (val, Value::Map { keys: p_keys, values }) => {
-                if p_keys.len() == 2 && values.len() == 2 {
-                    let p_segments = match &values[0] { Value::List(l) => l, _ => return Ok(false) };
-                    let p_args = match &values[1] { Value::List(l) => l, _ => return Ok(false) };
-                    if p_segments.len() == 1 && p_args.is_empty() {
-                        if let Value::String(var_name) = &p_segments[0] {
-                            if var_name != "_" {
-                                if let Some(existing) = vars.get(var_name) {
-                                    if existing != val {
-                                        return Ok(false);
-                                    }
-                                } else {
-                                    vars.insert(var_name.clone(), val.clone());
-                                }
-                            }
-                            return Ok(true);
-                        }
-                    }
-                }
-                Ok(false)
-            }
-
-            _ => Ok(false),
-        }
-    }
-
-    let matched = inner(value, pattern, &mut variables)?;
-
+    let mut vars: HashMap<String, Value> = HashMap::default();
+    let mut changes: Vec<(String, Option<Value>)> = Vec::new(); // record (key, previous_value)
+    let matched = inner(value, pattern, &mut vars, &mut changes)?;
     if matched {
-        Ok((true, variables))
+        Ok((true, vars))
     } else {
         Ok((false, HashMap::default()))
+    }
+}
+
+fn inner(
+    value: &Value,
+    pat: &PathElement,
+    vars: &mut HashMap<String, Value>,
+    changes: &mut Vec<(String, Option<Value>)>,
+) -> Result<bool, (String, String)> {
+    match pat {
+        PathElement::Literal(lit) => {
+            return Ok(match (value, lit) {
+                (Value::Int(a), Value::Int(b)) => a == b,
+                (Value::Float(a), Value::Float(b)) => a == b,
+                (Value::Boolean(a), Value::Boolean(b)) => a == b,
+                (Value::String(a), Value::String(b)) => a == b,
+                _ => false,
+            });
+        }
+        PathElement::Tuple(p_elems) => {
+            if !value.is_iterable() { return Ok(false); }
+            let mut it = value.iter();
+            for p in p_elems.iter() {
+                let Some(v) = it.next() else { return Ok(false); };
+                if !inner(&v, p, vars, changes)? { return Ok(false); }
+            }
+            return Ok(it.next().is_none());
+        }
+        PathElement::List(p_elems) => {
+            let Value::List(v_elems) = value else { return Ok(false); };
+            if v_elems.len() != p_elems.len() { return Ok(false); }
+            for (v, p) in v_elems.iter().zip(p_elems.iter()) {
+                if !inner(v, p, vars, changes)? { return Ok(false); }
+            }
+            return Ok(true);
+        }
+        PathElement::Union(alts) => {
+            for alt in alts.iter() {
+                let snapshot = changes.len();
+                if inner(value, alt, vars, changes)? {
+                    return Ok(true);
+                }
+                rollback(vars, changes, snapshot);
+            }
+            return Ok(false);
+        }
+        PathElement::Path { segments, args } => {
+            if segments.len() == 1 && segments[0] == "_" && args.is_empty() {
+                return Ok(true);
+            }
+
+            if segments.len() == 1 && args.is_empty() {
+                let name = &segments[0];
+                if name != "_" {
+                    match vars.entry(name.clone()) {
+                        std::collections::hash_map::Entry::Occupied(e) => {
+                            if e.get() != value {
+                                return Ok(false);
+                            }
+                        }
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(value.clone());
+                            changes.push((name.clone(), None));
+                        }
+                    }
+                }
+                return Ok(true);
+            }
+
+            let Value::Enum(enum_val) = value else { return Ok(false); };
+
+            let pat_name = match segments.last() {
+                Some(n) => n,
+                None => return Ok(false),
+            };
+
+            let actual_name = match get_variant_name(&enum_val.ty, enum_val.variant.0) {
+                Some(n) => n,
+                None => return Ok(false),
+            };
+
+            if *pat_name != actual_name {
+                return Ok(false);
+            }
+
+            match &*enum_val.variant.1 {
+                Value::Tuple(payload_elems) => {
+                    if payload_elems.len() != args.len() { return Ok(false); }
+                    for (pv, pp) in payload_elems.iter().zip(args.iter()) {
+                        if !inner(pv, pp, vars, changes)? { return Ok(false); }
+                    }
+                    return Ok(true);
+                }
+                Value::Null => {
+                    return Ok(args.is_empty());
+                }
+                other => {
+                    if args.len() == 1 {
+                        return inner(other, &args[0], vars, changes);
+                    } else {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn rollback(vars: &mut HashMap<String, Value>, changes: &mut Vec<(String, Option<Value>)>, snapshot: usize) {
+    while changes.len() > snapshot {
+        if let Some((k, prev)) = changes.pop() {
+            match prev {
+                Some(v) => { vars.insert(k, v); }
+                None => { vars.remove(&k); }
+            }
+        }
     }
 }
 
@@ -2184,7 +2152,7 @@ pub fn diff_fields(
     a: &Vec<(String, Statement, Vec<String>)>,
     b: &Vec<(String, Statement, Vec<String>)>,
 ) -> Result<HashMap<String, String>, String> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
     let mut i = 0;
     let mut j = 0;
 

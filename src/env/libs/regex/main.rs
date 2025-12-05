@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::to_static;
@@ -26,7 +26,7 @@ fn is_fancy_pattern(pattern: &str) -> bool {
 
 
 fn get_cached_regex(pattern: &str) -> Result<RegexEngine, String> {
-    let mut cache = REGEX_CACHE.lock().unwrap();
+    let mut cache = REGEX_CACHE.lock();
     if let Some(re) = cache.get(pattern) {
         return Ok(re.clone());
     }
