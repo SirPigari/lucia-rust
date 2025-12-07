@@ -55,6 +55,7 @@ assert_err!(
     (a: int, b: int) := "aa"
 )
 
+#config allow_unsafe = true
 // added because it was a bug before
 (t: &int, u: &int) := (&a, &b)
 assert_eq!(t, &30)
