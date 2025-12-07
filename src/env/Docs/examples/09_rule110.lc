@@ -6,11 +6,11 @@
 
 n: int = 100
 base: list = array(n, 0)
-base[n - 2] = 1
+base[n - 1] = 1
 
 fun display(n: int):
-    for (i in [0..n - 1]):
-        if (base[i]):
+    for (b in base):
+        if b:
             print("#", end="")
         else:
             print(".", end="")
@@ -21,7 +21,7 @@ end
 
 fun next(n: int, mutable base: list) -> list:
     state: int = (base[0] bor (base[1] << 1))
-    for (i in [2..n - 1]):
+    for (i: int = 2, i < n, i++):
         state = (state << 1)
         state = (state bor base[i])
         state = (state band 7)
@@ -30,7 +30,7 @@ fun next(n: int, mutable base: list) -> list:
     return (base)
 end
 
-for (i in [0..n]):
+for (i: int = 0, i < n, i++):
     display(n)
     base = next(n, base)
 end

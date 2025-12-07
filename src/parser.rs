@@ -1,7 +1,7 @@
 use crate::env::runtime::utils::{hex_to_ansi, unescape_string_literal, get_type_default_as_statement, get_type_default_as_statement_from_statement, get_precedence, is_valid_token, supports_color, to_static, parse_usize_radix};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
-use crate::env::runtime::statements::{Statement, Node, MatchCase, ThrowNode,  alloc_loc, RangeModeType, IterableNode, TypeNode, TypeDeclNode, AccessType, ParamAST, PtrNode};
+use crate::env::runtime::statements::{Statement, Node, MatchCase, ThrowNode,  alloc_loc, RangeModeType, IterableNode, TypeNode, TypeDeclNode, AccessType, ParamAST, PtrNode, ForLoopNode};
 use crate::env::runtime::types::{VALID_TYPES, Int, Float};
 use crate::env::runtime::tokens::{Token, Location, DEFAULT_TOKEN};
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
@@ -80,6 +80,7 @@ impl Parser {
         Statement::Null
     }
 
+    #[inline]
     fn next(&mut self) -> Option<&Token> {
         self.pos += 1;
         self.token()
@@ -137,8 +138,23 @@ impl Parser {
         (vec![], vec![])
     }
 
+    #[inline]
     fn peek(&self, offset: usize) -> Option<&Token> {
         self.tokens.get(self.pos + offset)
+    }
+
+    fn peek_until(&self, kind: &str, value: &str) -> Vec<Token> {
+        let mut toks = Vec::new();
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            let tk = &self.tokens[i];
+            if tk.0 == kind && tk.1 == value {
+                break;
+            }
+            toks.push(tk.clone());
+            i += 1;
+        }
+        toks
     }
 
     pub fn get_loc(&mut self) -> Option<Location> {
@@ -1422,9 +1438,95 @@ impl Parser {
                     }
 
                     let mut parentheses = false;
+                    let mut is_cstyle = false;
+
                     if self.token_is("SEPARATOR", "(") {
                         parentheses = true;
                         self.next();
+
+                        let ahead = self.peek_until("SEPARATOR", ")");
+                        let comma_count = ahead.iter().filter(|t| t.1 == ",").count();
+
+                        let after_paren = self.peek(1);
+
+                        if comma_count == 2 {
+                            if let Some(Token(k, v, _)) = after_paren {
+                                if k == "SEPARATOR" && v == ":" {
+                                    is_cstyle = true;
+                                }
+                            }
+                        }
+
+                        if is_cstyle {
+                            let decl = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            if !self.token_is("SEPARATOR", ",") {
+                                self.raise("SyntaxError", "Expected ',' after initializer");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            let cond = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            if !self.token_is("SEPARATOR", ",") {
+                                self.raise("SyntaxError", "Expected ',' after condition");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            let update = self.parse_expression();
+                            if self.err.is_some() {
+                                return Statement::Null;
+                            }
+
+                            if !self.token_is("SEPARATOR", ")") {
+                                self.raise_with_help("SyntaxError", "Expected ')'", "Did you forget the ')' ?");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            if !self.token_is("SEPARATOR", ":") {
+                                self.raise("SyntaxError", "Expected ':' after C-style for header");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            let mut body = vec![];
+                            while let Some(tok) = self.token() {
+                                if tok.0 == "IDENTIFIER" && tok.1 == "end" {
+                                    break;
+                                }
+                                let stmt = self.parse_expression();
+                                if self.err.is_some() {
+                                    return Statement::Null;
+                                }
+                                body.push(stmt);
+                            }
+
+                            if !self.token_is("IDENTIFIER", "end") {
+                                self.raise("SyntaxError", "Expected 'end' after C-style for body");
+                                return Statement::Null;
+                            }
+                            self.next();
+
+                            return Statement {
+                                node: Node::For {
+                                    node: ForLoopNode::Standard {
+                                        initializer: Box::new(decl),
+                                        condition: Box::new(cond),
+                                        update: Box::new(update),
+                                    },
+                                    body,
+                                },
+                                loc: alloc_loc(loc),
+                            };
+                        }
                     }
 
                     let variable: PathElement = match self.parse_path() {
@@ -1445,7 +1547,9 @@ impl Parser {
                         self.next();
                         let mut functions: Vec<Statement> = Vec::new();
                         while !self.token_is("IDENTIFIER", "end") {
-                            if !["public", "private", "static", "non-static", "final", "mutable", "fun"].contains(&self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone()).1.as_ref()) {
+                            if ![
+                                "public","private","static","non-static","final","mutable","fun"
+                            ].contains(&self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone()).1.as_ref()) {
                                 self.raise("SyntaxError", "Expected function definition in methods block");
                                 return Statement::Null;
                             }
@@ -1495,7 +1599,7 @@ impl Parser {
 
                     if parentheses {
                         if !self.token_is("SEPARATOR", ")") {
-                            self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?");
+                            self.raise_with_help("SyntaxError", "Expected ')' after 'for' iterable", "Did you forget to add ')'?"); 
                             return Statement::Null;
                         }
                         self.next();
@@ -1527,9 +1631,11 @@ impl Parser {
 
                     Statement {
                         node: Node::For {
-                            iterable: Box::new(iterable),
+                            node: ForLoopNode::ForIn {
+                                iterable: Box::new(iterable),
+                                variable,
+                            },
                             body,
-                            variable,
                         },
                         loc: alloc_loc(self.get_loc()),
                     }

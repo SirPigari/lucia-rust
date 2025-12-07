@@ -96,3 +96,10 @@ for ([a, (b, c)] in pairs):
     sums = sums.append(a + b + c)
 end
 assert_eq!(sums, ([6, 15, 24]))
+
+
+for (i: int = 0, i < 5, i++):
+    output = output + i.to_string()
+end
+
+assert_eq!(output, ("Hello,World!01234"))

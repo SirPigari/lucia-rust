@@ -139,8 +139,7 @@ pub fn get_defs_from_c_header(path: &PathBuf, library: &PathBuf) -> Result<Vec<C
     let content = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
-    let func_regex = Regex::new(r"(?m)^\s*(?P<ret>[a-zA-Z_][a-zA-Z0-9_ \*]*)\s+(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*\((?P<params>[^\)]*)\)\s*;")
-        .map_err(|e| format!("Failed to compile regex: {}", e))?;
+    let func_regex = Regex::new(r"(?m)^\s*(?P<ret>[a-zA-Z_][a-zA-Z0-9_ \*]*)\s+(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*\((?P<params>[^\)]*)\)\s*;").unwrap();
 
     let mut signatures = Vec::new();
 

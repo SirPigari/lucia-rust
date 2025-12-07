@@ -88,3 +88,12 @@ assert_eq!(m.filter((x) => (if (x == 7 || x == 14) then false else true)).collec
 t := [1..10]
 assert_eq!(t.take(5).collect(), ([1, 2, 3, 4, 5]))
 assert_eq!(t.collect(), ([6, 7, 8, 9, 10]))
+
+gen for_standard_gen(n: int) -> int:
+    for (i: int = 0, i < n, i += 2):
+        return i
+    end
+end
+
+s := for_standard_gen(10)
+assert_eq!(s.collect(), ([0, 2, 4, 6, 8]))

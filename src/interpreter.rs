@@ -46,7 +46,7 @@ use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, get_loc, TypeNode, TypeDeclNode, PtrNode, ParamAST};
+use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, get_loc, TypeNode, TypeDeclNode, PtrNode, ParamAST, ForLoopNode};
 use crate::env::runtime::modules::Module;
 use crate::env::runtime::native;
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
@@ -238,6 +238,7 @@ impl Interpreter {
         this
     }
 
+    #[inline]
     pub fn debug_log(&self, message: std::fmt::Arguments) {
         if self.config.debug && (self.config.debug_mode == "full" || self.config.debug_mode == "normal") {
             let message = format!("{}", message);
@@ -245,18 +246,22 @@ impl Interpreter {
         }
     }
 
+    #[inline]
     pub fn set_scope(&mut self, scope: &str) {
         self.scope = scope.to_owned();
     }
 
+    #[inline]
     pub fn is_stopped(&self) -> bool {
         self.state == State::Exit
     }
 
+    #[inline]
     pub fn set_cache(&mut self, cache: Cache) {
         self.cache = cache;
     }
 
+    #[inline]
     pub fn get_cache(&self) -> &Cache {
         &self.cache
     }
@@ -270,6 +275,7 @@ impl Interpreter {
         owned_keys
     }
 
+    #[inline]
     fn check_type_validity(&self, type_str: &str) -> bool {
         let trimmed = type_str.trim_start_matches('&').trim_start_matches('?');
         if let Some(t) = self.variables.get(trimmed) {
@@ -353,203 +359,240 @@ impl Interpreter {
 
     // this is a lot cleaner than last time, glad i refactored it
     fn check_type(&mut self, value: &Value, expected: &Type) -> (bool, Option<Error>) {
-        let mut err: Option<Error> = None;
+        let value_type = value.get_type();
+        if std::ptr::eq(&value_type, expected) || value_type == *expected {
+            return (true, None);
+        }
+
+        if let Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: _null_allowed } = expected {
+            if expected_type == "any" && *expected_ref == 0 {
+                return (true, None);
+            }
+        }
+
+        let err: Option<Error> = None;
         let mut status: bool = true;
+        
+        #[inline]
         fn make_err(err_type: &str, err_msg: &str, loc: Option<Location>) -> Error {
             loc.map(|l| Error::with_location(err_type, err_msg, l))
                 .unwrap_or_else(|| Error::new_anonymous(err_type, err_msg))
         }
-
-        let value_type = value.get_type();
 
         match expected {
             Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: null_allowed } => {
                 if expected_type != "any" {
                     match value_type {
                         Type::Simple { name: value_type_name, ref_level: value_type_ref, .. } => {
-                            if !((*null_allowed && value_type_name == "void") || (value_type_name == *expected_type && value_type_ref == *expected_ref)) {
+                            if !((value_type_name == *expected_type && value_type_ref == *expected_ref) || (*null_allowed && value_type_name == "void")) {
+                                status = false;
+                            }
+                        }
+                        Type::Function { .. } => {
+                            if expected_type != "function" || *expected_ref != 0 {
+                                status = false;
+                            }
+                        }
+                        Type::Generator { .. } => {
+                            if expected_type != "generator" || *expected_ref != 0 {
                                 status = false;
                             }
                         }
                         _ => {
-                            err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
+                            return (false, Some(make_err("TypeError", 
+                                &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), 
+                                self.get_location_from_current_statement())));
                         }
                     }
                 } else if *expected_ref > 0 {
-                    match value_type {
-                        Type::Simple { name: _, ref_level: value_type_ref, .. } => {
-                            if value_type_ref != *expected_ref {
-                                status = false;
-                            }
+                    if let Type::Simple { ref_level: value_type_ref, .. } = value_type {
+                        if value_type_ref != *expected_ref {
+                            status = false;
                         }
-                        _ => {}
                     }
                 }
             }
             Type::Indexed { base_type: base, elements } => {
                 if value_type != **base {
-                    status = false;
+                    return (false, None);
                 }
+                
                 match value {
                     Value::List(l) | Value::Tuple(l) => {
                         let val_type: &str = if matches!(value, Value::Tuple(_)) { "tuple" } else { "list" };
+                        
                         if elements.len() == 1 {
+                            let element_type = &elements[0];
                             for (i, elem) in l.iter().enumerate() {
-                                if !self.check_type(elem, &elements[0]).0 {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for {} element #{}, got '{}' ({})", elements[0].display_simple(), val_type, i + 1, elem.get_type().display_simple(), format_value(elem)), self.get_location_from_current_statement()));
-                                    status = false;
-                                    break;
+                                if !self.check_type(elem, element_type).0 {
+                                    return (false, Some(make_err("TypeError", 
+                                        &format!("Expected type '{}' for {} element #{}, got '{}' ({})", 
+                                            element_type.display_simple(), val_type, i + 1, 
+                                            elem.get_type().display_simple(), format_value(elem)), 
+                                        self.get_location_from_current_statement())));
                                 }
                             }
                         } else if l.len() != elements.len() {
-                            err = Some(make_err("TypeError", &format!("Expected {} of length {}, got {}", val_type, elements.len(), l.len()), self.get_location_from_current_statement()));
-                            status = false;
+                            return (false, Some(make_err("TypeError", 
+                                &format!("Expected {} of length {}, got {}", val_type, elements.len(), l.len()), 
+                                self.get_location_from_current_statement())));
                         } else {
-                            for (i, elem) in l.iter().enumerate() {
-                                if !self.check_type(elem, &elements[i]).0 {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for {} element #{}, got '{}' ({})", elements[i].display_simple(), val_type, i + 1, elem.get_type().display_simple(), format_value(elem)), self.get_location_from_current_statement()));
-                                    status = false;
-                                    break;
+                            for (i, (elem, expected_elem_type)) in l.iter().zip(elements.iter()).enumerate() {
+                                if !self.check_type(elem, expected_elem_type).0 {
+                                    return (false, Some(make_err("TypeError", 
+                                        &format!("Expected type '{}' for {} element #{}, got '{}' ({})", 
+                                            expected_elem_type.display_simple(), val_type, i + 1, 
+                                            elem.get_type().display_simple(), format_value(elem)), 
+                                        self.get_location_from_current_statement())));
                                 }
                             }
                         }
                     }
                     Value::Map { keys, values } => {
-                        if elements.len() == 2 {
-                            for (k, v) in keys.iter().zip(values.iter()) {
-                                if !self.check_type(k, &elements[0]).0 {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map key, got '{}'", elements[0].display(), k.get_type().display()), self.get_location_from_current_statement()));
-                                    status = false;
-                                }
-                                if !self.check_type(v, &elements[1]).0 {
-                                    err = Some(make_err("TypeError", &format!("Expected type '{}' for map value, got '{}'", elements[1].display(), v.get_type().display()), self.get_location_from_current_statement()));
-                                    status = false;
-                                }
+                        if elements.len() != 2 {
+                            return (false, Some(make_err("TypeError", 
+                                &format!("Expected type with 2 elements, got {}", elements.len()), 
+                                self.get_location_from_current_statement())));
+                        }
+                        
+                        let key_type = &elements[0];
+                        let value_type = &elements[1];
+                        
+                        for (k, v) in keys.iter().zip(values.iter()) {
+                            if !self.check_type(k, key_type).0 {
+                                return (false, Some(make_err("TypeError", 
+                                    &format!("Expected type '{}' for map key, got '{}'", key_type.display(), k.get_type().display()), 
+                                    self.get_location_from_current_statement())));
                             }
-                        } else {
-                            err = Some(make_err("TypeError", &format!("Expected type with 2 elements, got {}", elements.len()), self.get_location_from_current_statement()));
-                            status = false;
+                            if !self.check_type(v, value_type).0 {
+                                return (false, Some(make_err("TypeError", 
+                                    &format!("Expected type '{}' for map value, got '{}'", value_type.display(), v.get_type().display()), 
+                                    self.get_location_from_current_statement())));
+                            }
                         }
                     }
                     Value::Pointer(ptr) => {
                         let ptr_val = ptr.lock();
-                        self.check_type(&ptr_val.0, expected);
+                        return self.check_type(&ptr_val.0, expected);
                     }
                     _ => {
-                        err = Some(make_err("TypeError", &format!("Expected type '{}' for indexed type, got '{}'", base.display(), value.get_type().display()), self.get_location_from_current_statement()));
-                        status = false;
+                        return (false, Some(make_err("TypeError", 
+                            &format!("Expected type '{}' for indexed type, got '{}'", base.display(), value_type.display()), 
+                            self.get_location_from_current_statement())));
                     }
                 }
             }
             Type::Union(types) => {
                 if types.is_empty() {
-                    err = Some(make_err("TypeError", "Union type cannot be empty", self.get_location_from_current_statement()));
-                    status = false;
-                } else {
-                    let mut matched = false;
-                    for ty in types {
-                        if self.check_type(value, ty).0 {
-                            matched = true;
-                            break;
-                        }
-                    }
-                    if !matched {
-                        err = Some(make_err("TypeError", &format!("Expected one of the union types: {}, got '{}'", types.iter().map(|t| t.display()).collect::<Vec<_>>().join(", "), value.get_type().display()), self.get_location_from_current_statement()));
-                        status = false;
+                    return (false, Some(make_err("TypeError", "Union type cannot be empty", self.get_location_from_current_statement())));
+                }
+                
+                for ty in types {
+                    if value_type == *ty {
+                        return (true, None);
                     }
                 }
+                
+                for ty in types {
+                    if self.check_type(value, ty).0 {
+                        return (true, None);
+                    }
+                }
+                
+                let type_names: Vec<String> = types.iter().map(|t| t.display()).collect();
+                return (false, Some(make_err("TypeError", 
+                    &format!("Expected one of the union types: {}, got '{}'", type_names.join(", "), value_type.display()), 
+                    self.get_location_from_current_statement())));
             }
             Type::Function { return_type: expected_return_type, parameter_types: expected_parameter_types } => {
-                if let Value::Function(f) = value {
-                    status = true;
-                    let return_type = f.get_return_type();
-                    let parameter_types = f.get_parameter_types();
-                    if !type_matches(&return_type, expected_return_type) {
-                        err = Some(make_err("TypeError", &format!("Expected return type '{}', got '{}'", expected_return_type.display(), return_type.display()), self.get_location_from_current_statement()));
-                        status = false;
+                let Value::Function(f) = value else {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Expected type 'function', got '{}'", value_type.display()), 
+                        self.get_location_from_current_statement())));
+                };
+                
+                let return_type = f.get_return_type();
+                let parameter_types = f.get_parameter_types();
+                
+                if !type_matches(&return_type, expected_return_type) {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Expected return type '{}', got '{}'", expected_return_type.display(), return_type.display()), 
+                        self.get_location_from_current_statement())));
+                }
+                
+                if parameter_types.len() != expected_parameter_types.len() {
+                    return (false, Some(make_err("TypeError",
+                        &format!("Expected {} parameters, got {}", expected_parameter_types.len(), parameter_types.len()),
+                        self.get_location_from_current_statement())));
+                }
+                
+                for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
+                    if !type_matches(param_type, expected_param_type) {
+                        return (false, Some(make_err("TypeError",
+                            &format!("Expected parameter type '{}' for parameter #{}, got '{}'", 
+                                expected_param_type.display(), i + 1, param_type.display()),
+                            self.get_location_from_current_statement())));
                     }
-                    if parameter_types.len() != expected_parameter_types.len() {
-                        err = Some(make_err(
-                            "TypeError",
-                            &format!("Expected {} parameters, got {}", expected_parameter_types.len(), parameter_types.len()),
-                            self.get_location_from_current_statement(),
-                        ));
-                        status = false;
-                    } else {
-                        for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
-                            if !type_matches(param_type, expected_param_type) {
-                                err = Some(make_err(
-                                    "TypeError",
-                                    &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()),
-                                    self.get_location_from_current_statement(),
-                                ));
-                                status = false;
-                            }
-                        }
-                    }
-                } else {
-                    err = Some(make_err("TypeError", &format!("Expected type 'function', got '{}'", value.get_type().display()), self.get_location_from_current_statement()));
-                    status = false;
                 }
             }
             Type::Generator { yield_type: expected_yield_type, parameter_types: expected_parameter_types } => {
-                if let Value::Generator(g) = value {
-                    status = true;
+                let Value::Generator(g) = value else {
+                    return (false, Some(make_err("TypeError",
+                        &format!("Expected type 'generator', got '{}'", value_type.display()),
+                        self.get_location_from_current_statement())));
+                };
 
-                    if let Some(yield_type) = g.get_yield_type() {
-                        if yield_type != **expected_yield_type {
-                            err = Some(make_err(
-                                "TypeError",
-                                &format!("Expected yield type '{}', got '{}'", expected_yield_type.display(), yield_type.display()),
-                                self.get_location_from_current_statement(),
-                            ));
-                            status = false;
+                if let Some(yield_type) = g.get_yield_type() {
+                    if yield_type != **expected_yield_type {
+                        return (false, Some(make_err("TypeError",
+                            &format!("Expected yield type '{}', got '{}'", expected_yield_type.display(), yield_type.display()),
+                            self.get_location_from_current_statement())));
+                    }
+                }
+
+                if let Some(parameter_types) = g.get_parameter_types() {
+                    for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
+                        if !type_matches(param_type, expected_param_type) {
+                            return (false, Some(make_err("TypeError",
+                                &format!("Expected parameter type '{}' for parameter #{}, got '{}'", 
+                                    expected_param_type.display(), i + 1, param_type.display()),
+                                self.get_location_from_current_statement())));
                         }
                     }
-
-                    if let Some(parameter_types) = g.get_parameter_types() {
-                        for (i, (param_type, expected_param_type)) in parameter_types.iter().zip(expected_parameter_types.iter()).enumerate() {
-                            if !type_matches(param_type, expected_param_type) {
-                                err = Some(make_err(
-                                    "TypeError",
-                                    &format!("Expected parameter type '{}' for parameter #{}, got '{}'", expected_param_type.display(), i + 1, param_type.display()),
-                                    self.get_location_from_current_statement(),
-                                ));
-                                status = false;
-                            }
-                        }
-                    }
-                } else {
-                    err = Some(make_err(
-                        "TypeError",
-                        &format!("Expected type 'generator', got '{}'", value.get_type().display()),
-                        self.get_location_from_current_statement(),
-                    ));
-                    status = false;
                 }
             }
             Type::Alias { name: alias_name, base_type, conditions, variables } => {
+                if variables.len() > 1 {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), 
+                        self.get_location_from_current_statement())));
+                }
+                
                 let inner_type = match get_inner_type(&base_type) {
                     Ok((_, t)) => t,
                     Err(e) => {
-                        status = false;
-                        err = Some(make_err("TypeError", &e, self.get_location_from_current_statement()));
-                        Type::new_simple("any")
+                        return (false, Some(make_err("TypeError", &e, self.get_location_from_current_statement())));
                     }
                 };
+                
                 let (status_check, err_check) = self.check_type(value, &inner_type);
                 if !status_check {
-                    status = false;
-                    err = err_check.or(Some(make_err("TypeError", &format!("Alias '{}' expects type '{}', got '{}'", alias_name, inner_type.display(), value.get_type().display()), self.get_location_from_current_statement())));    
+                    return (false, err_check.or(Some(make_err("TypeError", 
+                        &format!("Alias '{}' expects type '{}', got '{}'", 
+                            alias_name, inner_type.display(), value_type.display()), 
+                        self.get_location_from_current_statement()))));
                 }
-                if variables.len() > 1 {
-                    status = false;
-                    err = Some(make_err("TypeError", &format!("Alias '{}' expects only one variable, got {}", alias_name, variables.len()), self.get_location_from_current_statement()));
+                
+                if conditions.is_empty() {
+                    return (true, None);
                 }
+                
                 let mut vars: HashMap<String, Variable> = HashMap::with_capacity(variables.len());
+                let value_type_str = value_type.display().to_string();
                 for var_name in variables.iter() {
-                    vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value.get_type().display().to_string(), false, true, true));
+                    vars.insert(var_name.clone(), Variable::new(var_name.clone(), value.clone(), value_type_str.clone(), false, true, true));
                 }
+                
                 let mut new_interpreter = Interpreter::new(
                     self.config.clone(),
                     &self.file_path,
@@ -559,128 +602,113 @@ impl Interpreter {
                 );
                 new_interpreter.variables.extend(vars);
                 new_interpreter.set_scope(&format!("{}+scope.{}", self.scope, alias_name));
+                
                 for (i, cond) in conditions.iter().enumerate() {
                     if !new_interpreter.evaluate(&cond).is_truthy() {
-                        status = false;
-                        err = Some(make_err("TypeError", &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), self.get_location_from_current_statement()));
-                        break;
+                        return (false, Some(make_err("TypeError", 
+                            &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), 
+                            self.get_location_from_current_statement())));
                     }
                 }
             }
             Type::Enum { generics, .. } => {
-                match value {
-                    Value::Enum(e) => {
-                        if type_matches(&e.ty, expected) {
-                            if self.config.type_strict && generics.len() > 0 {
-                                self.warn("TypeWarning: Strict type checking for Enums with generics is not implemented yet.");
-                            }
-                            status = true;
-                        } else {
-                            status = false;
-                        }
+                let Value::Enum(e) = value else {
+                    return (false, None);
+                };
+                
+                if type_matches(&e.ty, expected) {
+                    if self.config.type_strict && !generics.is_empty() {
+                        self.warn("TypeWarning: Strict type checking for Enums with generics is not implemented yet.");
                     }
-                    _ => status = false,
+                    return (true, None);
                 }
+                return (false, None);
             }
             Type::Struct { .. } => {
-                match value {
-                    Value::Struct(s) => {
-                        if type_matches(&s.ty, expected) {
-                            status = true;
-                        } else {
-                            status = false;
-                        }
-                    }
-                    _ => status = false,
-                }
+                let Value::Struct(s) = value else {
+                    return (false, None);
+                };
+                
+                return (type_matches(&s.ty, expected), None);
             }
             Type::Impl { implementations } => {
-                if let Some((_, props)) = self.get_properties(value, true) {
-                    let mut all_matched = true;
-                    for (name, ty, mods) in implementations {
-                        let mut is_static = false;
-                        let mut is_final = true;
-                        for m in mods {
-                            match m.as_str() {
-                                "static" => is_static = true,
-                                "non-static" => is_static = false,
-                                "final" => is_final = true,
-                                "mutable" => is_final = false,
-                                _ => {}
-                            }
+                let Some((_, props)) = self.get_properties(value, true) else {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Expected type compatible with 'impl', got incompatible '{}'", value_type.display()), 
+                        self.get_location_from_current_statement())));
+                };
+                
+                for (name, ty, mods) in implementations {
+                    let (is_static, is_final) = mods.iter().fold((false, true), |(mut static_val, mut final_val), m| {
+                        match m.as_str() {
+                            "static" => static_val = true,
+                            "non-static" => static_val = false,
+                            "final" => final_val = true,
+                            "mutable" => final_val = false,
+                            _ => {}
                         }
-                        let t = match get_inner_type(ty) {
-                            Ok((_, mut t)) => {
-                                if let Type::Function { parameter_types, .. } = &mut t {
-                                    if !is_static {
-                                        parameter_types.insert(0, Type::new_simple("any"));
-                                    }
+                        (static_val, final_val)
+                    });
+                    
+                    let t = match get_inner_type(ty) {
+                        Ok((_, mut t)) => {
+                            if let Type::Function { parameter_types, .. } = &mut t {
+                                if !is_static {
+                                    parameter_types.insert(0, Type::new_simple("any"));
                                 }
-                                t
                             }
-                            Err(e) => {
-                                err = Some(make_err("TypeError", &e,  self.get_location_from_current_statement()));
-                                all_matched = false;
-                                break;
-                            }
-                        };
-                        if let Some(prop) = props.get(name) {
-                            if let Value::Function(f) = &prop.value {
-                                if is_final != f.is_final() {
-                                    let expected = if is_final { "final" } else { "non-final" };
-                                    let actual = if f.is_final() { "final" } else { "non-final" };
-                                    err = Some(make_err(
-                                        "TypeError",
-                                        &format!("Method '{}' is {} but expected {}", name, actual, expected),
-                                        self.get_location_from_current_statement(),
-                                    ));
-                                    all_matched = false;
-                                    break;
-                                }
+                            t
+                        }
+                        Err(e) => {
+                            return (false, Some(make_err("TypeError", &e, self.get_location_from_current_statement())));
+                        }
+                    };
+                    
+                    let Some(prop) = props.get(name) else {
+                        return (false, Some(make_err("TypeError", 
+                            &format!("Property '{}' not found in value", name), 
+                            self.get_location_from_current_statement())));
+                    };
+                    
+                    let Value::Function(f) = &prop.value else {
+                        return (false, Some(make_err("TypeError", 
+                            &format!("Property '{}' is not a function", name), 
+                            self.get_location_from_current_statement())));
+                    };
+                    
+                    if is_final != f.is_final() {
+                        let expected = if is_final { "final" } else { "non-final" };
+                        let actual = if f.is_final() { "final" } else { "non-final" };
+                        return (false, Some(make_err("TypeError",
+                            &format!("Method '{}' is {} but expected {}", name, actual, expected),
+                            self.get_location_from_current_statement())));
+                    }
 
-                                if is_static != f.is_static() {
-                                    let expected = if is_static { "static" } else { "non-static" };
-                                    let actual = if f.is_static() { "static" } else { "non-static" };
-                                    err = Some(make_err(
-                                        "TypeError",
-                                        &format!("Method '{}' is {} but expected {}", name, actual, expected),
-                                        self.get_location_from_current_statement(),
-                                    ));
-                                    all_matched = false;
-                                    break;
-                                }
-                            } else {
-                                err = Some(make_err("TypeError", &format!("Property '{}' is not a function", name), self.get_location_from_current_statement()));
-                                all_matched = false;
-                                break;
-                            }
-                            let (status, e) = self.check_type(&prop.value, &t);
-                            if !status {
-                                err = e.or(Some(make_err("TypeError", &format!("Property '{}' expected to be of type '{}', got '{}'", name, ty.display(), prop.value.get_type().display()), self.get_location_from_current_statement())));
-                                all_matched = false;
-                                break;
-                            }
-                        } else {
-                            err = Some(make_err("TypeError", &format!("Property '{}' not found in value", name), self.get_location_from_current_statement()));
-                            all_matched = false;
-                            break;
-                        }
+                    if is_static != f.is_static() {
+                        let expected = if is_static { "static" } else { "non-static" };
+                        let actual = if f.is_static() { "static" } else { "non-static" };
+                        return (false, Some(make_err("TypeError",
+                            &format!("Method '{}' is {} but expected {}", name, actual, expected),
+                            self.get_location_from_current_statement())));
                     }
-                    if !all_matched {
-                        status = false;
+                    
+                    let (type_status, type_err) = self.check_type(&prop.value, &t);
+                    if !type_status {
+                        return (false, type_err.or(Some(make_err("TypeError", 
+                            &format!("Property '{}' expected to be of type '{}', got '{}'", 
+                                name, ty.display(), prop.value.get_type().display()), 
+                            self.get_location_from_current_statement()))));
                     }
-                } else {
-                    status = false;
-                    err = Some(make_err("TypeError", &format!("Expected type compatible with 'impl', got incompatible '{}'", value.get_type().display()), self.get_location_from_current_statement()));
                 }
             }
             _ => {
-                status = false;
-                err = Some(make_err("TypeError", &format!("Unsupported type check for '{}'", expected.display()), self.get_location_from_current_statement()));
+                return (false, Some(make_err("TypeError", 
+                    &format!("Unsupported type check for '{}'", expected.display()), 
+                    self.get_location_from_current_statement())));
             }
         }
 
-        return (status, err);
+        (status, err)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1358,7 +1386,7 @@ impl Interpreter {
     
         let result = match statement.node.clone() {
             Node::If { condition, body, else_body } => self.handle_if(*condition, &body, else_body.as_deref()),
-            Node::For { iterable, body, variable } => self.handle_for_loop(*iterable, &body, variable),
+            Node::For { node, body } => self.handle_for_loop(node, &body),
             Node::While { condition, body } => self.handle_while(*condition, &body),
             Node::TryCatch { body, catch_body, exception_vars } => self.handle_try(body, catch_body, exception_vars),
             Node::Throw { node } => self.handle_throw(*node),
@@ -2528,6 +2556,11 @@ impl Interpreter {
             PtrNode::PointerRef { ref_level } => {
                 match value {
                     Value::Type(mut t) => Value::Type(t.set_reference(ref_level).unmut()),
+                    Value::Pointer(ref ptr_arc) => {
+                        let mut guard = ptr_arc.lock();
+                        guard.1 += ref_level;
+                        Value::Pointer(ptr_arc.clone())
+                    }
                     _ => Value::Pointer(Arc::new(Mutex::new((value, ref_level)))),
                 }
             }
@@ -2545,9 +2578,20 @@ impl Interpreter {
                         }
                     };
 
-                    let guard = arc_clone.lock();
-                    current = guard.0.clone();
-                    drop(guard);
+                    let mut guard = arc_clone.lock();
+                    let depth = guard.1;
+
+                    if remaining > depth {
+                        self.raise("TypeError", "Dereference depth exceeds pointer depth");
+                        return Value::Null;
+                    }
+
+                    if remaining == depth {
+                        return guard.0.clone();
+                    }
+
+                    guard.1 = depth - 1;
+                    current = Value::Pointer(arc_clone.clone());
 
                     remaining -= 1;
                 }
@@ -2561,7 +2605,7 @@ impl Interpreter {
                     return Value::Null;
                 }
 
-                let mut remaining = assign_level;
+                let mut remaining = assign_level - 1;
 
                 loop {
                     let arc_clone = match target {
@@ -2677,7 +2721,7 @@ impl Interpreter {
                         return NULL;
                     }
                 }
-                Node::VariableDeclaration { var_type, name, val_stmt, modifiers, is_default: _ } => {
+                Node::VariableDeclaration { var_type, name, val_stmt: _, modifiers, is_default: _ } => {
                     let type_ = match self.evaluate(&var_type) {
                         Value::Type(t) => t,
                         _ => {
@@ -2708,18 +2752,19 @@ impl Interpreter {
                         return NULL;
                     }
 
+                    let val_statement = Statement {
+                        node: Node::Value { value: val.clone() },
+                        loc: alloc_loc(self.get_location_from_current_statement()),
+                    };
+
                     let _ = self.handle_variable_declaration(
                         name.clone(),
-                        *val_stmt.clone(),
+                        val_statement,
                         *var_type.clone(),
                         modifiers.to_vec(),
                     );
                     if self.err.is_some() {
                         return NULL;
-                    }
-
-                    if let Some(var) = self.variables.get_mut(name.as_str()) {
-                        var.set_value(val.clone());
                     }
                 
                     result_values.push(val);
@@ -5663,6 +5708,9 @@ impl Interpreter {
             Value::Null => return NULL,
             t => return self.raise("TypeError", &format!("Expected a type for variable type, got {}", t.type_name())),
         };
+        if self.err.is_some() {
+            return NULL;
+        }
 
         if declared_type == Type::new_simple("auto") {
             declared_type = value.get_type();
@@ -5846,72 +5894,109 @@ impl Interpreter {
         }
     }
     
-    fn handle_for_loop(&mut self, iterable: Statement, body: &[Statement], variable: PathElement) -> Value {
-        let iterable_value = self.evaluate(&iterable);
-        if self.err.is_some() { return NULL; }
-        if !iterable_value.is_iterable() {
-            return self.raise(
-                "TypeError",
-                &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name())
-            );
-        }
+    fn handle_for_loop(&mut self, node: ForLoopNode, body: &[Statement]) -> Value {
+        match node {
+            ForLoopNode::ForIn { variable, iterable } => {
+                let iterable_value = self.evaluate(&iterable);
+                if self.err.is_some() { return NULL; }
+                if !iterable_value.is_iterable() {
+                    return self.raise(
+                        "TypeError",
+                        &format!("Expected an iterable for 'for' loop, got {}", iterable_value.type_name())
+                    );
+                }
 
-        let mut result = NULL;
+                let mut result = NULL;
+                let iter_items = iterable_value.iter();
 
-        for item in iterable_value.iter() {
-            if self.check_stop_flag() { return NULL; }
+                let mut prev_vars: Vec<Option<Variable>> = Vec::new();
+                for item in iter_items {
+                    if self.check_stop_flag() { return NULL; }
 
-            if let Value::Error(ref err_type, ref err_msg, ref ref_err) = item {
-                self.err = Some(match ref_err {
-                    Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
-                    None => Error::new(err_type, err_msg, &self.file_path),
-                });
-                return NULL;
-            }
+                    if let Value::Error(ref err_type, ref err_msg, ref ref_err) = item {
+                        self.err = Some(match ref_err {
+                            Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
+                            None => Error::new(err_type, err_msg, &self.file_path),
+                        });
+                        return NULL;
+                    }
 
-            let bindings = match check_pattern(&item, &variable) {
-                Ok((true, vars)) => vars,
-                Ok((false, _)) => return self.raise("ValueError", "Item did not match for-loop variable pattern"),
-                Err((etype, emsg)) => return self.raise(&etype, &emsg),
-            };
+                    let bindings = match check_pattern(&item, &variable) {
+                        Ok((true, vars)) => vars,
+                        Ok((false, _)) => return self.raise("ValueError", "Item did not match for-loop variable pattern"),
+                        Err((etype, emsg)) => return self.raise(&etype, &emsg),
+                    };
 
-            let mut prev_vars: Vec<Option<Variable>> = Vec::with_capacity(bindings.len());
-            for name in bindings.keys() {
-                prev_vars.push(self.variables.remove(name));
-            }
+                    prev_vars.clear();
+                    prev_vars.reserve(bindings.len());
+                    for name in bindings.keys() {
+                        prev_vars.push(self.variables.remove(name));
+                    }
 
-            for (name, val) in &bindings {
-                self.variables.insert(name.clone(), Variable::new_pt(
-                    name.clone(), val.clone(), val.get_type(), false, true, true,
-                ));
-            }
+                    for (name, val) in &bindings {
+                        self.variables.insert(name.clone(), Variable::new_pt(
+                            name.clone(), val.clone(), val.get_type(), false, true, true,
+                        ));
+                    }
 
-            for stmt in body {
-                result = self.evaluate(stmt);
-                if self.err.is_some() || self.is_returning {
+                    for stmt in body {
+                        result = self.evaluate(stmt);
+                        if self.err.is_some() || self.is_returning {
+                            for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
+                                if let Some(var) = prev_var {
+                                    self.variables.insert(name.clone(), var.clone());
+                                }
+                            }
+                            return result;
+                        }
+                    }
+
                     for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
                         if let Some(var) = prev_var {
                             self.variables.insert(name.clone(), var.clone());
                         }
                     }
-                    return result;
+
+                    match self.state {
+                        State::Break => { self.state = State::Normal; break; },
+                        State::Continue => { self.state = State::Normal; continue; },
+                        _ => {}
+                    }
                 }
+
+                result
             }
 
-            for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
-                if let Some(var) = prev_var {
-                    self.variables.insert(name.clone(), var.clone());
-                }
-            }
+            ForLoopNode::Standard { initializer, condition, update } => {
+                self.evaluate(&initializer);
+                if self.err.is_some() { return NULL; }
 
-            match self.state {
-                State::Break => { self.state = State::Normal; break; },
-                State::Continue => { self.state = State::Normal; continue; },
-                _ => {}
+                let mut result = NULL;
+                while {
+                    if self.check_stop_flag() { return NULL; }
+
+                    let cond_value = self.evaluate(&condition);
+                    if self.err.is_some() { return NULL; }
+                    cond_value.is_truthy()
+                } {
+                    for stmt in body {
+                        result = self.evaluate(stmt);
+                        if self.err.is_some() || self.is_returning { return result; }
+                    }
+
+                    match self.state {
+                        State::Break => { self.state = State::Normal; break; },
+                        State::Continue => { self.state = State::Normal; },
+                        _ => {}
+                    }
+
+                    self.evaluate(&update);
+                    if self.err.is_some() { return NULL; }
+                }
+
+                result
             }
         }
-
-        result
     }
 
     fn handle_iterable(&mut self, iterable: IterableNode) -> Value {
@@ -9201,7 +9286,30 @@ impl Interpreter {
     }
 
     fn handle_number(&mut self, value: String) -> Value {
-        let mut s = value.replace('_', "");
+        if !value.contains('_') && !value.contains('.') && !value.contains('e') && !value.contains('E') 
+           && !value.starts_with("0x") && !value.starts_with("0X") 
+           && !value.starts_with("0b") && !value.starts_with("0B")
+           && !value.starts_with("0o") && !value.starts_with("0O")
+           && !value.contains('#') && !value.ends_with('i') {
+            
+            let trimmed = value.trim().trim_start_matches('0').trim_start_matches('+');
+            let final_str = if trimmed.is_empty() { "0" } else { trimmed };
+            
+            if let Ok(int_val) = Int::from_str(final_str) {
+                if final_str.len() < 10 {
+                    self.cache.constants.insert(value, Value::Int(int_val.clone()));
+                }
+                return Value::Int(int_val);
+            }
+        }
+
+        let original_len = value.len();
+        
+        let mut s = if value.contains('_') {
+            value.replace('_', "")
+        } else {
+            value
+        };
 
         if s.is_empty() {
             return self.raise("RuntimeError", "Empty string provided for number");
@@ -9214,12 +9322,10 @@ impl Interpreter {
             return cached.clone();
         }
 
-        let is_imaginary = if s.ends_with('i') {
-            s = s[..s.len() - 1].to_owned();
-            true
-        } else {
-            false
-        };
+        let is_imaginary = s.ends_with('i');
+        if is_imaginary {
+            s.truncate(s.len() - 1);
+        }
 
         fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
             use std::ops::{Add, Mul};
@@ -9237,19 +9343,82 @@ impl Interpreter {
             })
         }
 
-        let result = if s.starts_with("0b") || s.starts_with("0B") {
-            parse_int_with_base(&s[2..].to_lowercase(), 2)
-                .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for binary integer literal."))
-        } else if s.starts_with("0o") || s.starts_with("0O") {
-            parse_int_with_base(&s[2..].to_lowercase(), 8)
-                .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for octal integer literal."))
-        } else if s.starts_with("0x") || s.starts_with("0X") {
-            parse_int_with_base(&s[2..].to_lowercase(), 16)
-                .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for hex integer literal."))
-        } else if let Some(hash_pos) = s.find('#') {
+        let result = if s.len() > 2 {
+            let bytes = s.as_bytes();
+            if bytes[0] == b'0' {
+                match bytes[1] {
+                    b'b' | b'B' => {
+                        parse_int_with_base(&s[2..].to_ascii_lowercase(), 2)
+                            .map(Value::Int)
+                            .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for binary integer literal."))
+                    }
+                    b'o' | b'O' => {
+                        parse_int_with_base(&s[2..].to_ascii_lowercase(), 8)
+                            .map(Value::Int)
+                            .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for octal integer literal."))
+                    }
+                    b'x' | b'X' => {
+                        parse_int_with_base(&s[2..].to_ascii_lowercase(), 16)
+                            .map(Value::Int)
+                            .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid format for hex integer literal."))
+                    }
+                    _ => self.parse_number_fallback(&s)
+                }
+            } else {
+                self.parse_number_fallback(&s)
+            }
+        } else {
+            self.parse_number_fallback(&s)
+        };
+    
+        let cacheable = match &result {
+            Value::Float(f) => {
+                f.to_f64().map_or(false, |val| val.is_finite() && val.abs() < 1e15)
+            }
+            Value::Int(_i) => {
+                original_len < 50
+            }
+            _ => false,
+        };        
+    
+        if cacheable {
+            self.cache.constants.insert(s.clone(), result.clone());
+        }
+    
+        if is_imaginary {
+            return match result {
+                Value::Int(i) => {
+                    match Float::from_int(&i) {
+                        Ok(f) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(f))),
+                        Err(_) => self.raise("RuntimeError", "Failed to convert Int to Float for imaginary number"),
+                    }
+                }
+                Value::Float(f) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(f))),
+                _ => self.raise("RuntimeError", "Invalid imaginary number format"),
+            };
+        }
+
+        result
+    }
+
+    fn parse_number_fallback(&mut self, s: &str) -> Value {
+        fn parse_int_with_base(s: &str, base: u32) -> Result<Int, ()> {
+            use std::ops::{Add, Mul};
+            let zero = Int::from(0);
+            let base_int = Int::from(base as usize);
+
+            s.chars().try_fold(zero.clone(), |acc, c| {
+                let digit = char_to_digit(c).ok_or(())?;
+                if digit >= base {
+                    return Err(());
+                }
+                let digit_int = Int::from(digit as usize);
+                let product = acc.mul(base_int.clone()).map_err(|_| ())?;
+                product.add(digit_int).map_err(|_| ())
+            })
+        }
+
+        if let Some(hash_pos) = s.find('#') {
             use std::str::FromStr;
             let (base_str, digits) = s.split_at(hash_pos);
             let digits = &digits[1..];
@@ -9261,15 +9430,16 @@ impl Interpreter {
             if base == 1 {
                 if digits.chars().all(|c| c == '1') {
                     let val = Int::from(digits.len());
-                    Ok(val)
+                    return Value::Int(val);
                 } else {
                     return self.raise("RuntimeError", "Invalid digits for base 1 literal, only '1's allowed");
                 }
             } else {
-                parse_int_with_base(digits, base)
+                match parse_int_with_base(digits, base) {
+                    Ok(val) => return Value::Int(val),
+                    Err(_) => return self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)),
+                }
             }
-            .map(Value::Int)
-            .unwrap_or_else(|_| self.raise("RuntimeError", &format!("Invalid digits for {} base integer literal.", base_str)))        
         } else if s.contains('.') || s.to_ascii_lowercase().contains('e') {
             if is_number_parentheses(&s) {
                 Value::Float(imagnum::create_float(&s))
@@ -9289,48 +9459,50 @@ impl Interpreter {
                 }
             }
         } else {
-            let mut s = s.trim().trim_start_matches('0').trim_start_matches('+');
-            if s.is_empty() {
-                s = "0";
-            }
-            Int::from_str(s)
-                .map_err(|_| ())
-                .map(Value::Int)
-                .unwrap_or_else(|_| self.raise("RuntimeError", "Invalid integer format"))
-        };
-    
-        let bit_limit = std::mem::size_of::<usize>() * 64;
-
-        let cacheable = match &result {
-            Value::Float(f) => {
-                f.to_f64().map_or(false, |val| val.is_finite())
-                    || (f.is_integer_like()
-                        && f.to_int().is_ok()
-                        && f.to_int().unwrap().to_string().len() * 4 < bit_limit)
-            }
-            Value::Int(i) => i.to_string().len() * 4 < bit_limit,
-            _ => false,
-        };        
-    
-        if cacheable {
-            self.cache.constants.insert(s.to_string(), result.clone());
-        }
-    
-        if is_imaginary {
-            return match result {
-                Value::Int(i) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(Float::from_int(&i).unwrap_or_else(|_| {
-                    self.raise("RuntimeError", "Failed to convert Int to Float");
-                    Float::from(0.0)
-                })))),
-                Value::Float(f) => Value::Float(Float::Complex(Box::new(Float::from(0.0)), Box::new(f))),
-                _ => return self.raise("RuntimeError", "Invalid imaginary number format"),
+            let trimmed = s.trim().trim_start_matches('0').trim_start_matches('+');
+            let final_str = if trimmed.is_empty() { "0" } else { trimmed };
+            match Int::from_str(final_str) {
+                Ok(i) => Value::Int(i),
+                Err(_) => self.raise("RuntimeError", "Invalid integer format"),
             }
         }
-
-        result
     }
     
     fn handle_string(&mut self, value: String, mods: Vec<char>) -> Value {
+        if mods.is_empty() {
+            return match unescape_string(&value) {
+                Ok(unescaped) => Value::String(unescaped),
+                Err(e) => self.raise("UnicodeError", &e),
+            };
+        }
+
+        if mods.len() == 1 {
+            match mods[0] {
+                'r' => {
+                    return if value.len() >= 2 {
+                        let bytes = value.as_bytes();
+                        let first = bytes[0];
+                        let last = bytes[bytes.len() - 1];
+                        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+                            Value::String(value[1..value.len() - 1].to_string())
+                        } else {
+                            Value::String(value)
+                        }
+                    } else {
+                        Value::String(value)
+                    };
+                }
+                'b' => {
+                    let processed = match unescape_string(&value) {
+                        Ok(unescaped) => unescaped,
+                        Err(e) => return self.raise("UnicodeError", &e),
+                    };
+                    return Value::Bytes(processed.into_bytes());
+                }
+                _ => {}
+            }
+        }
+
         let mut modified_string = value;
         let mut is_raw = false;
         let mut is_bytes = false;
@@ -9338,150 +9510,10 @@ impl Interpreter {
         for modifier in mods {
             match modifier {
                 'f' => {
-                    let mut output = String::new();
-                    let mut chars = modified_string.chars().peekable();
-
-                    while let Some(c) = chars.next() {
-                        if c == '{' {
-                            if let Some(&'{') = chars.peek() {
-                                chars.next();
-                                output.push('{');
-                                continue;
-                            }
-
-                            let mut expr = String::new();
-                            let mut format_spec: Option<String> = None;
-                            let mut brace_level = 1;
-                            let mut in_string: Option<char> = None;
-
-                            while let Some(&next_c) = chars.peek() {
-                                chars.next();
-
-                                if let Some(quote) = in_string {
-                                    expr.push(next_c);
-                                    if next_c == quote {
-                                        in_string = None;
-                                    }
-                                    continue;
-                                } else if next_c == '"' || next_c == '\'' {
-                                    in_string = Some(next_c);
-                                    expr.push(next_c);
-                                    continue;
-                                }
-
-                                if next_c == '{' {
-                                    brace_level += 1;
-                                } else if next_c == '}' {
-                                    brace_level -= 1;
-                                    if brace_level == 0 {
-                                        break;
-                                    }
-                                }
-
-                                if brace_level == 1
-                                    && next_c == ':'
-                                    && chars.peek() == Some(&':')
-                                {
-                                    chars.next();
-                                    let mut spec = String::new();
-                                    while let Some(&spec_c) = chars.peek() {
-                                        if spec_c == '}' { break; }
-                                        chars.next();
-                                        spec.push(spec_c);
-                                    }
-                                    format_spec = Some(spec.trim().to_string());
-                                    continue;
-                                }
-
-                                expr.push(next_c);
-                            }
-
-                            expr = match unescape_string_premium_edition(&expr) {
-                                Ok(unescaped) => unescaped,
-                                Err(err) => {
-                                    return self.raise("UnescapeError", &err);
-                                }
-                            };
-
-                            if brace_level != 0 {
-                                return self.raise("SyntaxError", "Unmatched '{' in f-string");
-                            }
-
-                            let tokens = Lexer::new(&expr, &self.file_path.clone()).tokenize();
-
-                            let filtered = tokens.iter()
-                                .filter(|token| {
-                                    let t = &token.0;
-                                    t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
-                                })
-                                .collect::<Vec<_>>();
-
-                            let formatted_toks = filtered.iter()
-                                .map(|token| (&token.0, &token.1))
-                                .collect::<Vec<_>>();
-
-                            self.debug_log(
-                                format_args!("Generated f-string tokens: {:?}", formatted_toks)
-                            );
-
-                            let tokens_no_loc: Vec<Token> = tokens
-                                .iter()
-                                .map(|tk| Token(tk.0.clone(), tk.1.clone(), None))
-                                .collect();
-
-                            let parsed = match Parser::new(tokens_no_loc).parse_safe() {
-                                Ok(parsed) => parsed,
-                                Err(error) => {
-                                    return self.raise(
-                                        "SyntaxError",
-                                        &format!("Error parsing f-string expression: {}", error.msg),
-                                    );
-                                }
-                            };
-
-                            self.debug_log(
-                                format_args!(
-                                    "Generated f-string statement: {}",
-                                    parsed.iter().map(|stmt| stmt.format_for_debug()).collect::<Vec<String>>().join(", ")
-                                )
-                            );
-
-                            self.debug_log(
-                                format_args!("<FString: {}>", expr.clone().trim())
-                            );
-
-                            let result_val = self.evaluate(&parsed[0]);
-                            if self.err.is_some() {
-                                return NULL;
-                            }
-                            let result;
-                            if let Some(spec) = format_spec {
-                                result = match apply_format_spec(&result_val, &spec, self) {
-                                    Ok(res) => res,
-                                    Err(e) => return self.raise("SyntaxError", &e),
-                                };
-                            } else {
-                                result = match escape_string(&native::format_value(&result_val, self)) {
-                                    Ok(res) => res,
-                                    Err(e) => return self.raise("UnicodeError", &e),
-                                };
-                            }
-
-                            output.push_str(&result);
-                        } else if c == '}' {
-                            if let Some(&'}') = chars.peek() {
-                                chars.next();
-                                output.push('}');
-                                continue;
-                            } else {
-                                return self.raise("SyntaxError", "Single '}' encountered in format string");
-                            }
-                        } else {
-                            output.push(c);
-                        }
-                    }
-
-                    modified_string = output;
+                    modified_string = match self.process_f_string(modified_string) {
+                        Ok(result) => result,
+                        Err(_) => return NULL,
+                    };
                 }
                 'r' => is_raw = true,
                 'b' => is_bytes = true,
@@ -9490,18 +9522,14 @@ impl Interpreter {
         }
 
         if is_raw {
-            let unquoted = if modified_string.len() >= 2 {
-                let first = modified_string.chars().next().unwrap();
-                let last = modified_string.chars().last().unwrap();
-                if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-                    modified_string[1..modified_string.len() - 1].to_string()
-                } else {
-                    modified_string
+            if modified_string.len() >= 2 {
+                let bytes = modified_string.as_bytes();
+                let first = bytes[0];
+                let last = bytes[bytes.len() - 1];
+                if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+                    modified_string = modified_string[1..modified_string.len() - 1].to_string();
                 }
-            } else {
-                modified_string
-            };
-            modified_string = unquoted;
+            }
         } else {
             modified_string = match unescape_string(&modified_string) {
                 Ok(unescaped) => unescaped,
@@ -9510,12 +9538,196 @@ impl Interpreter {
         }
 
         if is_bytes {
-            return Value::Bytes(modified_string.clone().into_bytes());
+            return Value::Bytes(modified_string.into_bytes());
         }
 
         Value::String(modified_string)
     }
 
+    fn process_f_string(&mut self, input: String) -> Result<String, ()> {
+        if !input.contains('{') {
+            return Ok(input);
+        }
+
+        let mut output = String::with_capacity(input.len() * 2);
+        let input_bytes = input.as_bytes();
+        let mut i = 0;
+
+        while i < input_bytes.len() {
+            let c = input_bytes[i] as char;
+            
+            if c == '{' {
+                if i + 1 < input_bytes.len() && input_bytes[i + 1] == b'{' {
+                    output.push('{');
+                    i += 2;
+                    continue;
+                }
+
+                let expr_start = i + 1;
+                let mut expr_end = expr_start;
+                let mut brace_level = 1;
+                let mut in_string: Option<u8> = None;
+                let mut has_format_spec = false;
+                let mut format_spec_start = 0;
+
+                while expr_end < input_bytes.len() && brace_level > 0 {
+                    let byte = input_bytes[expr_end];
+                    
+                    if let Some(quote) = in_string {
+                        if byte == quote {
+                            in_string = None;
+                        }
+                    } else if byte == b'"' || byte == b'\'' {
+                        in_string = Some(byte);
+                    } else if byte == b'{' {
+                        brace_level += 1;
+                    } else if byte == b'}' {
+                        brace_level -= 1;
+                        if brace_level == 0 {
+                            break;
+                        }
+                    } else if brace_level == 1 && byte == b':' && 
+                             expr_end + 1 < input_bytes.len() && input_bytes[expr_end + 1] == b':' {
+                        has_format_spec = true;
+                        format_spec_start = expr_end + 2;
+                        expr_end += 1;
+                    }
+                    
+                    expr_end += 1;
+                }
+
+                if brace_level != 0 {
+                    self.raise("SyntaxError", "Unmatched '{' in f-string");
+                    return Err(());
+                }
+
+                let actual_expr_end = if has_format_spec { format_spec_start - 2 } else { expr_end };
+                let expr = std::str::from_utf8(&input_bytes[expr_start..actual_expr_end])
+                    .map_err(|_| {
+                        self.raise("UnicodeError", "Invalid UTF-8 in f-string expression");
+                    })?;
+
+                let format_spec = if has_format_spec {
+                    let spec_bytes = &input_bytes[format_spec_start..expr_end];
+                    Some(std::str::from_utf8(spec_bytes).map_err(|_| {
+                        self.raise("UnicodeError", "Invalid UTF-8 in format spec");
+                    })?.trim().to_string())
+                } else {
+                    None
+                };
+
+                let result = if expr.trim().chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    let var_name = expr.trim();
+                    if let Some(var) = self.variables.get(var_name) {
+                        var.get_value().clone()
+                    } else {
+                        self.evaluate_f_string_expression(expr)?
+                    }
+                } else {
+                    self.evaluate_f_string_expression(expr)?
+                };
+
+                let formatted_result = if let Some(spec) = format_spec {
+                    match apply_format_spec(&result, &spec, self) {
+                        Ok(res) => res,
+                        Err(e) => {
+                            self.raise("SyntaxError", &e);
+                            return Err(());
+                        }
+                    }
+                } else {
+                    match escape_string(&native::format_value(&result, self)) {
+                        Ok(res) => res,
+                        Err(e) => {
+                            self.raise("UnicodeError", &e);
+                            return Err(());
+                        }
+                    }
+                };
+
+                output.push_str(&formatted_result);
+                i = expr_end + 1;
+            } else if c == '}' {
+                if i + 1 < input_bytes.len() && input_bytes[i + 1] == b'}' {
+                    output.push('}');
+                    i += 2;
+                } else {
+                    self.raise("SyntaxError", "Single '}' encountered in format string");
+                    return Err(());
+                }
+            } else {
+                output.push(c);
+                i += 1;
+            }
+        }
+
+        Ok(output)
+    }
+
+    fn evaluate_f_string_expression(&mut self, expr: &str) -> Result<Value, ()> {
+        let unescaped_expr = match unescape_string_premium_edition(expr) {
+            Ok(unescaped) => unescaped,
+            Err(err) => {
+                self.raise("UnescapeError", &err);
+                return Err(());
+            }
+        };
+
+        let tokens = Lexer::new(&unescaped_expr, &self.file_path.clone()).tokenize();
+
+        let filtered = tokens.iter()
+            .filter(|token| {
+                let t = &token.0;
+                t != "WHITESPACE" && !t.starts_with("COMMENT_") && t != "EOF"
+            })
+            .collect::<Vec<_>>();
+
+        let formatted_toks = filtered.iter()
+            .map(|token| (&token.0, &token.1))
+            .collect::<Vec<_>>();
+
+        self.debug_log(
+            format_args!("Generated f-string tokens: {:?}", formatted_toks)
+        );
+
+        let tokens_no_loc: Vec<Token> = tokens
+            .into_iter()
+            .map(|tk| Token(tk.0, tk.1, None))
+            .collect();
+
+        let parsed = match Parser::new(tokens_no_loc).parse_safe() {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));
+                return Err(());
+            }
+        };
+
+        self.debug_log(
+            format_args!(
+                "Generated f-string statement: {}",
+                parsed.iter().map(|stmt| stmt.format_for_debug()).collect::<Vec<String>>().join(", ")
+            )
+        );
+
+        self.debug_log(
+            format_args!("<FString: {}>", expr.trim())
+        );
+
+        if parsed.is_empty() {
+            self.raise("SyntaxError", "Empty f-string expression");
+            return Err(());
+        }
+
+        let result = self.evaluate(&parsed[0]);
+        if self.err.is_some() {
+            return Err(());
+        }
+
+        Ok(result)
+    }
+
+    #[inline]
     fn handle_boolean(&mut self, value: Option<bool>) -> Value {
         match value {
             Some(true) => TRUE,

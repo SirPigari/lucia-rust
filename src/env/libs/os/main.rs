@@ -74,6 +74,18 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn get_logged_user(_: &HashMap<String, Value>) -> Value {
+    if let Ok(name) = std::env::var("USERNAME") {
+        return Value::String(name);
+    }
+    if let Ok(name) = std::env::var("USER") {
+        return Value::String(name);
+    }
+
+    Value::String("unknown".to_string())
+}
+
 fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
         return Value::Error(
@@ -1183,6 +1195,8 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
     }, vec![Parameter::positional("ptr", "int")], "any", EffectFlags::UNSAFE);
 
     insert_native_fn!(map, "panic", panic_handler, vec![Parameter::positional_optional("message", "str", "Panic called without a message".into())], "void", EffectFlags::IO);
+    #[cfg(not(target_arch = "wasm32"))]
+    insert_native_fn!(map, "get_logged_user", get_logged_user, vec![], "str", EffectFlags::IO);
 
     insert_native_fn!(map, "is_unsafe_allowed", move |_: &HashMap<String, Value>| -> Value {
         Value::Boolean(allow_unsafe)

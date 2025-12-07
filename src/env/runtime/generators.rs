@@ -6,6 +6,7 @@ use crate::env::runtime::utils::{to_static, check_pattern};
 use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::functions::Function;
+use crate::env::runtime::statements::ForLoopNode;
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -399,13 +400,20 @@ enum LoopType {
         condition: Statement,
         body: Vec<Statement>,
     },
-    For {
+    ForIn {
         var: PathElement,
         iterable: Vec<Value>,
         body: Vec<Statement>,
         index: usize,
         body_pc: usize,
         saved_var: Vec<Variable>,
+    },
+    ForStandard {
+        initializer: Statement,
+        condition: Statement,
+        update: Statement,
+        body: Vec<Statement>,
+        body_pc: usize,
     },
 }
 
@@ -482,7 +490,7 @@ impl Iterator for CustomGenerator {
                         continue;
                     }
 
-                    LoopType::For { var, iterable, body, index, body_pc, saved_var } => {
+                    LoopType::ForIn { var, iterable, body, index, body_pc, saved_var } => {
                         if *index >= iterable.len() {
                             for prev in saved_var.drain(..) {
                                 self.interpreter.variables.insert(prev.get_name().to_string(), prev);
@@ -572,6 +580,79 @@ impl Iterator for CustomGenerator {
 
                         continue;
                     }
+
+                    LoopType::ForStandard { initializer, condition, update, body, body_pc } => {
+                        if frame.while_pc == 0 {
+                            let _ = self.interpreter.evaluate(&initializer);
+                            if self.interpreter.err.is_some() {
+                                self.done = true;
+                                let err = self.interpreter.err.take().unwrap();
+                                return Some(Value::Error(
+                                    to_static(err.error_type),
+                                    to_static(err.msg),
+                                    err.ref_err.map(|boxed| *boxed),
+                                ));
+                            }
+                            frame.while_pc = 1;
+                        }
+
+                        if !self.interpreter.evaluate(&condition).is_truthy() {
+                            self.loop_stack.pop();
+                            self.index += 1;
+                            continue;
+                        }
+
+                        if *body_pc >= body.len() {
+                            let _ = self.interpreter.evaluate(&update);
+                            if self.interpreter.err.is_some() {
+                                self.done = true;
+                                let err = self.interpreter.err.take().unwrap();
+                                return Some(Value::Error(
+                                    to_static(err.error_type),
+                                    to_static(err.msg),
+                                    err.ref_err.map(|boxed| *boxed),
+                                ));
+                            }
+                            *body_pc = 0;
+                            continue;
+                        }
+
+                        let stmt = body[*body_pc].clone();
+                        let result = self.interpreter.evaluate(&stmt);
+
+                        if self.interpreter.err.is_some() {
+                            self.done = true;
+                            let err = self.interpreter.err.take().unwrap();
+                            return Some(Value::Error(
+                                to_static(err.error_type),
+                                to_static(err.msg),
+                                err.ref_err.map(|boxed| *boxed),
+                            ));
+                        }
+
+                        match self.interpreter.state {
+                            State::Break => {
+                                self.interpreter.state = State::Normal;
+                                self.loop_stack.pop();
+                                self.index += 1;
+                                continue;
+                            }
+                            State::Continue => {
+                                self.interpreter.state = State::Normal;
+                                *body_pc = body.len();
+                                continue;
+                            }
+                            _ => {}
+                        }
+
+                        *body_pc += 1;
+
+                        if self.interpreter.is_returning {
+                            return Some(result);
+                        }
+
+                        continue;
+                    }
                 }
             }
 
@@ -590,36 +671,52 @@ impl Iterator for CustomGenerator {
                     });
                 }
 
-                Node::For { iterable, body, variable } => {
-                    let iterable_val = self.interpreter.evaluate(&iterable);
-                    if self.interpreter.err.is_some() {
-                        self.done = true;
-                        let err = self.interpreter.err.take().unwrap();
-                        return Some(Value::Error(
-                            to_static(err.error_type),
-                            to_static(err.msg),
-                            err.ref_err.map(|boxed| *boxed),
-                        ));
+                Node::For { node, body } => {
+                    match node {
+                        ForLoopNode::ForIn { variable, iterable } => {
+                            let iterable_val = self.interpreter.evaluate(&iterable);
+                            if self.interpreter.err.is_some() {
+                                self.done = true;
+                                let err = self.interpreter.err.take().unwrap();
+                                return Some(Value::Error(
+                                    to_static(err.error_type),
+                                    to_static(err.msg),
+                                    err.ref_err.map(|boxed| *boxed),
+                                ));
+                            }
+
+                            if !iterable_val.is_iterable() {
+                                self.done = true;
+                                return Some(self.interpreter.raise("TypeError", "Expected iterable in for loop"));
+                            }
+
+                            let iterable_vec = iterable_val.iterable_to_vec();
+
+                            self.loop_stack.push(Frame {
+                                loop_type: LoopType::ForIn {
+                                    var: variable,
+                                    iterable: iterable_vec,
+                                    body,
+                                    index: 0,
+                                    body_pc: 0,
+                                    saved_var: Vec::new(),
+                                },
+                                while_pc: 0,
+                            });
+                        }
+                        ForLoopNode::Standard { initializer, condition, update } => {
+                            self.loop_stack.push(Frame {
+                                loop_type: LoopType::ForStandard {
+                                    initializer: *initializer,
+                                    condition: *condition,
+                                    update: *update,
+                                    body,
+                                    body_pc: 0,
+                                },
+                                while_pc: 0,
+                            });
+                        }
                     }
-
-                    if !iterable_val.is_iterable() {
-                        self.done = true;
-                        return Some(self.interpreter.raise("TypeError", "Expected iterable in for loop"));
-                    }
-
-                    let iterable_vec = iterable_val.iterable_to_vec();
-
-                    self.loop_stack.push(Frame {
-                        loop_type: LoopType::For {
-                            var: variable,
-                            iterable: iterable_vec,
-                            body,
-                            index: 0,
-                            body_pc: 0,
-                            saved_var: Vec::new(),
-                        },
-                        while_pc: 0,
-                    });
                 }
 
                 _ => {

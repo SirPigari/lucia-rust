@@ -479,6 +479,7 @@ pub fn predict_sequence_until_length(
     Ok((seed_f64, PatternMethod::Polynomial(coeffs)))
 }
 
+#[inline]
 fn is_close(a: f64, b: f64, epsilon: f64) -> bool {
     if a.is_nan() || b.is_nan() {
         false

@@ -900,5 +900,32 @@ pub fn register() -> HashMap<String, Variable> {
     insert_irrational!(map, "ZETA2", _ZETA2);
     insert_irrational!(map, "CATALAN", _CATALAN);
 
+    insert_native_var!(map, "U8MAX", Value::Int(Int::from(u8::MAX)), "int");
+    insert_native_var!(map, "U8MIN", Value::Int(Int::from(u8::MIN)), "int");
+    insert_native_var!(map, "U16MAX", Value::Int(Int::from(u16::MAX)), "int");
+    insert_native_var!(map, "U16MIN", Value::Int(Int::from(u16::MIN)), "int");
+    insert_native_var!(map, "U32MAX", Value::Int(Int::from(u32::MAX)), "int");
+    insert_native_var!(map, "U32MIN", Value::Int(Int::from(u32::MIN)), "int");
+    insert_native_var!(map, "U64MAX", Value::Int(Int::from(u64::MAX)), "int");
+    insert_native_var!(map, "U64MIN", Value::Int(Int::from(u64::MIN)), "int");
+    insert_native_var!(map, "U128MAX", Value::Int(Int::from(u128::MAX)), "int");
+    insert_native_var!(map, "U128MIN", Value::Int(Int::from(u128::MIN)), "int");
+
+    insert_native_var!(map, "I8MAX", Value::Int(Int::from(i8::MAX)), "int");
+    insert_native_var!(map, "I8MIN", Value::Int(Int::from(i8::MIN)), "int");
+    insert_native_var!(map, "I16MAX", Value::Int(Int::from(i16::MAX)), "int");
+    insert_native_var!(map, "I16MIN", Value::Int(Int::from(i16::MIN)), "int");
+    insert_native_var!(map, "I32MAX", Value::Int(Int::from(i32::MAX)), "int");
+    insert_native_var!(map, "I32MIN", Value::Int(Int::from(i32::MIN)), "int");
+    insert_native_var!(map, "I64MAX", Value::Int(Int::from(i64::MAX)), "int");
+    insert_native_var!(map, "I64MIN", Value::Int(Int::from(i64::MIN)), "int");
+    insert_native_var!(map, "I128MAX", Value::Int(Int::from(i128::MAX)), "int");
+    insert_native_var!(map, "I128MIN", Value::Int(Int::from(i128::MIN)), "int");
+
+    insert_native_var!(map, "F32MAX", Value::Float(Float::from(f32::MAX)), "float");
+    insert_native_var!(map, "F32MIN", Value::Float(Float::from(f32::MIN)), "float");
+    insert_native_var!(map, "F64MAX", Value::Float(Float::from(f64::MAX)), "float");
+    insert_native_var!(map, "F64MIN", Value::Float(Float::from(f64::MIN)), "float");
+
     map
 }

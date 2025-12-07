@@ -228,6 +228,19 @@ pub enum PtrNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
+pub enum ForLoopNode {
+    Standard {
+        initializer: Box<Statement>,
+        condition: Box<Statement>,
+        update: Box<Statement>,
+    },
+    ForIn {
+        variable: PathElement,
+        iterable: Box<Statement>,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub enum Node {
     If {
         condition: Box<Statement>,
@@ -235,9 +248,8 @@ pub enum Node {
         else_body: Option<Vec<Statement>>,
     },
     For {
-        iterable: Box<Statement>,
-        body: Vec<Statement>, 
-        variable: PathElement,
+        node: ForLoopNode,
+        body: Vec<Statement>,
     },
     While {
         condition: Box<Statement>,
@@ -539,11 +551,19 @@ impl Statement {
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
                 else_body.as_ref().map_or("".to_string(), |eb| eb.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "))
             ),
-            Node::For { iterable, body, variable } => format!(", \"iterable\": {}, \"variable\": \"{}\", \"body\": [{}]",
-                iterable.format_for_debug(),
-                variable.display(),
-                body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
-            ),
+            Node::For { node, body } => match node {
+                ForLoopNode::Standard { initializer, condition, update } => format!(", \"initializer\": {}, \"condition\": {}, \"update\": {}, \"body\": [{}]",
+                    initializer.format_for_debug(),
+                    condition.format_for_debug(),
+                    update.format_for_debug(),
+                    body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                ),
+                ForLoopNode::ForIn { variable, iterable } => format!(", \"variable\": \"{}\", \"iterable\": {}, \"body\": [{}]",
+                    variable.display(),
+                    iterable.format_for_debug(),
+                    body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
+                ),
+            },
             Node::While { condition, body } => format!(", \"condition\": {}, \"body\": [{}]",
                 condition.format_for_debug(),
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")

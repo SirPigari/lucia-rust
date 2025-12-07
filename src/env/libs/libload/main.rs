@@ -31,6 +31,8 @@ use crate::interpreter::Interpreter;
 use crate::env::libs::libload::ffi::{LuciaLib, LuciaFfiFn, ValueType, get_list};
 
 use crate::{insert_native_fn, insert_native_shared_fn};
+#[cfg(unix)]
+use crate::insert_native_var;
 
 static STRINGS: OnceCell<Mutex<Vec<CString>>> = OnceCell::new();
 
@@ -311,10 +313,125 @@ fn cast(args: &HashMap<String, Value>) -> Value {
     Value::Pointer(ptr_arc)
 }
 
+fn create_array_ptr(args: &HashMap<String, Value>) -> Value {
+    let size = match args.get("size") {
+        Some(Value::Int(i)) => match i.to_i64() {
+            Ok(v) if v >= 0 => v as usize,
+            Ok(_) | Err(_) => return libload_error("Invalid Int value for size"),
+        },
+        _ => return libload_error("Expected size: Int"),
+    };
+
+    let elem_type = match args.get("type") {
+        Some(Value::String(s)) => match s.as_str() {
+            "int" => ValueType::Int,
+            "float64" => ValueType::Float64,
+            "float" | "float32" => ValueType::Float32,
+            "bool" => ValueType::Boolean,
+            "byte" => ValueType::Byte,
+            "ptr" => ValueType::Ptr,
+            "void" => ValueType::Void,
+            _ => return libload_error("Unknown type string"),
+        },
+        _ => return libload_error("Expected type: str"),
+    };
+
+    let elements_lucia = match args.get("elements") {
+        Some(Value::List(l)) => l.clone(),
+        _ => return libload_error("Expected elements: list"),
+    };
+
+    let mut bytes_vec: Vec<u8> = Vec::with_capacity(size * 8);
+
+    for val in elements_lucia.iter().take(size) {
+        match elem_type {
+            ValueType::Byte => match val {
+                Value::Int(i) => match i.to_i64() {
+                    Ok(v) if v >= 0 && v <= 255 => bytes_vec.push(v as u8),
+                    _ => return libload_error("Invalid Int for Byte"),
+                },
+                _ => return libload_error("Expected Int for Byte array"),
+            },
+            ValueType::Boolean => match val {
+                Value::Boolean(b) => bytes_vec.push(if *b { 1 } else { 0 }),
+                _ => return libload_error("Expected Boolean for Boolean array"),
+            },
+            ValueType::Int => match val {
+                Value::Int(i) => match i.to_i32() {
+                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
+                    Err(_) => return libload_error("Invalid Int value"),
+                },
+                _ => return libload_error("Expected Int for Int array"),
+            },
+            ValueType::Float64 => match val {
+                Value::Float(f) => match f.to_f64() {
+                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
+                    Err(_) => return libload_error("Invalid Float value"),
+                },
+                _ => return libload_error("Expected Float for Float64 array"),
+            },
+            ValueType::Float32 => match val {
+                Value::Float(f) => match f.to_f32() {
+                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
+                    Err(_) => return libload_error("Invalid Float value"),
+                },
+                _ => return libload_error("Expected Float for Float32 array"),
+            },
+            ValueType::Ptr => match val {
+                Value::Pointer(p) => {
+                    let addr = match &*p.lock() {
+                        (Value::Int(i), _) => match i.to_i64() {
+                            Ok(v) => v as usize,
+                            Err(_) => return libload_error("Invalid Int inside Pointer"),
+                        },
+                        _ => return libload_error("Expected Int inside Pointer"),
+                    };
+                    bytes_vec.extend(&addr.to_le_bytes());
+                }
+                _ => return libload_error("Expected Pointer for Ptr array"),
+            },
+            _ => return libload_error("Unsupported type for array allocation"),
+        }
+    }
+
+    let boxed_slice = bytes_vec.into_boxed_slice();
+    let ptr_val = (boxed_slice.as_ptr() as usize).into();
+
+    std::mem::forget(boxed_slice);
+
+    let arc_ptr = Arc::new(Mutex::new((Value::Int(ptr_val), 1)));
+    Value::Pointer(arc_ptr)
+}
+
 fn load_lib(args: &HashMap<String, Value>) -> Value {
+    let flags: Option<i32> = match args.get("flags") {
+        Some(Value::Int(i)) => match i.to_i32() {
+            Ok(f) => Some(f),
+            Err(_) => return libload_error("Invalid flags value"),
+        },
+        _ => None,
+    };
+    #[cfg(not(unix))]
+    if flags.is_some() {
+        return libload_error("RTLD flags are only supported on Unix systems");
+    }
     match args.get("path") {
         Some(Value::String(path)) => {
-            match unsafe { LuciaLib::load(Path::new(path)) } {
+            let lib = {
+                #[cfg(unix)]
+                {
+                    if let Some(f) = flags {
+                        unsafe { LuciaLib::load_flags(Path::new(path), f) }
+                    } else {
+                        unsafe { LuciaLib::load(Path::new(path)) }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    unsafe { LuciaLib::load(Path::new(path)) }
+                }
+            };
+            match lib {
                 Ok(lib) => {
                     let ptr_val = Box::into_raw(Box::new(lib)) as usize;
                     Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr_val as i64).into()), 1))))
@@ -358,6 +475,7 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
                 "void" => Some(ValueType::Void),
                 "byte" => Some(ValueType::Byte),
                 "any" | "str" | "ptr" => Some(ValueType::Ptr),
+                "array" => Some(ValueType::Ptr),
                 "" => Some(ValueType::Ptr),
                 _ => None,
             };
@@ -812,6 +930,19 @@ pub fn unload_lib(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+#[cfg(unix)]
+fn insert_rtld_constants(map: &mut HashMap<String, Variable>) {
+    insert_native_var!(map, "RTLD_LAZY", Value::Int(libc::RTLD_LAZY.into()), "int");
+    insert_native_var!(map, "RTLD_NOW", Value::Int(libc::RTLD_NOW.into()), "int");
+    insert_native_var!(map, "RTLD_GLOBAL", Value::Int(libc::RTLD_GLOBAL.into()), "int");
+    insert_native_var!(map, "RTLD_LOCAL", Value::Int(libc::RTLD_LOCAL.into()), "int");
+    insert_native_var!(map, "RTLD_NODELETE", Value::Int(libc::RTLD_NODELETE.into()), "int");
+    insert_native_var!(map, "RTLD_NOLOAD", Value::Int(libc::RTLD_NOLOAD.into()), "int");
+    #[cfg(target_os = "linux")]
+    insert_native_var!(map, "RTLD_DEEPBIND", Value::Int(libc::RTLD_DEEPBIND.into()), "int");
+    insert_native_var!(map, "RTLD_BINDING_MASK", Value::Int(libc::RTLD_BINDING_MASK.into()), "int");
+}
+
 pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
@@ -819,7 +950,7 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "load_lib",
         load_lib,
-        vec![Parameter::positional("path", "str")],
+        vec![Parameter::positional("path", "str"), Parameter::positional_optional("flags", "int", Value::Null)],
         "any",
         EffectFlags::UNSAFE
     );
@@ -1014,6 +1145,22 @@ pub fn register() -> HashMap<String, Variable> {
         "void",
         EffectFlags::UNSAFE
     );
+
+    insert_native_fn!(
+        map,
+        "create_array_ptr",
+        create_array_ptr,
+        vec![
+            Parameter::positional("elements", "list"),
+            Parameter::positional("size", "int"),
+            Parameter::positional("type", "str"),
+        ],
+        "any",
+        EffectFlags::UNSAFE
+    );
+
+    #[cfg(unix)]
+    insert_rtld_constants(&mut map);
 
     map
 }

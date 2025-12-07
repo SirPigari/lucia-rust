@@ -113,7 +113,7 @@ impl fmt::Debug for Value {
             Value::Pointer(arc) => {
                 let raw_ptr = Arc::as_ptr(arc);
                 let addr = raw_ptr as usize;
-                write!(f, "Pointer(0x{:X})", addr)
+                write!(f, "Pointer(0x{:X}, {})", addr, arc.lock().1.to_string())
             },
             Value::Error(kind, msg, _) => write!(f, "Error({}, {})", kind, msg),
             Value::Struct(v) => write!(f, "{}", v.display()),
@@ -588,15 +588,15 @@ impl Value {
             Value::Enum(e) => e.get_type(),
             Value::Struct(s) => s.get_type(),
             Value::Pointer(arc) => {
-                let mut ptr_level = 1;
                 let mut temp_arc = arc.clone();
                 let mut t = temp_arc.lock().0.get_type();
+                let mut ptr_level = temp_arc.lock().1;
                 loop {
                     let next = {
                         let guard = temp_arc.lock();
                         match &*guard {
-                            (Value::Pointer(inner_arc), _) => {
-                                ptr_level += 1;
+                            (Value::Pointer(inner_arc), l) => {
+                                ptr_level += l;
                                 Some(inner_arc.clone())
                             }
                             _ => {

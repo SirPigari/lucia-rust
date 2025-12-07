@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use libloading::{Library, Symbol};
+#[cfg(unix)]
+use libloading::os::unix::{Library as UnixLibrary};
 use libffi::middle::{Cif, CodePtr, Type, Arg};
 use std::ffi::c_void;
 
 use crate::env::runtime::value::Value;
+use crate::env::runtime::utils::format_value;
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -100,6 +103,13 @@ impl LuciaLib {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(unix)]
+    pub unsafe fn load_flags<P: AsRef<std::ffi::OsStr> + libloading::AsFilename>(path: P, flags: i32) -> Result<Self, String> {
+        unsafe { UnixLibrary::open(Some(path.as_ref()), flags) }
+            .map(|lib| LuciaLib { lib: Arc::new(Library::from(lib)) })
+            .map_err(|e| e.to_string())
+    }
+
     pub unsafe fn get_function(
         &self,
         name: &str,
@@ -157,7 +167,7 @@ impl LuciaFfiFn {
         let mut stored_args = STORED_ARGS.lock();
         stored_args.clear();
 
-        let ffi_args: Result<Vec<Arg>, String> = args.iter().zip(self.arg_types.iter()).map(|(v, t)| {
+        let ffi_args: Result<Vec<Arg>, String> = args.iter().zip(self.arg_types.iter()).enumerate().map(|(index, (v, t))| {
             match (v, t) {
                 (Value::Int(i), ValueType::Int) => {
                     let val = i.to_i64().unwrap_or(0);
@@ -246,7 +256,10 @@ impl LuciaFfiFn {
                     }
                 }
                 (Value::Null, ValueType::Void) => Ok(Arg::new(&StoredValue::Null)),
-                _ => Err("Unsupported Value/ValueType combination for ffi call".to_string()),
+                _ => Err(format!("Unsupported Value/ValueType combination for ffi call argument #{}, expected: {:?}, got: {}", 
+                    index + 1,
+                    t,
+                    format_value(v))),
             }
         }).collect();
 

@@ -38,7 +38,7 @@
 // uses ApolloTime from time module
 #macro time_it!($expr):
     scope time_it_scope (_time): 
-        start_time: int = _time.ApolloTime.now()
+        start_time := _time.ApolloTime.now()
         result: any = ($expr)
         return ((result, start_time.elapsed()))
     end

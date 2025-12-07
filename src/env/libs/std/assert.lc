@@ -35,9 +35,9 @@
 #macro assert_err!($expr, $msg=("Expected an error but got success")):
     // smallest assert err macro i could come up with
     // you could argue that the before ones were more readable, but this is the smallest
-    //               | --------------------- wrapping into a group
+    //               | --------------------- wrapping into a local scope
     //               V                      V -- using '? or' to check if error, on error return the error tuple
-    result: ?tuple = \ ($expr) return null \? or _err
+    result: ?tuple = scope (*): ($expr) return null end? or _err
     // if result is null (which can be only if it doesnt fail) then throw the error
     if (result.is_null()) then throw $msg from "AssertionError"
     // forget and return the error tuple

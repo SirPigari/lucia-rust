@@ -37,6 +37,8 @@ for i in [1..10]:
     pp = &pp
 end
 
+pp: &&&&&&&&&&int = pp
+
 assert!(pp is &&&&&&&&&&int)
 flattened_p2: int = ++pp
 assert_eq!(flattened_p2, 10)

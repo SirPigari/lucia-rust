@@ -1652,9 +1652,10 @@ impl Preprocessor {
 
         if depth > MAX_MACRO_RECURSION_DEPTH {
             result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("throw"), call_loc.clone()));
-            result.push(Token::new_static(TK_STRING, Cow::Borrowed("Macro recursion limit exceeded"), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("\"Macro recursion limit exceeded\""), call_loc.clone()));
             result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("from"), call_loc.clone()));
-            result.push(Token::new_static(TK_STRING, Cow::Borrowed("RecursionError"), call_loc.clone()));
+            result.push(Token::new_static(TK_STRING, Cow::Borrowed("\"RecursionError\""), call_loc.clone()));
+            return Ok(result);
         }
 
         while i < tokens.len() {
@@ -2001,7 +2002,11 @@ impl Preprocessor {
         }
 
         if grouping_enabled {
-            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("scope"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("("), call_loc.clone()));
+            result.push(Token::new_static(TK_OPERATOR, Cow::Borrowed("*"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(")"), call_loc.clone()));
+            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed(":"), call_loc.clone()));
         }
 
         let unsafe_macro_output = format!("__unsafe_macro_output_{}", call_loc.as_ref().map(|loc| loc.line_number * loc.range.0 / loc.range.1).unwrap_or(0));
@@ -2053,7 +2058,7 @@ impl Preprocessor {
         }
 
         if grouping_enabled {
-            result.push(Token::new_static(TK_SEPARATOR, Cow::Borrowed("\\"), call_loc.clone()));
+            result.push(Token::new_static(TK_IDENTIFIER, Cow::Borrowed("end"), call_loc.clone()));
         }
 
         let consumed = i - start_i;

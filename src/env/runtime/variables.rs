@@ -475,6 +475,38 @@ impl Variable {
                         None,
                     )
                 };
+                let to_lower = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "to_lower",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => Value::String(s.to_lowercase()),
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let to_upper = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "to_upper",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => Value::String(s.to_uppercase()),
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "to_bytes".to_string(),
@@ -646,6 +678,28 @@ impl Variable {
                     Variable::new(
                         "replace".to_string(),
                         replace,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "to_lower".to_string(),
+                    Variable::new(
+                        "to_lower".to_string(),
+                        to_lower,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "to_upper".to_string(),
+                    Variable::new(
+                        "to_upper".to_string(),
+                        to_upper,
                         "function".to_string(),
                         false,
                         true,
@@ -1404,6 +1458,24 @@ impl Variable {
                         None,
                     )
                 };
+                let contains = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "contains",
+                        move |args| {
+                            if let Some(item) = args.get("item") {
+                                if let Value::List(list) = &val_clone {
+                                    return Value::Boolean(list.contains(item));
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("item", "any")],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -1531,6 +1603,17 @@ impl Variable {
                     Variable::new(
                         "all".to_string(),
                         all,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "contains".to_string(),
+                    Variable::new(
+                        "contains".to_string(),
+                        contains,
                         "function".to_string(),
                         false,
                         true,

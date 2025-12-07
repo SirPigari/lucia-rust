@@ -41,7 +41,7 @@ assert_type!(i, int)
 assert_err!(assert_type!(i, str, "Expected i to be a string"))
 
 // time_it macro runs the code and then returns a tuple with the result and the elapsed time in apollo time (nanoseconds from apollo epoch)
-(_, elapsed: int) = time_it!(
+(_, elapsed: any) = time_it!(
     for (i in [0..69]):
         i * i
     end
