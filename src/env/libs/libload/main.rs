@@ -940,7 +940,6 @@ fn insert_rtld_constants(map: &mut HashMap<String, Variable>) {
     insert_native_var!(map, "RTLD_NOLOAD", Value::Int(libc::RTLD_NOLOAD.into()), "int");
     #[cfg(target_os = "linux")]
     insert_native_var!(map, "RTLD_DEEPBIND", Value::Int(libc::RTLD_DEEPBIND.into()), "int");
-    insert_native_var!(map, "RTLD_BINDING_MASK", Value::Int(libc::RTLD_BINDING_MASK.into()), "int");
 }
 
 pub fn register() -> HashMap<String, Variable> {
