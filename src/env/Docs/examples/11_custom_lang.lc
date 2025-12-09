@@ -1181,6 +1181,23 @@ while (steps > 0) {
         end
     end
 
+    if argv.contains("--target"):
+        target_index := argv.index_of("--target") + 1
+        if target_index >= len(argv):
+            print(f"{error_str} --target requires an argument")
+            return
+        end
+        target_str := argv[target_index].to_lower()
+        match (target_str):
+            "linux-x86_64": platform = SupportedPlatform.Linux_x86_64,
+            "windows-x86_64": platform = SupportedPlatform.Windows_x86_64,
+            _ -> 
+                print(f"{error_str} Unknown target: {target_str}")
+                return
+            end
+        end
+    end
+
     print(f"{info_str} Detected platform: {platform}")
 
     if !subprocess.popen(["nasm", "--version"], capture_output=true).runned():

@@ -1138,7 +1138,7 @@ impl Interpreter {
         Value::Function(Function::CustomMethod(Arc::new(UserFunctionMethod::new_from_func_with_interpreter(arc_func, Arc::new(Mutex::new(self.clone()))))))
     }
 
-    pub fn interpret(&mut self, mut statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
+    pub fn interpret(&mut self, statements: Vec<Statement>, deferable: bool) -> Result<Value, Error> {
         self.is_returning = false;
         self.return_value = NULL;
         self.err = None;
@@ -1151,44 +1151,29 @@ impl Interpreter {
             StackType::File,
         ));
 
-        loop {
-            for statement in &statements {
-                if let Some(err) = &self.err {
-                    return Err(err.clone());
+        for statement in &statements {
+            if let Some(err) = &self.err {
+                return Err(err.clone());
+            }
+            let value = self.evaluate(&statement);
+            if let Value::Error(err_type, err_msg, referr) = &value {
+                if let Some(referr) = referr {
+                    self.raise_with_ref(err_type, &err_msg, referr.clone());
+                } else {
+                    self.raise(err_type, &err_msg);
                 }
-
-                let value = self.evaluate(&statement);
-
-                if let Value::Error(err_type, err_msg, referr) = &value {
-                    if let Some(referr) = referr {
-                        self.raise_with_ref(err_type, &err_msg, referr.clone());
-                    } else {
-                        self.raise(err_type, &err_msg);
-                    }
-                }
-
-                if self.is_returning {
-                    self.return_value = value;
-                    return Ok(self.return_value.clone());
-                }
-
-                if let Some(err) = &self.err {
-                    return Err(err.clone());
-                }
-
+            }
+            if self.is_returning {
                 self.return_value = value;
-
-                if let State::TCO(_) = self.state {
-                    break;
-                }
+                return Ok(self.return_value.clone());
             }
-
-            if let State::TCO(stmt) = std::mem::replace(&mut self.state, State::Normal) {
-                statements = vec![stmt];
-                continue;
+            if let Some(err) = &self.err {
+                return Err(err.clone());
             }
-
-            break;
+            self.return_value = value;
+            if let State::TCO(_) = self.state {
+                break;
+            }
         }
 
         if deferable {
@@ -1479,6 +1464,47 @@ impl Interpreter {
         }
     
         result
+    }
+
+    #[track_caller]
+    fn run_isolated(&mut self, temp_vars: FxHashMap<String, Variable>, body: &[Statement]) -> (Value, State, Option<Error>, FxHashMap<String, Variable>) {
+        let saved_vars = std::mem::replace(&mut self.variables, temp_vars);
+        let saved_stack = std::mem::replace(&mut self.stack, Stack::new());
+        let saved_state = std::mem::replace(&mut self.state, State::Normal);
+        let saved_err = self.err.clone();
+        let saved_defer = std::mem::replace(&mut self.defer_stack, Vec::new());
+        let saved_is_returning = self.is_returning;
+        let saved_return_value = self.return_value.clone();
+        let saved_current_statement = std::mem::replace(&mut self.current_statement, None);
+
+        self.err = None;
+        self.is_returning = false;
+        self.return_value = NULL;
+
+        let mut res = NULL;
+        for stmt in body {
+            res = self.evaluate(stmt);
+            if self.err.is_some() {
+                break;
+            }
+            if matches!(self.state, State::Break | State::Continue) {
+                break;
+            }
+        }
+
+        let err = self.err.clone();
+        let end_state = self.state.clone();
+        let resulting_vars = std::mem::replace(&mut self.variables, saved_vars);
+
+        self.stack = saved_stack;
+        self.state = saved_state;
+        self.err = saved_err;
+        self.defer_stack = saved_defer;
+        self.is_returning = saved_is_returning;
+        self.return_value = saved_return_value;
+        self.current_statement = saved_current_statement;
+
+        (res, end_state, err, resulting_vars)
     }
 
     fn handle_prefix_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
@@ -2289,68 +2315,48 @@ impl Interpreter {
                     }
 
                     if let Some(g) = guard {
-                        let mut guard_interp = Interpreter::new(
-                            self.config.clone(),
-                            &self.file_path,
-                            &self.cwd,
-                            self.preprocessor_info.clone(),
-                            &[],
-                        );
-                        guard_interp.variables = temp_vars.clone();
-                        let guard_result = guard_interp.evaluate(g);
-                        if guard_interp.err.is_some() {
-                            self.err = guard_interp.err.clone();
+                        let (guard_res, _guard_state, guard_err, _guard_vars) = self.run_isolated(temp_vars.clone(), std::slice::from_ref(g));
+                        if guard_err.is_some() {
+                            self.err = guard_err;
                             return NULL;
                         }
-                        if !guard_result.is_truthy() {
+                        if !guard_res.is_truthy() {
                             continue;
                         }
                     }
 
-                    let mut interp = Interpreter::new(
-                        self.config.clone(),
-                        &self.file_path,
-                        &self.cwd,
-                        self.preprocessor_info.clone(),
-                        &[],
-                    );
-                    interp.variables = temp_vars;
-                    let mut cont = false;
-                    let mut res = NULL;
-
-                    for stmt in body {
-                        res = interp.evaluate(stmt);
-                        if interp.err.is_some() {
-                            self.err = interp.err.clone();
-                            return NULL;
-                        }
-
-                        match interp.state {
-                            State::Continue => {
-                                cont = true;
-                                interp.state = State::Normal;
-                                break;
-                            }
-                            State::Break => {
-                                interp.state = State::Normal;
-                                self.variables.extend(interp.variables);
-                                return NULL;
-                            }
-                            _ => {}
-                        }
+                    let (res, state, err, resulting_vars) = self.run_isolated(temp_vars, body);
+                    if err.is_some() {
+                        self.err = err;
+                        return NULL;
                     }
 
-                    self.variables.extend(interp.variables);
-                    if !cont {
-                        return res;
+                    match state {
+                        State::Continue => {
+                            self.variables.extend(resulting_vars);
+                        }
+                        State::Break => {
+                            self.variables.extend(resulting_vars);
+                            return NULL;
+                        }
+                        _ => {
+                            self.variables.extend(resulting_vars);
+                            return res;
+                        }
                     }
                 }
 
                 MatchCase::Literal { patterns, body } => {
-                    let matched = patterns.iter().any(|p| cond_val == self.evaluate(p));
-                    if self.err.is_some() {
-                        return NULL;
+                    let mut evaluated_patterns: Vec<Value> = Vec::with_capacity(patterns.len());
+                    for p in patterns.iter() {
+                        let v = self.evaluate(p);
+                        if self.err.is_some() {
+                            return NULL;
+                        }
+                        evaluated_patterns.push(v);
                     }
+
+                    let matched = evaluated_patterns.iter().any(|pv| *pv == cond_val);
 
                     if matched {
                         let mut res = NULL;
@@ -4970,30 +4976,31 @@ impl Interpreter {
                         interp.variables.extend(generics_evaluated.clone().into_iter().map(|(k, v)| {
                             (k.clone(), Variable::new(k, Value::Type(v), "type".to_string(), false, true, true))
                         }));
-                        for (variant_name, variant_type, variant_disc) in variants.iter() {
-                            if *variant_type == Statement::Null {
-                                built_fields.push((variant_name.clone(), Statement::Null, variant_disc.clone()));
-                                continue;
-                            }
-                            let v = match interp.evaluate(&variant_type.clone()) {
-                                Value::Type(t) => Value::Type(t),
-                                _ => {
-                                    if interp.err.is_some() {
-                                        self.err = interp.err;
+                            for (variant_name, variant_type, variant_disc) in variants.iter() {
+                                if *variant_type == Statement::Null {
+                                    built_fields.push((variant_name.clone(), Statement::Null, variant_disc.clone()));
+                                    continue;
+                                }
+                                let (v, _state, _err, _vars) = interp.run_isolated(interp.variables.clone(), &[variant_type.clone()]);
+                                let v = match v {
+                                    Value::Type(t) => Value::Type(t),
+                                    _ => {
+                                        if interp.err.is_some() {
+                                            self.err = interp.err;
+                                            return NULL;
+                                        }
+                                        self.raise("TypeError", &format!("Variant '{}' in enum '{}' has invalid type", variant_name, name));
                                         return NULL;
                                     }
-                                    self.raise("TypeError", &format!("Variant '{}' in enum '{}' has invalid type", variant_name, name));
-                                    return NULL;
-                                }
-                            };
-                            let new_field_type = Statement {
-                                node: Node::Value {
-                                    value: v
-                                },
-                                loc: alloc_loc(self.get_location_from_current_statement()),
-                            };
-                            built_fields.push((variant_name.clone(), new_field_type, variant_disc.clone()));
-                        }
+                                };
+                                let new_field_type = Statement {
+                                    node: Node::Value {
+                                        value: v
+                                    },
+                                    loc: alloc_loc(self.get_location_from_current_statement()),
+                                };
+                                built_fields.push((variant_name.clone(), new_field_type, variant_disc.clone()));
+                            }
                         drop(interp);
                         Type::Enum {
                             name: name.clone(),
@@ -7586,20 +7593,11 @@ impl Interpreter {
                             tokens,
                         );
                         let statements = parser.parse();
-                        let mut new_interpreter = Interpreter::new(
-                            self.config.clone(),
-                            &self.file_path.clone(),
-                            &self.cwd.clone(),
-                            self.preprocessor_info.clone(),
-                            &vec![],
-                        );
-                        new_interpreter.variables = self.variables.clone();
-                        new_interpreter.stack = self.stack.clone();
-                        let _ = new_interpreter.interpret(statements, true);
-                        if let Some(err) = new_interpreter.err {
+                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements);
+                        if let Some(err) = err {
                             self.raise_with_ref("RuntimeError", "Error in exec script", err);
                         }
-                        return new_interpreter.return_value.clone();
+                        return return_value.clone();
                     } else {
                         return self.raise("TypeError", "Expected a string in 'code' argument in exec");
                     }
@@ -7617,18 +7615,11 @@ impl Interpreter {
                             tokens,
                         );
                         let statements = parser.parse();
-                        let mut new_interpreter = Interpreter::new(
-                            self.config.clone(),
-                            &self.file_path.clone(),
-                            &self.cwd.clone(),
-                            self.preprocessor_info.clone(),
-                            &vec![],
-                        );
-                        let _ = new_interpreter.interpret(statements, true);
-                        if let Some(err) = new_interpreter.err {
+                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements);
+                        if let Some(err) = err {
                             self.raise_with_ref("RuntimeError", "Error in exec script", err);
                         }
-                        return new_interpreter.return_value.clone();
+                        return return_value.clone();
                     } else {
                         return self.raise("TypeError", "Expected a string in 'code' argument in eval");
                     }
@@ -7783,29 +7774,18 @@ impl Interpreter {
         }
 
         if let Function::Lambda(_, closure_vars) = func {
-            let mut new_interpreter = Interpreter::new(
-                self.config.clone(),
-                &self.file_path.clone(),
-                &self.cwd.clone(),
-                self.preprocessor_info.clone(),
-                &vec![],
-            );
             let mut merged_variables = self.variables.clone();
             merged_variables.extend(closure_vars.clone());
             merged_variables.extend(final_args_variables);
-            new_interpreter.variables = merged_variables;
-            new_interpreter.stack = self.stack.clone();
-            new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
-            new_interpreter.internal_storage.in_function = true;
             let body = func.get_body();
-            let _ = new_interpreter.interpret(body, true);
-            result = new_interpreter.return_value.clone();
+            let (return_value, _state, err, variables) = self.run_isolated(merged_variables, &body);
+            result = return_value.clone();
             if change_in_function {
                 self.internal_storage.in_function = false;
             }
-            if new_interpreter.err.is_some() {
+            if let Some(err) = err {
                 self.stack.pop();
-                self.err = new_interpreter.err.clone();
+                self.err = Some(err);
                 return NULL;
             }
             if let Value::Error(err_type, err_msg, referr) = &result {
@@ -7834,9 +7814,9 @@ impl Interpreter {
                 );
                 self.stack.pop();
                 return NULL;
-            };
+            }
             if !effect_flags.contains(EffectFlags::UNKNOWN) {
-                match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
+                match effect_flags.check_branches(self.collected_effects.clone(), effect_mask) {
                     Some((false, extra_bits)) => {
                         let names = extra_bits.get_names();
                         return self.raise_with_help(
@@ -7858,13 +7838,13 @@ impl Interpreter {
                 }
             }
             for var in instance_variables {
-                if let Some(v) = new_interpreter.variables.get_mut(&var) {
+                if let Some(v) = variables.get(&var) {
                     if let Some(ref mut object_variable) = object_variable {
                         object_variable.set_value(v.get_value().clone());
                     }
                 }
             }
-            self.stack = new_interpreter.stack;
+            self.stack = self.stack.clone();
         } else if let Function::CustomMethod(func) = func {
             let interpreter_arc = func.get_interpreter();
             let mut interpreter = interpreter_arc.lock();
@@ -8193,7 +8173,7 @@ impl Interpreter {
                 &format!("Return value does not match expected type '{}', got '{}'", &metadata.return_type.display(), result.type_name())
             );
         }
-        return result
+        return result;
     }
 
     fn handle_operation(&mut self, left_stmt: Statement, operator: String, right_stmt: Statement) -> Value {
@@ -8245,6 +8225,7 @@ impl Interpreter {
                 let (r_val, _) = rp.lock().clone();
                 (l_val, r_val)
             }
+            // fuck auto deref
             // (Value::Pointer(lp), r) => {
             //     let l_val = lp.lock().clone();
             //     (l_val, r.clone())

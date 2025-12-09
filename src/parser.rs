@@ -143,20 +143,6 @@ impl Parser {
         self.tokens.get(self.pos + offset)
     }
 
-    fn peek_until(&self, kind: &str, value: &str) -> Vec<Token> {
-        let mut toks = Vec::new();
-        let mut i = self.pos;
-        while i < self.tokens.len() {
-            let tk = &self.tokens[i];
-            if tk.0 == kind && tk.1 == value {
-                break;
-            }
-            toks.push(tk.clone());
-            i += 1;
-        }
-        toks
-    }
-
     pub fn get_loc(&mut self) -> Option<Location> {
         if let Some(token) = self.token() {
             if token.2.is_some() {
@@ -1444,17 +1430,35 @@ impl Parser {
                         parentheses = true;
                         self.next();
 
-                        let ahead = self.peek_until("SEPARATOR", ")");
-                        let comma_count = ahead.iter().filter(|t| t.1 == ",").count();
+                        let mut depth:  usize = 1;
+                        let mut commas: usize = 0;
 
-                        let after_paren = self.peek(1);
-
-                        if comma_count == 2 {
-                            if let Some(Token(k, v, _)) = after_paren {
-                                if k == "SEPARATOR" && v == ":" {
-                                    is_cstyle = true;
+                        let mut i: usize = 0;
+                        while let Some(Token(k, v, _)) = self.peek(i) && depth > 0 {
+                            if k == "SEPARATOR" {
+                                match v.as_ref() {
+                                    "(" => {
+                                        depth += 1;
+                                    }
+                                    ")" => {
+                                        depth -= 1;
+                                    }
+                                    "," if depth == 1 => {
+                                        commas += 1;
+                                    }
+                                    _ => {}
                                 }
                             }
+                            i += 1;
+                        }
+
+                        let colon_at_top = match self.peek(i) {
+                            Some(Token(k, v, _)) if k == "SEPARATOR" && v == ":" => true,
+                            _ => false,
+                        };
+
+                        if commas == 2 && colon_at_top {
+                            is_cstyle = true;
                         }
 
                         if is_cstyle {

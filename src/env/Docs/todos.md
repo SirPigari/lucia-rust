@@ -14,7 +14,7 @@ _Total TODOs found: 6_
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3091:1`](../../../src/interpreter.rs#L3091) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3097:1`](../../../src/interpreter.rs#L3097) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_

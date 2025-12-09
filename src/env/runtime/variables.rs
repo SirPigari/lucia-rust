@@ -1476,6 +1476,29 @@ impl Variable {
                         None,
                     )
                 };
+                let index_of = {
+                    let val_clone = self.value.clone();
+                    make_native_method(
+                        "index_of",
+                        move |args| {
+                            if let Some(item) = args.get("item") {
+                                if let Value::List(list) = &val_clone {
+                                    for (index, list_item) in list.iter().enumerate() {
+                                        if list_item == item {
+                                            return Value::Int(create_int(&(index as i64).to_string()));
+                                        }
+                                    }
+                                    return Value::Error("ValueError", "Item not found in list", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![Parameter::positional("item", "any")],
+                        "int",
+                        false, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -1614,6 +1637,17 @@ impl Variable {
                     Variable::new(
                         "contains".to_string(),
                         contains,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "index_of".to_string(),
+                    Variable::new(
+                        "index_of".to_string(),
+                        index_of,
                         "function".to_string(),
                         false,
                         true,
