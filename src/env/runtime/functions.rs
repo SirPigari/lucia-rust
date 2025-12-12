@@ -69,7 +69,13 @@ impl std::default::Default for FunctionMetadata {
 
 pub trait Callable: Send + Sync {
     fn call(&self, args: &HashMap<String, Value>) -> Value;
-    fn call_shared(&self, args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value;
+    fn call_shared(&self, _args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
+    #[allow(dead_code)]
+    fn call_method(&self, _value: &mut Value, _args: &HashMap<String, Value>) -> Value {
+        Value::Error("RuntimeError", "This should not be called directly", None)
+    }
     fn metadata(&self) -> &FunctionMetadata;
 }
 
@@ -264,10 +270,6 @@ impl Callable for NativeFunction {
         self.func.call(args)
     }
 
-    fn call_shared(&self, _args: &HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
-        Value::Error("RuntimeError", "This should not be called directly", None)
-    }
-
     fn metadata(&self) -> &FunctionMetadata {
         &self.meta
     }
@@ -290,18 +292,27 @@ impl Callable for UserFunction {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
-        Value::Error("RuntimeError", "This should not be called directly", None)
-    }
-
     fn metadata(&self) -> &FunctionMetadata {
         &self.meta
     }
 }
 
+pub trait NativeMethodCallable: Send + Sync {
+    fn call(&self, _value: &mut Value, _args: &HashMap<String, Value>) -> Value;
+}
+
+impl<F> NativeMethodCallable for F
+where
+    F: Fn(&mut Value, &HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    fn call(&self, _value: &mut Value, _args: &HashMap<String, Value>) -> Value {
+        (self)(_value, _args)
+    }
+}
+
 #[derive(Clone)]
 pub struct NativeMethod {
-    pub func: Arc<dyn NativeCallable>,
+    pub func: Arc<dyn NativeMethodCallable>,
     pub meta: FunctionMetadata,
 }
 
@@ -313,11 +324,11 @@ impl NativeMethod {
 
 impl Callable for NativeMethod {
     fn call(&self, _args: &std::collections::HashMap<String, Value>) -> Value {
-        self.func.call(_args)
+        Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
-        Value::Error("RuntimeError", "This should not be called directly", None)
+    fn call_method(&self, value: &mut Value, args: &HashMap<String, Value>) -> Value {
+        self.func.call(value, args)
     }
 
     fn metadata(&self) -> &FunctionMetadata {
@@ -388,16 +399,11 @@ impl Callable for UserFunctionMethod {
         Value::Error("RuntimeError", "This should not be called directly", None)
     }
 
-    fn call_shared(&self, _args: &std::collections::HashMap<String, Value>, _interpreter: &mut Interpreter) -> Value {
-        Value::Error("RuntimeError", "This should not be called directly", None)
-    }
-
     fn metadata(&self) -> &FunctionMetadata {
         &self.meta
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub enum Function {
     Native(Arc<NativeFunction>),

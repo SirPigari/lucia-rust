@@ -9,7 +9,7 @@ use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction};
+use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction, SharedNativeFunction, NativeFunction};
 use crate::env::runtime::statements::{Statement, Node, TypeNode, PtrNode, IterableNode};
 use crate::env::runtime::structs_and_enums::Struct;
 use crate::env::runtime::types::{Int, Float, Type};
@@ -650,9 +650,9 @@ pub fn make_native_method<F>(
     is_static: bool,
     is_final: bool,
     state: Option<String>
-) -> Value
+) -> Function
 where
-    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
+    F: Fn(&mut Value, &std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
 {
     let method = NativeMethod {
         func: Arc::new(func),
@@ -669,10 +669,41 @@ where
         },
     };
 
-    Value::Function(Function::NativeMethod(Arc::new(method)))
+    Function::NativeMethod(Arc::new(method))
 }
 
-pub fn make_native_method_pt<F>(
+pub fn make_native_method_val<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &str,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>
+) -> Value
+where
+    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    let method = NativeFunction {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: Type::new_simple(return_type),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+            effects: EffectFlags::UNKNOWN,
+        },
+    };
+
+    Value::Function(Function::Native(Arc::new(method)))
+}
+
+pub fn make_native_method_val_pt<F>(
     name: &str,
     func: F,
     parameters: Vec<Parameter>,
@@ -684,6 +715,37 @@ pub fn make_native_method_pt<F>(
 ) -> Value
 where
     F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
+{
+    let method = NativeFunction {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: return_type.clone(),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+            effects: EffectFlags::UNKNOWN,
+        },
+    };
+
+    Value::Function(Function::Native(Arc::new(method)))
+}
+
+pub fn make_native_method_pt<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &Type,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>
+) -> Function
+where
+    F: Fn(&mut Value, &std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
 {
     let method = NativeMethod {
         func: Arc::new(func),
@@ -700,7 +762,38 @@ where
         },
     };
 
-    Value::Function(Function::NativeMethod(Arc::new(method)))
+    Function::NativeMethod(Arc::new(method))
+}
+
+pub fn make_native_shared_fn<F>(
+    name: &str,
+    func: F,
+    parameters: Vec<Parameter>,
+    return_type: &str,
+    is_public: bool,
+    is_static: bool,
+    is_final: bool,
+    state: Option<String>
+) -> Function
+where
+    F: Fn(&std::collections::HashMap<String, Value>, &mut Interpreter) -> Value + Send + Sync + 'static,
+{
+    let method = SharedNativeFunction {
+        func: Arc::new(func),
+        meta: FunctionMetadata {
+            name: name.to_string(),
+            parameters,
+            return_type: Type::new_simple(return_type),
+            is_public,
+            is_static,
+            is_final,
+            is_native: true,
+            state,
+            effects: EffectFlags::UNKNOWN,
+        },
+    };
+
+    Function::SharedNative(Arc::new(method))
 }
 
 pub fn get_type_default(type_: &str) -> Value {
@@ -2041,6 +2134,47 @@ pub fn generate_name_variants(name: &str) -> Vec<String> {
     }
 
     variants
+}
+
+#[allow(dead_code)]
+pub fn is_type_ident_available(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Float(_) | Value::String(_) | Value::Boolean(_) | Value::Null |
+        Value::Map { .. } | Value::Tuple(_) | Value::List(_) | Value::Bytes(_) |
+        Value::Function(_) | Value::Generator(_) | Value::Module(_) |
+        Value::Enum(_) | Value::Pointer(_) | Value::Error(..) => true,
+        Value::Type(t) => match t {
+            Type::Enum { .. } => false,
+            _ => true,
+        }
+        _ => false,
+    }
+}
+
+#[allow(dead_code)]
+pub fn check_type_ident(value: &Value, ident: &str) -> bool {
+    if ident == "any" {
+        return true;
+    }
+
+    match value {
+        Value::Int(_) => ident == "int",
+        Value::Float(_) => ident == "float",
+        Value::String(_) => ident == "str",
+        Value::Boolean(_) => ident == "bool",
+        Value::Null => ident == "void",
+        Value::Map { .. } => ident == "map",
+        Value::Tuple(_) => ident == "tuple",
+        Value::List(_) => ident == "list",
+        Value::Bytes(_) => ident == "bytes",
+        Value::Type(_ ) => ident == "type",
+        Value::Function(_) => ident == "function",
+        Value::Generator(_) => ident == "generator",
+        Value::Enum(_) => ident == "enum",
+        Value::Pointer(_) => ident == "&any",
+        Value::Error(..) => ident == "error",
+        _ => false,
+    }
 }
 
 pub fn find_struct_method(

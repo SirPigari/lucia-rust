@@ -5654,20 +5654,24 @@ impl Interpreter {
                 let s_val = self.evaluate(&start);
                 let e_val = self.evaluate(&end);
                 if self.err.is_some() { return NULL; }
-                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len).unwrap_or(0) };
-                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len).unwrap_or(len) };
-                (s_idx, e_idx, false)
+                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len+1).unwrap_or(0) };
+                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len+1).unwrap_or(len) };
+                if s_idx == e_idx {
+                    (s_idx, e_idx, true)
+                } else {
+                    (s_idx, e_idx, false)
+                }
             }
             AccessType::ToStart { end } => {
                 let e_val = self.evaluate(&end);
                 if self.err.is_some() { return NULL; }
-                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len).unwrap_or(len) };
+                let e_idx = if e_val == NULL { len } else { self.to_index(&e_val, len+1).unwrap_or(len) };
                 (0, e_idx, false)
             }
             AccessType::ToEnd { start } => {
                 let s_val = self.evaluate(&start);
                 if self.err.is_some() { return NULL; }
-                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len).unwrap_or(0) };
+                let s_idx = if s_val == NULL { 0 } else { self.to_index(&s_val, len+1).unwrap_or(0) };
                 (s_idx, len, false)
             }
             AccessType::Full => (0, len, false),
@@ -5685,8 +5689,13 @@ impl Interpreter {
 
         match &object_val {
             Value::String(s) => {
-                let chars: Vec<char> = s.chars().skip(start_idx).take(end_idx - start_idx).collect();
-                if is_single { Value::String(chars[0].to_string()) } else { Value::String(chars.into_iter().collect()) }
+                let chars: Vec<char> = s.chars().collect();
+                if is_single {
+                    chars.get(start_idx).map(|&c| Value::String(c.to_string())).unwrap_or(NULL)
+                } else {
+                    let slice: String = chars.get(start_idx..end_idx).unwrap_or(&[]).iter().collect();
+                    Value::String(slice)
+                }
             }
             Value::List(l) => {
                 let slice = l.get(start_idx..end_idx).unwrap_or(&[]).to_vec();
@@ -6654,6 +6663,223 @@ impl Interpreter {
             }
         }
     }
+
+    // fn handle_method_call(&mut self, object_stmt: Statement, method_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
+    //     let object_value = self.evaluate(&object_stmt);
+    //     if self.err.is_some() {
+    //         return NULL;
+    //     }
+
+    //     let func = match is_type_ident_available(&object_value) {
+    //         true => {
+    //             let tf = get_default_type_method(method_name);
+    //             if let Some((it, f)) = tf && check_type_ident(&object_value, &it) {
+    //                 f
+    //             } else {
+    //                 let type_methods = get_type_method_names(&object_value);
+    //                 let closest_match = find_closest_match(method_name, &type_methods);
+    //                 if let Some(m) = closest_match {
+    //                     return self.raise_with_help(
+    //                         "NameError",
+    //                         &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
+    //                         &format!("Did you mean '{}'?", m)
+    //                     );
+    //                 } else {
+    //                     return self.raise(
+    //                         "NameError",
+    //                         &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
+    //                     );
+    //                 }
+    //             }
+    //         }
+    //         false => {
+    //             let object_type = object_value.type_name();
+
+    //             let mut object_variable = Variable::new(
+    //                 "_".to_string(),
+    //                 object_value.clone(),
+    //                 object_type.clone(),
+    //                 false,
+    //                 true,
+    //                 true,
+    //             );
+    //             let mut variable_name: Option<String> = if let Node::Variable { name, ..} = &object_stmt.node {
+    //                 Some(name.clone())
+    //             } else {
+    //                 None
+    //             };
+
+    //             let pos_args: Vec<Value> = pos_args_stmt.into_iter().map(|s| self.evaluate(&s)).collect();
+    //             if self.err.is_some() {
+    //                 return NULL;
+    //             }
+    //             let named_args: HashMap<String, Value> = named_args_stmt.into_iter().map(|(k, v)| (k, self.evaluate(&v))).collect();
+    //             if self.err.is_some() {
+    //                 return NULL;
+    //             }
+
+    //             match object_value {
+    //                 Value::Type(ref t) => {
+    //                     match t {
+    //                         Type::Enum { name, variants, generics, .. } => {
+    //                             let variant_name = method_name;
+    //                             let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
+    //                                 Some(variant) => variant,
+    //                                 None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
+    //                             };
+    //                             if self.err.is_some() {
+    //                                 return NULL;
+    //                             }
+    //                             if !named_args.is_empty() {
+    //                                 return self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", name, variant_name));
+    //                             }
+    //                             let (variant_name, variant_ty, _) = variant;
+    //                             if *variant_ty == Statement::Null {
+    //                                 if pos_args.is_empty() {
+    //                                     return self.raise_with_help(
+    //                                         "TypeError",
+    //                                         &format!("Unexpected '()' for '{}.{}'", name, variant_name),
+    //                                         &format!("Remove '()' from '{}.{}()'", name, variant_name),
+    //                                     );
+    //                                 } else {
+    //                                     return self.raise_with_help(
+    //                                         "TypeError",
+    //                                         &format!("Variant '{}.{}' doesn't accept any arguments", name, variant_name),
+    //                                         &format!("Did you mean to use '{}.{}'", name, variant_name),
+    //                                     );
+    //                                 }
+    //                             }
+    //                             if self.err.is_some() {
+    //                                 return NULL;
+    //                             }
+    //                             let saved_variables = self.variables.clone();
+    //                             self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
+    //                             let eval_type = match self.evaluate(&variant_ty) {
+    //                                 Value::Type(t) => t,
+    //                                 e => {
+    //                                     self.variables = saved_variables;
+    //                                     if self.err.is_some() {
+    //                                         return NULL;
+    //                                     }
+    //                                     return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string()))
+    //                                 },
+    //                             };
+    //                             self.variables = saved_variables;
+    //                             if self.err.is_some() {
+    //                                 return NULL;
+    //                             }
+    //                             let variant_val = if pos_args.is_empty() {
+    //                                 NULL
+    //                             } else if pos_args.len() == 1 {
+    //                                 pos_args[0].clone()
+    //                             } else {
+    //                                 Value::Tuple(pos_args)
+    //                             };
+    //                             if self.check_type(&NULL, &eval_type).0 {
+    //                                 return self.raise_with_help(
+    //                                     "TypeError",
+    //                                     &format!("Expected a value of type '{}' for '{}.{}', but got none", eval_type.display_simple(), name, variant_name),
+    //                                     &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
+    //                                 );
+    //                             }
+    //                             if self.err.is_some() {
+    //                                 return NULL;
+    //                             }
+    //                             let idx = match get_enum_idx(&t, &variant_name) {
+    //                                 Some(u) => u,
+    //                                 None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
+    //                             };
+    //                             let v = Enum::new(
+    //                                 t.clone(),
+    //                                 (idx, variant_val)
+    //                             );
+    //                             return Value::Enum(v);
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //                 _ => {}
+    //             }
+
+    //             if let Some((var_name, props)) = self.get_properties(&object_value, false) {
+    //                 object_variable.properties = props;
+    //                 object_variable.set_name(var_name.clone());
+    //             }
+
+    //             if self.err.is_some() {
+    //                 return NULL;
+    //             }
+
+    //             let func = match object_variable.properties.get(&method_name.to_string()) {
+    //                 Some(v) => match v.get_value() {
+    //                     Value::Function(f) => f.clone(),
+    //                     other => return self.raise_with_help(
+    //                         "TypeError",
+    //                         &format!("'{}' is not callable", method_name),
+    //                         &format!("Expected a function, but got: {}", other.to_string()),
+    //                     ),
+    //                 },
+    //                 None => {
+    //                     if let Value::Struct(s) =  object_variable.get_value() {
+    //                         match s.get_field(&method_name) {
+    //                             Some(Value::Function(f)) => f.clone(),
+    //                             Some(field_val) => {
+    //                                 if !pos_args.is_empty() || !named_args.is_empty() {
+    //                                     return self.raise_with_help(
+    //                                         "TypeError",
+    //                                         &format!("Field '{}' is not callable", method_name),
+    //                                         &format!("Did you mean to access the field without '()'?"),
+    //                                     );
+    //                                 }
+    //                                 return field_val.clone();
+    //                             }
+    //                             None => {            
+    //                                 let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
+    //                                 if let Some(closest) = find_closest_match(method_name, &available_names) {
+    //                                     return self.raise_with_help(
+    //                                         "NameError",
+    //                                         &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
+    //                                         &format!("Did you mean '{}{}{}'?",
+    //                                             check_ansi("\x1b[4m", &self.config.supports_color),
+    //                                             closest,
+    //                                             check_ansi("\x1b[24m", &self.config.supports_color),
+    //                                         ),
+    //                                     );
+    //                                 } else {
+    //                                     return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
+    //                                 }
+    //                             }
+    //                         }
+    //                     } else {
+    //                         let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
+    //                         if let Some(closest) = find_closest_match(method_name, &available_names) {
+    //                             return self.raise_with_help(
+    //                                 "NameError",
+    //                                 &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
+    //                                 &format!("Did you mean '{}{}{}'?",
+    //                                     check_ansi("\x1b[4m", &self.config.supports_color),
+    //                                     closest,
+    //                                     check_ansi("\x1b[24m", &self.config.supports_color),
+    //                                 ),
+    //                             );
+    //                         } else {
+    //                             return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
+    //                         }
+    //                     }
+    //                 }
+    //             };
+    //         }
+    //     };
+
+
+    //     let result = self.call_function(
+    //         &func,
+    //         pos_args,
+    //         named_args,
+    //         Some((None, Some(&mut object_variable))),
+    //     );
+    //     return result;
+    // }
 
     fn handle_method_call(&mut self, object_stmt: Statement, method_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
         let object_value = self.evaluate(&object_stmt);
@@ -8524,12 +8750,6 @@ impl Interpreter {
             false,
             true,
         );
-
-        if let Some((_, props)) = self.get_properties(&left, true) {
-            object_variable.properties = props;
-        } else {
-            return self.raise("RuntimeError", "Failed to get struct properties");
-        }
 
         if func.is_static() {
             self.call_function(

@@ -1,5 +1,5 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method, make_native_method_pt, convert_value_to_type, to_static, parse_type, timsort_by};
+use crate::env::runtime::utils::{make_native_method_val, make_native_method_val_pt, convert_value_to_type, to_static, parse_type, timsort_by};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, RepeatingIter};
 use std::collections::HashMap;
@@ -51,7 +51,7 @@ impl Variable {
     pub fn init_properties(&mut self, interpreter: &mut Interpreter) {
         let to_string = {
             let val_clone = self.value.clone();
-            make_native_method(
+            make_native_method_val(
                 "to_string",
                 move |_args| {
                     match val_clone.to_string() {
@@ -68,7 +68,7 @@ impl Variable {
 
         let clone = {
             let val_clone = self.value.clone();
-            make_native_method_pt(
+            make_native_method_val_pt(
                 "clone",
                 move |_args| {
                     match &val_clone {
@@ -91,7 +91,7 @@ impl Variable {
         
         let is_null = {
             let val_clone = self.value.clone();
-            make_native_method(
+            make_native_method_val(
                 "is_null",
                 move |_args| {
                     Value::Boolean(val_clone.is_null())
@@ -105,7 +105,7 @@ impl Variable {
         
         let is_truthy = {
             let val_clone = self.value.clone();
-            make_native_method(
+            make_native_method_val(
                 "is_truthy",
                 move |_args| {
                     Value::Boolean(val_clone.is_truthy())
@@ -118,7 +118,7 @@ impl Variable {
         };
         let is_some = {
             let val_clone = self.value.clone();
-            make_native_method(
+            make_native_method_val(
                 "is_some",
                 move |_args| {
                     Value::Boolean(val_clone.is_truthy())
@@ -190,7 +190,7 @@ impl Variable {
             Value::String(_) => {
                 let to_bytes = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_bytes",
                         move |_args| {
                             match val_clone.to_bytes() {
@@ -206,7 +206,7 @@ impl Variable {
                 };  
                 let endswith = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "endswith",
                         move |args| {
                             if let Some(s) = args.get("suffix").and_then(|v| match v {
@@ -227,7 +227,7 @@ impl Variable {
                 };        
                 let startswith = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "startswith",
                         move |args| {
                             if let Some(s) = args.get("prefix").and_then(|v| match v {
@@ -248,7 +248,7 @@ impl Variable {
                 };
                 let to_int = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_int",
                         move |_args| {
                             match &val_clone {
@@ -264,7 +264,7 @@ impl Variable {
                 };
                 let to_float = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_float",
                         move |_args| {
                             match &val_clone {
@@ -280,7 +280,7 @@ impl Variable {
                 };
                 let split = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "split",
                         move |args| {
                             if let Some(Value::String(delim)) = args.get("delimiter") {
@@ -301,7 +301,7 @@ impl Variable {
                 };
                 let join = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "join",
                         move |args| {
                             if let Some(Value::List(parts)) = args.get("parts") {
@@ -326,7 +326,7 @@ impl Variable {
                 };
                 let trim = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "trim",
                         move |_args| {
                             match &val_clone {
@@ -342,7 +342,7 @@ impl Variable {
                 };
                 let chars = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "chars",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -359,7 +359,7 @@ impl Variable {
                 };
                 let isalpha = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "isalpha",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -375,7 +375,7 @@ impl Variable {
                 };
                 let isdigit = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "isdigit",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -391,7 +391,7 @@ impl Variable {
                 };
                 let islower = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "islower",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -407,7 +407,7 @@ impl Variable {
                 };
                 let isupper = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "isupper",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -423,7 +423,7 @@ impl Variable {
                 };
                 let isalnum = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "isalnum",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -439,7 +439,7 @@ impl Variable {
                 };
                 let isspace = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "isspace",
                         move |_args| {
                             if let Value::String(s) = &val_clone {
@@ -455,7 +455,7 @@ impl Variable {
                 };
                 let replace = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "replace",
                         move |args| {
                             if let (Some(Value::String(from)), Some(Value::String(to))) = (args.get("from"), args.get("to")) {
@@ -477,7 +477,7 @@ impl Variable {
                 };
                 let to_lower = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_lower",
                         move |_args| {
                             match &val_clone {
@@ -493,7 +493,7 @@ impl Variable {
                 };
                 let to_upper = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_upper",
                         move |_args| {
                             match &val_clone {
@@ -710,7 +710,7 @@ impl Variable {
             Value::Int(_) => {
                 let to_float = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_float",
                         move |_args| {
                             match &val_clone {
@@ -731,7 +731,7 @@ impl Variable {
             
                 let format = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "format",
                         move |args| {
                             let sep = if let Some(Value::String(s)) = args.get("sep") {
@@ -873,7 +873,7 @@ impl Variable {
             Value::Float(_) => {
                 let to_int = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_int",
                         move |_args| {
                             match &val_clone {
@@ -894,7 +894,7 @@ impl Variable {
             
                 let format = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "format",
                         move |args| {
                             let sep = if let Some(Value::String(s)) = args.get("sep") {
@@ -1029,7 +1029,7 @@ impl Variable {
 
                 let round = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "round",
                         move |args| {
                             let precision = if let Some(Value::Int(i)) = args.get("precision") {
@@ -1090,7 +1090,7 @@ impl Variable {
 
                 let append = {
                     let self_arc = Arc::clone(&self_arc);
-                    make_native_method(
+                    make_native_method_val(
                         "append",
                         move |args| {
                             if let Some(item) = args.get("item") {
@@ -1111,7 +1111,7 @@ impl Variable {
 
                 let extend = {
                     let self_arc = Arc::clone(&self_arc);
-                    make_native_method(
+                    make_native_method_val(
                         "extend",
                         move |args| {
                             if let Some(Value::List(to_extend)) = args.get("item") {
@@ -1132,7 +1132,7 @@ impl Variable {
 
                 let into = {
                     let self_arc = Arc::clone(&self_arc);
-                    make_native_method(
+                    make_native_method_val(
                         "into",
                         move |args| {
                             let locked = self_arc.lock();
@@ -1165,7 +1165,7 @@ impl Variable {
 
                 let into_gen = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "into_gen",
                         move |_args| {
                             let vec = match &val_clone {
@@ -1194,7 +1194,7 @@ impl Variable {
 
                 let into_repeating_gen = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "into_repeating_gen",
                         move |_args| {
                             let vec = match &val_clone {
@@ -1230,7 +1230,7 @@ impl Variable {
 
                 let enumerate = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "enumerate",
                         move |_args| {
                             let vec = match &val_clone {
@@ -1262,7 +1262,7 @@ impl Variable {
                 let map = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "map",
                         move |args| {
                             if let Value::List(list) = &val_clone {
@@ -1300,7 +1300,7 @@ impl Variable {
                 let filter = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "filter",
                         move |args| {
                             if let Value::List(list) = &val_clone {
@@ -1340,7 +1340,7 @@ impl Variable {
                     let value_clone = self.value.clone();
                     let interpreter_arc = Arc::new(Mutex::new(interpreter.clone()));
 
-                    make_native_method(
+                    make_native_method_val(
                         "sort",
                         {
                             let interpreter_arc = interpreter_arc.clone();
@@ -1407,7 +1407,7 @@ impl Variable {
                     let function_signature = parse_type("function[any] -> any | null");
                     let interpreter_clone = interpreter.clone();
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "all",
                         move |args| {
                             let function: Option<_> = match args.get("f") {
@@ -1460,7 +1460,7 @@ impl Variable {
                 };
                 let contains = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "contains",
                         move |args| {
                             if let Some(item) = args.get("item") {
@@ -1478,7 +1478,7 @@ impl Variable {
                 };
                 let index_of = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "index_of",
                         move |args| {
                             if let Some(item) = args.get("item") {
@@ -1658,7 +1658,7 @@ impl Variable {
             Value::Tuple(_) => {
                 let to_list = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "to_list",
                         move |_args| {
                             if let Value::Tuple(tuple) = &val_clone {
@@ -1675,7 +1675,7 @@ impl Variable {
 
                 let enumerate = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "enumerate",
                         move |_args| {
                             let vec = match &val_clone {
@@ -1730,7 +1730,7 @@ impl Variable {
             Value::Pointer(_) => {
                 let extract_ptr = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "extract_ptr",
                         move |_args| {
                             match &val_clone {
@@ -1763,7 +1763,7 @@ impl Variable {
             Value::Generator(_) => {
                 let collect = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "collect",
                         move |_args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1788,7 +1788,7 @@ impl Variable {
 
                 let collect_into = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "collect_into",
                         move |args| {
                             let type_ = args
@@ -1827,7 +1827,7 @@ impl Variable {
 
                 let next = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "next",
                         move |_args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1848,7 +1848,7 @@ impl Variable {
 
                 let is_done = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "is_done",
                         move |_args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1865,7 +1865,7 @@ impl Variable {
 
                 let peek = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "peek",
                         move |_args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1886,7 +1886,7 @@ impl Variable {
 
                 let enumerate = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "enumerate",
                         move |_args| {
                             let generator = match &val_clone {
@@ -1915,7 +1915,7 @@ impl Variable {
                 let filter = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "filter",
                         move |args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1945,7 +1945,7 @@ impl Variable {
                 let map = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "map",
                         move |args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -1974,7 +1974,7 @@ impl Variable {
                 
                 let take = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "take",
                         move |args| {
                             if let Value::Generator(generator) = &val_clone {
@@ -2106,7 +2106,7 @@ impl Variable {
             Value::Map { .. } => {
                 let get = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "get",
                         move |args| {
                             if let Some(key) = args.get("key") {
@@ -2127,7 +2127,7 @@ impl Variable {
                 let filter = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "filter",
                         move |args| {
                             if let Some(Value::Function(func)) = args.get("f") {
@@ -2170,7 +2170,7 @@ impl Variable {
                 let map = {
                     let val_clone = self.value.clone();
                     let interpreter_clone = interpreter.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "map",
                         move |args| {
                             if let Some(Value::Function(func)) = args.get("f") {
@@ -2206,7 +2206,7 @@ impl Variable {
                 };
                 let keys = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "keys",
                         move |_args| {
                             if let Value::Map { keys, .. } = &val_clone {
@@ -2222,7 +2222,7 @@ impl Variable {
                 };
                 let values = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "values",
                         move |_args| {
                             if let Value::Map { values, .. } = &val_clone {
@@ -2238,7 +2238,7 @@ impl Variable {
                 };
                 let zip = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "zip",
                         move |_args| {
                             let (keys, values) = if let Value::Map { keys, values } = &val_clone {
@@ -2256,7 +2256,7 @@ impl Variable {
                 };
                 let contains_key = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "contains_key",
                         move |args| {
                             if let Some(key) = args.get("key") {
@@ -2274,7 +2274,7 @@ impl Variable {
                 };
                 let contains_value = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "contains_value",
                         move |args| {
                             if let Some(value) = args.get("value") {
@@ -2383,7 +2383,7 @@ impl Variable {
             Value::Enum(_) => {
                 let unwrap = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "unwrap",
                         move |_| {
                             match &val_clone {
@@ -2401,7 +2401,7 @@ impl Variable {
                 };
                 let unwrap_or = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "unwrap_or",
                         move |args| {
                             match &val_clone {
@@ -2425,7 +2425,7 @@ impl Variable {
                 };
                 let discriminant = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "discriminant",
                         move |_| {
                             match &val_clone {
@@ -2479,7 +2479,7 @@ impl Variable {
             Value::Type(_) => {
                 let base_type = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "base_type",
                         move |_| {
                             if let Value::Type(t) = &val_clone {
@@ -2495,7 +2495,7 @@ impl Variable {
                 };
                 let name = {
                     let val_clone = self.value.clone();
-                    make_native_method(
+                    make_native_method_val(
                         "name",
                         move |_| {
                             if let Value::Type(t) = &val_clone {

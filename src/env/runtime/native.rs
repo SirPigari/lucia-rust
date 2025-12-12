@@ -1,17 +1,20 @@
-use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method};
+use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method, make_native_method_pt, make_native_method, make_native_shared_fn, timsort_by, convert_value_to_type, check_type_ident};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
-use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter};
+use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter, VecIter, EnumerateIter, FilterIter, MapIter, RepeatingIter};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::env::runtime::repl::read_input_no_repl;
 use crate::env::runtime::internal_structs::{EffectFlags};
 use crate::interpreter::Interpreter;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::config::{get_version};
+use imagnum::{create_int};
 use std::collections::HashMap;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
+use rustc_hash::FxHashMap;
+use parking_lot::Mutex;
 use std::io::{stdout, Write};
 
 // -------------------------------
@@ -836,4 +839,2147 @@ pub fn placeholder_fn() -> Function {
         None,
         EffectFlags::PURE,
     )))
+}
+
+#[allow(dead_code)]
+// TODO: Implement this in interpreter
+fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)> {
+    let mut methods: FxHashMap<String, (String, Function)> = FxHashMap::with_capacity_and_hasher(16, Default::default());
+
+    let to_string = {
+        make_native_method(
+            "to_string",
+            move |value, _args| {
+                Value::String(value.to_string())
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+    let clone = {
+        make_native_method(
+            "clone",
+            move |value, _args| {
+                match &value {
+                    Value::Pointer(inner_arc) => {
+                        let inner_guard = inner_arc.lock();
+                        let (inner_value, counter) = &*inner_guard;
+                        let cloned_value = inner_value.clone();
+                        Value::Pointer(Arc::new(Mutex::new((cloned_value, *counter))))
+                    },
+                    Value::Null => Value::Null,
+                    _ => value.clone(),
+                }
+            },
+            vec![],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_null = {
+        make_native_method(
+            "is_null",
+            move |value, _args| {
+                Value::Boolean(value.is_null())
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_truthy = {
+        make_native_method(
+            "is_truthy",
+            move |value, _args| {
+                Value::Boolean(value.is_truthy())
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_some = {
+        make_native_method(
+            "is_some",
+            move |value, _args| {
+                Value::Boolean(value.is_truthy())
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("to_string".to_owned(), ("any".to_owned(), to_string)),
+        ("clone".to_owned(), ("any".to_owned(), clone)),
+        ("is_null".to_owned(), ("any".to_owned(), is_null)),
+        ("is_truthy".to_owned(), ("any".to_owned(), is_truthy)),
+        ("is_some".to_owned(), ("any".to_owned(), is_some)),
+    ]);
+
+    // STRING METHODS
+
+    let to_bytes = {
+        make_native_method(
+            "to_bytes",
+            move |value, _args| {
+                match value.to_bytes() {
+                    Some(bytes) => Value::Bytes(bytes),
+                    None => Value::Null,
+                }
+            },
+            vec![],
+            "bytes",
+            true, false, true,
+            None,
+        )
+    };
+
+    let endswith = {
+        make_native_method(
+            "endswith",
+            move |value, args| {
+                if let Some(suffix_value) = args.get("suffix") {
+                    match (value, suffix_value) {
+                        (Value::String(s), Value::String(suffix)) => {
+                            Value::Boolean(s.ends_with(&*suffix))
+                        }
+                        _ => Value::Error("TypeError", "endswith() expects a string suffix", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "endswith() missing required argument 'suffix'", None)
+                }
+            },
+            vec![
+                Parameter::positional("suffix", "str"),
+            ],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let startswith = {
+        make_native_method(
+            "startswith",
+            move |value, args| {
+                if let Some(prefix_value) = args.get("prefix") {
+                    match (value, prefix_value) {
+                        (Value::String(s), Value::String(prefix)) => {
+                            Value::Boolean(s.starts_with(&*prefix))
+                        }
+                        _ => Value::Error("TypeError", "startswith() expects a string prefix", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "startswith() missing required argument 'prefix'", None)
+                }
+            },
+            vec![
+                Parameter::positional("prefix", "str"),
+            ],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let split = {
+        make_native_method(
+            "split",
+            move |value, args| {
+                if let Some(delim_value) = args.get("delimiter") {
+                    match (value, delim_value) {
+                        (Value::String(s), Value::String(delim)) => {
+                            let parts: Vec<Value> = s.split(delim.as_str())
+                                .map(|part| Value::String(part.to_string()))
+                                .collect();
+                            Value::List(parts)
+                        }
+                        _ => Value::Error("TypeError", "split() expects a string delimiter", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "split() missing required argument 'delimiter'", None)
+                }
+            },
+            vec![
+                Parameter::positional("delimiter", "str"),
+            ],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let join = {
+        make_native_method(
+            "join",
+            move |value, args| {
+                if let Some(parts_value) = args.get("parts") {
+                    match (value, parts_value) {
+                        (Value::String(s), Value::List(parts)) => {
+                            let joined: String = parts.iter()
+                                .filter_map(|v| match v {
+                                    Value::String(part) => Some(part.clone()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<String>>()
+                                .join(&s);
+                            Value::String(joined)
+                        }
+                        _ => Value::Error("TypeError", "join() expects a list of strings", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "join() missing required argument 'parts'", None)
+                }
+            },
+            vec![
+                Parameter::positional("parts", "list"),
+            ],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let trim = {
+        make_native_method(
+            "trim",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::String(s.trim().to_string()),
+                    _ => Value::Error("TypeError", "trim() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let chars = {
+        make_native_method_pt(
+            "chars",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        let char_list: Vec<Value> = s.chars().map(|c| Value::String(c.to_string())).collect();
+                        Value::List(char_list)
+                    }
+                    _ => Value::Error("TypeError", "chars() can only be called on strings", None),
+                }
+            },
+            vec![],
+            &Type::new_list(Type::new_simple("str")),
+            true, false, true,
+            None,
+        )
+    };
+
+    let isalpha = {
+        make_native_method(
+            "isalpha",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphabetic())),
+                    _ => Value::Error("TypeError", "isalpha() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let isdigit = {
+        make_native_method(
+            "isdigit",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_digit(10))),
+                    _ => Value::Error("TypeError", "isdigit() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let islower = {
+        make_native_method(
+            "islower",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_lowercase()) && s.chars().all(|c| !c.is_uppercase())),
+                    _ => Value::Error("TypeError", "islower() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let isupper = {
+        make_native_method(
+            "isupper",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_uppercase()) && s.chars().all(|c| !c.is_lowercase())),
+                    _ => Value::Error("TypeError", "isupper() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let isalnum = {
+        make_native_method(
+            "isalnum",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphanumeric())),
+                    _ => Value::Error("TypeError", "isalnum() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let isspace = {
+        make_native_method(
+            "isspace",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_whitespace())),
+                    _ => Value::Error("TypeError", "isspace() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let isnumeric = {
+        make_native_method(
+            "isnumeric",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_numeric())),
+                    _ => Value::Error("TypeError", "isnumeric() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let replace = {
+        make_native_method(
+            "replace",
+            move |value, args| {
+                if let (Some(old_value), Some(new_value)) = (args.get("old"), args.get("new")) {
+                    match (value, old_value, new_value) {
+                        (Value::String(s), Value::String(old), Value::String(new)) => {
+                            let count = match args.get("count") {
+                                Some(Value::Int(i)) => {
+                                    if *i < 0.into() { usize::MAX } else { i.to_usize().unwrap_or(usize::MAX) }
+                                }
+                                _ => usize::MAX,
+                            };
+
+                            let case_sensitive = match args.get("case_sensitive") {
+                                Some(Value::Boolean(b)) => *b,
+                                _ => true,
+                            };
+
+                            let from_left = match args.get("from_left") {
+                                Some(Value::Boolean(b)) => *b,
+                                _ => true,
+                            };
+
+                            let from_right = match args.get("from_right") {
+                                Some(Value::Boolean(b)) => *b,
+                                _ => false,
+                            };
+
+                            let result = if case_sensitive {
+                                if from_right {
+                                    let parts = s.rsplitn(count + 1, old).collect::<Vec<_>>();
+                                    parts.join(new)
+                                } else if from_left {
+                                    let parts = s.splitn(count + 1, old).collect::<Vec<_>>();
+                                    parts.join(new)
+                                } else {
+                                    s.replacen(old, new, count)
+                                }
+                            } else {
+                                let mut result = s.clone();
+                                let old_lower = old.to_lowercase();
+
+                                if from_left || from_right {
+                                    let mut indices = vec![];
+                                    let mut pos = 0;
+
+                                    let lower = result.to_lowercase();
+                                    while let Some(found) = lower[pos..].find(&old_lower) {
+                                        indices.push(pos + found);
+                                        pos = pos + found + old.len();
+                                    }
+
+                                    if from_right {
+                                        indices.reverse();
+                                    }
+
+                                    let mut replaced = String::with_capacity(result.len());
+                                    let mut last = 0;
+                                    let mut performed = 0;
+
+                                    for idx in indices {
+                                        if performed >= count {
+                                            break;
+                                        }
+                                        replaced.push_str(&result[last..idx]);
+                                        replaced.push_str(new);
+                                        last = idx + old.len();
+                                        performed += 1;
+                                    }
+
+                                    replaced.push_str(&result[last..]);
+                                    result = replaced;
+                                } else {
+                                    let mut lower = result.to_lowercase();
+                                    let mut performed = 0;
+                                    let mut start = 0;
+
+                                    while let Some(pos) = lower[start..].find(&old_lower) {
+                                        if performed >= count {
+                                            break;
+                                        }
+                                        let real = start + pos;
+                                        result.replace_range(real..real + old.len(), new);
+
+                                        lower = result.to_lowercase();
+                                        start = real + new.len();
+                                        performed += 1;
+                                    }
+                                }
+
+                                result
+                            };
+
+                            Value::String(result)
+                        }
+                        _ => Value::Error("TypeError", "replace() expects string arguments", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "replace() missing required arguments 'old' and 'new'", None)
+                }
+            },
+            vec![
+                Parameter::positional("old", "str"),
+                Parameter::positional("new", "str"),
+                Parameter::positional_optional("count", "int", Value::Int((-1).into())),
+                Parameter::keyword_optional("case_sensitive", "bool", Value::Boolean(true)),
+                Parameter::keyword_optional("from_left", "bool", Value::Boolean(true)),
+                Parameter::keyword_optional("from_right", "bool", Value::Boolean(false)),
+            ],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let to_upper = {
+        make_native_method(
+            "to_upper",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::String(s.to_uppercase()),
+                    _ => Value::Error("TypeError", "to_upper() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let to_lower = {
+        make_native_method(
+            "to_lower",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => Value::String(s.to_lowercase()),
+                    _ => Value::Error("TypeError", "to_lower() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let ord = {
+        make_native_method(
+            "ord",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        let mut chars = s.chars();
+                        if let Some(c) = chars.next() {
+                            if chars.next().is_none() {
+                                Value::Int((c as u32).into())
+                            } else {
+                                Value::Error("ValueError", "ord() expected a single character string", None)
+                            }
+                        } else {
+                            Value::Error("ValueError", "ord() expected a non-empty string", None)
+                        }
+                    }
+                    _ => Value::Error("TypeError", "ord() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("to_bytes".to_owned(), ("str".to_owned(), to_bytes)),
+        ("endswith".to_owned(), ("str".to_owned(), endswith)),
+        ("startswith".to_owned(), ("str".to_owned(), startswith)),
+        ("split".to_owned(), ("str".to_owned(), split)),
+        ("join".to_owned(), ("str".to_owned(), join)),
+        ("trim".to_owned(), ("str".to_owned(), trim)),
+        ("chars".to_owned(), ("str".to_owned(), chars)),
+        ("isalpha".to_owned(), ("str".to_owned(), isalpha)),
+        ("isdigit".to_owned(), ("str".to_owned(), isdigit)),
+        ("islower".to_owned(), ("str".to_owned(), islower)),
+        ("isupper".to_owned(), ("str".to_owned(), isupper)),
+        ("isalnum".to_owned(), ("str".to_owned(), isalnum)),
+        ("isspace".to_owned(), ("str".to_owned(), isspace)),
+        ("isnumeric".to_owned(), ("str".to_owned(), isnumeric)),
+        ("replace".to_owned(), ("str".to_owned(), replace)),
+        ("to_upper".to_owned(), ("str".to_owned(), to_upper)),
+        ("to_lower".to_owned(), ("str".to_owned(), to_lower)),
+        ("ord".to_owned(), ("str".to_owned(), ord)),
+    ]);
+
+    // INT METHODS
+
+    let to_float = {
+        make_native_method(
+            "to_float",
+            move |value, _args| {
+                match value {
+                    Value::Int(i) => match i.to_float() {
+                        Ok(f) => Value::Float(f),
+                        Err(_) => Value::Error("TypeError", "Failed to convert int to float", None),
+                    },
+                    _ => Value::Error("TypeError", "to_float() can only be called on int", None),
+                }
+            },
+            vec![],
+            "float",
+            true, false, true,
+            None,
+        )
+    };
+
+    let format = {
+        make_native_method(
+            "format",
+            move |value, args| {
+                if let Value::Int(val) = value {
+                    let sep = if let Some(Value::String(s)) = args.get("sep") {
+                        s.as_str()
+                    } else {
+                        "_"
+                    };
+            
+                    let width = if let Some(Value::Int(i)) = args.get("width") {
+                        i.to_i64().unwrap_or(0)
+                    } else {
+                        0
+                    };
+            
+                    let pad = if let Some(Value::String(p)) = args.get("pad") {
+                        p.chars().next().unwrap_or(' ')
+                    } else {
+                        ' '
+                    };
+            
+                    let show_plus = if let Some(Value::Boolean(b)) = args.get("show_plus") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let base = if let Some(Value::Int(i)) = args.get("base") {
+                        i.to_i64().unwrap_or(10)
+                    } else {
+                        10
+                    };
+            
+                    let abbreviate = if let Some(Value::Boolean(b)) = args.get("abbreviate") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let paren_neg = if let Some(Value::Boolean(b)) = args.get("paren_neg") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let mut s = match base {
+                        2 => format!("0b{:b}", val),
+                        8 => format!("0o{:o}", val),
+                        16 => format!("0x{:x}", val),
+                        _ => val.to_string(),
+                    };
+            
+                    if abbreviate {
+                        let mut f = val.to_i64().unwrap_or(0) as f64;
+                        let units = ["", "K", "M", "B", "T"];
+                        let mut idx = 0;
+                        while f.abs() >= 1000.0 && idx < units.len() as i64 - 1 {
+                            f /= 1000.0;
+                            idx += 1;
+                        }
+                        s = format!("{:.2}{}", f, units[idx as usize]);
+                    } else if base == 10 {
+                        let val_str = s.clone();
+                        let chars: Vec<char> = val_str.chars().collect();
+                        let (start, negative) = if chars.get(0) == Some(&'-') {
+                            (1, true)
+                        } else {
+                            (0, false)
+                        };
+                        let mut result = String::with_capacity(s.len() + (s.len() / 3));
+                        let mut count = 0;
+                        for i in (start..chars.len() as i64).rev() {
+                            if count > 0 && count % 3 == 0 {
+                                result = format!("{}{}", sep, result);
+                            }
+                            result.insert(0, chars[i as usize]);
+                            count += 1;
+                        }
+                        if negative {
+                            result.insert(0, '-');
+                        }
+                        s = result;
+                    }
+                    if paren_neg && s.starts_with('-') {
+                        s = format!("({})", &s[1..]);
+                    } else if show_plus && !s.starts_with('-') {
+                        s = format!("+{}", s);
+                    }
+                    if width > s.len() as i64 {
+                        let padding = std::iter::repeat(pad).take((width - s.len() as i64).try_into().unwrap()).collect::<String>();
+                        s = format!("{}{}", padding, s);
+                    }
+                    Value::String(s)
+                } else {
+                    Value::Error("TypeError", "format() can only be called on int", None)
+                }
+            },
+            vec![
+                Parameter::positional_optional("sep", "str", Value::String("_".to_string())),
+                Parameter::positional_optional("width", "int", Value::Int(0.into())),
+                Parameter::positional_optional("pad", "str", Value::String(" ".to_string())),
+                Parameter::positional_optional("show_plus", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("base", "int", Value::Int(10.into())),
+                Parameter::positional_optional("abbreviate", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("paren_neg", "bool", Value::Boolean(false)),
+            ],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let display = {
+        make_native_method(
+            "display",
+            move |value, _args| {
+                Value::String(value.to_string())
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_even = {
+        make_native_method(
+            "is_even",
+            move |value, _args| {
+                match value {
+                    Value::Int(i) => Value::Boolean((&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
+                    _ => Value::Error("TypeError", "is_even() can only be called on int", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_odd = {
+        make_native_method(
+            "is_odd",
+            move |value, _args| {
+                match value {
+                    Value::Int(i) => Value::Boolean(!(&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
+                    _ => Value::Error("TypeError", "is_odd() can only be called on int", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("to_float".to_owned(), ("int".to_owned(), to_float)),
+        ("format".to_owned(), ("int".to_owned(), format)),
+        ("display".to_owned(), ("int".to_owned(), display)),
+        ("is_even".to_owned(), ("int".to_owned(), is_even)),
+        ("is_odd".to_owned(), ("int".to_owned(), is_odd)),
+    ]);
+
+    // FLOAT METHODS
+
+    let to_int = {
+        make_native_method(
+            "to_int",
+            move |value, _args| {
+                match value {
+                    Value::Float(f) => match f.to_int() {
+                        Ok(i) => Value::Int(i),
+                        Err(_) => Value::Error("TypeError", "Failed to convert Float to Int", None),
+                    },
+                    _ => Value::Error("TypeError", "to_int() can only be called on float", None),
+                }
+            },
+            vec![],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    let format = {
+        make_native_method(
+            "format",
+            move |value, args| {
+                if let Value::Float(val) = value {
+                    let sep = if let Some(Value::String(s)) = args.get("sep") {
+                        s.as_str()
+                    } else {
+                        "_"
+                    };
+            
+                    let precision = if let Some(Value::Int(i)) = args.get("precision") {
+                        i.to_i64().unwrap_or(6)
+                    } else {
+                        6
+                    };
+            
+                    let width = if let Some(Value::Int(i)) = args.get("width") {
+                        i.to_i64().unwrap_or(0)
+                    } else {
+                        0
+                    };
+            
+                    let pad = if let Some(Value::String(p)) = args.get("pad") {
+                        p.chars().next().unwrap_or(' ')
+                    } else {
+                        ' '
+                    };
+            
+                    let show_plus = if let Some(Value::Boolean(b)) = args.get("show_plus") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let scientific = if let Some(Value::Boolean(b)) = args.get("scientific") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let abbreviate = if let Some(Value::Boolean(b)) = args.get("abbreviate") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let paren_neg = if let Some(Value::Boolean(b)) = args.get("paren_neg") {
+                        *b
+                    } else {
+                        false
+                    };
+            
+                    let mut f = val.to_f64().unwrap_or(0.0);
+                    let mut s = if scientific {
+                        format!("{:.*e}", precision as usize, f)
+                    } else if abbreviate {
+                        let units = ["", "K", "M", "B", "T"];
+                        let mut idx = 0;
+                        while f.abs() >= 1000.0 && idx < units.len() as i64 - 1 {
+                            f /= 1000.0;
+                            idx += 1;
+                        }
+                        format!("{:.2}{}", f, units[idx as usize])
+                    } else {
+                        format!("{:.*}", precision as usize, f)
+                    };
+            
+                    if s.contains('.') {
+                        s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+                    }
+                    if !scientific && !abbreviate && s.contains('.') {
+                        let parts: Vec<&str> = s.split('.').collect();
+                        let int_part = parts[0];
+                        let frac_part = parts.get(1).copied().unwrap_or("");
+                        let chars: Vec<char> = int_part.chars().collect();
+            
+                        let (start, negative) = if chars.get(0) == Some(&'-') {
+                            (1, true)
+                        } else {
+                            (0, false)
+                        };
+            
+                        let mut result = String::new();
+                        let mut count = 0;
+                        for i in (start..chars.len() as usize).rev() {
+                            if count > 0 && count % 3 == 0 {
+                                result = format!("{}{}", sep, result);
+                            }
+                            result.insert(0, chars[i]);
+                            count += 1;
+                        }
+                        if negative {
+                            result.insert(0, '-');
+                        }
+            
+                        result.push('.');
+                        result.push_str(frac_part);
+                        s = result;
+                    }
+                    if paren_neg && s.starts_with('-') {
+                        s = format!("({})", &s[1..]);
+                    } else if show_plus && !s.starts_with('-') {
+                        s = format!("+{}", s);
+                    }
+                    if width > s.len() as i64 {
+                        let padding = std::iter::repeat(pad).take((width - s.len() as i64).try_into().unwrap()).collect::<String>();
+                        s = format!("{}{}", padding, s);
+                    }
+                    Value::String(s)
+                } else {
+                    Value::Error("TypeError", "format() can only be called on float", None)
+                }
+            },
+            vec![
+                Parameter::positional_optional("sep", "str", Value::String("_".to_string())),
+                Parameter::positional_optional("precision", "int", Value::Int(6.into())),
+                Parameter::positional_optional("width", "int", Value::Int(0.into())),
+                Parameter::positional_optional("pad", "str", Value::String(" ".to_string())),
+                Parameter::positional_optional("show_plus", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("scientific", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("abbreviate", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("paren_neg", "bool", Value::Boolean(false)),
+            ],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let display = {
+        make_native_method(
+            "display",
+            move |value, _args| {
+                Value::String(value.to_string())
+            },
+            vec![],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
+    let round = {
+        make_native_method(
+            "round",
+            move |value, args| {
+                let precision = if let Some(Value::Int(i)) = args.get("precision") {
+                    i.to_i64().unwrap_or(0)
+                } else {
+                    0
+                };
+        
+                if let Value::Float(val) = value {
+                    return Value::Float(val.round(precision as usize));
+                }
+        
+                Value::Error("TypeError", "round() can only be called on float", None)
+            },
+            vec![Parameter::positional_optional("precision", "int", Value::Int(0.into()))],
+            "float",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("to_int".to_owned(), ("float".to_owned(), to_int)),
+        ("format".to_owned(), ("float".to_owned(), format)),
+        ("display".to_owned(), ("float".to_owned(), display)),
+        ("round".to_owned(), ("float".to_owned(), round)),
+    ]);
+
+    // LIST METHODS
+
+    let append = {
+        make_native_method(
+            "append",
+            move |value, args| {
+                if let Some(item) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            let mut new_list = list.clone();
+                            new_list.push(item.clone());
+                            Value::List(new_list)
+                        }
+                        _ => Value::Error("TypeError", "append() can only be called on lists", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "append() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "any")],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let push = {
+        make_native_method(
+            "push",
+            |value, args| {
+                if let Some(item) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            list.push(item.clone());
+                            Value::Null
+                        }
+                        _ => Value::Error("TypeError", "push() can only be called on lists", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "push() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "any")],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let extend_list = {
+        make_native_method(
+            "extend",
+            |value, args| {
+                if let Some(Value::List(to_extend)) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            list.extend(to_extend.clone());
+                            Value::Null
+                        }
+                        _ => Value::Error("TypeError", "extend() can only be called on lists", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "extend() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "list")],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let into_list = {
+        make_native_method(
+            "into",
+            move |value, args| {
+                let type_ = args
+                    .get("ty")
+                    .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
+                    .unwrap_or_else(|| "any".to_string());
+
+                let item_vec = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "into() can only be called on lists", None),
+                };
+
+                let mut list = Vec::with_capacity(item_vec.len());
+                for item in item_vec {
+                    match convert_value_to_type(&type_, &item) {
+                        Ok(converted) => list.push(converted),
+                        Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                    }
+                }
+
+                Value::List(list)
+            },
+            vec![Parameter::positional("ty", "type")],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let into_gen = {
+        make_native_method(
+            "into_gen",
+            move |value, _args| {
+                let vec = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "into_gen() can only be called on lists", None),
+                };
+                
+                let vec_iter = VecIter::new(&vec);
+
+                let generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(vec_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let into_repeating_gen = {
+        make_native_method(
+            "into_repeating_gen",
+            move |value, _args| {
+                let vec = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "into_repeating_gen() can only be called on lists", None),
+                };
+                
+                let vec_iter = VecIter::new(&vec);
+                let generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(vec_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+                let repeating_iter = RepeatingIter::new(&generator);
+                let repeating_generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(repeating_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(repeating_generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let enumarate_list = {
+        make_native_method(
+            "enumerate",
+            move |value, _args| {
+                let vec = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "enumerate() can only be called on lists", None),
+                };
+                let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
+                    Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
+                }).collect::<Vec<Value>>();
+                let vec_iter = VecIter::new(&vec_enumerated);
+
+                let generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(vec_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let map_list = {
+        make_native_shared_fn(
+            "map",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let vec = match value {
+                        Value::List(list) => list.clone(),
+                        _ => return Value::Error("TypeError", "map() can only be called on lists", None),
+                    };
+                    let vec_iter = VecIter::new(&vec);
+                    let vec_gen = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(vec_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    let map_iter = MapIter::new(&vec_gen, func.clone(), interpreter);
+                    let generator = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(map_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    return Value::Generator(generator);
+                } else {
+                    return Value::Error("TypeError", "map() missing required argument 'f'", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let filter_list = {
+        make_native_shared_fn(
+            "filter",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let vec = match value {
+                        Value::List(list) => list.clone(),
+                        _ => return Value::Error("TypeError", "filter() can only be called on lists", None),
+                    };
+                    let vec_iter = VecIter::new(&vec);
+                    let vec_gen = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(vec_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    let filter_iter = FilterIter::new(&vec_gen, func.clone(), interpreter);
+                    let generator = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(filter_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    return Value::Generator(generator);
+                } else {
+                    return Value::Error("TypeError", "filter() missing required argument 'f'", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let sort = {
+        make_native_shared_fn(
+            "sort",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
+
+                let function: Option<_> = match args.get("f") {
+                    Some(Value::Function(func)) => Some(func.clone()),
+                    Some(Value::Null) | None => None,
+                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                };
+
+                let items = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "sort() can only be called on lists", None),
+                };
+                let mut keys = Vec::with_capacity(items.len());
+                if let Some(function) = function {
+                    for item in &items {
+                        let key_res = interpreter.call_function(
+                            &function,
+                            vec![item.clone()],
+                            std::collections::HashMap::default(),
+                            None,
+                        );
+
+                        if interpreter.err.is_some() {
+                            return interpreter.err.take().unwrap().to_value();
+                        }
+
+                        keys.push(key_res);
+                    }
+                } else {
+                    keys = items.clone();
+                }
+                let mut indices: Vec<usize> = (0..items.len()).collect();
+
+                timsort_by(&mut indices, |&i, &j| {
+                    let ord = keys[i]
+                        .partial_cmp(&keys[j])
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if reverse { ord.reverse() } else { ord }
+                });
+                let sorted_items: Vec<Value> = indices.into_iter().map(|i| items[i].clone()).collect();
+                Value::List(sorted_items)
+            },
+            vec![
+                Parameter::positional_optional("f", "function", Value::Null),
+                Parameter::keyword_optional("reverse", "bool", Value::Boolean(false)),
+            ],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let all = {
+        make_native_shared_fn(
+            "all",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                let function: Option<_> = match args.get("f") {
+                    Some(Value::Function(func)) => Some(func.clone()),
+                    Some(Value::Null) | None => None,
+                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                };
+
+                let items = match value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "all() can only be called on lists", None),
+                };
+
+                for item in &items {
+                    let result = if let Some(function) = &function {
+                        let res = interpreter.call_function(
+                            function,
+                            vec![item.clone()],
+                            std::collections::HashMap::default(),
+                            None,
+                        );
+
+                        if interpreter.err.is_some() {
+                            return interpreter.err.take().unwrap().to_value();
+                        }
+
+                        res
+                    } else {
+                        item.clone()
+                    };
+
+                    match result {
+                        Value::Boolean(b) => {
+                            if !b {
+                                return Value::Boolean(false);
+                            }
+                        }
+                        _ => return Value::Error("TypeError", "Function must return a boolean", None),
+                    }
+                }
+
+                Value::Boolean(true)
+            },
+            vec![Parameter::positional_optional("f", "function", Value::Null)],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let clear = {
+        make_native_method(
+            "clear",
+            |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        list.clear();
+                        Value::Null
+                    }
+                    _ => Value::Error("TypeError", "clear() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "null",
+            true, false, true,
+            None,
+        )
+    };
+
+    let contains = {
+        make_native_method(
+            "contains",
+            move |value, args| {
+                if let Some(item) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            for elem in list {
+                                if elem == item {
+                                    return Value::Boolean(true);
+                                }
+                            }
+                            Value::Boolean(false)
+                        }
+                        _ => Value::Error("TypeError", "contains() can only be called on lists", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "contains() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "any")],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let index_of = {
+        make_native_method(
+            "index_of",
+            move |value, args| {
+                if let Some(item) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            for (i, elem) in list.iter().enumerate() {
+                                if elem == item {
+                                    return Value::Int(create_int(&(i as i64).to_string()));
+                                }
+                            }
+                            Value::Error("ValueError", "Item not found in list", None)
+                        }
+                        _ => Value::Error("TypeError", "index_of() can only be called on lists", None),
+                    }
+                } else {
+                    Value::Error("TypeError", "index_of() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "any")],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("append".to_owned(), ("list".to_owned(), append)),
+        ("push".to_owned(), ("list".to_owned(), push)),
+        ("extend".to_owned(), ("list".to_owned(), extend_list)),
+        ("into".to_owned(), ("list".to_owned(), into_list)),
+        ("into_gen".to_owned(), ("list".to_owned(), into_gen.clone())),
+        ("iter".to_owned(), ("list".to_owned(), into_gen)),
+        ("into_repeating_gen".to_owned(), ("list".to_owned(), into_repeating_gen.clone())),
+        ("repeating_iter".to_owned(), ("list".to_owned(), into_repeating_gen)),
+        ("enumerate".to_owned(), ("list".to_owned(), enumarate_list)),
+        ("map".to_owned(), ("list".to_owned(), map_list)),
+        ("filter".to_owned(), ("list".to_owned(), filter_list)),
+        ("sort".to_owned(), ("list".to_owned(), sort)),
+        ("all".to_owned(), ("list".to_owned(), all)),
+        ("clear".to_owned(), ("list".to_owned(), clear)),
+        ("contains".to_owned(), ("list".to_owned(), contains)),
+        ("index_of".to_owned(), ("list".to_owned(), index_of)),
+    ]);
+
+    // TUPLE METHODS
+
+    let to_list = {
+        make_native_method(
+            "to_list",
+            move |value, _args| {
+                if let Value::Tuple(tuple) = value {
+                    return Value::List(tuple.to_vec());
+                }
+                Value::Null
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let enumerate_tuple = {
+        make_native_method(
+            "enumerate",
+            move |value, _args| {
+                let vec = match value {
+                    Value::Tuple(v) => v.clone(),
+                    _ => return Value::Error("TypeError", "Expected a tuple", None),
+                };
+                let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
+                    Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
+                }).collect::<Vec<Value>>();
+                let vec_iter = VecIter::new(&vec_enumerated);
+
+                let generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(vec_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("to_list".to_owned(), ("tuple".to_owned(), to_list)),
+        ("enumerate".to_owned(), ("tuple".to_owned(), enumerate_tuple)),
+    ]);
+
+    // POINTER METHODS
+
+    let extract_ptr = {
+        make_native_method(
+            "extract_ptr",
+            move |value, _args| {
+                match value {
+                    Value::Pointer(ptr_arc) => {
+                        let raw_ptr: *const Mutex<(Value, usize)> = Arc::as_ptr(ptr_arc);
+                        Value::Int((raw_ptr as usize).into())
+                    }
+                    _ => Value::Null,
+                }
+            },
+            vec![],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("extract_ptr".to_owned(), ("&any".to_owned(), extract_ptr)),
+    ]);
+
+    // GENERATOR METHODS
+
+    let collect = {
+        make_native_method(
+            "collect",
+            move |value, _args| {
+                if let Value::Generator(generator) = value {
+                    if !generator.is_infinite() {
+                        let v = generator.to_vec();
+                        if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                            return Value::Error(err_type, err_msg, ref_err.clone());
+                        }
+                        return Value::List(v);
+                    } else {
+                        return Value::Error("TypeError", "Cannot convert infinite generator to list", None);
+                    }
+                }
+                Value::Null
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let collect_into = {
+        make_native_method(
+            "collect_into",
+            move |value, args| {
+                let type_ = args
+                    .get("ty")
+                    .and_then(|v| if let Value::Type(t) = v { Some(t.display_simple()) } else { None })
+                    .unwrap_or_else(|| "any".to_string());
+
+                let item_vec = match value {
+                    Value::Generator(generator) if !generator.is_infinite() => {
+                        let v = generator.to_vec();
+                        if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                            return Value::Error(err_type, err_msg, ref_err.clone());
+                        }
+                        v
+                    }
+                    Value::Generator(_) => return Value::Error("TypeError", "Cannot convert infinite generator to list", None),
+                    _ => return Value::Error("TypeError", "Expected a generator", None),
+                };
+
+                let mut list = Vec::with_capacity(item_vec.len());
+                for item in item_vec {
+                    match convert_value_to_type(&type_, &item) {
+                        Ok(converted) => list.push(converted),
+                        Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                    }
+                }
+
+                Value::List(list)
+            },
+            vec![Parameter::positional("ty", "type")],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let next = {
+        make_native_method(
+            "next",
+            move |value, _args| {
+                if let Value::Generator(generator) = value {
+                    if let Some(next_value) = generator.next() {
+                        return next_value;
+                    } else {
+                        return Value::Error("StopIteration", "No more items in generator", None);
+                    }
+                }
+                Value::Null
+            },
+            vec![],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
+
+    let is_done = {
+        make_native_method(
+            "is_done",
+            move |value, _args| {
+                if let Value::Generator(generator) = value {
+                    return Value::Boolean(generator.is_done());
+                }
+                Value::Null
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let peek = {
+        make_native_method(
+            "peek",
+            move |value, _args| {
+                if let Value::Generator(generator) = value {
+                    if let Some(peeked_value) = generator.peek() {
+                        return peeked_value;
+                    } else {
+                        return Value::Error("StopIteration", "No more items in generator", None);
+                    }
+                }
+                Value::Null
+            },
+            vec![],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
+
+    let enumerate_gen = {
+        make_native_method(
+            "enumerate",
+            move |value, _args| {
+                let generator = match value {
+                    Value::Generator(generator) => generator,
+                    _ => return Value::Error("TypeError", "Expected a generator", None),
+                };
+                let enumerate_iter = EnumerateIter::new(generator);
+
+                let generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(enumerate_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let map_gen = {
+        make_native_shared_fn(
+            "map",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let generator = match value {
+                        Value::Generator(generator) => generator,
+                        _ => return Value::Error("TypeError", "map() can only be called on generators", None),
+                    };
+                    let map_iter = MapIter::new(&generator, func.clone(), interpreter);
+                    let generator = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(map_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    return Value::Generator(generator);
+                } else {
+                    return Value::Error("TypeError", "map() missing required argument 'f'", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let filter_gen = {
+        make_native_shared_fn(
+            "filter",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let generator = match value {
+                        Value::Generator(generator) => generator,
+                        _ => return Value::Error("TypeError", "filter() can only be called on generators", None),
+                    };
+                    let filter_iter = FilterIter::new(&generator, func.clone(), interpreter);
+                    let generator = Generator::new_anonymous(
+                        GeneratorType::Native(NativeGenerator {
+                            iter: Box::new(filter_iter),
+                            iteration: 0,
+                        }),
+                        false,
+                    );
+                    return Value::Generator(generator);
+                } else {
+                    return Value::Error("TypeError", "filter() missing required argument 'f'", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let repeating = {
+        make_native_method(
+            "repeating",
+            move |value, _args| {
+                let generator = match value {
+                    Value::Generator(generator) => generator,
+                    _ => return Value::Error("TypeError", "repeating() can only be called on generators", None),
+                };
+                let repeating_iter = RepeatingIter::new(generator);
+                let repeating_generator = Generator::new_anonymous(
+                    GeneratorType::Native(NativeGenerator {
+                        iter: Box::new(repeating_iter),
+                        iteration: 0,
+                    }),
+                    false,
+                );
+
+                Value::Generator(repeating_generator)
+            },
+            vec![],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    let take = {
+        make_native_method(
+            "take",
+            move |value, args| {
+                if let Value::Generator(generator) = value {
+                    if let Some(Value::Int(n)) = args.get("n") {
+                        let n = n.to_usize().unwrap_or(0);
+                        let taken_values: Vec<Value> = generator.take(n as usize);
+                        let vec_iter = VecIter::new(&taken_values);
+                        let generator = Generator::new_anonymous(
+                            GeneratorType::Native(NativeGenerator {
+                                iter: Box::new(vec_iter),
+                                iteration: 0,
+                            }),
+                            false,
+                        );
+                        return Value::Generator(generator);
+                    } else {
+                        return Value::Error("TypeError", "Expected 'n' to be an integer", None);
+                    }
+                }
+                Value::Null
+            },
+            vec![Parameter::positional("n", "int")],
+            "generator",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("collect".to_owned(), ("generator".to_owned(), collect)),
+        ("collect_into".to_owned(), ("generator".to_owned(), collect_into)),
+        ("next".to_owned(), ("generator".to_owned(), next)),
+        ("is_done".to_owned(), ("generator".to_owned(), is_done)),
+        ("peek".to_owned(), ("generator".to_owned(), peek)),
+        ("enumerate".to_owned(), ("generator".to_owned(), enumerate_gen)),
+        ("map".to_owned(), ("generator".to_owned(), map_gen)),
+        ("filter".to_owned(), ("generator".to_owned(), filter_gen)),
+        ("repeating".to_owned(), ("generator".to_owned(), repeating)),
+        ("take".to_owned(), ("generator".to_owned(), take)),
+    ]);
+
+    // MAP METHODS
+
+    let get = {
+        make_native_method(
+            "get",
+            move |value, args| {
+                if let Some(key) = args.get("key") {
+                    if let Value::Map { keys: map_keys, values: map_values } = value {
+                        if let Some(index) = map_keys.iter().position(|k| k == key) {
+                            return map_values.get(index).cloned().unwrap_or(Value::Null);
+                        }
+                    }
+                }
+                Value::Null
+            },
+            vec![Parameter::positional("key", "any")],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
+
+    let filter_map = {
+        make_native_shared_fn(
+            "filter",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let (keys, values) = if let Value::Map { keys, values } = value {
+                        (keys.clone(), values.clone())
+                    } else {
+                        return Value::Error("TypeError", "Expected a map", None);
+                    };
+
+                    let (new_keys, new_values): (Vec<Value>, Vec<Value>) = keys.iter().zip(values.iter()).filter_map(|(key, val)| {
+                        let result = interpreter.call_function(
+                            func,
+                            vec![key.clone(), val.clone()],
+                            HashMap::default(),
+                            None
+                        );
+                        if result.is_truthy() {
+                            Some((key.clone(), val.clone()))
+                        } else {
+                            None
+                        }
+                    }).unzip();
+
+                    return Value::Map {
+                        keys: new_keys,
+                        values: new_values,
+                    };
+                } else {
+                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "map",
+            true, false, true,
+            None,
+        )
+    };
+
+    let map_map = {
+        make_native_shared_fn(
+            "map",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let (keys, values) = if let Value::Map { keys, values } = value {
+                        (keys.clone(), values.clone())
+                    } else {
+                        return Value::Error("TypeError", "Expected a map", None);
+                    };
+
+                    let new_values: Vec<Value> = keys.iter().zip(values.iter()).map(|(key, val)| {
+                        interpreter.call_function(
+                            func,
+                            vec![key.clone(), val.clone()],
+                            HashMap::default(), None
+                        )
+                    }).collect();
+
+                    return Value::Map {
+                        keys: keys.clone(),
+                        values: new_values,
+                    };
+                } else {
+                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                }
+            },
+            vec![Parameter::positional("f", "function")],
+            "map",
+            true, false, true,
+            None,
+        )
+    };
+
+    let keys = {
+        make_native_method(
+            "keys",
+            move |value, _args| {
+                if let Value::Map { keys, .. } = value {
+                    return Value::List(keys.clone());
+                }
+                Value::Null
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let values = {
+        make_native_method(
+            "values",
+            move |value, _args| {
+                if let Value::Map { values, .. } = value {
+                    return Value::List(values.clone());
+                }
+                Value::Null
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let zip = {
+        make_native_method(
+            "zip",
+            move |value, _args| {
+                if let Value::Map { keys, values } = value {
+                    let zipped: Vec<Value> = keys.iter().zip(values.iter()).map(|(k, v)| {
+                        Value::Tuple(vec![k.clone(), v.clone()])
+                    }).collect();
+                    return Value::List(zipped);
+                }
+                Value::Null
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
+    let contains_key = {
+        make_native_method(
+            "contains_key",
+            move |value, args| {
+                if let Some(key) = args.get("key") {
+                    if let Value::Map { keys: map_keys, .. } = value {
+                        for k in map_keys {
+                            if k == key {
+                                return Value::Boolean(true);
+                            }
+                        }
+                    }
+                }
+                Value::Boolean(false)
+            },
+            vec![Parameter::positional("key", "any")],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let contains_value = {
+        make_native_method(
+            "contains_value",
+            move |value, args| {
+                if let Some(val) = args.get("value") {
+                    if let Value::Map { values: map_values, .. } = value {
+                        for v in map_values {
+                            if v == val {
+                                return Value::Boolean(true);
+                            }
+                        }
+                    }
+                }
+                Value::Boolean(false)
+            },
+            vec![Parameter::positional("value", "any")],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
+
+    let insert = {
+        make_native_method(
+            "insert",
+            move |value, args| {
+                if let (Some(key), Some(val)) = (args.get("key"), args.get("value")) {
+                    if let Value::Map { keys: map_keys, values: map_values } = value {
+                        for (i, k) in map_keys.iter().enumerate() {
+                            if k == key {
+                                map_values[i] = val.clone();
+                                return Value::Null;
+                            }
+                        }
+                        map_keys.push(key.clone());
+                        map_values.push(val.clone());
+                        return Value::Null;
+                    }
+                }
+                Value::Error("TypeError", "Expected a map and both 'key' and 'value' arguments", None)
+            },
+            vec![
+                Parameter::positional("key", "any"),
+                Parameter::positional("value", "any"),
+            ],
+            "null",
+            true, false, true,
+            None,
+        )
+    };
+
+    let clear = {
+        make_native_method(
+            "clear",
+            move |value, _args| {
+                if let Value::Map { keys: map_keys, values: map_values } = value {
+                    map_keys.clear();
+                    map_values.clear();
+                    return Value::Null;
+                }
+                Value::Error("TypeError", "Expected a map", None)
+            },
+            vec![],
+            "null",
+            true, false, true,
+            None,
+        )
+    };
+
+    let extend_map = {
+        make_native_method(
+            "extend",
+            move |value, args| {
+                if let Some(Value::Map { keys: other_keys, values: other_values }) = args.get("other") {
+                    if let Value::Map { keys: map_keys, values: map_values } = value {
+                        for (k, v) in other_keys.iter().zip(other_values.iter()) {
+                            let mut found = false;
+                            for (i, existing_key) in map_keys.iter().enumerate() {
+                                if existing_key == k {
+                                    map_values[i] = v.clone();
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+                                map_keys.push(k.clone());
+                                map_values.push(v.clone());
+                            }
+                        }
+                        return Value::Null;
+                    }
+                }
+                Value::Error("TypeError", "Expected a map and 'other' argument to be a map", None)
+            },
+            vec![Parameter::positional("other", "map")],
+            "null",
+            true, false, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("get".to_owned(), ("map".to_owned(), get)),
+        ("filter".to_owned(), ("map".to_owned(), filter_map)),
+        ("map".to_owned(), ("map".to_owned(), map_map)),
+        ("keys".to_owned(), ("map".to_owned(), keys)),
+        ("values".to_owned(), ("map".to_owned(), values)),
+        ("zip".to_owned(), ("map".to_owned(), zip)),
+        ("contains_key".to_owned(), ("map".to_owned(), contains_key)),
+        ("contains_value".to_owned(), ("map".to_owned(), contains_value)),
+        ("insert".to_owned(), ("map".to_owned(), insert)),
+        ("clear".to_owned(), ("map".to_owned(), clear)),
+        ("extend".to_owned(), ("map".to_owned(), extend_map)),
+    ]);
+
+    // ENUM METHODS
+
+    let unwrap = {
+        make_native_method(
+            "unwrap",
+            move |value, _args| {
+                match value {
+                    Value::Enum(enm) => {
+                        *enm.variant.1.clone()
+                    }
+                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                }
+            },
+            vec![],
+            "any",
+            false, true, true,
+            None,
+        )
+    };
+
+    let unwrap_or = {
+        make_native_method(
+            "unwrap_or",
+            move |value, args| {
+                match value {
+                    Value::Enum(enm) => {
+                        if *enm.variant.1 != Value::Null {
+                            *enm.variant.1.clone()
+                        } else {
+                            args.get("default").cloned().unwrap_or(Value::Null)
+                        }
+                    }
+                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                }
+            },
+            vec![
+                Parameter::positional("default", "any")
+            ],
+            "any",
+            false, true, true,
+            None,
+        )
+    };
+
+    let discriminant = {
+        make_native_method(
+            "discriminant",
+            move |value, _args| {
+                match value {
+                    Value::Enum(enm) => {
+                        Value::Int(Int::from_i64(enm.variant.0 as i64))
+                    }
+                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                }
+            },
+            vec![],
+            "int",
+            false, true, true,
+            None,
+        )
+    };
+
+    methods.extend([
+        ("unwrap".to_owned(), ("enum".to_owned(), unwrap)),
+        ("unwrap_or".to_owned(), ("enum".to_owned(), unwrap_or)),
+        ("discriminant".to_owned(), ("enum".to_owned(), discriminant)),
+    ]);
+    
+    methods
+}
+
+#[allow(dead_code)]
+pub static DEFAULT_TYPE_METHODS: Lazy<FxHashMap<String, (String, Function)>> = Lazy::new(|| {
+    generate_methods_for_default_types()
+});
+
+#[allow(dead_code)]
+pub fn get_default_type_method(name: &str) -> Option<&(String, Function)> {
+    DEFAULT_TYPE_METHODS.get(name)
+}
+
+#[allow(dead_code)]
+pub fn get_type_method_names(val: &Value) -> Vec<String> {
+    DEFAULT_TYPE_METHODS.iter()
+        .filter_map(|(method_name, (ty_name, _))| {
+            if check_type_ident(val, ty_name) {
+                Some(method_name.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }

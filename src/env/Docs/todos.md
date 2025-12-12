@@ -5,7 +5,7 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 6_
+_Total TODOs found: 7_
 ---
 
 ### [`src/env/runtime/preprocessor.rs:1179:1`](../../../src/env/runtime/preprocessor.rs#L1179) _(added by **SirPigari** on **2025-12-03**)_
@@ -25,6 +25,9 @@ _Total TODOs found: 6_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
+
+### [`src/env/runtime/native.rs:845:1`](../../../src/env/runtime/native.rs#L845) **(TODO not committed yet)**
+- Implement this in interpreter
 
 ---
 *Report generated automatically.*

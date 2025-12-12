@@ -232,6 +232,17 @@ impl Type {
         }
     }
 
+    pub fn new_list(element_type: Type) -> Self {
+        Type::Indexed {
+            base_type: Box::new(Type::Simple {
+                name: "list".to_string(),
+                ref_level: 0,
+                is_maybe_type: false,
+            }),
+            elements: vec![element_type],
+        }
+    }
+
     pub fn new_union(types: Vec<Type>) -> Self {
         Type::Union(types)
     }
