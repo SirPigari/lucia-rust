@@ -960,7 +960,7 @@ impl Parser {
                             body: vec![body_expr],
                             modifiers: vec!["mutable".to_string()],
                             return_type: Box::new(return_type_stmt),
-                            effect_flags: EffectFlags::empty(),
+                            effect_flags: EffectFlags::UNKNOWN,
                         },
                         loc: alloc_loc(self.get_loc()),
                     };

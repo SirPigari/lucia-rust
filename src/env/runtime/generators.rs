@@ -1030,7 +1030,7 @@ impl Iterator for FilterIter {
                 return Some(Value::Error(
                     "FilterError",
                     "Error during filter function evaluation",
-                    None,
+                    interpreter.err.take()
                 ));
             }
 
@@ -1067,7 +1067,7 @@ impl Iterator for MapIter {
                 return Some(Value::Error(
                     "MapError",
                     "Error during map function evaluation",
-                    None,
+                    interpreter.err.take()
                 ));
             }
 

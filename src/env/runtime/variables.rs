@@ -10,6 +10,7 @@ use crate::interpreter::Interpreter;
 use std::sync::Arc;
 use parking_lot::Mutex;
 use bincode::{Encode, Decode};
+use rustc_hash::{FxHashSet, FxHashMap};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Variable {
@@ -299,6 +300,25 @@ impl Variable {
                         None,
                     )
                 };
+                let split_lines = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "split_lines",
+                        move |_args| {
+                            if let Value::String(val) = &val_clone {
+                                let parts: Vec<Value> = val.lines()
+                                    .map(|s| Value::String(s.to_string()))
+                                    .collect();
+                                return Value::List(parts);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
                 let join = {
                     let val_clone = self.value.clone();
                     make_native_method_val(
@@ -307,10 +327,7 @@ impl Variable {
                             if let Some(Value::List(parts)) = args.get("parts") {
                                 if let Value::String(val) = &val_clone {
                                     let joined: String = parts.iter()
-                                        .filter_map(|v| match v {
-                                            Value::String(s) => Some(s.clone()),
-                                            _ => None,
-                                        })
+                                        .filter_map(|v| v.to_string().into())
                                         .collect::<Vec<String>>()
                                         .join(val);
                                     return Value::String(joined);
@@ -507,6 +524,69 @@ impl Variable {
                         None,
                     )
                 };
+                let iter = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "iter",
+                        move |_args| {
+                            if let Value::String(s) = &val_clone {
+                                let char_list: Vec<Value> = s.chars().map(|c| Value::String(c.to_string())).collect();
+                                let vec_iter = VecIter::new(&char_list);
+                                let generator = Generator::new_anonymous(
+                                    GeneratorType::Native(NativeGenerator {
+                                        iter: Box::new(vec_iter),
+                                        iteration: 0,
+                                    }),
+                                    false,
+                                );
+                                return Value::Generator(generator);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "generator",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let to_lf = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "to_lf",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => {
+                                    let converted = s.replace("\r\n", "\n").replace("\r", "\n");
+                                    Value::String(converted)
+                                },
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let to_crlf = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "to_crlf",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => {
+                                    let converted = s.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n");
+                                    Value::String(converted)
+                                },
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "str",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "to_bytes".to_string(),
@@ -568,6 +648,17 @@ impl Variable {
                     Variable::new(
                         "split".to_string(),
                         split,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "split_lines".to_string(),
+                    Variable::new(
+                        "split_lines".to_string(),
+                        split_lines,
                         "function".to_string(),
                         false,
                         true,
@@ -700,6 +791,50 @@ impl Variable {
                     Variable::new(
                         "to_upper".to_string(),
                         to_upper,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "iter".to_string(),
+                    Variable::new(
+                        "iter".to_string(),
+                        iter.clone(),
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "into_gen".to_string(),
+                    Variable::new(
+                        "into_gen".to_string(),
+                        iter,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "to_lf".to_string(),
+                    Variable::new(
+                        "to_lf".to_string(),
+                        to_lf,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "to_crlf".to_string(),
+                    Variable::new(
+                        "to_crlf".to_string(),
+                        to_crlf,
                         "function".to_string(),
                         false,
                         true,
@@ -1334,7 +1469,6 @@ impl Variable {
                         None,
                     )
                 };
-
                 let sort = {
                     let function_signature = parse_type("function[any] -> any | null");
                     let value_clone = self.value.clone();
@@ -1400,6 +1534,210 @@ impl Variable {
                         ],
                         "list",
                         false, true, true,
+                        None,
+                    )
+                };
+                let sort_by = {
+                    let function_signature = parse_type("function[any, any] -> bool");
+                    let value_clone = self.value.clone();
+                    let interpreter_arc = Arc::new(Mutex::new(interpreter.clone()));
+
+                    make_native_method_val(
+                        "sort_by",
+                        {
+                            let interpreter_arc = interpreter_arc.clone();
+
+                            move |args| {
+                                let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
+
+                                let function = match args.get("f") {
+                                    Some(Value::Function(func)) => func.clone(),
+                                    _ => {
+                                        return Value::Error(
+                                            "RuntimeError",
+                                            "Expected 'f' to be a function",
+                                            None,
+                                        )
+                                    }
+                                };
+
+                                let items = match &value_clone {
+                                    Value::List(list) => list.clone(),
+                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                };
+
+                                let mut indices: Vec<usize> = (0..items.len()).collect();
+                                let mut interp_guard = interpreter_arc.lock();
+
+                                let cache: Arc<Mutex<FxHashMap<(usize, usize), std::cmp::Ordering>>> = Arc::new(Mutex::new(FxHashMap::default()));
+
+                                timsort_by(&mut indices, |&i, &j| {
+                                    {
+                                        let cache_guard = cache.lock();
+                                        if let Some(&ord) = cache_guard.get(&(i, j)) {
+                                            return ord;
+                                        }
+                                    }
+
+                                    let res = interp_guard.call_function(
+                                        &function,
+                                        vec![items[i].clone(), items[j].clone()],
+                                        std::collections::HashMap::default(),
+                                        None,
+                                    );
+
+                                    if interp_guard.err.is_some() {
+                                        return std::cmp::Ordering::Equal;
+                                    }
+
+                                    let mut ord = match res {
+                                        Value::Boolean(true) => std::cmp::Ordering::Less,
+                                        Value::Boolean(false) => std::cmp::Ordering::Greater,
+                                        _ => std::cmp::Ordering::Equal,
+                                    };
+
+                                    if reverse {
+                                        ord = ord.reverse();
+                                    };
+
+                                    {
+                                        let mut cache_guard = cache.lock();
+                                        cache_guard.insert((i, j), ord);
+                                        cache_guard.insert((j, i), ord.reverse());
+                                    }
+
+                                    ord
+                                });
+
+                                if interp_guard.err.is_some() {
+                                    return interp_guard.err.take().unwrap().to_value();
+                                }
+
+                                let sorted_items: Vec<Value> =
+                                    indices.into_iter().map(|i| items[i].clone()).collect();
+
+                                Value::List(sorted_items)
+                            }
+                        },
+                        vec![
+                            Parameter::positional_pt("f", &function_signature),
+                            Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
+                        ],
+                        "list",
+                        false,
+                        true,
+                        true,
+                        None,
+                    )
+                };
+                let sort_by_unstable = {
+                    let function_signature = parse_type("function[any, any] -> bool");
+                    let value_clone = self.value.clone();
+                    let interpreter_arc = Arc::new(Mutex::new(interpreter.clone()));
+
+                    make_native_method_val(
+                        "sort_by_unstable",
+                        {
+                            let interpreter_arc = interpreter_arc.clone();
+
+                            move |args| {
+                                let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
+
+                                let function = match args.get("f") {
+                                    Some(Value::Function(func)) => func.clone(),
+                                    _ => {
+                                        return Value::Error(
+                                            "RuntimeError",
+                                            "Expected 'f' to be a function",
+                                            None,
+                                        )
+                                    }
+                                };
+
+                                let items: Vec<Value> = match &value_clone {
+                                    Value::List(list) => list.clone(),
+                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                };
+
+                                let mut indices: Vec<usize> = (0..items.len()).collect();
+
+                                let cache: Arc<Mutex<FxHashMap<(usize, usize), std::cmp::Ordering>>> =
+                                    Arc::new(Mutex::new(FxHashMap::default()));
+
+                                let mut had_error: Option<crate::Error> = None;
+
+                                let functione = |&i: &usize, &j: &usize| {
+                                    if had_error.is_some() {
+                                        return std::cmp::Ordering::Equal;
+                                    }
+
+                                    {
+                                        let cache_guard = cache.lock();
+                                        if let Some(&ord) = cache_guard.get(&(i, j)) {
+                                            return ord;
+                                        }
+                                    }
+
+                                    let res = {
+                                        let mut interp_guard = interpreter_arc.lock();
+                                        let result = interp_guard.call_function(
+                                            &function,
+                                            vec![items[i].clone(), items[j].clone()],
+                                            std::collections::HashMap::default(),
+                                            None,
+                                        );
+
+                                        if let Some(err) = interp_guard.err.take() {
+                                            had_error = Some(err);
+                                        };
+                                        
+                                        result
+                                    };
+
+                                    let mut ord = match res {
+                                        Value::Boolean(true) => std::cmp::Ordering::Less,
+                                        Value::Boolean(false) => std::cmp::Ordering::Greater,
+                                        _ => std::cmp::Ordering::Equal,
+                                    };
+
+                                    if reverse {
+                                        ord = ord.reverse();
+                                    };
+
+                                    {
+                                        let mut cache_guard = cache.lock();
+                                        cache_guard.insert((i, j), ord);
+                                        cache_guard.insert((j, i), ord.reverse());
+                                    }
+
+                                    ord
+                                };
+
+                                if args.get("unstabler") == Some(&Value::Boolean(true)) {
+                                    indices.sort_unstable_by(functione);
+                                } else {
+                                    indices.sort_by(functione);
+                                }
+
+                                if had_error.is_some() {
+                                    return had_error.unwrap().to_value();
+                                }
+
+                                let sorted_items: Vec<Value> =
+                                    indices.into_iter().map(|i| items[i].clone()).collect();
+
+                                Value::List(sorted_items)
+                            }
+                        },
+                        vec![
+                            Parameter::positional_pt("f", &function_signature),
+                            Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
+                            Parameter::positional_optional("unstabler", "bool", Value::Boolean(false)),
+                        ],
+                        "list",
+                        false,
+                        true,
+                        true,
                         None,
                     )
                 };
@@ -1483,7 +1821,12 @@ impl Variable {
                         move |args| {
                             if let Some(item) = args.get("item") {
                                 if let Value::List(list) = &val_clone {
-                                    for (index, list_item) in list.iter().enumerate() {
+                                    let start = if let Some(Value::Int(i)) = args.get("start") {
+                                        i.to_usize().unwrap_or(0)
+                                    } else {
+                                        0
+                                    };
+                                    for (index, list_item) in list.iter().enumerate().skip(start) {
                                         if list_item == item {
                                             return Value::Int(create_int(&(index as i64).to_string()));
                                         }
@@ -1493,8 +1836,34 @@ impl Variable {
                             }
                             Value::Null
                         },
-                        vec![Parameter::positional("item", "any")],
+                        vec![
+                            Parameter::positional("item", "any"),
+                            Parameter::positional_optional("start", "int", Value::Int(0.into())),
+                        ],
                         "int",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let undup = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "undup",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                let mut seen = FxHashSet::with_capacity_and_hasher(list.len(), Default::default());
+                                let mut unduped = Vec::with_capacity(list.len());
+                                for item in list {
+                                    if seen.insert(item.clone()) {
+                                        unduped.push(item.clone());
+                                    }
+                                }
+                                return Value::List(unduped);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
                         false, true, true,
                         None,
                     )
@@ -1622,6 +1991,28 @@ impl Variable {
                     ),
                 );
                 self.properties.insert(
+                    "sort_by".to_string(),
+                    Variable::new(
+                        "sort_by".to_string(),
+                        sort_by,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "sort_by_unstable".to_string(),
+                    Variable::new(
+                        "sort_by_unstable".to_string(),
+                        sort_by_unstable,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
                     "all".to_string(),
                     Variable::new(
                         "all".to_string(),
@@ -1648,6 +2039,17 @@ impl Variable {
                     Variable::new(
                         "index_of".to_string(),
                         index_of,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "undup".to_string(),
+                    Variable::new(
+                        "undup".to_string(),
+                        undup,
                         "function".to_string(),
                         false,
                         true,

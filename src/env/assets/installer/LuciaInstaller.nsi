@@ -599,29 +599,31 @@ Section "Install"
     File /r "..\..\..\..\src\env\Docs\*"
     SetOutPath "$INSTDIR\src\env\runtime"
     File /r "..\..\..\..\src\env\runtime\*"
-
     SetOutPath "$INSTDIR\src\env\libs"
+    File /r "..\..\..\..\src\env\libs\*"
 
-    ; libs files
-    File "..\..\..\..\src\env\libs\*.*"
+    ; SetOutPath "$INSTDIR\src\env\libs"
 
-    FindFirst $0 $1 "..\..\..\..\src\env\libs\*"
+    ; ; libs files
+    ; File "..\..\..\..\src\env\libs\*"
 
-    libs_loop:
-        StrCmp $1 "" libs_done
+    ; FindFirst $0 $1 "..\..\..\..\src\env\libs\*"
 
-        IfFileExists "..\..\..\..\src\env\libs\$1\*.*" 0 libs_next
+    ; libs_loop:
+    ;     StrCmp $1 "" libs_done
 
-        StrCmp $1 "raylib_lucia" libs_next
+    ;     IfFileExists "..\..\..\..\src\env\libs\$1\*.*" 0 libs_next
 
-        File /r "..\..\..\..\src\env\libs\$1\*"
+    ;     StrCmp $1 "raylib_lucia" libs_next
 
-    libs_next:
-        FindNext $0 $1
-        Goto libs_loop
+    ;     File /r "..\..\..\..\src\env\libs\$1\*"
 
-    libs_done:
-    FindClose $0
+    ; libs_next:
+    ;     FindNext $0 $1
+    ;     Goto libs_loop
+
+    ; libs_done:
+    ; FindClose $0
 
     ; assets
     SetOutPath "$INSTDIR\src\env\assets\installer"

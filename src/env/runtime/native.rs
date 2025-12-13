@@ -13,7 +13,7 @@ use imagnum::{create_int};
 use std::collections::HashMap;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashSet, FxHashMap};
 use parking_lot::Mutex;
 use std::io::{stdout, Write};
 
@@ -1020,6 +1020,27 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         )
     };
 
+    let split_lines = {
+        make_native_method(
+            "split_lines",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        let parts: Vec<Value> = s.lines()
+                            .map(|part| Value::String(part.to_string()))
+                            .collect();
+                        Value::List(parts)
+                    }
+                    _ => Value::Error("TypeError", "split_lines() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
     let join = {
         make_native_method(
             "join",
@@ -1028,10 +1049,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     match (value, parts_value) {
                         (Value::String(s), Value::List(parts)) => {
                             let joined: String = parts.iter()
-                                .filter_map(|v| match v {
-                                    Value::String(part) => Some(part.clone()),
-                                    _ => None,
-                                })
+                                .filter_map(|v| v.to_string().into())
                                 .collect::<Vec<String>>()
                                 .join(&s);
                             Value::String(joined)
@@ -1378,6 +1396,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         ("endswith".to_owned(), ("str".to_owned(), endswith)),
         ("startswith".to_owned(), ("str".to_owned(), startswith)),
         ("split".to_owned(), ("str".to_owned(), split)),
+        ("split_lines".to_owned(), ("str".to_owned(), split_lines)),
         ("join".to_owned(), ("str".to_owned(), join)),
         ("trim".to_owned(), ("str".to_owned(), trim)),
         ("chars".to_owned(), ("str".to_owned(), chars)),
@@ -1825,6 +1844,28 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         )
     };
 
+    let pop = {
+        make_native_method(
+            "pop",
+            |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        if let Some(item) = list.pop() {
+                            item
+                        } else {
+                            Value::Error("IndexError", "pop() from empty list", None)
+                        }
+                    }
+                    _ => Value::Error("TypeError", "pop() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
+
     let extend_list = {
         make_native_method(
             "extend",
@@ -2211,7 +2252,12 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(item) = args.get("item") {
                     match value {
                         Value::List(list) => {
-                            for (i, elem) in list.iter().enumerate() {
+                            let start = if let Some(Value::Int(i)) = args.get("start") {
+                                i.to_usize().unwrap_or(0)
+                            } else {
+                                0
+                            };
+                            for (i, elem) in list.iter().enumerate().skip(start) {
                                 if elem == item {
                                     return Value::Int(create_int(&(i as i64).to_string()));
                                 }
@@ -2224,8 +2270,36 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     Value::Error("TypeError", "index_of() missing required argument 'item'", None)
                 }
             },
-            vec![Parameter::positional("item", "any")],
+            vec![
+                Parameter::positional("item", "any"),
+                Parameter::positional_optional("start", "int", Value::Int(0.into())),
+            ],
             "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    let undup = {
+        make_native_method(
+            "undup",
+            move |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        let mut seen = FxHashSet::with_capacity_and_hasher(list.len(), Default::default());
+                        let mut unduped = Vec::with_capacity(list.len());
+                        for item in list {
+                            if seen.insert(item.clone()) {
+                                unduped.push(item.clone());
+                            }
+                        }
+                        Value::List(unduped)
+                    }
+                    _ => Value::Error("TypeError", "undup() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "list",
             true, false, true,
             None,
         )
@@ -2234,6 +2308,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     methods.extend([
         ("append".to_owned(), ("list".to_owned(), append)),
         ("push".to_owned(), ("list".to_owned(), push)),
+        ("pop".to_owned(), ("list".to_owned(), pop)),
         ("extend".to_owned(), ("list".to_owned(), extend_list)),
         ("into".to_owned(), ("list".to_owned(), into_list)),
         ("into_gen".to_owned(), ("list".to_owned(), into_gen.clone())),
@@ -2248,6 +2323,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         ("clear".to_owned(), ("list".to_owned(), clear)),
         ("contains".to_owned(), ("list".to_owned(), contains)),
         ("index_of".to_owned(), ("list".to_owned(), index_of)),
+        ("undup".to_owned(), ("list".to_owned(), undup)),
     ]);
 
     // TUPLE METHODS

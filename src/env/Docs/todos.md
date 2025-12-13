@@ -8,6 +8,9 @@ Be free to fix them or add new ones.
 _Total TODOs found: 7_
 ---
 
+### [`src/env/runtime/native.rs:845:1`](../../../src/env/runtime/native.rs#L845) _(added by **SirPigari** on **2025-12-12**)_
+- Implement this in interpreter
+
 ### [`src/env/runtime/preprocessor.rs:1179:1`](../../../src/env/runtime/preprocessor.rs#L1179) _(added by **SirPigari** on **2025-12-03**)_
 - finish
 
@@ -25,9 +28,6 @@ _Total TODOs found: 7_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/env/runtime/native.rs:845:1`](../../../src/env/runtime/native.rs#L845) **(TODO not committed yet)**
-- Implement this in interpreter
 
 ---
 *Report generated automatically.*
