@@ -2304,6 +2304,85 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
+    let reverse = {
+        make_native_method(
+            "reverse",
+            |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        list.reverse();
+                        Value::Null
+                    }
+                    _ => Value::Error("TypeError", "reverse() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+    let reversed = {
+        make_native_method(
+            "reversed",
+            |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        let reversed_list: Vec<Value> = list.iter().rev().cloned().collect();
+                        Value::List(reversed_list)
+                    }
+                    _ => Value::Error("TypeError", "reversed() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+    let reduce = {
+        make_native_shared_fn(
+            "reduce",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Function(func)) = args.get("f") {
+                    let list = match value {
+                        Value::List(list) => list.clone(),
+                        _ => return Value::Error("TypeError", "reduce() can only be called on lists", None),
+                    };
+                    if list.is_empty() {
+                        return Value::Error("ValueError", "Cannot reduce an empty list", None);
+                    }
+                    let mut iter = list.iter();
+                    let mut accumulator = match args.get("initial") {
+                        Some(initial) if *initial != Value::Null => initial.clone(),
+                        _ => iter.next().unwrap().clone(),
+                    };
+                    for item in iter {
+                        accumulator = interpreter.call_function(
+                            func,
+                            vec![accumulator, item.clone()],
+                            std::collections::HashMap::default(),
+                            None,
+                        );
+                        if interpreter.err.is_some() {
+                            return interpreter.err.take().unwrap().to_value();
+                        }
+                    }
+                    return accumulator;
+                } else {
+                    return Value::Error("TypeError", "reduce() missing required argument 'f'", None);
+                }
+            },
+            vec![
+                Parameter::positional("f", "function"),
+                Parameter::positional_optional("initial", "any", Value::Null)
+            ],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
 
     methods.extend([
         ("append".to_owned(), ("list".to_owned(), append)),
@@ -2324,6 +2403,9 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         ("contains".to_owned(), ("list".to_owned(), contains)),
         ("index_of".to_owned(), ("list".to_owned(), index_of)),
         ("undup".to_owned(), ("list".to_owned(), undup)),
+        ("reverse".to_owned(), ("list".to_owned(), reverse)),
+        ("reversed".to_owned(), ("list".to_owned(), reversed)),
+        ("reduce".to_owned(), ("list".to_owned(), reduce)),
     ]);
 
     // TUPLE METHODS

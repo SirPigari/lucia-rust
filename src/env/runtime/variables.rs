@@ -587,6 +587,27 @@ impl Variable {
                         None,
                     )
                 };
+                let split_whitespace = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "split_whitespace",
+                        move |_args| {
+                            match &val_clone {
+                                Value::String(s) => {
+                                    let parts: Vec<Value> = s.split_whitespace()
+                                        .map(|s| Value::String(s.to_string()))
+                                        .collect();
+                                    return Value::List(parts);
+                                },
+                                _ => Value::Null,
+                            }
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
 
                 self.properties.insert(
                     "to_bytes".to_string(),
@@ -835,6 +856,17 @@ impl Variable {
                     Variable::new(
                         "to_crlf".to_string(),
                         to_crlf,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "split_whitespace".to_string(),
+                    Variable::new(
+                        "split_whitespace".to_string(),
+                        split_whitespace,
                         "function".to_string(),
                         false,
                         true,
@@ -1868,6 +1900,71 @@ impl Variable {
                         None,
                     )
                 };
+                let reverse = {
+                    let value_clone = self.value.clone();
+                    make_native_method_val(
+                        "reverse",
+                        move |_args| {
+                            let items = match &value_clone {
+                                Value::List(list) => list.clone(),
+                                _ => return Value::Error("TypeError", "Expected a list", None),
+                            };
+
+                            let mut reversed_items = items;
+                            reversed_items.reverse();
+
+                            Value::List(reversed_items)
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let reduce = {
+                    let value_clone = self.value.clone();
+                    let interpreter_clone = interpreter.clone();
+                    make_native_method_val(
+                        "reduce",
+                        move |args| {
+                            if let Value::List(list) = &value_clone {
+                                if let Some(Value::Function(func)) = args.get("f") {
+                                    let mut interpreter_clone = interpreter_clone.clone();
+                                    if list.is_empty() {
+                                        return Value::Error("ValueError", "Cannot reduce an empty list", None);
+                                    }
+                                    let mut result = match args.get("initial") {
+                                        Some(initial) if *initial != Value::Null => initial.clone(),
+                                        _ => list[0].clone(),
+                                    };
+                                    for item in &list[1..] {
+                                        let res = interpreter_clone.call_function(
+                                            func,
+                                            vec![result.clone(), item.clone()],
+                                            std::collections::HashMap::default(),
+                                            None,
+                                        );
+                                        if interpreter_clone.err.is_some() {
+                                            return interpreter_clone.err.take().unwrap().to_value();
+                                        }
+                                        result = res;
+                                    }
+                                    return result;
+                                } else {
+                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                }
+                            }
+                            Value::Null
+                        },
+                        vec![
+                            Parameter::positional("f", "function"),
+                            Parameter::positional_optional("initial", "any", Value::Null)
+                        ],
+                        "any",
+                        false, true, true,
+                        None,
+                    )
+                };
             
                 self.properties.insert(
                     "append".to_string(),
@@ -2050,6 +2147,28 @@ impl Variable {
                     Variable::new(
                         "undup".to_string(),
                         undup,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "reverse".to_string(),
+                    Variable::new(
+                        "reverse".to_string(),
+                        reverse,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "reduce".to_string(),
+                    Variable::new(
+                        "reduce".to_string(),
+                        reduce,
                         "function".to_string(),
                         false,
                         true,
