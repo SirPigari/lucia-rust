@@ -796,6 +796,75 @@ where
     Function::SharedNative(Arc::new(method))
 }
 
+#[allow(dead_code)]
+pub fn get_pointer_depth(ptr: &Value) -> usize {
+    match ptr {
+        Value::Pointer(arc) => {
+            let mut temp_arc = arc.clone();
+            let mut ptr_level = temp_arc.lock().1;
+            loop {
+                let next = {
+                    let guard = temp_arc.lock();
+                    match &*guard {
+                        (Value::Pointer(inner_arc), l) => {
+                            ptr_level += l;
+                            Some(inner_arc.clone())
+                        }
+                        _ => {
+                            None
+                        }
+                    }
+                };
+                match next {
+                    Some(inner) => temp_arc = inner,
+                    None => break,
+                }
+            }
+            ptr_level
+        }
+        _ => 0,
+    }
+}
+
+pub fn get_pointer_depth_and_base_value(ptr: &Value) -> (usize, Value) {
+    match ptr {
+        Value::Pointer(arc) => {
+            let mut temp_arc = arc.clone();
+            let mut ptr_level = temp_arc.lock().1;
+            let mut base_value = {
+                let guard = temp_arc.lock();
+                guard.0.clone()
+            };
+            loop {
+                let next = {
+                    let guard = temp_arc.lock();
+                    match &*guard {
+                        (Value::Pointer(inner_arc), l) => {
+                            ptr_level += l;
+                            Some(inner_arc.clone())
+                        }
+                        _ => {
+                            None
+                        }
+                    }
+                };
+                match next {
+                    Some(inner) => {
+                        temp_arc = inner;
+                        base_value = {
+                            let guard = temp_arc.lock();
+                            guard.0.clone()
+                        };
+                    }
+                    None => break,
+                }
+            }
+            (ptr_level, base_value)
+        }
+        _ => (0, ptr.clone()),
+    }
+}
+
 pub fn get_type_default(type_: &str) -> Value {
     let ptr_level: usize = type_.chars().take_while(|&c| c == '&').count();
     let type_ = &type_[ptr_level..];
@@ -2044,11 +2113,19 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
 
     match (&inner_actual, &inner_expected) {
         (
-            Simple { name: actual_name, ref_level: actual_ref, .. },
-            Simple { name: expected_name, ref_level: expected_ref, .. },
+            Simple { name: actual_name, .. },
+            Simple { name: expected_name, .. },
         ) if expected_name == "any" || actual_name == "any" =>
         {
-            return actual_ref == expected_ref;
+            return true;
+        }
+
+        (
+            Reference { base_type: actual_inner, ref_level: actual_ref_level },
+            Reference { base_type: expected_inner, ref_level: expected_ref_level },
+        ) if actual_ref_level == expected_ref_level =>
+        {
+            return type_matches(actual_inner, expected_inner);
         }
 
         (

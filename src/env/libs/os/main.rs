@@ -425,7 +425,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
     }, vec![
         Parameter::positional("args", "list"),
         Parameter::positional_optional("shell", "bool", Value::Boolean(false)),
-        Parameter::positional_optional_pt("cwd", &Type::new_simple("str").set_maybe_type(true), Value::Null),
+        Parameter::positional_optional_pt("cwd", &Type::new_simple("?str"), Value::Null),
         Parameter::positional_optional("capture_output", "bool", Value::Boolean(false))
     ], &process_output_struct, EffectFlags::IO);
 

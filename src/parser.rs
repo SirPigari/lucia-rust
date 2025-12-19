@@ -13,7 +13,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     statements: Vec<Statement>,
-    err: Option<Error>,
+    pub err: Option<Error>,
     ignore_pipe_count: usize,
     parse_var_decl: bool,
 }
@@ -537,8 +537,6 @@ impl Parser {
                                                 node: Node::Type {
                                                     node: TypeNode::Simple {
                                                         base: "any".to_owned(),
-                                                        ptr_level: 0,
-                                                        is_maybe: false,
                                                     }
                                                 },
                                                 loc: alloc_loc(loc.clone()),
@@ -616,8 +614,6 @@ impl Parser {
                                     node: Node::Type {
                                         node: TypeNode::Simple {
                                             base: "any".to_owned(),
-                                            ptr_level: 0,
-                                            is_maybe: false,
                                         }
                                     },
                                     loc: alloc_loc(loc.clone()),
@@ -946,8 +942,6 @@ impl Parser {
                         node: Node::Type {
                             node: TypeNode::Simple {
                                 base: "any".to_owned(),
-                                ptr_level: 0,
-                                is_maybe: false,
                             }
                         },
                         loc: alloc_loc(self.get_loc()),
@@ -2061,8 +2055,6 @@ impl Parser {
                                         node: Node::Type {
                                             node: TypeNode::Simple {
                                                 base: "any".to_string(),
-                                                ptr_level: 0,
-                                                is_maybe: false,
                                             }
                                         },
                                         loc: alloc_loc(self.get_loc()),
@@ -2127,8 +2119,6 @@ impl Parser {
                                 node: Node::Type {
                                     node: TypeNode::Simple {
                                         base: "any".to_string(),
-                                        ptr_level: 0,
-                                        is_maybe: false,
                                     }
                                 },
                                 loc: alloc_loc(self.get_loc())
@@ -2426,8 +2416,6 @@ impl Parser {
                                                         self.raise("SyntaxError", "Expected type in generics");
                                                         return TypeNode::Simple { 
                                                             base: "any".to_owned(),
-                                                            ptr_level: 0,
-                                                            is_maybe: false,
                                                         }
                                                     }
                                                 }).collect();
@@ -2440,8 +2428,6 @@ impl Parser {
                                                         node: TypeNode::Generics {
                                                             base_type: Box::new(TypeNode::Simple { 
                                                                 base: "tuple".to_owned(),
-                                                                ptr_level: 0,
-                                                                is_maybe: false,
                                                             }),
                                                             generics_types: tuple_types,
                                                         }
@@ -3608,7 +3594,7 @@ impl Parser {
                                                 }),
                                                 var_type: Box::new(Statement {
                                                     node: Node::Type {
-                                                        node: TypeNode::Simple { base: "any".to_owned(), ptr_level: 0, is_maybe: false }
+                                                        node: TypeNode::Simple { base: "any".to_owned() }
                                                     },
                                                     loc: alloc_loc(self.get_loc()),
                                                 }),
@@ -3955,36 +3941,6 @@ impl Parser {
     }
 
     fn parse_single_type(&mut self) -> Option<(String, Statement)> {
-        let mut ptr_level: usize = 0;
-        let mut is_maybe = false;
-    
-        while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "&&") || self.token_is("OPERATOR", "??") {
-            match self.token().cloned().unwrap().1.as_ref() {
-                "&" => {
-                    ptr_level += 1;
-                }
-                "&&" => {
-                    ptr_level += 2;
-                }
-                "?" => {
-                    if is_maybe {
-                        self.raise("SyntaxError", "Type can only be marked as maybe once");
-                        return None;
-                    }
-                    is_maybe = true;
-                }
-                "??" => {
-                    if is_maybe {
-                        self.raise("SyntaxError", "Type can only be marked as maybe once");
-                        return None;
-                    }
-                    is_maybe = true;
-                }
-                _ => {}
-            }
-            self.next();
-        }
-    
         let token = self.token().cloned().unwrap_or(DEFAULT_TOKEN.clone());
         let is_tuple = token.0 == "SEPARATOR" && token.1 == "(";
 
@@ -4006,8 +3962,6 @@ impl Parser {
                 } else {
                     elements.push(TypeNode::Simple {
                         base: "any".to_string(),
-                        ptr_level: 0,
-                        is_maybe: false,
                     });
                 }
                 if self.token_is("SEPARATOR", ",") {
@@ -4024,8 +3978,6 @@ impl Parser {
                     node: TypeNode::Generics {
                         base_type: Box::new(TypeNode::Simple {
                             base: "tuple".to_string(),
-                            ptr_level: 0,
-                            is_maybe: false,
                         }),
                         generics_types: elements,
                     }
@@ -4052,8 +4004,6 @@ impl Parser {
                 node: Node::Type {
                     node: TypeNode::Simple {
                         base: name.clone(),
-                        ptr_level,
-                        is_maybe,
                     }
                 },
                 loc: alloc_loc(self.get_loc()),
@@ -4133,8 +4083,6 @@ impl Parser {
             } else {
                 TypeNode::Simple {
                     base: "any".to_string(),
-                    ptr_level: 0,
-                    is_maybe: false,
                 }
             };
 
@@ -4164,32 +4112,54 @@ impl Parser {
         }
     }
 
-    fn parse_type(&mut self) -> Statement {
-        if self.token_is("IDENTIFIER", "impl") {
-            return self.parse_impl();
+    pub fn parse_type(&mut self) -> Statement {
+        let mut modifiers: Vec<isize> = vec![];
+        let mut current_ref_level: usize = 0;
+        while self.token_is("OPERATOR", "&") || self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "&&") || self.token_is("OPERATOR", "??") {
+            if self.token_is("OPERATOR", "&") {
+                current_ref_level += 1;
+            } else if self.token_is("OPERATOR", "&&") {
+                current_ref_level += 2;
+            } else if self.token_is("OPERATOR", "?") || self.token_is("OPERATOR", "??") {
+                if current_ref_level > 0 {
+                    modifiers.push(current_ref_level as isize);
+                    current_ref_level = 0;
+                }
+                if modifiers.iter().any(|m| *m == -1) {
+                    self.raise("SyntaxError", "Type can only be marked as maybe once");
+                    return Statement::Null;
+                }
+                modifiers.push(-1);
+            }
+            self.next();
+        }
+        if current_ref_level > 0 {
+            modifiers.push(current_ref_level as isize);
         }
 
-        let (base_str, base_stmt) = match self.parse_single_type() {
-            Some(v) => v,
-            None => return Statement::Null,
-        };
-
-        let base_node = match &base_stmt.node {
-            Node::Type { node } => node,
-            _ => {
-                self.raise("SyntaxError", "Expected type");
-                return Statement::Null;
+        let (base_str, base_stmt) = if self.token_is("IDENTIFIER", "impl") {
+            ("impl".to_string(), self.parse_impl())
+        } else {
+            match self.parse_single_type() {
+                Some(v) => v,
+                None => return Statement::Null,
             }
         };
 
         if self.token_is("SEPARATOR", "(") {
+            let mut to_type_node = TypeNode::Simple {
+                base: base_str.to_owned(),
+            };
+            for modifier in modifiers.clone().into_iter().rev() {
+                to_type_node = match modifier {
+                    m if m > 0 => TypeNode::Reference { base_type: Box::new(to_type_node), ref_level: m as usize },
+                    -1 => TypeNode::Maybe { base_type: Box::new(to_type_node) },
+                    _ => to_type_node,
+                };
+            }
             let to_type = Statement {
                 node: Node::Type {
-                    node: TypeNode::Simple {
-                        base: base_str.to_owned(),
-                        ptr_level: 0,
-                        is_maybe: false,
-                    }
+                    node: to_type_node,
                 },
                 loc: alloc_loc(self.get_loc())
             };
@@ -4220,6 +4190,13 @@ impl Parser {
             };
         }
 
+        let mut current_type_node = if let Node::Type { node } = &base_stmt.node {
+            node.clone()
+        } else {
+            self.raise("SyntaxError", "Expected type");
+            return Statement::Null;
+        };
+
         if self.token_is("SEPARATOR", "[") {
             let inner_loc = alloc_loc(self.get_loc());
 
@@ -4234,7 +4211,7 @@ impl Parser {
                             Node::Type { node } => node,
                             _ => {
                                 self.raise("SyntaxError", "Expected parameter type");
-                                return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string(), ptr_level: 0, is_maybe: false } }, loc: inner_loc };
+                                return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string() } }, loc: inner_loc };
                             }
                         };
                         param_types.push(tt);
@@ -4245,7 +4222,7 @@ impl Parser {
                             break;
                         } else {
                             self.raise("SyntaxError", "Expected ',' or ']' in parameter list");
-                            return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string(), ptr_level: 0, is_maybe: false } }, loc: inner_loc };
+                            return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string() } }, loc: inner_loc };
                         }
                     }
                     self.next();
@@ -4258,19 +4235,19 @@ impl Parser {
                         Node::Type { node } => node,
                         _ => {
                             self.raise("SyntaxError", "Expected return type after '->'");
-                            return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string(), ptr_level: 0, is_maybe: false } }, loc: inner_loc };
+                            return Statement { node: Node::Type { node: TypeNode::Simple { base: "any".to_string() } }, loc: inner_loc };
                         }
                     };
                     Box::new(tt)
                 } else {
-                    Box::new(TypeNode::Simple { base: "any".to_string(), ptr_level: 0, is_maybe: false })
+                    Box::new(TypeNode::Simple { base: "any".to_string() })
                 };
 
-                if base_str == "function" {
-                    return Statement { node: Node::Type { node: TypeNode::Function { parameters_types: param_types, return_type } }, loc: inner_loc };
+                current_type_node = if base_str == "function" {
+                    TypeNode::Function { parameters_types: param_types, return_type }
                 } else {
-                    return Statement { node: Node::Type { node: TypeNode::Generator { parameters_types: param_types, yield_type: return_type } }, loc: inner_loc };
-                }
+                    TypeNode::Generator { parameters_types: param_types, yield_type: return_type }
+                };
             } else {
                 self.next();
                 let mut elements = Vec::new();
@@ -4281,8 +4258,6 @@ impl Parser {
                         elements.push(TypeNode::Variadics {
                             base: Box::new(TypeNode::Simple {
                                 base: "any".to_string(),
-                                ptr_level: 0,
-                                is_maybe: false,
                             }),
                         });
 
@@ -4348,20 +4323,14 @@ impl Parser {
 
                 self.next();
 
-                return Statement {
-                    node: Node::Type {
-                        node: TypeNode::Generics {
-                            base_type: Box::new(base_node.clone()),
-                            generics_types: elements,
-                        }
-                    },
-                    loc: alloc_loc(self.get_loc()),
-                }
+                current_type_node = TypeNode::Generics {
+                    base_type: Box::new(current_type_node),
+                    generics_types: elements,
+                };
             }
         }
 
-        let mut union_types = vec![];
-        union_types.push(base_stmt.clone());
+        let mut union_types = vec![current_type_node.clone()];
 
         while self.token_is("OPERATOR", "|") {
             self.next();
@@ -4373,40 +4342,42 @@ impl Parser {
             match &next_type.node {
                 Node::Type { node: TypeNode::Union { types } } => {
                     for t in types {
-                        union_types.push(Statement {
-                            node: Node::Type { node: t.clone() },
-                            loc: alloc_loc(self.get_loc()),
-                        });
+                        union_types.push(t.clone());
                     }
+                }
+                Node::Type { node } => {
+                    union_types.push(node.clone());
                 }
                 _ => {
-                    union_types.push(next_type);
+                    self.raise("SyntaxError", "Expected type in union");
+                    return Statement::Null;
                 }
             }
         }
 
-        let mut union_types_nodes = Vec::with_capacity(union_types.len());
-        for ut in union_types.iter() {
-            if let Node::Type { node } = &ut.node {
-                union_types_nodes.push(node.clone());
-            } else {
-                self.raise("SyntaxError", "Expected type in union");
-                return Statement::Null;
+        let final_type_node = if union_types.len() > 1 {
+            TypeNode::Union {
+                types: union_types,
             }
-        }
+        } else {
+            current_type_node
+        };
 
-        if union_types.len() > 1 {
-            return Statement {
-                node: Node::Type {
-                    node: TypeNode::Union {
-                        types: union_types_nodes,
-                    }
-                },
-                loc: alloc_loc(self.get_loc())
+        let mut wrapped_type_node = final_type_node;
+        for modifier in modifiers.into_iter().rev() {
+            wrapped_type_node = match modifier {
+                m if m > 0 => TypeNode::Reference { base_type: Box::new(wrapped_type_node), ref_level: m as usize },
+                -1 => TypeNode::Maybe { base_type: Box::new(wrapped_type_node) },
+                _ => wrapped_type_node,
             };
         }
 
-        base_stmt
+        Statement {
+            node: Node::Type {
+                node: wrapped_type_node,
+            },
+            loc: alloc_loc(self.get_loc()),
+        }
     }
 
     fn parse_variable(&mut self) -> Statement {
@@ -4457,8 +4428,6 @@ impl Parser {
                     node: Node::Type {
                         node: TypeNode::Simple {
                             base: "auto".to_owned(),
-                            ptr_level: 0,
-                            is_maybe: false,
                         }
                     },
                     loc: alloc_loc(loc.clone())

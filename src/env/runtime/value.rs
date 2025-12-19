@@ -610,7 +610,7 @@ impl Value {
                         None => break,
                     }
                 }
-                t.set_reference(ptr_level);
+                t = t.make_reference(ptr_level);
                 t
             }
             Value::Error(..) => Type::new_simple("error"),

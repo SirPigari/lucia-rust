@@ -76,7 +76,7 @@ impl ValueType {
             },
             ValueType::Pointer(arc) => {
                 let mut t = arc.get_type();
-                t.set_reference(1);
+                t = t.make_reference(1);
                 t
             }
             ValueType::Error(..) => Type::new_simple("error"),
@@ -358,26 +358,17 @@ impl Checker {
         let value_type = value.get_type();
 
         match expected {
-            Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: null_allowed } => {
+            Type::Simple { name: expected_type } => {
                 if expected_type != "any" {
                     match value_type {
-                        Type::Simple { name: value_type_name, ref_level: value_type_ref, .. } => {
-                            if !((*null_allowed && value_type_name == "void") || (value_type_name == *expected_type && value_type_ref == *expected_ref)) {
+                        Type::Simple { name: value_type_name, .. } => {
+                            if value_type_name != *expected_type {
                                 status = false;
                             }
                         }
                         _ => {
                             err = Some(make_err("TypeError", &format!("Expected type '{}', got '{}'", expected_type, value_type.display()), self.get_location_from_current_statement()));
                         }
-                    }
-                } else if *expected_ref > 0 {
-                    match value_type {
-                        Type::Simple { name: _, ref_level: value_type_ref, .. } => {
-                            if value_type_ref != *expected_ref {
-                                status = false;
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -548,10 +539,12 @@ impl Checker {
 
     pub fn check_type(&mut self, type_node: &TypeNode) -> ValueType {
         match type_node {
-            TypeNode::Simple { base, ptr_level, is_maybe } => {
+            TypeNode::Simple { base  } => {
                 match self.state.defined_vars.get(base) {
                     Some(val) => match &val.value_type {
-                        ValueType::Type(t) => ValueType::Type(t.clone().set_reference(*ptr_level).set_maybe_type(*is_maybe).unmut()),
+                        ValueType::Type(t) => {
+                            ValueType::Type(t.clone())
+                        }
                         _ => {
                             self.raise_with_help(ErrorTypes::TypeError, &format!("'{}' is a variable name, not a type", base), "If you meant to assign a value, use ':=' instead of ':'");
                             return ValueType::Null;
@@ -570,6 +563,24 @@ impl Checker {
                     }
                 }
             },
+            TypeNode::Reference { base_type, ref_level } => {
+                let ty = self.check_type(base_type);
+                if let ValueType::Type(t) = ty {
+                    ValueType::Type(t.make_reference(*ref_level))
+                } else {
+                    self.raise(ErrorTypes::TypeError, "Reference type must be a valid type");
+                    ValueType::Null
+                }
+            }
+            TypeNode::Maybe { base_type } => {
+                let ty = self.check_type(base_type);
+                if let ValueType::Type(t) = ty {
+                    ValueType::Type(t.make_maybe_type())
+                } else {
+                    self.raise(ErrorTypes::TypeError, "Maybe type must be a valid type");
+                    ValueType::Null
+                }
+            }
             TypeNode::Union { types } => {
                 let mut type_vec: Vec<Type> = Vec::new();
 
@@ -752,7 +763,8 @@ impl Checker {
 
         if is_default {
             match declared_type {
-                Type::Simple { ref name, is_maybe_type, ..} if CAN_BE_UNINITIALIZED.contains(&name.as_str()) || is_maybe_type => {},
+                Type::Simple { ref name, ..} if CAN_BE_UNINITIALIZED.contains(&name.as_str()) => {},
+                Type::Reference { .. } => {},
                 _ => {
                     self.raise_with_help(ErrorTypes::TypeError, &format!("Cannot declare variable '{}' as default because its type '{}' cannot be uninitialized", name, declared_type.display_simple()), "Only variables of type 'any', 'map', 'list', 'tuple', 'void', or maybe types can be declared as default");
                     return ValueType::Null;

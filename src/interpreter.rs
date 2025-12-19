@@ -32,6 +32,7 @@ use crate::env::runtime::utils::{
     find_struct_method,
     diff_fields,
     is_valid_alias,
+    get_pointer_depth_and_base_value,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -364,8 +365,8 @@ impl Interpreter {
             return (true, None);
         }
 
-        if let Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: _null_allowed } = expected {
-            if expected_type == "any" && *expected_ref == 0 {
+        if let Type::Simple { name: expected_type } = expected {
+            if expected_type == "any" {
                 return (true, None);
             }
         }
@@ -380,21 +381,21 @@ impl Interpreter {
         }
 
         match expected {
-            Type::Simple { name: expected_type, ref_level: expected_ref, is_maybe_type: null_allowed } => {
+            Type::Simple { name: expected_type  } => {
                 if expected_type != "any" {
                     match value_type {
-                        Type::Simple { name: value_type_name, ref_level: value_type_ref, .. } => {
-                            if !((value_type_name == *expected_type && value_type_ref == *expected_ref) || (*null_allowed && value_type_name == "void")) {
+                        Type::Simple { name: value_type_name, .. } => {
+                            if value_type_name != *expected_type {
                                 status = false;
                             }
                         }
                         Type::Function { .. } => {
-                            if expected_type != "function" || *expected_ref != 0 {
+                            if expected_type != "function" {
                                 status = false;
                             }
                         }
                         Type::Generator { .. } => {
-                            if expected_type != "generator" || *expected_ref != 0 {
+                            if expected_type != "generator" {
                                 status = false;
                             }
                         }
@@ -404,13 +405,28 @@ impl Interpreter {
                                 self.get_location_from_current_statement())));
                         }
                     }
-                } else if *expected_ref > 0 {
-                    if let Type::Simple { ref_level: value_type_ref, .. } = value_type {
-                        if value_type_ref != *expected_ref {
-                            status = false;
-                        }
-                    }
                 }
+            }
+            Type::Maybe { base_type } => {
+                if self.check_type(value, base_type).0 {
+                    return (true, None);
+                } else if matches!(value, Value::Null) {
+                    return (true, None);
+                } else {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Expected type '?{}', got '{}'", base_type.display_simple(), value_type.display_simple()), 
+                        self.get_location_from_current_statement())));
+                }
+            }
+            Type::Reference { base_type, ref_level } => {
+                let (current_ref_level, current_value) = get_pointer_depth_and_base_value(value);
+                if current_ref_level != *ref_level {
+                    return (false, Some(make_err("TypeError", 
+                        &format!("Expected reference level {}, got {}", ref_level, current_ref_level), 
+                        self.get_location_from_current_statement())));
+                }
+
+                return self.check_type(&current_value, base_type);
             }
             Type::Indexed { base_type: base, elements } => {
                 if value_type != **base {
@@ -2561,7 +2577,7 @@ impl Interpreter {
         match ptr_op_type {
             PtrNode::PointerRef { ref_level } => {
                 match value {
-                    Value::Type(mut t) => Value::Type(t.set_reference(ref_level).unmut()),
+                    Value::Type(t) => Value::Type(t.make_reference(ref_level)),
                     Value::Pointer(ref ptr_arc) => {
                         let mut guard = ptr_arc.lock();
                         guard.1 += ref_level;
@@ -2998,6 +3014,31 @@ impl Interpreter {
                     NULL
                 }
             },
+            "type" => {
+                if let Value::String(s) = value {
+                    let l = Lexer::new(&s, &self.file_path);
+                    let tokens = l.tokenize();
+                    let mut p = Parser::new(tokens);
+                    let type_stmt = p.parse_type();
+                    if p.err.is_some() {
+                        self.raise_with_ref("SyntaxError", "Failed to parse type string", p.err.take().unwrap());
+                        return NULL;
+                    }
+                    let type_value = self.evaluate(&type_stmt);
+                    if self.err.is_some() {
+                        return NULL;
+                    }
+                    if let Value::Type(t) = type_value {
+                        Value::Type(t)
+                    } else {
+                        self.raise("TypeError", "Parsed value is not a type");
+                        NULL
+                    }
+                } else {
+                    self.raise("TypeError", &format!("Cannot convert '{}' to type", value.type_name()));
+                    NULL
+                }
+            }
             _ => {
                 self.raise("NotImplemented", &format!("Type conversion to '{}' is not implemented", target_type));
                 NULL
@@ -4679,10 +4720,10 @@ impl Interpreter {
 
     fn handle_type(&mut self, type_kind: TypeNode) -> Value {
         let type_: Type = match type_kind {
-            TypeNode::Simple { base: type_name, ptr_level, is_maybe} => {
+            TypeNode::Simple { base: type_name } => {
                 match self.variables.get(type_name.as_str()) {
                     Some(val) => match &val.value {
-                        Value::Type(t) => t.clone().set_reference(ptr_level).set_maybe_type(is_maybe).unmut(),
+                        Value::Type(t) => { t.clone() }
                         _ => {
                             self.raise_with_help("TypeError", &format!("'{}' is a variable name, not a type", type_name), "If you meant to assign a value, use ':=' instead of ':'");
                             return NULL;
@@ -4697,6 +4738,43 @@ impl Interpreter {
                                 VALID_TYPES[0..5].join(", ")
                             ),
                         );
+                        return NULL;
+                    }
+                }
+            }
+
+            TypeNode::Reference { base_type, ref_level } => {
+                let base = self.handle_type(*base_type);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                match &base {
+                    Value::Type(t) => {
+                        Type::Reference {
+                            base_type: Box::new(t.clone()),
+                            ref_level,
+                        }
+                    }
+                    _ => {
+                        self.raise("TypeError", "Reference type must be a valid type");
+                        return NULL;
+                    }
+                }
+            }
+
+            TypeNode::Maybe { base_type } => {
+                let base = self.handle_type(*base_type);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                match &base {
+                    Value::Type(t) => {
+                        Type::Maybe {
+                            base_type: Box::new(t.clone()),
+                        }
+                    }
+                    _ => {
+                        self.raise("TypeError", "Maybe type must be a valid type");
                         return NULL;
                     }
                 }
@@ -5010,7 +5088,7 @@ impl Interpreter {
                         }
                     }
                     _ => {
-                        return self.raise("TypeError", &format!("Invalid generic type '{}'", base.get_type().display_simple()));
+                        return self.raise("TypeError", &format!("Invalid generic type '{}'", base_type.display_simple()));
                     }
                 }
             }

@@ -411,11 +411,11 @@ pub fn register() -> HashMap<String, Variable> {
         range_handler,
         vec![
             Parameter::positional("a", "int"),
-            Parameter::positional_optional_pt("b", Type::new_simple("int").set_maybe_type(true), Value::Null),
+            Parameter::positional_optional_pt("b", &Type::new_simple("?int"), Value::Null),
             Parameter::positional_optional("step", "int", Value::Int(Int::from_i64(1)))
         ],
         "list",
-        "deprecated: 'range' was added to builins in v2.0.0, use 'range' from there instead.",
+        "deprecated: 'range' was added to builtins in v2.0.0, use 'range' from there instead.",
         EffectFlags::PURE
     );
     insert_native_fn!(

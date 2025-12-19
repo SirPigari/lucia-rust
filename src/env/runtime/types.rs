@@ -18,8 +18,6 @@ pub const VALID_TYPES: &[&str] = &[
 pub enum Type {
     Simple {
         name: String,
-        ref_level: usize,
-        is_maybe_type: bool,
     },
     Function {
         parameter_types: Vec<Type>,
@@ -56,25 +54,21 @@ pub enum Type {
         conditions: Vec<Statement>,
         variables: Vec<String>,
     },
+    Reference {
+        base_type: Box<Type>,
+        ref_level: usize,
+    },
+    Maybe {
+        base_type: Box<Type>,
+    },
     Unwrap(Vec<Value>),
 }
 
 impl Type {
     pub fn display(&self) -> String {
         match self {
-            Type::Simple { name, ref_level, is_maybe_type } => {
-                let mut result = "<type '".to_string();
-                if *ref_level > 0 {
-                    for _ in 0..*ref_level {
-                        result.push('&');
-                    }
-                }
-                if *is_maybe_type {
-                    result.push('?');
-                }
-                result.push_str(name);
-                result.push_str("'>");
-                result
+            Type::Simple { name } => {
+                format!("<type '{}'>", name)
             },
             Type::Function { parameter_types, return_type } => {
                 let params = parameter_types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ");
@@ -138,24 +132,19 @@ impl Type {
                 let methods_str = implementations.iter().map(|(name, func, _)| func.display_simple().replacen("function", &name, 1)).collect::<Vec<_>>().join(" + ");
                 format!("<impl {}>", methods_str)
             },
+            Type::Reference { base_type, ref_level } => {
+                let refs = "&".repeat(*ref_level);
+                format!("<type '{}{}'>", refs, base_type.display_simple())
+            },
+            Type::Maybe { base_type } => format!("<type '?{}'>", base_type.display_simple()),
             Type::Unwrap(values) => format!("<unwrap type '{}'>", values.iter().map(|v| v.get_type().display_simple()).collect::<Vec<_>>().join(", ")),
         }
     }
 
     pub fn display_simple(&self) -> String {
         match self {
-            Type::Simple { name, ref_level, is_maybe_type } => {
-                let mut result = String::new();
-                if *ref_level > 0 {
-                    for _ in 0..*ref_level {
-                        result.push('&');
-                    }
-                }
-                if *is_maybe_type {
-                    result.push('?');
-                }
-                result.push_str(name);
-                result
+            Type::Simple { name } => {
+                name.to_owned()
             },
             Type::Function { parameter_types, return_type } => {
                 let params = parameter_types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ");
@@ -186,58 +175,80 @@ impl Type {
                     .join(" + ");
                 format!("impl {}", methods_str)
             },
+            Type::Reference { base_type, ref_level } => {
+                let refs = "&".repeat(*ref_level);
+                format!("{}{}", refs, base_type.display_simple())
+            },
+            Type::Maybe { base_type } => format!("?{}", base_type.display_simple()),
             _ => self.display(),
         }
     }
 
-    pub fn set_reference(&mut self, r: usize) -> &mut Self {
-        if let Type::Simple { ref_level, .. } = self {
-            *ref_level = r;
+    pub fn make_reference(&self, level: usize) -> Self {
+        if level == 0 {
+            return self.clone();
         }
-        self
+        Type::Reference {
+            base_type: Box::new(self.clone()),
+            ref_level: level,
+        }
     }
 
-    pub fn set_maybe_type(&mut self, m: bool) -> &mut Self {
-        if let Type::Simple { is_maybe_type, .. } = self {
-            *is_maybe_type = m;
+    pub fn make_maybe_type(&self) -> Self {
+        Type::Maybe {
+            base_type: Box::new(self.clone()),
         }
-        self
-    }
-
-    pub fn unmut(&mut self) -> Self {
-        std::mem::replace(self, Type::Simple {
-            name: "void".to_owned(),
-            ref_level: 0,
-            is_maybe_type: false,
-        })
     }
 
     pub fn new_simple(name: &str) -> Self {
-        let mut ref_level = 0;
-        let mut maybe_type = false;
-        let mut base_name = name.to_owned();
-        while base_name.starts_with('&') || base_name.starts_with('?') {
-            if base_name.starts_with('&') {
-                ref_level += 1;
-                base_name = base_name[1..].to_owned();
-            } else if base_name.starts_with('?') {
-                maybe_type = true;
-                base_name = base_name[1..].to_owned();
+        let mut base = name;
+
+        while let Some(c) = base.chars().next() {
+            match c {
+                '&' | '?' => {
+                    base = &base[1..];
+                }
+                _ => break,
             }
         }
-        Type::Simple {
-            name: base_name,
-            ref_level,
-            is_maybe_type: maybe_type,
+
+        let mut t = Type::Simple {
+            name: base.to_owned(),
+        };
+
+        let rest = name[..name.len() - base.len()].as_bytes();
+        let mut i = rest.len();
+
+        let mut ref_acc = 0;
+
+        while i > 0 {
+            i -= 1;
+            match rest[i] {
+                b'&' => {
+                    ref_acc += 1;
+                }
+                b'?' => {
+                    if ref_acc > 0 {
+                        t = t.make_reference(ref_acc);
+                        ref_acc = 0;
+                    }
+                    t = t.make_maybe_type();
+                }
+                _ => unreachable!(),
+            }
         }
+
+        if ref_acc > 0 {
+            t = t.make_reference(ref_acc);
+        }
+
+        t
     }
 
     pub fn new_list(element_type: Type) -> Self {
         Type::Indexed {
             base_type: Box::new(Type::Simple {
                 name: "list".to_string(),
-                ref_level: 0,
-                is_maybe_type: false,
             }),
             elements: vec![element_type],
         }
@@ -251,6 +262,8 @@ impl Type {
         match get_inner_type(self) {
             Ok((_, Type::Indexed { base_type, .. })) => *base_type.clone(),
             Ok((_, Type::Alias { base_type, .. })) => *base_type.clone(),
+            Ok((_, Type::Reference { base_type, .. })) => *base_type.clone(),
+            Ok((_, Type::Maybe { base_type })) => *base_type.clone(),
             _ => self.clone(),
         }
     }
@@ -260,9 +273,9 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         use Type::*;
         match (self, other) {
-            (Simple { name: n1, ref_level: r1, is_maybe_type: m1 },
-             Simple { name: n2, ref_level: r2, is_maybe_type: m2 }) => {
-                n1 == n2 && r1 == r2 && m1 == m2
+            (Simple { name: n1 },
+             Simple { name: n2 }) => {
+                n1 == n2
             },
 
             (Function { parameter_types: p1, return_type: r1 },
@@ -296,6 +309,14 @@ impl PartialEq for Type {
              Impl { implementations: m2, .. }) =>
                 m1 == m2,
 
+            (Reference { base_type: b1, ref_level: r1 },
+             Reference { base_type: b2, ref_level: r2 }) =>
+                b1 == b2 && r1 == r2,
+
+            (Maybe { base_type: b1 },
+             Maybe { base_type: b2 }) =>
+                b1 == b2,
+
             (Unwrap(v1), Unwrap(v2)) =>
                 v1 == v2,
 
@@ -315,10 +336,8 @@ impl Hash for Type {
         use Type::*;
         std::mem::discriminant(self).hash(state);
         match self {
-            Simple { name, ref_level, is_maybe_type } => {
+            Simple { name } => {
                 name.hash(state);
-                ref_level.hash(state);
-                is_maybe_type.hash(state);
             }
             Function { parameter_types, return_type } => {
                 parameter_types.hash(state);
@@ -351,6 +370,13 @@ impl Hash for Type {
             }
             Impl { implementations, .. } => {
                 implementations.hash(state);
+            }
+            Reference { base_type, ref_level } => {
+                base_type.hash(state);
+                ref_level.hash(state);
+            }
+            Maybe { base_type } => {
+                base_type.hash(state);
             }
             Unwrap(values) => {
                 values.hash(state);

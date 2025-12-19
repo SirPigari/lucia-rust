@@ -107,8 +107,6 @@ pub enum AccessType {
 pub enum TypeNode {
     Simple {
         base: String,
-        ptr_level: usize,
-        is_maybe: bool,  
     },
     Union {
         types: Vec<TypeNode>,
@@ -131,16 +129,21 @@ pub enum TypeNode {
     },
     Variadics {
         base: Box<TypeNode>
-    }
+    },
+    Reference {
+        base_type: Box<TypeNode>,
+        ref_level: usize,
+    },
+    Maybe {
+        base_type: Box<TypeNode>,
+    },
 }
 
 impl TypeNode {
     pub fn format_for_debug(&self) -> String {
         match self {
-            TypeNode::Simple { base, ptr_level, is_maybe } => format!("\"type_type\": \"simple\", \"base\": \"{}\", \"ptr_level\": {}, \"is_maybe\": {}",
+            TypeNode::Simple { base } => format!("\"type_type\": \"simple\", \"base\": \"{}\"",
                 base,
-                ptr_level,
-                is_maybe
             ),
             TypeNode::Union { types } => format!("{{\"type_type\": \"union\", \"types\": [{}]}}",
                 types.iter().map(|t| t.format_for_debug()).collect::<Vec<String>>().join(", ")
@@ -166,6 +169,13 @@ impl TypeNode {
                 )).collect::<Vec<String>>().join(", "),
                 joins.iter().map(|j| format!("\"{}\"", j)).collect::<Vec<String>>().join(", ")
             ),
+            TypeNode::Reference { base_type, ref_level } => format!("{{\"type_type\": \"reference\", \"base_type\": {}, \"ref_level\": {}}}",
+                base_type.format_for_debug(),
+                ref_level
+            ),
+            TypeNode::Maybe { base_type } => format!("{{\"type_type\": \"maybe\", \"base_type\": {}}}",
+                base_type.format_for_debug()
+            ),  
             TypeNode::Variadics { base } => format!("{{\"type_type\": \"variadics\", \"base\": {}}}",
                 base.format_for_debug()
             ),
