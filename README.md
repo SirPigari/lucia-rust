@@ -24,6 +24,7 @@ It's designed for speed and safety, without sacrificing elegance.
 
 - Clean, easy-to-read syntax inspired by Python and Lua (Kotlin too)  
 - Static types  
+- No abstraction for references - everything is explicit  
 - Entirely written in Rust for reliability and speed  
 - Designed to run efficiently across all major platforms  
 - Beginner-friendly, while allowing advanced usage  
@@ -91,6 +92,11 @@ Tested on:
 - ![macOS](https://img.shields.io/badge/macOS-Supported-lightgrey?logo=apple)  
 - ![Ubuntu Linux](https://img.shields.io/badge/Ubuntu_Linux-Supported-E95420?logo=ubuntu&logoColor=white)  
 - ![Arch Linux](https://img.shields.io/badge/Arch_Linux-Supported-1793D1?logo=arch-linux&logoColor=white)  
+
+Build on:
+
+- Everything above
+- ![WASM 32](https://img.shields.io/badge/WebAssembly-Supported-654FF0?logo=webassembly&logoColor=white)
 
 ---
 

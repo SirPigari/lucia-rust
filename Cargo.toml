@@ -10,7 +10,7 @@ imagnum = "0.2.29"
 once_cell = { version = "1.21.3", default-features = false }
 regex = "1.12.2"
 rand = { version = "0.9.2", default-features = false, features = ["small_rng"] }
-reqwest = { version = "0.12.25", features = [
+reqwest = { version = "0.12.26", features = [
     "json",
     "rustls-tls",
 ], default-features = false }
@@ -18,8 +18,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.9"
-fancy-regex = { version = "0.16.2", optional = true }
-bincode = "2.0.1"
+fancy-regex = { version = "0.17", optional = true }
+bincode = "2.0.1"  # fuck you doxxers
 zstd = "0.13.3"
 rustc-hash = "2.1.1"
 parking_lot = "0.12.5"

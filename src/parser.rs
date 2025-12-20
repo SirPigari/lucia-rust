@@ -87,7 +87,7 @@ impl Parser {
     }
 
     #[track_caller]
-    fn check_for(&mut self, expected_type: &str, expected_value: &str) -> (Vec<Value>, Vec<(Value, Value)>) {
+    fn check_for(&mut self, expected_type: &str, expected_value: &str) {
         if let Some(token) = self.token() {
             let (token_type, token_value) = (token.0.clone(), token.1.clone());
             let value_matches = expected_value.is_empty() || token_value == expected_value;
@@ -100,7 +100,7 @@ impl Parser {
                         token_value
                     ));
                 }
-                return (vec![], vec![]);
+                return;
             }
         }
         if expected_type == "SEPARATOR" && [")", "]", "}", "end"].contains(&expected_value) {
@@ -117,7 +117,7 @@ impl Parser {
                 opening
             ),
             &format!("Maybe you forgot '{}'?", expected_value));
-            return (vec![], vec![]);
+            return;
         } else if expected_type == "OPERATOR" && ["|"].contains(&expected_value) {
             let mut opening = "".to_string();
             match expected_value {
@@ -129,13 +129,13 @@ impl Parser {
                 opening
             ),
             &format!("Maybe you forgot '{}'?", expected_value));
-            return (vec![], vec![]);
+            return;
         }
         self.raise("UEFError", &format!(
             "Expected token '{}' but found end of input",
             if expected_value.is_empty() { expected_type } else { expected_value }
         ));
-        (vec![], vec![])
+        return;
     }
 
     #[inline]
@@ -3081,24 +3081,9 @@ impl Parser {
                             loc: alloc_loc(self.get_loc()),
                         };
                     }
-                    let mut parenthesis = false;
-                    if self.token_is("SEPARATOR", "(") {
-                        self.next();
-                        parenthesis = true;
-                    }
                     let value = self.parse_expression();
                     if self.err.is_some() {
                         return Statement::Null;
-                    }
-                    if !self.token_is("SEPARATOR", ")") && parenthesis {
-                        self.raise_with_help(
-                            "SyntaxError",
-                            "Expected ')' after expression in 'return (...)'",
-                            "Maybe you forgot to add ')'?"
-                        );
-                        return Statement::Null;
-                    } else if parenthesis {
-                        self.next();
                     }
                     Statement {
                         node: Node::Return {
@@ -3948,21 +3933,15 @@ impl Parser {
             self.next();
             let mut elements = Vec::new();
             while !self.token_is("SEPARATOR", ")") {
-                let elem = self.parse_single_type();
+                let elem = self.parse_type();
                 if self.err.is_some() {
                     return None;
                 }
-                if let Some((_, stmt)) = elem {
-                    if let Node::Type { node } = &stmt.node {
-                        elements.push(node.clone());
-                    } else {
-                        self.raise("SyntaxError", "Expected type in tuple elements");
-                        return None;
-                    }
+                if let Node::Type { node } = &elem.node {
+                    elements.push(node.clone());
                 } else {
-                    elements.push(TypeNode::Simple {
-                        base: "any".to_string(),
-                    });
+                    self.raise("SyntaxError", "Expected type in tuple elements");
+                    return None;
                 }
                 if self.token_is("SEPARATOR", ",") {
                     self.next();

@@ -1965,7 +1965,132 @@ impl Variable {
                         None,
                     )
                 };
-            
+                let pop = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "pop",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                if list.is_empty() {
+                                    return Value::Error("IndexError", "Pop from empty list", None);
+                                }
+                                let mut new_list = list.clone();
+                                let item = new_list.pop().unwrap();
+                                return Value::Tuple(vec![Value::List(new_list), item]);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "tuple",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let dedup = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "dedup",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                let mut seen = FxHashSet::with_capacity_and_hasher(list.len(), Default::default());
+                                let mut deduped = Vec::with_capacity(list.len());
+                                for item in list {
+                                    if !seen.contains(item) {
+                                        seen.insert(item.clone());
+                                        deduped.push(item.clone());
+                                    }
+                                }
+                                return Value::List(deduped);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "list",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let max = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "max",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                if list.is_empty() {
+                                    return Value::Null;
+                                }
+                                let mut max_value = list[0].clone();
+                                for item in list.iter().skip(1) {
+                                    if let Some(ordering) = item.partial_cmp(&max_value) {
+                                        if ordering == std::cmp::Ordering::Greater {
+                                            max_value = item.clone();
+                                        }
+                                    } else {
+                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                    }
+                                }
+                                return max_value;
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "any",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let min = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "min",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                if list.is_empty() {
+                                    return Value::Null;
+                                }
+                                let mut min_value = list[0].clone();
+                                for item in list.iter().skip(1) {
+                                    if let Some(ordering) = item.partial_cmp(&min_value) {
+                                        if ordering == std::cmp::Ordering::Less {
+                                            min_value = item.clone();
+                                        }
+                                    } else {
+                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                    }
+                                }
+                                return min_value;
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "any",
+                        false, true, true,
+                        None,
+                    )
+                };
+
+                self.properties.insert(
+                    "max".to_string(),
+                    Variable::new(
+                        "max".to_string(),
+                        max,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "min".to_string(),
+                    Variable::new(
+                        "min".to_string(),
+                        min,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
                 self.properties.insert(
                     "append".to_string(),
                     Variable::new(
@@ -2169,6 +2294,28 @@ impl Variable {
                     Variable::new(
                         "reduce".to_string(),
                         reduce,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "pop".to_string(),
+                    Variable::new(
+                        "pop".to_string(),
+                        pop,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "dedup".to_string(),
+                    Variable::new(
+                        "dedup".to_string(),
+                        dedup,
                         "function".to_string(),
                         false,
                         true,

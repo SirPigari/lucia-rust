@@ -1,6 +1,14 @@
 use crate::env::runtime::tokens::{Location, Token, TK_IDENTIFIER, TK_STRING, TK_RAW_STRING, TK_NUMBER, TK_BOOLEAN, TK_OPERATOR, TK_SEPARATOR, TK_INVALID, TK_EOF};
 use std::borrow::Cow;
 
+const SYMBOL_OPERATORS: [&str; 45] = [
+    "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*",
+    "=/", "=^", "=", "<<", ">>", ":=", "^^^", "^^", "++", "--", "+", "-", "^", "*", "/",
+    ">", "<", "!", "%", "||", "&&", "??", "|>",  "|", "#", "~", "$", "?", "&", "^=", "%=",
+];
+const WORD_OPERATORS: [&str; 15] = ["lshift", "rshift", "isn't", "isnt", "xnor", "nein", "band", "bnot", "and", "not", "xor", "bor", "in", "or", "is"];
+const SEPARATORS: [&str; 13] = ["...", "..", "(", ")", "{", "}", "[", "]", ";", ":", ".", ",", "\\"];
+
 pub struct Lexer<'a> {
     code: &'a str,
     file_path: &'a str,
@@ -69,19 +77,6 @@ impl<'a> Lexer<'a> {
         let mut pos = 0;
         let len = self.code.len();
         let mut tokens = Vec::with_capacity(len / 3);
-
-        let symbol_operators = [
-            "->", ">=", "<=", "==", "!=", "+=", "-=", "*=", "/=", "=>", "=!", "=+", "=-", "=*",
-            "=/", "=^", "=", "<<", ">>", ":=", "^^^", "^^", "++", "--", "+", "-", "^", "*", "/",
-            ">", "<", "!", "%", "||", "&&", "??", "|>",  "|", "#", "~", "$", "?", "&", "^=", "%=",
-        ];
-        let word_operators = [
-            "in", "or", "and", "not", "isnt", "isn't", "is", "xor", "xnor", "nein", "lshift",
-            "rshift", "band", "bor", "bnot",
-        ];
-        let mut word_ops_sorted = word_operators.to_vec();
-        word_ops_sorted.sort_by(|a, b| b.len().cmp(&a.len()));
-        let separators = ["...", "..", "(", ")", "{", "}", "[", "]", ";", ":", ".", ",", "\\"];
 
         'outer: while pos < len {
             let slice = &self.code[pos..];
@@ -345,7 +340,7 @@ impl<'a> Lexer<'a> {
 
             // WORD OPERATORS
             let mut matched = false;
-            for &op in &word_ops_sorted {
+            for &op in &WORD_OPERATORS {
                 if slice.starts_with(op) {
                     let before_ok = pos == 0
                         || !self.code[..pos].chars().rev().next().unwrap().is_alphanumeric()
@@ -375,7 +370,7 @@ impl<'a> Lexer<'a> {
 
             // SYMBOL OPERATORS
             let mut op_matched = false;
-            for &op in &symbol_operators {
+            for &op in &SYMBOL_OPERATORS {
                 if slice.starts_with(op) {
                     tokens.push(self.make_token(TK_OPERATOR, op, pos, pos + op.len()));
                     pos += op.len();
@@ -387,7 +382,7 @@ impl<'a> Lexer<'a> {
 
             // SEPARATORS
             let mut sep_matched = false;
-            for &sep in &separators {
+            for &sep in &SEPARATORS {
                 if slice.starts_with(sep) {
                     tokens.push(self.make_token(TK_SEPARATOR, sep, pos, pos + sep.len()));
                     pos += sep.len();
