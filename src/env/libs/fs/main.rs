@@ -5,6 +5,11 @@ use std::path::Path;
 use std::env as std_env;
 use std::fs::File;
 
+#[cfg(windows)]
+use std::os::windows::io::FromRawHandle;
+#[cfg(unix)]
+use std::os::fd::FromRawFd;
+
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::utils::{to_static, fix_path};
 use crate::env::runtime::value::Value;
@@ -31,8 +36,6 @@ fn read_from_fd_handler(args: &HashMap<String, Value>) -> Value {
         unsafe {
             #[cfg(unix)]
             let mut file = File::from_raw_fd(fd_usize as i32);
-            #[cfg(windows)]
-            use std::os::windows::io::FromRawHandle;
             #[cfg(windows)]
             let mut file = File::from_raw_handle(fd_usize as *mut std::ffi::c_void);
             let mut contents = String::new();
