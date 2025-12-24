@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int};
 use crate::env::runtime::errors::Error;

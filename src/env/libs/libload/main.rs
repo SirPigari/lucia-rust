@@ -5,6 +5,7 @@ use std::ffi::{c_void, CStr, CString};
 use parking_lot::Mutex;
 use once_cell::sync::OnceCell;
 use crate::env::runtime::utils::escape_string;
+use rustc_hash::FxHashMap;
 
 #[cfg(unix)]
 use libc::{dlsym, RTLD_DEFAULT};
@@ -175,7 +176,7 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
                     }).sum();
                     for i in 0..len {
                         let struct_ptr = (ptr as usize + i * struct_size) as *const u8;
-                        let mut field_map = HashMap::new();
+                        let mut field_map = FxHashMap::default();
                         let mut offset = 0;
                         for (field_name, field_type, _) in fields {
                             let type_name = get_type_from_statement(field_type).unwrap_or_else(|| "any".to_string());
@@ -202,12 +203,9 @@ fn get_list_native(args: &HashMap<String, Value>) -> Value {
                                 }
                                 _ => Value::Null,
                             };
-                            field_map.insert(field_name.clone(), val);
+                            field_map.insert(Value::String(field_name.clone()), val);
                         }
-                        result.push(Value::Map {
-                            keys: field_map.keys().cloned().map(Value::String).collect(),
-                            values: field_map.values().cloned().collect(),
-                        });
+                        result.push(Value::Map(field_map));
                     }
                     Value::List(result)
                 }

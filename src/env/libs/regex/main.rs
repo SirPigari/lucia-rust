@@ -6,9 +6,9 @@ use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;
 use super::regex_engine::{RegexEngine, normal, fancy};
 use crate::env::runtime::internal_structs::EffectFlags;
-use std::sync::Arc;
 use once_cell::sync::Lazy;
 use crate::insert_native_fn;
+use rustc_hash::FxHashMap;
 
 // This module provides regular expression matching capabilities.
 // It includes functions for compiling, matching, and replacing patterns in strings.
@@ -186,16 +186,20 @@ fn regex_capture(args: &HashMap<String, Value>) -> Value {
         Ok(re) => {
             match re.captures(value) {
                 Some(c) => {
-                    let mut keys = Vec::new();
-                    let mut values = Vec::new();
+                    let mut map = FxHashMap::with_capacity_and_hasher(
+                        c.names.len(),
+                        Default::default(),
+                    );
                     for (i, mat) in c.groups.iter().enumerate() {
-                        keys.push(Value::String(i.to_string()));
-                        values.push(match mat {
-                            Some(m) => Value::String(m.clone()),
-                            None => Value::Null,
-                        });
+                        map.insert(
+                            Value::String(i.to_string()),
+                            match mat {
+                                Some(m) => Value::String(m.clone()),
+                                None => Value::Null,
+                            },
+                        );
                     }
-                    Value::Map { keys, values }
+                    Value::Map(map)
                 },
                 None => Value::Null,
             }
@@ -219,13 +223,11 @@ fn regex_match_all(args: &HashMap<String, Value>) -> Value {
             let matches: Vec<Value> = re.find_iter(value)
                 .into_iter()
                 .map(|m| {
-                    let keys = vec!["match".into(), "start".into(), "end".into()];
-                    let values = vec![
-                        Value::String(m.as_str().to_string()),
-                        Value::Int((m.start as i64).into()),
-                        Value::Int((m.end as i64).into()),
-                    ];
-                    Value::Map { keys, values }
+                    Value::Map(FxHashMap::from_iter([
+                        (Value::String("match".to_string()), Value::String(m.as_str().to_string())),
+                        (Value::String("start".to_string()), Value::Int((m.start as i64).into())),
+                        (Value::String("end".to_string()), Value::Int((m.end as i64).into())),
+                    ]))
                 })
                 .collect();
             Value::List(matches)
@@ -248,16 +250,20 @@ fn regex_named_groups(args: &HashMap<String, Value>) -> Value {
         Ok(re) => {
             match re.captures(value) {
                 Some(caps) => {
-                    let mut keys = Vec::new();
-                    let mut values = Vec::new();
+                    let mut map = FxHashMap::with_capacity_and_hasher(
+                        re.named_group_count(),
+                        Default::default(),
+                    );
                     for name in re.capture_names().into_iter().flatten() {
-                        keys.push(Value::String(name.clone()));
-                        values.push(match caps.name(&name) {
-                            Some(m) => Value::String(m.to_string()),
-                            None => Value::Null,
-                        });
+                        map.insert(
+                            Value::String(name.to_string()),
+                            match caps.name(&name) {
+                                Some(m) => Value::String(m.to_string()),
+                                None => Value::Null,
+                            },
+                        );
                     }
-                    Value::Map { keys, values }
+                    Value::Map(map)
                 },
                 None => Value::Null,
             }

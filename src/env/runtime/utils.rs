@@ -351,10 +351,9 @@ pub fn format_value(value: &Value) -> String {
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
 
-        Value::Map { keys, values, .. } => {
-            let formatted_pairs: Vec<String> = keys
+        Value::Map(map) => {
+            let formatted_pairs: Vec<String> = map
                 .iter()
-                .zip(values.iter())
                 .filter(|(key, _)| match key {
                     Value::String(s) => s != "_line" && s != "_column",
                     _ => true,
@@ -885,7 +884,7 @@ pub fn get_type_default(type_: &str) -> Value {
         "string" => Value::String(String::new()),
         "bool" => Value::Boolean(false),
         "any" => Value::Null,
-        "map" => Value::Map { keys: vec![], values: vec![] },
+        "map" => Value::Map(HashMap::default()),
         "list" => Value::List(vec![]),
         "bytes" => Value::Bytes(vec![]),
         "tuple" => Value::Tuple(vec![]),
@@ -1120,9 +1119,9 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             parameters: vec![
                 Parameter::positional("url", "str"),
                 Parameter::positional_optional("method", "str", Value::String("GET".to_string())),
-                Parameter::positional_optional("headers", "map", Value::Map { keys: vec![], values: vec![] }),
-                Parameter::positional_optional("params", "map", Value::Map { keys: vec![], values: vec![] }),
-                Parameter::positional_optional("data", "map", Value::Map { keys: vec![], values: vec![] }),
+                Parameter::positional_optional("headers", "map", Value::Map(HashMap::default())),
+                Parameter::positional_optional("params", "map", Value::Map(HashMap::default())),
+                Parameter::positional_optional("data", "map", Value::Map(HashMap::default())),
                 Parameter::positional_optional("json", "any", NULL),
             ],
             return_type: Type::new_simple("map"),
@@ -1482,10 +1481,7 @@ pub fn convert_value_to_type(
         },
 
         "map" => match value {
-            Value::Map { keys, values } => Ok(Value::Map {
-                keys: keys.clone(),
-                values: values.clone(),
-            }),
+            Value::Map(map) => Ok(Value::Map(map.clone())),
             _ => Err(("TypeError", "Cannot convert value to map", "")),
         },
 
@@ -2428,9 +2424,12 @@ pub fn convert_json_value_to_lucia_value(json_value: &serde_json::Value) -> Valu
             Value::List(list)
         }
         serde_json::Value::Object(obj) => {
-            let keys: Vec<Value> = obj.keys().map(|k| Value::String(k.clone())).collect();
-            let values: Vec<Value> = obj.values().map(convert_json_value_to_lucia_value).collect();
-            Value::Map { keys, values }
+            // let keys: Vec<Value> = obj.keys().map(|k| Value::String(k.clone())).collect();
+            // let values: Vec<Value> = obj.values().map(convert_json_value_to_lucia_value).collect();
+            // Value::Map { keys, values }
+            Value::Map(HashMap::from_iter(
+                obj.iter().map(|(k, v)| (Value::String(k.clone()), convert_json_value_to_lucia_value(v)))
+            ))
         }
     }
 }
@@ -2441,150 +2440,6 @@ static VALID_ALIAS_REGEX: Lazy<Regex> = Lazy::new(|| {
 
 pub fn is_valid_alias(name: &str) -> bool {
     VALID_ALIAS_REGEX.is_match(name)
-}
-
-#[inline(always)]
-pub fn timsort_by<T, F>(arr: &mut [T], mut compare: F)
-where
-    F: FnMut(&T, &T) -> std::cmp::Ordering,
-{
-    let n = arr.len();
-    if n < 2 { return; }
-
-    let minrun = calc_minrun(n);
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0;
-
-    while i < n {
-        let run_start = i;
-        let mut run_end = i + 1;
-
-        if run_end < n {
-            if compare(&arr[run_end], &arr[run_start]) == std::cmp::Ordering::Less {
-                while run_end < n && compare(&arr[run_end], &arr[run_end - 1]) == std::cmp::Ordering::Less {
-                    run_end += 1;
-                }
-                reverse(arr, run_start, run_end - 1);
-            } else {
-                while run_end < n && compare(&arr[run_end], &arr[run_end - 1]) != std::cmp::Ordering::Less {
-                    run_end += 1;
-                }
-            }
-        }
-
-        let run_len = run_end - run_start;
-        let extend = if run_len < minrun { usize::min(n, run_start + minrun) } else { run_end };
-        insertion_sort_by(&mut arr[run_start..extend], &mut compare);
-        runs.push((run_start, extend));
-        i = extend;
-
-        while runs.len() >= 2 {
-            let len = runs.len();
-            let (start2, end2) = runs[len - 1];
-            let (start1, end1) = runs[len - 2];
-
-            if (len >= 3 && runs[len - 3].1 - runs[len - 3].0 <= (end1 - start1) + (end2 - start2))
-                || ((end1 - start1) <= (end2 - start2))
-            {
-                merge_gallop_by(arr, start1, end1, end2, &mut compare);
-                runs[len - 2] = (start1, end2);
-                runs.pop();
-            } else {
-                break;
-            }
-        }
-    }
-
-    while runs.len() > 1 {
-        let (_, end2) = runs.pop().unwrap();
-        let (start1, end1) = runs.pop().unwrap();
-        merge_gallop_by(arr, start1, end1, end2, &mut compare);
-        runs.push((start1, end2));
-    }
-}
-
-#[inline(always)]
-fn insertion_sort_by<T, F>(arr: &mut [T], compare: &mut F)
-where
-    F: FnMut(&T, &T) -> std::cmp::Ordering,
-{
-    for i in 1..arr.len() {
-        let mut j = i;
-        while j > 0 && compare(&arr[j], &arr[j - 1]) == std::cmp::Ordering::Less {
-            arr.swap(j, j - 1);
-            j -= 1;
-        }
-    }
-}
-
-#[inline(always)]
-fn merge_gallop_by<T, F>(arr: &mut [T], start: usize, mid: usize, end: usize, compare: &mut F)
-where
-    F: FnMut(&T, &T) -> std::cmp::Ordering,
-{
-    let mut left = start;
-    let mut right = mid;
-
-    while left < right && right < end {
-        if compare(&arr[left], &arr[right]) != std::cmp::Ordering::Greater {
-            left += 1;
-        } else {
-            let block_size = gallop_right_by(&arr[left], &arr[right..end], compare);
-            rotate(arr, left, right, right + block_size);
-            left += block_size;
-            right += block_size;
-        }
-    }
-}
-
-#[inline(always)]
-fn gallop_right_by<T, F>(key: &T, slice: &[T], compare: &mut F) -> usize
-where
-    F: FnMut(&T, &T) -> std::cmp::Ordering,
-{
-    let mut step = 1;
-    let idx = 0;
-    while idx + step < slice.len() && compare(&slice[idx + step], key) == std::cmp::Ordering::Less {
-        step *= 2;
-    }
-
-    let mut low = idx;
-    let mut high = usize::min(idx + step, slice.len());
-    while low < high {
-        let mid = (low + high) / 2;
-        if compare(&slice[mid], key) == std::cmp::Ordering::Less {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-    low
-}
-
-#[inline(always)]
-fn rotate<T>(arr: &mut [T], a: usize, b: usize, c: usize) {
-    reverse(arr, a, b - 1);
-    reverse(arr, b, c - 1);
-    reverse(arr, a, c - 1);
-}
-
-#[inline(always)]
-fn reverse<T>(arr: &mut [T], mut start: usize, mut end: usize) {
-    while start < end {
-        arr.swap(start, end);
-        start += 1;
-        end -= 1;
-    }
-}
-
-#[inline(always)]
-fn calc_minrun(mut n: usize) -> usize {
-    let mut r = 0;
-    while n >= 64 {
-        r |= n & 1;
-        n >>= 1;
-    }
-    n + r
 }
 
 pub const KEYWORDS: &[&str] = &[

@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::sync::Arc;
-
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Float, Int};
 use crate::env::runtime::utils::to_static;
@@ -9,6 +7,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::insert_native_fn;
+use rustc_hash::FxHashMap;
 
 use serde_json::{self, Serializer, Value as JsonValue};
 use serde::Serialize;
@@ -37,9 +36,10 @@ fn from_json_value(jv: &JsonValue) -> Value {
         JsonValue::String(s) => Value::String(s.clone()),
         JsonValue::Array(arr) => Value::List(arr.into_iter().map(from_json_value).collect()),
         JsonValue::Object(map) => {
-            let keys = map.keys().map(|k| Value::String(k.clone())).collect();
-            let values = map.values().map(from_json_value).collect();
-            Value::Map { keys, values }
+            let new_map = FxHashMap::from_iter(
+                map.iter().map(|(k, v)| (Value::String(k.clone()), from_json_value(v)))
+            );
+            Value::Map(new_map)
         }
     }
 }

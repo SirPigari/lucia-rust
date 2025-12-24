@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int, Type};
 use crate::env::runtime::value::Value;
@@ -11,6 +10,7 @@ use crate::env::runtime::structs_and_enums::Struct;
 use std::time::{Duration, SystemTime};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+use rustc_hash::FxHashMap;
 use once_cell::sync::Lazy;
 use crate::{insert_native_fn, make_native_fn_pt, make_native_static_fn_pt, insert_native_var};
 use chrono::{Utc, Local, Timelike, Datelike, NaiveDateTime, DateTime, FixedOffset, TimeZone, LocalResult};
@@ -1139,17 +1139,14 @@ fn parse_time(args: &HashMap<String, Value>) -> Value {
 
     match NaiveDateTime::parse_from_str(time_str, format) {
         Ok(dt) => {
-            let mut map = HashMap::new();
-            map.insert("year".to_string(), Value::Int(Int::from_i64(dt.year().into())));
-            map.insert("month".to_string(), Value::Int(Int::from_i64(dt.month().into())));
-            map.insert("day".to_string(), Value::Int(Int::from_i64(dt.day().into())));
-            map.insert("hour".to_string(), Value::Int(Int::from_i64(dt.hour().into())));
-            map.insert("minute".to_string(), Value::Int(Int::from_i64(dt.minute().into())));
-            map.insert("second".to_string(), Value::Int(Int::from_i64(dt.second().into())));
-            Value::Map {
-                keys: map.keys().cloned().map(Value::String).collect(),
-                values: map.values().cloned().collect(),
-            }
+            let mut map = FxHashMap::with_capacity_and_hasher(6, Default::default());
+            map.insert(Value::String("year".to_string()), Value::Int(Int::from_i64(dt.year().into())));
+            map.insert(Value::String("month".to_string()), Value::Int(Int::from_i64(dt.month().into())));
+            map.insert(Value::String("day".to_string()), Value::Int(Int::from_i64(dt.day().into())));
+            map.insert(Value::String("hour".to_string()), Value::Int(Int::from_i64(dt.hour().into())));
+            map.insert(Value::String("minute".to_string()), Value::Int(Int::from_i64(dt.minute().into())));
+            map.insert(Value::String("second".to_string()), Value::Int(Int::from_i64(dt.second().into())));
+            Value::Map(map)
         }
         Err(e) => Value::Error("ParseError", to_static(format!("{}", e)), None),
     }

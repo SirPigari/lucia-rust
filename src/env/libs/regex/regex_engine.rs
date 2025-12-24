@@ -114,4 +114,11 @@ impl RegexEngine {
             RegexEngine::Fancy(re) => re.capture_names().map(|s| s.map(|s| s.to_string())).collect(),
         }
     }
+
+    pub fn named_group_count(&self) -> usize {
+        match self {
+            RegexEngine::Normal(re) => re.capture_names().filter(|n| n.is_some()).count(),
+            RegexEngine::Fancy(re) => re.capture_names().filter(|n| n.is_some()).count(),
+        }
+    }
 }

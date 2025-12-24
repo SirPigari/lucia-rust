@@ -1,5 +1,7 @@
 # Note to contributors
 
+// TODO: add actual context
+
 Hello there! Thank you for checking out *Lucia* and deciding to contribute to it!
 In this note i want to explain, walk trhough and apologise for this codebase.
 

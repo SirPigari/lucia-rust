@@ -18,6 +18,7 @@ use bincode::{
 use std::sync::Arc;
 use parking_lot::Mutex;
 use std::cmp::Ordering;
+use rustc_hash::FxHashMap;
 
 #[derive(Clone)]
 pub enum Value {
@@ -26,10 +27,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Null,
-    Map {
-        keys: Vec<Value>,
-        values: Vec<Value>,
-    },
+    Map(FxHashMap<Value, Value>),
     Tuple(Vec<Value>),
     List(Vec<Value>),
     Bytes(Vec<u8>),
@@ -52,11 +50,7 @@ impl PartialEq for Value {
             (String(a), String(b)) => a == b,
             (Boolean(a), Boolean(b)) => a == b,
             (Null, Null) => true,
-            (Map { keys: ak, values: av }, Map { keys: bk, values: bv }) => {
-                let hm1 = ak.iter().zip(av.iter()).collect::<HashMap<_, _>>();
-                let hm2 = bk.iter().zip(bv.iter()).collect::<HashMap<_, _>>();
-                hm1 == hm2
-            }
+            (Map(a), Map(b)) => a == b,
             (Tuple(a), Tuple(b)) => a == b,
             (List(a), List(b)) => a == b,
             (Bytes(a), Bytes(b)) => a == b,
@@ -150,14 +144,14 @@ impl Serialize for Value {
             Value::String(s) => serializer.serialize_str(s),
             Value::Boolean(b) => serializer.serialize_bool(*b),
             Value::Null => serializer.serialize_unit(),
-            Value::Map { keys, values } => {
+            Value::Map(map) => {
                 use serde::ser::SerializeMap;
 
-                let mut map = serializer.serialize_map(Some(keys.len()))?;
-                for (k, v) in keys.iter().zip(values.iter()) {
-                    map.serialize_entry(k, v)?;
+                let mut s = serializer.serialize_map(Some(map.len()))?;
+                for (k, v) in map.iter() {
+                    s.serialize_entry(k, v)?;
                 }
-                map.end()
+                s.end()
             }
             Value::Tuple(vec) | Value::List(vec) => {
                 serializer.collect_seq(vec)
@@ -268,7 +262,9 @@ impl<'de> Deserialize<'de> for Value {
                     values.push(v);
                 }
 
-                Ok(Value::Map { keys, values })
+                Ok(Value::Map(FxHashMap::from_iter(
+                    keys.into_iter().zip(values.into_iter())
+                )))
             }
         }
 
@@ -300,10 +296,9 @@ impl Encode for Value {
             Null => {
                 4u8.encode(encoder)
             }
-            Map { keys, values } => {
+            Map(map) => {
                 5u8.encode(encoder)?;
-                keys.encode(encoder)?;
-                values.encode(encoder)
+                map.encode(encoder)
             }
             Tuple(v) => {
                 6u8.encode(encoder)?;
@@ -365,9 +360,8 @@ impl<C> Decode<C> for Value {
             3 => Ok(Value::Boolean(bool::decode(decoder)?)),
             4 => Ok(Value::Null),
             5 => {
-                let keys = Vec::<Value>::decode(decoder)?;
-                let values = Vec::<Value>::decode(decoder)?;
-                Ok(Value::Map { keys, values })
+                let map = FxHashMap::<Value, Value>::decode(decoder)?;
+                Ok(Value::Map(map))
             }
             6 => Ok(Value::Tuple(Vec::<Value>::decode(decoder)?)),
             7 => Ok(Value::List(Vec::<Value>::decode(decoder)?)),
@@ -423,7 +417,12 @@ impl Hash for Value {
 
             Value::Null => 0.hash(state),
 
-            Value::Map { keys, values, .. } => {
+            Value::Map(map) => {
+                let (keys, values): (Vec<_>, Vec<_>) =
+                    map.iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .unzip();
+
                 keys.hash(state);
                 values.hash(state);
             }
@@ -517,13 +516,11 @@ impl Value {
                 Value::List(vals)
             }
             serde_json::Value::Object(obj) => {
-                let keys = obj.keys()
-                    .map(|k| Value::String(k.clone()))
-                    .collect::<Vec<_>>();
-                let values = obj.values()
-                    .map(Value::from_json)
-                    .collect::<Vec<_>>();
-                Value::Map { keys, values }
+                let mut map = FxHashMap::with_capacity_and_hasher(obj.len(), Default::default());
+                for (k, v) in obj.iter() {
+                    map.insert(Value::String(k.clone()), Value::from_json(v));
+                }
+                Value::Map(map)
             }
         }
     }
@@ -533,7 +530,7 @@ impl Value {
             Value::String(s) if !s.is_empty() => true,
             Value::Bytes(b) if !b.is_empty() => true,
             Value::Tuple(items) if !items.is_empty() => true,
-            Value::Map { keys, values } if !keys.is_empty() && !values.is_empty() => true,
+            Value::Map(map) if !map.is_empty() => true,
             Value::Generator(_) => true,
             _ => false,
         }
@@ -542,10 +539,9 @@ impl Value {
         match self {
             Value::List(items) => Box::new(items.clone().into_iter()),
 
-            Value::Map { keys, values } => Box::new(
-                keys.clone()
+            Value::Map(map) => Box::new(
+                map.clone()
                     .into_iter()
-                    .zip(values.clone().into_iter())
                     .map(|(k, v)| Value::Tuple(vec![k, v])),
             ),
 
@@ -623,9 +619,9 @@ impl Value {
             Value::String(s) => s.len(),
             Value::Boolean(_) => std::mem::size_of::<bool>(),
             Value::Null => 0,
-            Value::Map { keys, values } => {
+            Value::Map(map) => {
                 let mut final_size: usize = 0;
-                for (k, v) in keys.iter().zip(values.iter()) {
+                for (k, v) in map.iter() {
                     final_size += k.get_size() + v.get_size();
                 }
                 final_size
@@ -650,7 +646,7 @@ impl Value {
             Value::Float(f) => *f != Float::from(0.0),
             Value::String(s) => !s.is_empty(),
             Value::List(l) => !l.is_empty(),
-            Value::Map { keys, .. } => !keys.is_empty(),
+            Value::Map(map) => !map.is_empty(),
             Value::Tuple(items) => !items.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Type(_) => true,
@@ -680,8 +676,8 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
             Value::Null => "null".to_string(),
-            Value::Map { keys, values } => {
-                let pairs: Vec<String> = keys.iter().zip(values.iter())
+            Value::Map(map)=> {
+                let pairs: Vec<String> = map.iter()
                     .map(|(k, v)| format!("{}: {}", k.to_string(), v.to_string()))
                     .collect();
                 format!("{{{}}}", pairs.join(", "))
@@ -748,7 +744,7 @@ impl Value {
             Value::Null => Some(vec![0x00]),
     
             // opaque types
-            Value::Map { keys: _, values: _ } | Value::Type(_) | Value::Function(_) | Value::Generator(_) | Value::Module(_) | Value::Pointer(_) | Value::Error(_, _, _) | Value::Enum(_) | Value::Struct(_) | Value::List(_) | Value::Tuple(_) => {
+            Value::Map(_) | Value::Type(_) | Value::Function(_) | Value::Generator(_) | Value::Module(_) | Value::Pointer(_) | Value::Error(_, _, _) | Value::Enum(_) | Value::Struct(_) | Value::List(_) | Value::Tuple(_) => {
                 let cfg = bincode::config::standard();
                 match bincode::encode_to_vec(&self, cfg) {
                     Ok(vec) => Some(vec),
@@ -779,34 +775,22 @@ impl Value {
     }
     pub fn convert_to_hashmap(&self) -> Option<HashMap<String, Value>> {
         match self {
-            Value::Map { keys, values } => {
-                if keys.len() != values.len() {
-                    return None;
+            Value::Map(map) => {
+                let mut string_map = HashMap::new();
+                for (key, value) in map.iter() {
+                    string_map.insert(key.to_string(), value.clone());
                 }
-                let mut map = HashMap::default();
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    if let Value::String(s) = key {
-                        map.insert(s.clone(), value.clone());
-                    } else {
-                        return None;
-                    }
-                }
-                Some(map)
+                Some(string_map)
             }
             _ => None,
         }
     }
     pub fn convert_to_hashmap_value(&self) -> HashMap<Value, Value> {
         match self {
-            Value::Map { keys, values } => {
-                if keys.len() != values.len() {
-                    return HashMap::default();
-                }
-                let mut map = HashMap::default();
-                for (key, value) in keys.iter().zip(values.iter()) {
-                    map.insert(key.clone(), value.clone());
-                }
-                map
+            Value::Map(map) => {
+                map.iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
             }
             _ => HashMap::default(),
         }
@@ -820,7 +804,7 @@ impl Value {
             Value::String(s) => s.chars().map(|c| Value::String(c.to_string())).collect(),
             Value::Bytes(b) => b.iter().map(|&byte| Value::Int(Int::from(byte as i32))).collect(),
             Value::Tuple(items) => items.clone(),
-            Value::Map { keys, values } => keys.iter().zip(values.iter()).map(|(k, v)| Value::Map { keys: vec![k.clone()], values: vec![v.clone()] }).collect(),
+            Value::Map(map) => map.iter().map(|(k, v)| Value::Tuple(vec![k.clone(), v.clone()])).collect(),
             Value::Generator(generator) => generator.make_iter().collect(),
             _ => vec![],
         }
@@ -845,10 +829,10 @@ impl Value {
             Value::Type(t) => {
                 format!("Type: 'type'\nInner type: '{}'", t.display())
             }
-            Value::Map { keys, values } => {
+            Value::Map(map) => {
                 let mut s = String::new();
-                s.push_str(&format!("Value: Map with {} entries\nType: '{}'\nFull type: '{}'\nEntries:\n", keys.len(), self.get_type().display_simple(), self.get_type().display()));
-                for (k, v) in keys.iter().zip(values.iter()) {
+                s.push_str(&format!("Value: Map with {} entries\nType: '{}'\nFull type: '{}'\nEntries:\n", map.keys().len(), self.get_type().display_simple(), self.get_type().display()));
+                for (k, v) in map.keys().zip(map.values()) {
                     s.push_str(&format!("  {}: {}\n", k.to_string(), v.to_string()));
                 }
                 s

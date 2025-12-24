@@ -1184,7 +1184,7 @@ while (steps > 0) {
     if argv.contains("--target"):
         target_index := argv.index_of("--target") + 1
         if target_index >= len(argv):
-            print(f"{error_str} --target requires an argument")
+            print(f"{error_str} '--target' requires an argument")
             return
         end
         target_str := argv[target_index].to_lower()

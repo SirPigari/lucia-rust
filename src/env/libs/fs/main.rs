@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{Write};
+use std::io::{Write, Read};
 use std::path::Path;
-use std::sync::Arc;
 use std::env as std_env;
 use std::fs::File;
 
@@ -23,6 +22,27 @@ fn fix_path_handler(args: &HashMap<String, Value>) -> Value {
         Value::String(fixed_path)
     } else {
         Value::Error("TypeError", "expected 'path' as string", None)
+    }
+}
+
+fn read_from_fd_handler(args: &HashMap<String, Value>) -> Value {
+    if let Some(Value::Int(fd)) = args.get("fd") {
+        let fd_usize = fd.to_usize().unwrap_or(0);
+        unsafe {
+            #[cfg(unix)]
+            let mut file = File::from_raw_fd(fd_usize as i32);
+            #[cfg(windows)]
+            use std::os::windows::io::FromRawHandle;
+            #[cfg(windows)]
+            let mut file = File::from_raw_handle(fd_usize as *mut std::ffi::c_void);
+            let mut contents = String::new();
+            match file.read_to_string(&mut contents) {
+                Ok(_) => Value::String(contents),
+                Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            }
+        }
+    } else {
+        Value::Error("TypeError", "expected 'fd' as int", None)
     }
 }
 
@@ -498,6 +518,14 @@ pub fn register() -> HashMap<String, Variable> {
         "temp_dir",
         temp_dir_handler,
         vec![],
+        "str",
+        EffectFlags::IO
+    );
+    insert_native_fn!(
+        map,
+        "read_from_fd",
+        read_from_fd_handler,
+        vec![Parameter::positional("fd", "int")],
         "str",
         EffectFlags::IO
     );

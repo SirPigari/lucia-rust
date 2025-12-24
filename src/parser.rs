@@ -8,6 +8,7 @@ use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
 use crate::env::runtime::utils::RESERVED_KEYWORDS;
 use std::collections::HashMap;
 use std::borrow::Cow;
+use rustc_hash::FxHashMap;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -2845,14 +2846,15 @@ impl Parser {
                                         let converted: Vec<Value> = named_imports
                                             .into_iter()
                                             .map(|(name, alias)| {
-                                                let mut keys = vec![Value::String("name".to_string())];
-                                                let mut values = vec![Value::String(name.to_string())];
+                                                let mut map = FxHashMap::from_iter([(
+                                                    Value::String("name".to_string()),
+                                                    Value::String(name.to_string()),
+                                                )]);
 
                                                 if let Some(alias) = alias {
-                                                    keys.push(Value::String("alias".to_string()));
-                                                    values.push(Value::String(alias.to_string()));
+                                                    map.insert(Value::String("alias".to_string()), Value::String(alias.to_string()));
                                                 }
-                                                Value::Map { keys, values }
+                                                Value::Map(map)
                                             })
                                             .collect();
                                         converted

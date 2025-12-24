@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::lexer::Lexer;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::tokens::{Token, Location, TK_OPERATOR, TK_IDENTIFIER, TK_STRING, TK_SEPARATOR, TK_BOOLEAN, TK_NUMBER};
-use crate::env::runtime::utils::{to_static, KEYWORDS, fix_path, escape_string, get_inner_string};
+use crate::env::runtime::utils::{to_static, KEYWORDS, RESERVED_KEYWORDS, fix_path, escape_string, get_inner_string};
 use crate::env::runtime::precompile::{precompile, precompile_to_value};
 use crate::env::runtime::types::Float;
 use crate::env::runtime::value::Value;
@@ -37,6 +37,8 @@ const STD_LIB_OPS: &str = include_str!("../libs/std/ops.lc");
 #[cfg(feature = "preprocessor_include_std")]
 const STD_LIB_TYPES: &str = include_str!("../libs/std/types.lc");
 #[cfg(feature = "preprocessor_include_std")]
+const STD_LIB_HASHSET: &str = include_str!("../libs/std/hashset.lc");
+#[cfg(feature = "preprocessor_include_std")]
 static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::default();
     m.insert("_import", STD_LIB_IMPORT);
@@ -47,6 +49,7 @@ static STD_LIBS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("math", STD_LIB_MATH);
     m.insert("ops", STD_LIB_OPS);
     m.insert("types", STD_LIB_TYPES);
+    m.insert("hashset", STD_LIB_HASHSET);
     m
 });
 
@@ -425,6 +428,9 @@ impl Preprocessor {
                         }
 
                         let name_token = &tokens[i];
+                        if RESERVED_KEYWORDS.contains(&name_token.1.as_ref()) {
+                            return Err(create_err(&format!("#macro NAME cannot be a reserved keyword '{}'", name_token.1), &tokens[i]));
+                        }
 
                         i += 1;
 
@@ -1496,7 +1502,7 @@ impl Preprocessor {
             } else {
                 if !skipping 
                     && i + 2 < tokens.len()
-                    && matches!(tokens[i], Token(ref a, _, _) if a == "IDENTIFIER")
+                    && matches!(tokens[i], Token(ref a, ref b, _) if a == "IDENTIFIER" && !RESERVED_KEYWORDS.contains(&b.as_ref()))
                     && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
                     && matches!(tokens[i + 2], Token(_, ref b, _) if BracketType::is_bracket_type_start(&b))
                 {

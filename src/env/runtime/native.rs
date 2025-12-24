@@ -1,4 +1,4 @@
-use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method, make_native_method_pt, make_native_method, make_native_shared_fn, timsort_by, convert_value_to_type, check_type_ident};
+use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method, make_native_method_pt, make_native_method, make_native_shared_fn, convert_value_to_type, check_type_ident};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::{Int, Float, Type};
 use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
@@ -189,7 +189,7 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
     match args.get("v") {
         Some(Value::List(list)) => Value::Int(list.len().into()),
         Some(Value::String(s)) => Value::Int(s.chars().count().into()),
-        Some(Value::Map { keys, .. }) => Value::Int(keys.len().into()),
+        Some(Value::Map(map)) => Value::Int(map.len().into()),
         Some(v @ Value::Int(_) | v @ Value::Float(_)) => {
             Value::Int(format_value(v, interpreter).len().into())
         }
@@ -522,10 +522,9 @@ pub fn format_value(value: &Value, interpreter: &mut Interpreter) -> String {
         Value::String(s) => s.clone(),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
-        Value::Map { keys, values, .. } => {
-            let formatted_pairs: Vec<String> = keys
+        Value::Map(map) => {
+            let formatted_pairs: Vec<String> = map
                 .iter()
-                .zip(values.iter())
                 .filter(|(key, _)| {
                     if let Value::String(s) = key {
                         s != "_line" && s != "_column"
@@ -2090,6 +2089,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     let sort = {
+        let function_signature = parse_type("function[any] -> any");
         make_native_shared_fn(
             "sort",
             move |args, interpreter| {
@@ -2127,7 +2127,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 }
                 let mut indices: Vec<usize> = (0..items.len()).collect();
 
-                timsort_by(&mut indices, |&i, &j| {
+                indices.sort_by(|&i, &j| {
                     let ord = keys[i]
                         .partial_cmp(&keys[j])
                         .unwrap_or(std::cmp::Ordering::Equal);
@@ -2137,7 +2137,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 Value::List(sorted_items)
             },
             vec![
-                Parameter::positional_optional("f", "function", Value::Null),
+                Parameter::positional_optional_pt("f", &function_signature, Value::Null),
                 Parameter::keyword_optional("reverse", "bool", Value::Boolean(false)),
             ],
             "list",
@@ -2145,7 +2145,110 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
+    let sort_by = {
+        let function_signature = parse_type("function[any, any] -> bool");
+        make_native_shared_fn(
+            "sort_by",
+            move |args, interpreter| {
+                let value = args.get("self").cloned().unwrap_or(Value::Null);
+                let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
 
+                let function = match args.get("f") {
+                    Some(Value::Function(func)) => func.clone(),
+                    _ => {
+                        return Value::Error(
+                            "RuntimeError",
+                            "Expected 'f' to be a function",
+                            None,
+                        )
+                    }
+                };
+
+                let items: Vec<Value> = match &value {
+                    Value::List(list) => list.clone(),
+                    _ => return Value::Error("TypeError", "Expected a list", None),
+                };
+
+                let mut indices: Vec<usize> = (0..items.len()).collect();
+
+                let cache: Arc<Mutex<FxHashMap<(usize, usize), std::cmp::Ordering>>> =
+                    Arc::new(Mutex::new(FxHashMap::default()));
+
+                let mut had_error: Option<crate::Error> = None;
+
+                let functione = |&i: &usize, &j: &usize| {
+                    if had_error.is_some() {
+                        return std::cmp::Ordering::Equal;
+                    }
+
+                    {
+                        let cache_guard = cache.lock();
+                        if let Some(&ord) = cache_guard.get(&(i, j)) {
+                            return ord;
+                        }
+                    }
+
+                    let res = {
+                        let result = interpreter.call_function(
+                            &function,
+                            vec![items[i].clone(), items[j].clone()],
+                            std::collections::HashMap::default(),
+                            None,
+                        );
+
+                        if let Some(err) = interpreter.err.take() {
+                            had_error = Some(err);
+                        };
+                        
+                        result
+                    };
+
+                    let mut ord = match res {
+                        Value::Boolean(true) => std::cmp::Ordering::Less,
+                        Value::Boolean(false) => std::cmp::Ordering::Greater,
+                        _ => std::cmp::Ordering::Equal,
+                    };
+
+                    if reverse {
+                        ord = ord.reverse();
+                    };
+
+                    {
+                        let mut cache_guard = cache.lock();
+                        cache_guard.insert((i, j), ord);
+                        cache_guard.insert((j, i), ord.reverse());
+                    }
+
+                    ord
+                };
+
+                if args.get("unstable") == Some(&Value::Boolean(true)) {
+                    indices.sort_unstable_by(functione);
+                } else {
+                    indices.sort_by(functione);
+                }
+
+                if had_error.is_some() {
+                    return had_error.unwrap().to_value();
+                }
+
+                let sorted_items: Vec<Value> =
+                    indices.into_iter().map(|i| items[i].clone()).collect();
+
+                Value::List(sorted_items)
+            },
+            vec![
+                Parameter::positional_pt("f", &function_signature),
+                Parameter::positional_optional("reverse", "bool", Value::Boolean(false)),
+                Parameter::positional_optional("unstable", "bool", Value::Boolean(false)),
+            ],
+            "list",
+            false,
+            true,
+            true,
+            None,
+        )
+    };
     let all = {
         make_native_shared_fn(
             "all",
@@ -2198,7 +2301,6 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
-
     let clear = {
         make_native_method(
             "clear",
@@ -2217,7 +2319,6 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
-
     let contains = {
         make_native_method(
             "contains",
@@ -2244,7 +2345,6 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
-
     let index_of = {
         make_native_method(
             "index_of",
@@ -2279,7 +2379,6 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
-
     let undup = {
         make_native_method(
             "undup",
@@ -2398,6 +2497,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         ("map".to_owned(), ("list".to_owned(), map_list)),
         ("filter".to_owned(), ("list".to_owned(), filter_list)),
         ("sort".to_owned(), ("list".to_owned(), sort)),
+        ("sort_by".to_owned(), ("list".to_owned(), sort_by)),
         ("all".to_owned(), ("list".to_owned(), all)),
         ("clear".to_owned(), ("list".to_owned(), clear)),
         ("contains".to_owned(), ("list".to_owned(), contains)),
@@ -2769,15 +2869,18 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             "get",
             move |value, args| {
                 if let Some(key) = args.get("key") {
-                    if let Value::Map { keys: map_keys, values: map_values } = value {
-                        if let Some(index) = map_keys.iter().position(|k| k == key) {
-                            return map_values.get(index).cloned().unwrap_or(Value::Null);
+                    if let Value::Map(map) = value {
+                        if let Some(val) = map.get(key) {
+                            return val.clone();
+                        } else if let Some(default) = args.get("default") {
+                            return default.clone();
                         }
+                        return Value::Null;
                     }
                 }
                 Value::Null
             },
-            vec![Parameter::positional("key", "any")],
+            vec![Parameter::positional("key", "any"), Parameter::positional_optional("default", "any", Value::Null)],
             "any",
             true, false, true,
             None,
@@ -2790,13 +2893,11 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
-                    let (keys, values) = if let Value::Map { keys, values } = value {
-                        (keys.clone(), values.clone())
-                    } else {
-                        return Value::Error("TypeError", "Expected a map", None);
+                    let map = match value {
+                        Value::Map(map) => map,
+                        _ => return Value::Error("TypeError", "Expected a map", None),
                     };
-
-                    let (new_keys, new_values): (Vec<Value>, Vec<Value>) = keys.iter().zip(values.iter()).filter_map(|(key, val)| {
+                    let new_map: FxHashMap<Value, Value> = map.iter().filter_map(|(key, val)| {
                         let result = interpreter.call_function(
                             func,
                             vec![key.clone(), val.clone()],
@@ -2808,12 +2909,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         } else {
                             None
                         }
-                    }).unzip();
-
-                    return Value::Map {
-                        keys: new_keys,
-                        values: new_values,
-                    };
+                    }).collect();
+                    return Value::Map(new_map);
                 } else {
                     return Value::Error("TypeError", "Expected 'f' to be a function", None);
                 }
@@ -2831,24 +2928,20 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
-                    let (keys, values) = if let Value::Map { keys, values } = value {
-                        (keys.clone(), values.clone())
-                    } else {
-                        return Value::Error("TypeError", "Expected a map", None);
+                    let map = match value {
+                        Value::Map(map) => map,
+                        _ => return Value::Error("TypeError", "Expected a map", None),
                     };
-
-                    let new_values: Vec<Value> = keys.iter().zip(values.iter()).map(|(key, val)| {
-                        interpreter.call_function(
+                    let new_map: FxHashMap<Value, Value> = map.iter().map(|(key, val)| {
+                        let new_val = interpreter.call_function(
                             func,
                             vec![key.clone(), val.clone()],
-                            HashMap::default(), None
-                        )
+                            HashMap::default(),
+                            None
+                        );
+                        (key.clone(), new_val)
                     }).collect();
-
-                    return Value::Map {
-                        keys: keys.clone(),
-                        values: new_values,
-                    };
+                    return Value::Map(new_map);
                 } else {
                     return Value::Error("TypeError", "Expected 'f' to be a function", None);
                 }
@@ -2864,8 +2957,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         make_native_method(
             "keys",
             move |value, _args| {
-                if let Value::Map { keys, .. } = value {
-                    return Value::List(keys.clone());
+                if let Value::Map(map) = value {
+                    return Value::List(map.keys().cloned().collect());
                 }
                 Value::Null
             },
@@ -2880,8 +2973,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         make_native_method(
             "values",
             move |value, _args| {
-                if let Value::Map { values, .. } = value {
-                    return Value::List(values.clone());
+                if let Value::Map(map) = value {
+                    return Value::List(map.values().cloned().collect());
                 }
                 Value::Null
             },
@@ -2896,8 +2989,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         make_native_method(
             "zip",
             move |value, _args| {
-                if let Value::Map { keys, values } = value {
-                    let zipped: Vec<Value> = keys.iter().zip(values.iter()).map(|(k, v)| {
+                if let Value::Map(map) = value {
+                    let zipped: Vec<Value> = map.iter().map(|(k, v)| {
                         Value::Tuple(vec![k.clone(), v.clone()])
                     }).collect();
                     return Value::List(zipped);
@@ -2916,12 +3009,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             "contains_key",
             move |value, args| {
                 if let Some(key) = args.get("key") {
-                    if let Value::Map { keys: map_keys, .. } = value {
-                        for k in map_keys {
-                            if k == key {
-                                return Value::Boolean(true);
-                            }
-                        }
+                    if let Value::Map(map) = value {
+                        return Value::Boolean(map.contains_key(key));
                     }
                 }
                 Value::Boolean(false)
@@ -2938,8 +3027,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             "contains_value",
             move |value, args| {
                 if let Some(val) = args.get("value") {
-                    if let Value::Map { values: map_values, .. } = value {
-                        for v in map_values {
+                    if let Value::Map(map) = value {
+                        for v in map.values() {
                             if v == val {
                                 return Value::Boolean(true);
                             }
@@ -2960,15 +3049,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             "insert",
             move |value, args| {
                 if let (Some(key), Some(val)) = (args.get("key"), args.get("value")) {
-                    if let Value::Map { keys: map_keys, values: map_values } = value {
-                        for (i, k) in map_keys.iter().enumerate() {
-                            if k == key {
-                                map_values[i] = val.clone();
-                                return Value::Null;
-                            }
-                        }
-                        map_keys.push(key.clone());
-                        map_values.push(val.clone());
+                    if let Value::Map(map) = value {
+                        map.insert(key.clone(), val.clone());
                         return Value::Null;
                     }
                 }
@@ -2988,9 +3070,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         make_native_method(
             "clear",
             move |value, _args| {
-                if let Value::Map { keys: map_keys, values: map_values } = value {
-                    map_keys.clear();
-                    map_values.clear();
+                if let Value::Map(map) = value {
+                    map.clear();
                     return Value::Null;
                 }
                 Value::Error("TypeError", "Expected a map", None)
@@ -3006,22 +3087,9 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         make_native_method(
             "extend",
             move |value, args| {
-                if let Some(Value::Map { keys: other_keys, values: other_values }) = args.get("other") {
-                    if let Value::Map { keys: map_keys, values: map_values } = value {
-                        for (k, v) in other_keys.iter().zip(other_values.iter()) {
-                            let mut found = false;
-                            for (i, existing_key) in map_keys.iter().enumerate() {
-                                if existing_key == k {
-                                    map_values[i] = v.clone();
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found {
-                                map_keys.push(k.clone());
-                                map_values.push(v.clone());
-                            }
-                        }
+                if let Some(Value::Map(omap)) = args.get("other") {
+                    if let Value::Map(smap) = value {
+                        smap.extend(omap.clone());
                         return Value::Null;
                     }
                 }

@@ -1,5 +1,5 @@
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::{make_native_method_val, make_native_method_val_pt, convert_value_to_type, to_static, parse_type, timsort_by};
+use crate::env::runtime::utils::{make_native_method_val, make_native_method_val_pt, convert_value_to_type, to_static, parse_type};
 use crate::env::runtime::functions::Parameter;
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, VecIter, EnumerateIter, FilterIter, MapIter, RepeatingIter};
 use std::collections::HashMap;
@@ -1549,7 +1549,7 @@ impl Variable {
                                 }
 
                                 let mut indices: Vec<usize> = (0..items.len()).collect();
-                                timsort_by(&mut indices, |&i, &j| {
+                                indices.sort_by(|&i, &j| {
                                     let ord = keys[i]
                                         .partial_cmp(&keys[j])
                                         .unwrap_or(std::cmp::Ordering::Equal);
@@ -1603,7 +1603,7 @@ impl Variable {
 
                                 let cache: Arc<Mutex<FxHashMap<(usize, usize), std::cmp::Ordering>>> = Arc::new(Mutex::new(FxHashMap::default()));
 
-                                timsort_by(&mut indices, |&i, &j| {
+                                indices.sort_by(|&i, &j| {
                                     {
                                         let cache_guard = cache.lock();
                                         if let Some(&ord) = cache_guard.get(&(i, j)) {
@@ -1969,18 +1969,40 @@ impl Variable {
                     let val_clone = self.value.clone();
                     make_native_method_val(
                         "pop",
-                        move |_args| {
+                        move |args| {
+                            let index = if let Some(Value::Int(i)) = args.get("index") {
+                                match i.to_isize() {
+                                    Ok(idx) => idx,
+                                    Err(_) => return Value::Error("IndexError", "Index out of bounds", None),
+                                }
+                            } else {
+                                -1
+                            };
                             if let Value::List(list) = &val_clone {
                                 if list.is_empty() {
                                     return Value::Error("IndexError", "Pop from empty list", None);
                                 }
                                 let mut new_list = list.clone();
-                                let item = new_list.pop().unwrap();
+                                let item = new_list.remove(if index < 0 {
+                                    let idx = new_list.len() as isize + index;
+                                    if idx < 0 {
+                                        return Value::Error("IndexError", "Index out of bounds", None);
+                                    }
+                                    idx as usize
+                                } else {
+                                    let idx = index as usize;
+                                    if idx >= new_list.len() {
+                                        return Value::Error("IndexError", "Index out of bounds", None);
+                                    }
+                                    idx
+                                });
                                 return Value::Tuple(vec![Value::List(new_list), item]);
                             }
                             Value::Null
                         },
-                        vec![],
+                        vec![
+                            Parameter::positional("index", "int"),
+                        ],
                         "tuple",
                         false, true, true,
                         None,
@@ -2771,16 +2793,16 @@ impl Variable {
                     ),
                 );
             }
-            Value::Map { .. } => {
+            Value::Map(_) => {
                 let get = {
                     let val_clone = self.value.clone();
                     make_native_method_val(
                         "get",
                         move |args| {
                             if let Some(key) = args.get("key") {
-                                if let Value::Map { keys: map_keys, values: map_values } = &val_clone {
-                                    if let Some(index) = map_keys.iter().position(|k| k == key) {
-                                        return map_values.get(index).cloned().unwrap_or(Value::Null);
+                                if let Value::Map(map) = &val_clone {
+                                    if let Some(value) = map.get(key) {
+                                        return value.clone();
                                     }
                                 }
                             }
@@ -2799,32 +2821,27 @@ impl Variable {
                         "filter",
                         move |args| {
                             if let Some(Value::Function(func)) = args.get("f") {
-                                let (keys, values) = if let Value::Map { keys, values } = &val_clone {
-                                    (keys.clone(), values.clone())
+                                if let Value::Map(map) = &val_clone {
+                                    let mut interpreter = interpreter_clone.clone();
+
+                                    let new_map: FxHashMap<Value, Value> = map.iter().filter_map(|(key, val)| {
+                                        let result = interpreter.call_function(
+                                            func,
+                                            vec![key.clone(), val.clone()],
+                                            HashMap::default(),
+                                            None
+                                        );
+                                        if result.is_truthy() {
+                                            Some((key.clone(), val.clone()))
+                                        } else {
+                                            None
+                                        }
+                                    }).collect();
+
+                                    return Value::Map(new_map);
                                 } else {
                                     return Value::Error("TypeError", "Expected a map", None);
-                                };
-
-                                let mut interpreter = interpreter_clone.clone();
-
-                                let (new_keys, new_values): (Vec<Value>, Vec<Value>) = keys.iter().zip(values.iter()).filter_map(|(key, val)| {
-                                    let result = interpreter.call_function(
-                                        func,
-                                        vec![key.clone(), val.clone()],
-                                        HashMap::default(),
-                                        None
-                                    );
-                                    if result.is_truthy() {
-                                        Some((key.clone(), val.clone()))
-                                    } else {
-                                        None
-                                    }
-                                }).unzip();
-
-                                return Value::Map {
-                                    keys: new_keys,
-                                    values: new_values,
-                                };
+                                }
                             } else {
                                 return Value::Error("TypeError", "Expected 'f' to be a function", None);
                             }
@@ -2842,26 +2859,23 @@ impl Variable {
                         "map",
                         move |args| {
                             if let Some(Value::Function(func)) = args.get("f") {
-                                let (keys, values) = if let Value::Map { keys, values } = &val_clone {
-                                    (keys.clone(), values.clone())
+                                if let Value::Map(map) = &val_clone {
+                                    let mut interpreter = interpreter_clone.clone();
+
+                                    let new_map: FxHashMap<Value, Value> = map.iter().map(|(key, val)| {
+                                        let new_val = interpreter.call_function(
+                                            func,
+                                            vec![key.clone(), val.clone()],
+                                            HashMap::default(),
+                                            None
+                                        );
+                                        (key.clone(), new_val)
+                                    }).collect();
+
+                                    return Value::Map(new_map);
                                 } else {
                                     return Value::Error("TypeError", "Expected a map", None);
-                                };
-
-                                let mut interpreter = interpreter_clone.clone();
-
-                                let new_values: Vec<Value> = keys.iter().zip(values.iter()).map(|(key, val)| {
-                                    interpreter.call_function(
-                                        func,
-                                        vec![key.clone(), val.clone()],
-                                        HashMap::default(), None
-                                    )
-                                }).collect();
-
-                                return Value::Map {
-                                    keys: keys.clone(),
-                                    values: new_values,
-                                };
+                                }
                             } else {
                                 return Value::Error("TypeError", "Expected 'f' to be a function", None);
                             }
@@ -2877,8 +2891,8 @@ impl Variable {
                     make_native_method_val(
                         "keys",
                         move |_args| {
-                            if let Value::Map { keys, .. } = &val_clone {
-                                return Value::List(keys.clone());
+                            if let Value::Map(map) = &val_clone {
+                                return Value::List(map.keys().cloned().collect());
                             }
                             Value::Null
                         },
@@ -2893,8 +2907,8 @@ impl Variable {
                     make_native_method_val(
                         "values",
                         move |_args| {
-                            if let Value::Map { values, .. } = &val_clone {
-                                return Value::List(values.clone());
+                            if let Value::Map(map) = &val_clone {
+                                return Value::List(map.values().cloned().collect());
                             }
                             Value::Null
                         },
@@ -2909,8 +2923,8 @@ impl Variable {
                     make_native_method_val(
                         "zip",
                         move |_args| {
-                            let (keys, values) = if let Value::Map { keys, values } = &val_clone {
-                                (keys.clone(), values.clone())
+                            let (keys, values) = if let Value::Map(map) = &val_clone {
+                                (map.keys().cloned().collect::<Vec<_>>(), map.values().cloned().collect::<Vec<_>>())
                             } else {
                                 return Value::Error("TypeError", "Expected a map", None);
                             };
@@ -2928,8 +2942,8 @@ impl Variable {
                         "contains_key",
                         move |args| {
                             if let Some(key) = args.get("key") {
-                                if let Value::Map { keys: map_keys, .. } = &val_clone {
-                                    return Value::Boolean(map_keys.iter().any(|k| k == key));
+                                if let Value::Map(map) = &val_clone {
+                                    return Value::Boolean(map.contains_key(key));
                                 }
                             }
                             Value::Boolean(false)
@@ -2946,14 +2960,57 @@ impl Variable {
                         "contains_value",
                         move |args| {
                             if let Some(value) = args.get("value") {
-                                if let Value::Map { values: map_values, .. } = &val_clone {
-                                    return Value::Boolean(map_values.iter().any(|v| v == value));
+                                if let Value::Map(map) = &val_clone {
+                                    return Value::Boolean(map.values().any(|v| v == value));
                                 }
                             }
                             Value::Boolean(false)
                         },
                         vec![Parameter::positional("value", "any")],
                         "bool",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let remove = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "remove",
+                        move |args| {
+                            if let Some(key) = args.get("key") {
+                                if let Value::Map(map) = &val_clone {
+                                    let mut new_map = map.clone();
+                                    new_map.remove(key);
+                                    return Value::Map(new_map);
+                                }
+                            }
+                            val_clone.clone()
+                        },
+                        vec![Parameter::positional("key", "any")],
+                        "map",
+                        false, true, true,
+                        None,
+                    )
+                };
+                let insert = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "insert",
+                        move |args| {
+                            if let (Some(key), Some(value)) = (args.get("key"), args.get("value")) {
+                                if let Value::Map(map) = &val_clone {
+                                    let mut new_map = map.clone();
+                                    new_map.insert(key.clone(), value.clone());
+                                    return Value::Map(new_map);
+                                }
+                            }
+                            val_clone.clone()
+                        },
+                        vec![
+                            Parameter::positional("key", "any"),
+                            Parameter::positional("value", "any"),
+                        ],
+                        "map",
                         false, true, true,
                         None,
                     )
@@ -3041,6 +3098,28 @@ impl Variable {
                     Variable::new(
                         "contains_value".to_string(),
                         contains_value,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "remove".to_string(),
+                    Variable::new(
+                        "remove".to_string(),
+                        remove,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "insert".to_string(),
+                    Variable::new(
+                        "insert".to_string(),
+                        insert,
                         "function".to_string(),
                         false,
                         true,

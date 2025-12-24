@@ -93,8 +93,12 @@ for LuaTable:
         end
     end
 
-    fun op_len(self) -> int:
+    fun len(self) -> int:
         return (len(self.table) - 1)
+    end
+
+    fun op_len(self) -> int:
+        return self.len()
     end
 
     fun push(mutable self, value: any):

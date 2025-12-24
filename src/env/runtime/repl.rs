@@ -116,13 +116,13 @@ impl Validator for ReplValidator {
             return ValidationResult::Incomplete;
         }
 
-        let mut single_quotes = 0;
-        let mut double_quotes = 0;
         let mut escaped = false;
         let mut parens = 0;
         let mut brackets = 0;
         let mut braces = 0;
         let mut in_multiline_comment = false;
+        let mut in_single_string = false;
+        let mut in_double_string = false;
 
         let mut chars = trimmed.chars().peekable();
         while let Some(ch) = chars.next() {
@@ -145,8 +145,9 @@ impl Validator for ReplValidator {
 
             match ch {
                 '\\' => escaped = true,
-                '\'' => single_quotes += 1,
-                '"'  => double_quotes += 1,
+                '\'' if !in_double_string => in_single_string = !in_single_string,
+                '"'  if !in_single_string => in_double_string = !in_double_string,
+                _ if in_double_string || in_single_string => continue,
                 '('  => parens += 1,
                 ')'  => parens -= 1,
                 '['  => brackets += 1,
@@ -157,7 +158,7 @@ impl Validator for ReplValidator {
             }
         }
 
-        if in_multiline_comment || single_quotes % 2 != 0 || double_quotes % 2 != 0 {
+        if in_multiline_comment || in_single_string || in_double_string {
             return ValidationResult::Incomplete;
         }
 

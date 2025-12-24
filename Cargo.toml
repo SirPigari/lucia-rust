@@ -10,12 +10,12 @@ imagnum = "0.2.29"
 once_cell = { version = "1.21.3", default-features = false }
 regex = "1.12.2"
 rand = { version = "0.9.2", default-features = false, features = ["small_rng"] }
-reqwest = { version = "0.12.26", features = [
+reqwest = { version = "0.12.28", features = [
     "json",
     "rustls-tls",
 ], default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = "1.0.146"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.9"
 fancy-regex = { version = "0.17", optional = true }
@@ -23,6 +23,23 @@ bincode = "2.0.1"  # fuck you doxxers
 zstd = "0.13.3"
 rustc-hash = "2.1.1"
 parking_lot = "0.12.5"
+
+# [target.'cfg(feature = "hash")'.dependencies]
+md5 = { version = "0.8.0", optional = true }
+sha1 = { version = "0.10.6", optional = true }
+sha3 = { version = "0.10.8", optional = true }
+blake2 = { version = "0.10.6", optional = true }
+blake3 = { version = "1.8.2", optional = true }
+ripemd = { version = "0.1.3", optional = true }
+argon2 = { version = "0.5.3", optional = true }
+pbkdf2 = { version = "0.12.2", optional = true }
+scrypt = { version = "0.11.0", optional = true }
+bcrypt = { version = "0.17.1", optional = true }
+cityhasher = { version = "0.1.0", optional = true }
+hex = { version = "0.4.3", optional = true }
+crc32fast = { version = "1.3.2", optional = true }
+fnv = { version = "1.0.7", optional = true }
+murmur3 = { version = "0.5.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 crossterm = "0.29.0"
@@ -98,6 +115,7 @@ lucia_std = [
     "nest",
     "libload",
     "elevator",
+    "hash",
 ]
 
 request = []
@@ -114,6 +132,23 @@ lasm = []
 nest = []
 libload = ["dep:libloading", "dep:libffi"]
 elevator = []
+hash = [
+    "dep:md5",
+    "dep:sha1",
+    "dep:sha3",
+    "dep:blake2",
+    "dep:blake3",
+    "dep:ripemd",
+    "dep:argon2",
+    "dep:pbkdf2",
+    "dep:scrypt",
+    "dep:bcrypt",
+    "dep:cityhasher",
+    "dep:hex",
+    "dep:crc32fast",
+    "dep:fnv",
+    "dep:murmur3",
+]
 
 preprocessor_include_std = []
 preprocessor_linking = []

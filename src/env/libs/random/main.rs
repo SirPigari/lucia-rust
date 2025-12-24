@@ -6,7 +6,6 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::variables::Variable;
 use crate::insert_native_fn;
 use crate::env::runtime::functions::Function;
-use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use imagnum::random::{randint as imagnum_randint, randfloat as imagnum_randfloat, rand as imagnum_rand};

@@ -102,6 +102,7 @@ impl Type {
                 format!("<enum '{}'{}>", name, variants_str)
             },
             Type::Struct { name, fields, .. } => {
+                let fields = fields.iter().filter(|(_, _, m)| !m.contains(&"private".to_string())).collect::<Vec<_>>();
                 let fields_str = if fields.is_empty() {
                     "".to_string()
                 } else {

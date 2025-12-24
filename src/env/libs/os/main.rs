@@ -8,6 +8,7 @@ use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::utils::{MAX_PTR};
 use crate::env::runtime::modules::Module;
+use rustc_hash::FxHashMap;
 use crate::{insert_native_fn, insert_native_var};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
@@ -1070,6 +1071,73 @@ fn create_terminal_map() -> HashMap<String, Variable> {
     }, vec![
         Parameter::positional("lines", "int")
     ], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "set_title", |args: &HashMap<String, Value>| -> Value {
+        let title = match args.get("title") {
+            Some(Value::String(s)) => s,
+            _ => return Value::Error("TypeError", "Expected 'title' to be a string", None),
+        };
+        
+        use crossterm::ExecutableCommand;
+
+        let mut out = std::io::stdout();
+        match out.execute(crossterm::terminal::SetTitle(title)) {
+            Ok(_) => Value::Boolean(true),
+            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+        }
+    }, vec![
+        Parameter::positional("title", "str")
+    ], "bool", EffectFlags::IO);
+    insert_native_fn!(map, "print_to_fd", |args: &HashMap<String, Value>| -> Value {
+        let fd = match args.get("fd") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v,
+                Err(_) => return Value::Error("TypeError", "Invalid 'fd' integer value", None),
+            },
+            _ => return Value::Error("TypeError", "Expected 'fd' to be an integer", None),
+        };
+        let message = match args.get("message") {
+            Some(Value::String(s)) => s,
+            _ => return Value::Error("TypeError", "Expected 'message' to be a string", None),
+        };
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            use std::io::Write;
+
+            unsafe {
+                let mut file = std::fs::File::from_raw_fd(fd as libc::c_int);
+                match file.write_all(message.as_bytes()) {
+                    Ok(_) => Value::Boolean(true),
+                    Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::FromRawHandle;
+            use std::io::Write;
+
+            unsafe {
+                let handle = fd as std::os::windows::io::RawHandle;
+                if handle.is_null() {
+                    return Value::Error("OSError", to_static("Invalid file descriptor"), None);
+                }
+
+                let mut file = std::fs::File::from_raw_handle(handle);
+                let result = file.write_all(message.as_bytes());
+                std::mem::forget(file);
+
+                match result {
+                    Ok(_) => Value::Boolean(true),
+                    Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                }
+            }
+        }
+    }, vec![
+        Parameter::positional("fd", "int"),
+        Parameter::positional("message", "str")
+    ], "bool", EffectFlags::IO);
 
     map
 }
@@ -1109,14 +1177,11 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         insert_native_fn!(map, "loadavg", |_: &HashMap<String, Value>| -> Value {
             match sys_info::loadavg() {
                 Ok(l) => {
-                    let mut inner_map = HashMap::new();
-                    inner_map.insert("one".to_string(), Value::Float(l.one.into()));
-                    inner_map.insert("five".to_string(), Value::Float(l.five.into()));
-                    inner_map.insert("fifteen".to_string(), Value::Float(l.fifteen.into()));
-                    Value::Map { 
-                        keys: inner_map.keys().cloned().map(Value::String).collect(),
-                        values: inner_map.values().cloned().collect(),
-                    }
+                    let mut inner_map = FxHashMap::with_capacity_and_hasher(3, Default::default());
+                    inner_map.insert(Value::String("one".to_string()), Value::Float(l.one.into()));
+                    inner_map.insert(Value::String("five".to_string()), Value::Float(l.five.into()));
+                    inner_map.insert(Value::String("fifteen".to_string()), Value::Float(l.fifteen.into()));
+                    Value::Map(inner_map)
                 }
                 Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }
@@ -1125,13 +1190,10 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         insert_native_fn!(map, "disk_info", |_: &HashMap<String, Value>| -> Value {
             match sys_info::disk_info() {
                 Ok(d) => {
-                    let mut inner_map = HashMap::new();
-                    inner_map.insert("total".to_string(), Value::Int(Int::from_i64(d.total as i64)));
-                    inner_map.insert("free".to_string(), Value::Int(Int::from_i64(d.free as i64)));
-                    Value::Map { 
-                        keys: inner_map.keys().cloned().map(Value::String).collect(),
-                        values: inner_map.values().cloned().collect(),
-                    }
+                    let mut inner_map = FxHashMap::with_capacity_and_hasher(2, Default::default());
+                    inner_map.insert(Value::String("total".to_string()), Value::Int(Int::from_i64(d.total as i64)));
+                    inner_map.insert(Value::String("free".to_string()), Value::Int(Int::from_i64(d.free as i64)));
+                    Value::Map(inner_map)
                 }
                 Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
             }

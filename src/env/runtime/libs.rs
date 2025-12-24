@@ -78,7 +78,7 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     #[cfg(feature = "collections")]
     m.insert("collections", LibInfo::new(
         "Collection of utilities.",
-        "1.0.0",
+        "2.0.0",
         &EXPECTED_VERSION,
     ));
 
@@ -128,6 +128,13 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
     m.insert("elevator", LibInfo::new(
         "Random stuff from markofwitch.",
         "42.0.0",
+        &EXPECTED_VERSION,
+    ));
+
+    #[cfg(feature = "hash")]
+    m.insert("hash", LibInfo::new(
+        "Hashing algorithms and utilities.",
+        "1.0.0",
         &EXPECTED_VERSION,
     ));
 
@@ -476,7 +483,7 @@ macro_rules! insert_native_fn {
             $effects,
         );
 
-        let func = Function::Native(Arc::new(native_fn));
+        let func = Function::Native(std::sync::Arc::new(native_fn));
 
         $map.insert(
             $name.to_string(),
@@ -507,7 +514,7 @@ macro_rules! insert_native_fn_pt {
             $effects,
         );
 
-        let func = Function::Native(Arc::new(native_fn));
+        let func = Function::Native(std::sync::Arc::new(native_fn));
 
         $map.insert(
             $name.to_string(),
@@ -538,7 +545,7 @@ macro_rules! insert_native_shared_fn {
             $effects,
         );
 
-        let func = Function::SharedNative(Arc::new(native_fn));
+        let func = Function::SharedNative(std::sync::Arc::new(native_fn));
 
         $map.insert(
             $name.to_string(),
@@ -569,7 +576,7 @@ macro_rules! insert_native_fn_state {
             $effects,
         );
 
-        let func = Function::Native(Arc::new(native_fn));
+        let func = Function::Native(std::sync::Arc::new(native_fn));
 
         $map.insert(
             $name.to_string(),
@@ -617,7 +624,7 @@ macro_rules! make_native_fn_pt {
             $effects,
         );
 
-        Function::Native(Arc::new(native_fn))
+        Function::Native(std::sync::Arc::new(native_fn))
     }};
 }
 
@@ -636,6 +643,6 @@ macro_rules! make_native_static_fn_pt {
             $effects,
         );
 
-        Function::Native(Arc::new(native_fn))
+        Function::Native(std::sync::Arc::new(native_fn))
     }};
 }

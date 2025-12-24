@@ -1,0 +1,112 @@
+#ifndef LUCIA_STD_SET_LC
+#define LUCIA_STD_SET_LC
+
+public mutable typedef struct HashSet<T> {
+    private data: map[T, bool],
+    private is_frozen: bool,
+}
+
+for HashSet:
+    static fun new() -> Self:
+        return HashSet { data = {}, is_frozen = false }
+    end
+    
+    static fun new_frozen() -> Self:
+        return HashSet { data = {}, is_frozen = true }
+    end
+
+    static fun from_list(data: list[any]) -> Self:
+        set: HashSet[any] = HashSet.new()
+        for item in data:
+            set.insert(item)
+        end
+        return set
+    end
+
+
+    fun insert(mutable self, value: any) -> bool:
+        if self.is_frozen:
+            throw "Cannot modify (insert) a frozen HashSet" from "FrozenError"
+        end
+        if !self.data.contains_key(value):
+            d := self.data
+            d[value] = true
+            self.data = d
+            return true
+        end
+        return false
+    end
+
+    fun contains(self, value: any) -> bool:
+        return self.data.contains_key(value)
+    end
+
+    fun remove(mutable self, value: any) -> bool:
+        if self.is_frozen:
+            throw "Cannot modify (remove) a frozen HashSet" from "FrozenError"
+        end
+        if self.data.contains_key(value):
+            self.data = self.data.remove(value)
+            return true
+        end
+        return false
+    end
+
+    fun len(self) -> int:
+        return len(self.data)
+    end
+
+    fun op_len(self) -> int:
+        return self.len()
+    end
+
+    fun is_empty(self) -> bool:
+        return len(self.data) == 0
+    end
+
+    fun op_plus(self, other: Self) -> Self:
+        result: HashSet[any] = HashSet.new()
+        for key in self.data.keys():
+            result.insert(key)
+        end
+        for key in other.data.keys():
+            result.insert(key)
+        end
+        return result
+    end
+
+    fun display(self) -> str:
+        items: list[str] = []
+        for key in self.data.keys():
+            items = items.append(key.to_string())
+        end
+        return "{" + ", ".join(items) + "}"
+    end
+
+    fun op_display(self) -> str:
+        return self.display()
+    end
+
+    fun freeze(mutable self):
+        self.is_frozen = true
+    end
+
+    fun is_frozen(self) -> bool:
+        return self.is_frozen
+    end
+
+    fun unfreeze(mutable self):
+        self.is_frozen = false
+    end
+
+    fun clear(mutable self):
+        if self.is_frozen:
+            throw "Cannot modify (clear) a frozen HashSet" from "FrozenError"
+        end
+        self.data = {}
+    end
+end
+
+public mutable typedef set<T> = HashSet[any]
+
+#endif // LUCIA_STD_SET_LC

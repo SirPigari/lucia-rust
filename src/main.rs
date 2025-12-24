@@ -72,6 +72,7 @@ mod env {
         #[cfg(feature = "collections")]
         pub mod collections {
             pub mod main;
+            pub mod deprecated_stuff;
         }
 
         #[cfg(feature = "random")]
@@ -103,6 +104,12 @@ mod env {
 
         #[cfg(feature = "elevator")]
         pub mod elevator {
+            pub mod main;
+            pub mod utils;
+        }
+
+        #[cfg(feature = "hash")]
+        pub mod hash {
             pub mod main;
         }
     }
@@ -587,7 +594,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
         allow_fetch: primary.allow_fetch,
         allow_unsafe: primary.allow_unsafe,
         allow_inline_config: primary.allow_inline_config,
-        type_strict: primary.type_strict,
+        disable_runtime_type_checking: primary.disable_runtime_type_checking,
         home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
         stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
         type_checker: merge_type_checker_configs(primary.type_checker, fallback.type_checker),
@@ -649,7 +656,7 @@ fn create_default_config(env_path: &Path) -> Config {
         allow_unsafe: false,
         allow_inline_config: true,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
-        type_strict: true,
+        disable_runtime_type_checking: false,
         stack_size: 16777216,
         type_checker: TypeCheckerConfig::default(),
         color_scheme: ColorScheme {
@@ -2883,12 +2890,32 @@ fn main() {
         }
     }
 
+    if config.disable_runtime_type_checking && !(moded || config.allow_unsafe) {
+        handle_error(
+            &Error::with_help(
+                "RuntimeTypeCheckingDisabledError",
+                "Runtime type checking is disabled in the config file. This may lead to unexpected behavior.",
+                "Set 'moded' and/or 'allow_unsafe' to true in your config file to ignore this error.",
+                to_static(exe_path.display().to_string()),
+            ),
+            "",
+            &config,
+        );
+        exit(1);
+    } else if config.debug && config.disable_runtime_type_checking && config.warnings {
+        print_colored(
+            "Warning: Runtime type checking is disabled. This may lead to unexpected behavior.",
+            &config.color_scheme.warning,
+            config.supports_color,
+        );
+    }
+
     let stack_size_lucia = config.stack_size;
 
     let handle_creation_time_start = Instant::now();
     let config_debug_color = config.color_scheme.debug.clone();
     let config_supports_color = config.supports_color;
-    let cache_dir = home_dir_path.join(".cache"); // replace with actual cache path
+    let cache_dir = home_dir_path.join(".cache");
     let handle = thread::Builder::new()
         .stack_size(stack_size_lucia)
         .name(format!("Lucia-{}", VERSION))

@@ -360,6 +360,10 @@ impl Interpreter {
 
     // this is a lot cleaner than last time, glad i refactored it
     fn check_type(&mut self, value: &Value, expected: &Type) -> (bool, Option<Error>) {
+        if self.config.disable_runtime_type_checking {
+            return (true, None);
+        }
+
         let value_type = value.get_type();
         if std::ptr::eq(&value_type, expected) || value_type == *expected {
             return (true, None);
@@ -464,7 +468,7 @@ impl Interpreter {
                             }
                         }
                     }
-                    Value::Map { keys, values } => {
+                    Value::Map(map) => {
                         if elements.len() != 2 {
                             return (false, Some(make_err("TypeError", 
                                 &format!("Expected type with 2 elements, got {}", elements.len()), 
@@ -474,7 +478,7 @@ impl Interpreter {
                         let key_type = &elements[0];
                         let value_type = &elements[1];
                         
-                        for (k, v) in keys.iter().zip(values.iter()) {
+                        for (k, v) in map.iter() {
                             if !self.check_type(k, key_type).0 {
                                 return (false, Some(make_err("TypeError", 
                                     &format!("Expected type '{}' for map key, got '{}'", key_type.display(), k.get_type().display()), 
@@ -633,7 +637,7 @@ impl Interpreter {
                 };
                 
                 if type_matches(&e.ty, expected) {
-                    if self.config.type_strict && !generics.is_empty() {
+                    if self.config.debug && !generics.is_empty() {
                         self.warn("TypeWarning: Strict type checking for Enums with generics is not implemented yet.");
                     }
                     return (true, None);
@@ -818,24 +822,16 @@ impl Interpreter {
         let body = resp.text().await?;
     
         let headers_map = headers.iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect::<HashMap<_, _>>();
+            .map(|(k, v)| (Value::String(k.to_string()), Value::String(v.to_str().unwrap_or("").to_string())))
+            .collect::<FxHashMap<_, _>>();
     
-        Ok(Value::Map {
-            keys: vec![
-                Value::String("status".to_string()),
-                Value::String("headers".to_string()),
-                Value::String("body".to_string()),
-            ],
-            values: vec![
-                Value::Int(Int::from_i64(status as i64)),
-                Value::Map {
-                    keys: headers_map.keys().cloned().map(Value::String).collect(),
-                    values: headers_map.values().cloned().map(Value::String).collect(),
-                },
-                Value::String(body),
-            ],
-        })
+        Ok(Value::Map(
+            HashMap::from_iter([
+                (Value::String("status".to_string()), Value::Int(Int::from_i64(status as i64))),
+                (Value::String("headers".to_string()), Value::Map(headers_map)),
+                (Value::String("body".to_string()), Value::String(body)),
+            ])
+        ))
     }
     
     #[cfg(not(target_arch = "wasm32"))]
@@ -858,46 +854,34 @@ impl Interpreter {
         };
 
         let headers = match args.get("headers") {
-            Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::with_capacity(keys.len());
-                for (k, v) in keys.iter().zip(values.iter()) {
-                    if let Value::String(key) = k {
-                        if let Value::String(value) = v {
-                            map.insert(key.clone(), value.clone());
-                        }
-                    }
+            Some(Value::Map(map)) => {
+                let mut new_map: HashMap<String, String> = HashMap::with_capacity(map.keys().len());
+                for (k, v) in map.iter() {
+                    new_map.insert(k.to_string(), v.to_string());
                 }
-                Some(map)
+                Some(new_map)
             }
             _ => None,
         };
 
         let params = match args.get("params") {
-            Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::with_capacity(keys.len());
-                for (k, v) in keys.iter().zip(values.iter()) {
-                    if let Value::String(key) = k {
-                        if let Value::String(value) = v {
-                            map.insert(key.clone(), value.clone());
-                        }
-                    }
+            Some(Value::Map(map)) => {
+                let mut params_map = HashMap::with_capacity(map.keys().len());
+                for (k, v) in map.iter() {
+                    params_map.insert(k.to_string(), v.to_string());
                 }
-                Some(map)
+                Some(params_map)
             }
             _ => None,
         };
 
         let data = match args.get("data") {
-            Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::with_capacity(keys.len());
-                for (k, v) in keys.iter().zip(values.iter()) {
-                    if let Value::String(key) = k {
-                        if let Value::String(value) = v {
-                            map.insert(key.clone(), value.clone());
-                        }
-                    }
+            Some(Value::Map(map)) => {
+                let mut data_map = HashMap::with_capacity(map.keys().len());
+                for (k, v) in map.iter() {
+                    data_map.insert(k.to_string(), v.to_string());
                 }
-                Some(map)
+                Some(data_map)
             }
             _ => None,
         };
@@ -1356,6 +1340,10 @@ impl Interpreter {
             });
         }
 
+        if self.is_returning {
+            return NULL;
+        }
+
         self.current_statement = Some(statement.clone());
 
         if self.check_stop_flag() {
@@ -1399,7 +1387,7 @@ impl Interpreter {
             Node::Group { body } => self.handle_group(body),
 
             Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
-                self.handle_function_declaration(name, args, body, modifiers, *return_type, effect_flags),
+                self.handle_function_declaration(name, args, body, modifiers, *return_type, effect_flags, false),
             Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
                 self.handle_generator_declaration(name, args, body, modifiers, *return_type, effect_flags),
             Node::Return { value } => self.handle_return(*value),
@@ -1483,7 +1471,7 @@ impl Interpreter {
     }
 
     #[track_caller]
-    fn run_isolated(&mut self, temp_vars: FxHashMap<String, Variable>, body: &[Statement]) -> (Value, State, Option<Error>, FxHashMap<String, Variable>) {
+    fn run_isolated(&mut self, temp_vars: FxHashMap<String, Variable>, body: &[Statement], keep_stuff: bool) -> (Value, State, Option<Error>, FxHashMap<String, Variable>) {
         let saved_vars = std::mem::replace(&mut self.variables, temp_vars);
         let saved_stack = std::mem::replace(&mut self.stack, Stack::new());
         let saved_state = std::mem::replace(&mut self.state, State::Normal);
@@ -1514,10 +1502,12 @@ impl Interpreter {
 
         self.stack = saved_stack;
         self.state = saved_state;
-        self.err = saved_err;
-        self.defer_stack = saved_defer;
-        self.is_returning = saved_is_returning;
-        self.return_value = saved_return_value;
+        self.err = saved_err; 
+        if !keep_stuff {
+            self.return_value = saved_return_value;
+            self.defer_stack = saved_defer;
+            self.is_returning = saved_is_returning;
+        }
         self.current_statement = saved_current_statement;
 
         (res, end_state, err, resulting_vars)
@@ -1787,12 +1777,23 @@ impl Interpreter {
         self.variables.extend::<HashMap<String, Variable>>(HashMap::from_iter(vec![
             ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
         ]));
+        for generic in if let Value::Type(Type::Struct { generics, .. }) = &struct_value {
+            generics
+        } else {
+            to_static(vec![])
+        } {
+            self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, false));
+        }
         for method in methods_ast {
             let mut m = method.node;
             let func;
             if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags } = &mut m {
                 modifiers.insert(0, "final".to_string());
-                func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags);
+                func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags, true);
+                if self.err.is_some() {
+                    self.variables = saved_variables;
+                    return NULL;
+                }
             } else {
                 return self.raise("TypeError", "Expected a function declaration in struct methods");
             }
@@ -2331,7 +2332,7 @@ impl Interpreter {
                     }
 
                     if let Some(g) = guard {
-                        let (guard_res, _guard_state, guard_err, _guard_vars) = self.run_isolated(temp_vars.clone(), std::slice::from_ref(g));
+                        let (guard_res, _guard_state, guard_err, _guard_vars) = self.run_isolated(temp_vars.clone(), std::slice::from_ref(g), false);
                         if guard_err.is_some() {
                             self.err = guard_err;
                             return NULL;
@@ -2341,7 +2342,7 @@ impl Interpreter {
                         }
                     }
 
-                    let (res, state, err, resulting_vars) = self.run_isolated(temp_vars, body);
+                    let (res, state, err, resulting_vars) = self.run_isolated(temp_vars, body, true);
                     if err.is_some() {
                         self.err = err;
                         return NULL;
@@ -2690,17 +2691,16 @@ impl Interpreter {
                         .collect::<Vec<Value>>()
                 }
             },
-            Value::Map { keys, values } => {
-                if keys.is_empty() || values.is_empty() {
+            Value::Map(map) => {
+                if map.is_empty() {
                     self.raise("SyntaxError", "Unpack assignment target cannot be an empty map");
                     return NULL;
                 }
-                keys.iter()
-                    .cloned()
-                    .zip(values.iter().cloned())
-                    .map(|(k, v)| Value::Map {
-                        keys: vec![k],
-                        values: vec![v],
+                map.iter()
+                    .map(|(k, v)| {
+                        let mut single_map = FxHashMap::with_hasher(Default::default());
+                        single_map.insert(k.clone(), v.clone());
+                        Value::Map(single_map)
                     })
                     .collect()
             },
@@ -2811,7 +2811,7 @@ impl Interpreter {
             return NULL;
         }
 
-        let mut map = HashMap::with_capacity(keys.len());
+        let mut map = FxHashMap::with_capacity_and_hasher(keys.len(), Default::default());
 
         for (key_stmt, value_stmt) in keys.into_iter().zip(values.into_iter()) {
             let key = self.evaluate(&key_stmt);
@@ -2832,8 +2832,7 @@ impl Interpreter {
             map.insert(key, value);
         }
 
-        let (map_keys, map_values): (Vec<_>, Vec<_>) = map.into_iter().unzip();
-        Value::Map { keys: map_keys, values: map_values }
+        Value::Map(map)
     }
 
     fn convert_value_to_type(&mut self, target_type: &str, value: &Value) -> Value {
@@ -2961,16 +2960,14 @@ impl Interpreter {
                 }
             },
             "map" => {
-                if let Value::Map { keys, values } = value {
-                    Value::Map { keys: keys.clone(), values: values.clone() }
+                if let Value::Map(m) = value {
+                    Value::Map(m.clone())
                 } else if let Value::Module(obj) = value {
-                    let mut keys = Vec::new();
-                    let mut values = Vec::new();
+                    let mut new_map = FxHashMap::default();
                     for (name, var) in obj.get_properties().iter() {
-                        keys.push(Value::String(name.clone()));
-                        values.push(var.value.clone());
+                        new_map.insert(Value::String(name.clone()), var.value.clone());
                     }
-                    Value::Map { keys, values }
+                    Value::Map(new_map)
                 } else {
                     self.raise("TypeError", &format!("Cannot convert '{}' to map", value.type_name()));
                     NULL
@@ -3319,33 +3316,25 @@ impl Interpreter {
                 "math" => {
                     use crate::env::libs::math::main as math;
                     let math_module_props = math::register();
-                    for (name, var) in math_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(math_module_props);
                 }
                 #[cfg(feature = "os")]
                 "os" => {
                     use crate::env::libs::os::main as os;
                     let os_module_props = os::register(&self.config.clone());
-                    for (name, var) in os_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(os_module_props);
                 }
                 #[cfg(feature = "time")]
                 "time" => {
                     use crate::env::libs::time::main as time;
                     let time_module_props = time::register();
-                    for (name, var) in time_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(time_module_props);
                 }
                 #[cfg(feature = "json")]
                 "json" => {
                     use crate::env::libs::json::main as json;
                     let json_module_props = json::register();
-                    for (name, var) in json_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(json_module_props);
                 }
                 #[cfg(feature = "clib")]
                 #[cfg(target_arch = "wasm32")]
@@ -3372,41 +3361,31 @@ impl Interpreter {
                         );
                     }
                     let clib_module_props = clib::register();
-                    for (name, var) in clib_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(clib_module_props);
                 }
                 #[cfg(feature = "regex")]
                 "regex" => {
                     use crate::env::libs::regex::main as regex;
                     let regex_module_props = regex::register();
-                    for (name, var) in regex_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(regex_module_props);
                 }
                 #[cfg(feature = "collections")]
                 "collections" => {
                     use crate::env::libs::collections::main as collections;
                     let collections_module_props = collections::register();
-                    for (name, var) in collections_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(collections_module_props);
                 }
                 #[cfg(feature = "random")]
                 "random" => {
                     use crate::env::libs::random::main as random;
                     let random_module_props = random::register();
-                    for (name, var) in random_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(random_module_props);
                 }
                 #[cfg(feature = "lasm")]
                 "lasm" => {
                     use crate::env::libs::lasm::main as lasm;
                     let lasm_module_props = lasm::register();
-                    for (name, var) in lasm_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(lasm_module_props);
                 }
                 #[cfg(feature = "fs")]
                 #[cfg(target_arch = "wasm32")]
@@ -3422,9 +3401,7 @@ impl Interpreter {
                 "fs" => {
                     use crate::env::libs::fs::main as fs;
                     let fs_module_props = fs::register();
-                    for (name, var) in fs_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(fs_module_props);
                 }
                 #[cfg(feature = "nest")]
                 "nest" => {
@@ -3442,9 +3419,7 @@ impl Interpreter {
                     }
                     let interpreter_arc = Arc::new(Mutex::new(&mut *self));
                     let nest_module_props = nest::register(interpreter_arc);
-                    for (name, var) in nest_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(nest_module_props);
                 }
                 #[cfg(feature = "libload")]
                 #[cfg(target_arch = "wasm32")]
@@ -3471,9 +3446,7 @@ impl Interpreter {
                         );
                     }
                     let libload_module_props = libload::register();
-                    for (name, var) in libload_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(libload_module_props);
                 }
                 #[cfg(feature = "elevator")]
                 #[cfg(target_arch = "wasm32")]
@@ -3489,9 +3462,13 @@ impl Interpreter {
                 "elevator" => {
                     use crate::env::libs::elevator::main as elevator;
                     let elevator_module_props = elevator::register(&self.config);
-                    for (name, var) in elevator_module_props {
-                        properties.insert(name, var);
-                    }
+                    properties.extend(elevator_module_props);
+                }
+                #[cfg(feature = "hash")]
+                "hash" => {
+                    use crate::env::libs::hash::main as hash;
+                    let hash_module_props = hash::register();
+                    properties.extend(hash_module_props);
                 }
                 _ => {
                     self.stack.pop();
@@ -4093,6 +4070,7 @@ impl Interpreter {
         modifiers: Vec<String>, 
         return_type: Statement,
         effect_flags: EffectFlags,
+        is_struct_method: bool,
     ) -> Value {
         let mut name = name;
         let mut return_type_str = match self.evaluate(&return_type) {
@@ -4180,7 +4158,7 @@ impl Interpreter {
             effects: effect_flags,
         };
 
-        if self.variables.contains_key(&name) && !name.starts_with("<") {
+        if self.variables.contains_key(&name) && !name.starts_with("<") && !is_struct_method {
             if let Some(var) = self.variables.get(&name) {
                 if var.is_final() {
                     return self.raise("AssigmentError", &format!("Cannot redefine final function '{}'", name));
@@ -4189,7 +4167,7 @@ impl Interpreter {
         }
 
         self.debug_log(
-            format_args!("<Defining function '{}'>", name)
+            format_args!("<Defining {} '{}'>", if is_struct_method { "struct method" } else { "function" }, name)
         );
 
         let function = if name.starts_with("<") && name.ends_with(">") {
@@ -4204,6 +4182,9 @@ impl Interpreter {
             )
         };
 
+        if is_struct_method {
+            return function;
+        }
         self.variables.insert(
             name.to_string(),
             Variable::new(
@@ -4441,12 +4422,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable, cannot forget indexes."),
-                            Value::Map { keys, values } => {
-                                if keys.len() != values.len() {
-                                    return self.raise("TypeError", "Map keys and values must have the same length");
-                                }
-                                keys.len()
-                            }
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }) {
                             Ok(i) => i + 1,
@@ -4473,7 +4449,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }) { Ok(i) => i, Err(e) => return e } };
 
@@ -4482,7 +4458,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }) { Ok(i) => i, Err(e) => return e } };
 
@@ -4498,7 +4474,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }) {
                             Ok(i) => i,
@@ -4509,7 +4485,7 @@ impl Interpreter {
                             Value::String(s) => s.chars().count(),
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         };
 
@@ -4525,7 +4501,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         }) {
                             Ok(i) => i,
@@ -4541,7 +4517,7 @@ impl Interpreter {
                             Value::List(l) => l.len(),
                             Value::Bytes(b) => b.len(),
                             Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                            Value::Map { keys, .. } => keys.len(),
+                            Value::Map(m) => m.len(),
                             _ => return self.raise("TypeError", "Object not indexable"),
                         };
                         (0, end_idx)
@@ -4574,14 +4550,15 @@ impl Interpreter {
                         );
                     }
                     Value::Tuple(_) => return self.raise("TypeError", "Tuples are immutable"),
-                    Value::Map { keys, values } => {
-                        let mut new_keys = keys.clone();
-                        let mut new_values = values.clone();
-                        if start_idx < new_keys.len() && end_idx <= new_keys.len() {
-                            new_keys.drain(start_idx..end_idx);
-                            new_values.drain(start_idx..end_idx);
+                    Value::Map(m) => {
+                        let mut new_map = m.clone();
+                        if start_idx < new_map.len() && end_idx <= new_map.len() {
+                            let keys_to_remove: Vec<_> = new_map.keys().cloned().skip(start_idx).take(end_idx - start_idx).collect();
+                            for key in keys_to_remove {
+                                new_map.remove(&key);
+                            }
                         }
-                        Value::Map { keys: new_keys, values: new_values }
+                        Value::Map(new_map)
                     }
                     _ => return self.raise("TypeError", "Object not indexable for forget"),
                 };
@@ -5059,7 +5036,7 @@ impl Interpreter {
                                     built_fields.push((variant_name.clone(), Statement::Null, variant_disc.clone()));
                                     continue;
                                 }
-                                let (v, _state, _err, _vars) = interp.run_isolated(interp.variables.clone(), &[variant_type.clone()]);
+                                let (v, _state, _err, _vars) = interp.run_isolated(interp.variables.clone(), &[variant_type.clone()], false);
                                 let v = match v {
                                     Value::Type(t) => Value::Type(t),
                                     _ => {
@@ -5489,15 +5466,13 @@ impl Interpreter {
                             if idx >= t.len() { return Err(Value::Error("IndexError", "Tuple index out of range", None)); }
                             assign_nested(&mut t[idx], &indices[1..], right_value)?;
                         }
-                        Value::Map { keys, values } => {
-                            match keys.iter().position(|k| k == current_index) {
-                                Some(pos) => assign_nested(&mut values[pos], &indices[1..], right_value)?,
-                                None => {
-                                    keys.push(current_index.clone());
-                                    values.push(Value::Null);
-                                    assign_nested(values.last_mut().unwrap(), &indices[1..], right_value)?;
-                                }
+                        Value::Map(m) => {
+                            let key = current_index.clone();
+                            if !m.contains_key(&key) {
+                                m.insert(key.clone(), Value::Null);
                             }
+                            let val = m.get_mut(&key).unwrap();
+                            assign_nested(val, &indices[1..], right_value)?;
                         }
                         Value::String(s) => {
                             if indices.len() != 1 { return Err(Value::Error("TypeError", "Cannot index deeper into a string", None)); }
@@ -5666,13 +5641,13 @@ impl Interpreter {
         let object_val = self.evaluate(&object_stmt);
         if self.err.is_some() { return NULL; }
 
-        if let Value::Map { keys, values } = &object_val {
+        if let Value::Map(map)= &object_val {
             if let AccessType::Single { index } = access_type {
                 let key_val = self.evaluate(&index);
                 if self.err.is_some() { return NULL; }
 
-                if let Some(pos) = keys.iter().position(|k| k == &key_val) {
-                    return values[pos].clone();
+                if let Some(val) = map.get(&key_val) {
+                    return val.clone();
                 } else {
                     return self.raise("KeyError", &format!("Key '{}' not found in map", format_value(&key_val)));
                 }
@@ -6167,31 +6142,22 @@ impl Interpreter {
 
                 let mut pattern_method: Option<PatternMethod> = None;
 
-                if let Some(Value::Map { keys, values }) = self.cache.iterables.get_mut(&cache_key) {
-                    for (k_idx, key) in keys.iter().enumerate() {
-                        if key == &cache_key {
-                            if let Some(cached_value) = values.get(k_idx) {
-                                let cached_clone = cached_value.clone();
+                if let Some(Value::Map(map)) = self.cache.iterables.get(&cache_key) {
+                    if let Some(cached_value) = map.get(&cache_key) {
+                        if self.config.debug {
+                            let seed_str = format_value(&Value::List(evaluated_seed.clone()));
+                            let end_str = format_value(&evaluated_end);
 
-                                if self.config.debug {
-                                    let seed_str = format_value(&Value::List(evaluated_seed.clone()));
-                                    let end_str = format_value(&evaluated_end);
-
-                                    self.debug_log(format_args!(
-                                        "<CachedListCompletion>\\A  seed: {}\\A  end: {}\\A  range_mode: {}\\A  pattern: {}",
-                                        seed_str,
-                                        end_str,
-                                        range_mode,
-                                        pattern_flag
-                                    ));
-                                }
-
-                                return cached_clone;
-                            } else {
-                                self.raise("RuntimeError", "Cache inconsistency detected");
-                                return NULL;
-                            }
+                            self.debug_log(format_args!(
+                                "<CachedListCompletion>\\A  seed: {}\\A  end: {}\\A  range_mode: {}\\A  pattern: {}",
+                                seed_str,
+                                end_str,
+                                range_mode,
+                                pattern_flag
+                            ));
                         }
+
+                        return cached_value.clone();
                     }
                 }
 
@@ -7043,7 +7009,7 @@ impl Interpreter {
                         } else {
                             Value::Tuple(pos_args)
                         };
-                        if self.check_type(&NULL, &eval_type).0 {
+                        if self.check_type(&NULL, &eval_type).0 && !self.config.disable_runtime_type_checking {
                             return self.raise_with_help(
                                 "TypeError",
                                 &format!("Expected a value of type '{}' for '{}.{}', but got none", eval_type.display_simple(), name, variant_name),
@@ -7528,6 +7494,8 @@ impl Interpreter {
                             check_ansi("\x1b[4m", &self.config.supports_color), alt_name, check_ansi("\x1b[24m", &self.config.supports_color)
                         ),
                     );
+                } else {
+                    self.warn(&state);
                 }
         }
         
@@ -7897,7 +7865,7 @@ impl Interpreter {
                             tokens,
                         );
                         let statements = parser.parse();
-                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements);
+                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements, false);
                         if let Some(err) = err {
                             self.raise_with_ref("RuntimeError", "Error in exec script", err);
                         }
@@ -7919,7 +7887,7 @@ impl Interpreter {
                             tokens,
                         );
                         let statements = parser.parse();
-                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements);
+                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements, false);
                         if let Some(err) = err {
                             self.raise_with_ref("RuntimeError", "Error in exec script", err);
                         }
@@ -8082,7 +8050,7 @@ impl Interpreter {
             merged_variables.extend(closure_vars.clone());
             merged_variables.extend(final_args_variables);
             let body = func.get_body();
-            let (return_value, _state, err, variables) = self.run_isolated(merged_variables, &body);
+            let (return_value, _state, err, variables) = self.run_isolated(merged_variables, &body, false);
             result = return_value.clone();
             if change_in_function {
                 self.internal_storage.in_function = false;
@@ -9547,7 +9515,10 @@ impl Interpreter {
                 } else {
                     return self.raise_with_help("TypeError", &format!("Cannot apply 'is' to {} and {}", left.type_name(), right.type_name()), &format!("Expected a type, got {}", right.type_name()));
                 };
+                let saved_drtch = self.config.disable_runtime_type_checking;
+                self.config.disable_runtime_type_checking = false;
                 let res = self.check_type(&left, &t).0;
+                self.config.disable_runtime_type_checking = saved_drtch;
                 Value::Boolean(res)
             },
             "isnt" | "isn't" => {
