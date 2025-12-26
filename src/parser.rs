@@ -808,32 +808,15 @@ impl Parser {
                 }
 
                 ("OPERATOR", op) if ["++", "--"].contains(&op) => {
-                    let operator = match op {
-                        "++" => "+",
-                        "--" => "-",
-                        _ => unreachable!(),
-                    }.to_string();
                     let loc = alloc_loc(self.get_loc());
                     self.next();
                     expr = Statement {
-                        node: Node::Assignment {
-                            left: Box::new(expr.clone()),
-                            right: Box::new(Statement {
-                                node: Node::Operation {
-                                    left: Box::new(expr.clone()),
-                                    operator: operator.to_owned(),
-                                    right: Box::new(Statement {
-                                        node: Node::Number {
-                                            value: "1".to_owned(),
-                                        },
-                                        loc: loc.clone(),
-                                    }),
-                                },
-                                loc: loc.clone(),
-                            }),
+                        node: Node::PostfixOperation {
+                            operator: op.to_string(),
+                            operand: Box::new(expr.clone()),
                         },
                         loc,
-                    };
+                    }
                 }
 
                 _ => break,

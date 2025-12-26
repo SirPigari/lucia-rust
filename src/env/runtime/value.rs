@@ -847,6 +847,18 @@ impl From<&str> for Value {
     }
 }
 
+impl From<lasm::Value> for Value {
+    fn from(v: lasm::Value) -> Self {
+        match v {
+            lasm::Value::Int(i) => Value::Int(Int::from(i)),
+            lasm::Value::Float(f) => Value::Float(Float::from(f)),
+            lasm::Value::String(s) => Value::String(s),
+            lasm::Value::Ptr(_) => Value::String(v.to_str().to_string()),
+            lasm::Value::Null => Value::Null,
+        }
+    }
+}
+
 impl From<String> for Value {
     fn from(s: String) -> Self {
         Value::String(s)

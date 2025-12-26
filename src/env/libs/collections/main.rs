@@ -7,7 +7,8 @@ use crate::env::runtime::types::Int;
 use crate::env::runtime::statements::Statement;
 use crate::env::libs::collections::deprecated_stuff::add_deprecated_functions;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use crate::env::runtime::types::Type;
 use crate::env::runtime::structs_and_enums::Struct;
 use once_cell::sync::Lazy;
@@ -44,7 +45,7 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
                 Value::Int(i) => i.to_usize().unwrap(),
                 _ => panic!("Expected int for id field"),
             };
-            let vec_deque = VEC_DEQUE_IDS.lock().unwrap();
+            let vec_deque = VEC_DEQUE_IDS.lock();
             let deque = vec_deque.get(&id).unwrap();
             Value::Int(Int::from(deque.len() as i64))
         }, vec![Parameter::instance("self", &vec_deque_type, vec![])], &Type::new_simple("int"), EffectFlags::PURE)
@@ -63,7 +64,7 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
                 Value::Int(i) => i.to_usize().unwrap(),
                 _ => panic!("Expected int for id field"),
             };
-            let vec_deque = VEC_DEQUE_IDS.lock().unwrap();
+            let vec_deque = VEC_DEQUE_IDS.lock();
             let deque = vec_deque.get(&id).unwrap();
             let display_str = format!("{:?}", deque);
             Value::String(display_str)
@@ -85,8 +86,8 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
     let vec_deque_type_clone = vec_deque_type.clone();
     let new = ("new".to_string(),
         make_native_static_fn_pt!("new", move |_args: &HashMap<String, Value>| -> Value {
-            let id = VEC_DEQUE_IDS.lock().unwrap().len() as usize + 1;
-            VEC_DEQUE_IDS.lock().unwrap().insert(id, VecDeque::new());
+            let id = VEC_DEQUE_IDS.lock().len() as usize + 1;
+            VEC_DEQUE_IDS.lock().insert(id, VecDeque::new());
             Value::Struct(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))])))
         }, vec![], &vec_deque_type, EffectFlags::PURE)
     );
@@ -99,12 +100,12 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
                 Value::List(l) => l,
                 _ => panic!("Expected list"),
             };
-            let id = VEC_DEQUE_IDS.lock().unwrap().len() as usize + 1;
+            let id = VEC_DEQUE_IDS.lock().len() as usize + 1;
             let mut deque = VecDeque::new();
             for item in list {
                 deque.push_back(item.clone());
             }
-            VEC_DEQUE_IDS.lock().unwrap().insert(id, deque);
+            VEC_DEQUE_IDS.lock().insert(id, deque);
             Value::Struct(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))])))
         }, vec![Parameter::positional("l", "list")], &vec_deque_type, EffectFlags::PURE)
     );

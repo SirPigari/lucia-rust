@@ -659,6 +659,7 @@ impl Checker {
             Node::Operation { .. } => self.raise(ErrorTypes::NotImplemented, "Operation checking not implemented"),
             Node::UnaryOperation { .. } => self.raise(ErrorTypes::NotImplemented, "Unary operation checking not implemented"),
             Node::PrefixOperation { .. } => self.raise(ErrorTypes::NotImplemented, "Prefix operation checking not implemented"),
+            Node::PostfixOperation { .. } => self.raise(ErrorTypes::NotImplemented, "Postfix operation checking not implemented"),
             Node::Pipeline { .. } => self.raise(ErrorTypes::NotImplemented, "Pipeline checking not implemented"),
 
             Node::Call { .. } => self.raise(ErrorTypes::NotImplemented, "Call checking not implemented"),

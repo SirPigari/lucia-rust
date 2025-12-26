@@ -83,7 +83,6 @@ mod env {
         #[cfg(feature = "lasm")]
         pub mod lasm {
             pub mod main;
-            pub mod cpu;
         }
 
         #[cfg(feature = "fs")]
@@ -123,7 +122,7 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::{Config, ColorScheme, TypeCheckerConfig, Libs};
-use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string};
+use crate::env::runtime::utils::{find_closest_match, supports_color, ctrl_t_pressed, fix_path, hex_to_ansi, get_line_info, format_value, check_ansi, clear_terminal, to_static, print_colored, escape_string, wait_any_key};
 use crate::env::runtime::repl::read_input;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
@@ -1957,7 +1956,9 @@ fn main() {
         }
 
         eprintln!("{}", "Press any key to continue...".yellow());
-        let _ = io::stdin().read(&mut [0u8]).unwrap();
+        let _ = std::io::stdout().flush();
+        wait_any_key();
+    println!();
     
         exit(101);
     }));

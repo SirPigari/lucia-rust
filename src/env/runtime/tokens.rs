@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
 use bincode::{Encode, Decode};
 use std::borrow::Cow;
+use std::panic::Location as PanicLocation;
 
 pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(Token::default);
 
@@ -33,6 +34,18 @@ impl Location {
             line_string: line_string.into(),
             line_number,
             range,
+        }
+    }
+
+    #[track_caller]
+    pub fn from_lasm_loc(lasm_loc: &lasm::Location, file: impl Into<String>) -> Self {
+        let lucia_source_loc = format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column());
+        Self {
+            file: file.into(),
+            lucia_source_loc,
+            line_string: lasm_loc.line_text.clone(),
+            line_number: lasm_loc.line,
+            range: (lasm_loc.column, lasm_loc.column + 1),
         }
     }
 

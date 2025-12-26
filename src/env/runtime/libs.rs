@@ -105,8 +105,8 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
 
     #[cfg(feature = "lasm")]
     m.insert("lasm", LibInfo::new(
-        "Cross-platform, lightweight assembly-inspired utilities for low-level programming and direct hardware control.",
-        "1.0.3",
+        "Cross-platform, low-level assembly capabilities through the LASM (Lucia Assembly) language.",
+        "2.0.0",
         &EXPECTED_VERSION,
     ));
 
@@ -534,6 +534,37 @@ macro_rules! insert_native_fn_pt {
 macro_rules! insert_native_shared_fn {
     ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::SharedNativeFunction::new(
+            $name,
+            $handler,
+            $params,
+            $ret_type,
+            true,
+            true,
+            true,
+            None,
+            $effects,
+        );
+
+        let func = Function::SharedNative(std::sync::Arc::new(native_fn));
+
+        $map.insert(
+            $name.to_string(),
+            Variable::new(
+                $name.to_string(),
+                Value::Function(func),
+                "function".to_string(),
+                true,
+                true,
+                true,
+            ),
+        );
+    }};
+}
+
+#[macro_export]
+macro_rules! insert_native_shared_fn_pt {
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        let native_fn = crate::env::runtime::functions::SharedNativeFunction::new_pt(
             $name,
             $handler,
             $params,

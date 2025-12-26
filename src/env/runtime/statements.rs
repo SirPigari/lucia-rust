@@ -382,11 +382,14 @@ pub enum Node {
         operator: String,
         operand: Box<Statement>,
     },
+    PostfixOperation {
+        operator: String,
+        operand: Box<Statement>,
+    },
     Pipeline {
         initial_value: Box<Statement>,
         arguments: Vec<Statement>,
     },
-
     Call {
         name: String,
         pos_args: Vec<Statement>,
@@ -478,6 +481,7 @@ impl Node {
             Node::Operation { .. } => "operation".to_string(),
             Node::UnaryOperation { .. } => "unary operation".to_string(),
             Node::PrefixOperation { .. } => "prefix operation".to_string(),
+            Node::PostfixOperation { .. } => "postfix_operation".to_string(),
             Node::Pipeline { .. } => "pipeline".to_string(),
             Node::Call { .. } => "call".to_string(),
             Node::MethodCall { .. } => "method call".to_string(),
@@ -538,6 +542,7 @@ impl Statement {
             Node::Operation { .. } => "OPERATION".to_string(),
             Node::UnaryOperation { .. } => "UNARY_OPERATION".to_string(),
             Node::PrefixOperation { .. } => "PREFIX_OPERATION".to_string(),
+            Node::PostfixOperation { .. } => "POSTFIX_OPERATION".to_string(),
             Node::Pipeline { .. } => "PIPELINE".to_string(),
             Node::Call { .. } => "CALL".to_string(),
             Node::MethodCall { .. } => "METHOD_CALL".to_string(),
@@ -707,6 +712,10 @@ impl Statement {
                 operand.format_for_debug()
             ),
             Node::PrefixOperation { operator, operand } => format!(", \"operator\": \"{}\", \"operand\": {}",
+                operator,
+                operand.format_for_debug()
+            ),
+            Node::PostfixOperation { operator, operand } => format!(", \"operator\": \"{}\", \"operand\": {}",
                 operator,
                 operand.format_for_debug()
             ),

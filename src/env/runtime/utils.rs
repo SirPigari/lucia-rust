@@ -202,6 +202,90 @@ pub fn get_remaining_stack_size() -> Option<usize> {
     None
 }
 
+#[cfg(unix)]
+pub fn wait_any_key() {
+    use std::os::unix::io::AsRawFd;
+    use libc::{tcgetattr, tcsetattr, termios, ECHO, ICANON, TCSANOW, c_int};
+
+    let stdin_fd = io::stdin().as_raw_fd();
+
+    let mut old_term = unsafe { std::mem::zeroed::<termios>() };
+    unsafe { tcgetattr(stdin_fd, &mut old_term) };
+
+    let mut new_term = old_term;
+    new_term.c_lflag &= !(ICANON | ECHO);
+    unsafe { tcsetattr(stdin_fd, TCSANOW, &new_term) };
+
+    let mut buf = [0u8];
+    let _ = io::stdin().read(&mut buf);
+
+    unsafe { tcsetattr(stdin_fd, TCSANOW, &old_term) };
+}
+
+#[cfg(windows)]
+#[allow(nonstandard_style)]
+pub fn wait_any_key() {
+    use std::os::raw::{c_void, c_ushort, c_uint};
+
+    type HANDLE = *mut c_void;
+    type DWORD = c_uint;
+    type WORD = c_ushort;
+    type BOOL = i32;
+
+    #[repr(C)]
+    struct KEY_EVENT_RECORD {
+        bKeyDown: i32,
+        wRepeatCount: WORD,
+        wVirtualKeyCode: WORD,
+        wVirtualScanCode: WORD,
+        uChar: [u8; 2],
+        dwControlKeyState: DWORD,
+    }
+
+    #[repr(C)]
+    struct INPUT_RECORD {
+        event_type: WORD,
+        event: KEY_EVENT_RECORD,
+    }
+
+    const STD_INPUT_HANDLE: DWORD = -10i32 as DWORD;
+    const KEY_EVENT: WORD = 0x0001;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetStdHandle(nStdHandle: DWORD) -> HANDLE;
+        fn ReadConsoleInputA(
+            hConsoleInput: HANDLE,
+            lpBuffer: *mut INPUT_RECORD,
+            nLength: DWORD,
+            lpNumberOfEventsRead: *mut DWORD,
+        ) -> BOOL;
+    }
+
+    unsafe {
+        let handle = GetStdHandle(STD_INPUT_HANDLE);
+        let mut record = INPUT_RECORD {
+            event_type: 0,
+            event: KEY_EVENT_RECORD {
+                bKeyDown: 0,
+                wRepeatCount: 0,
+                wVirtualKeyCode: 0,
+                wVirtualScanCode: 0,
+                uChar: [0, 0],
+                dwControlKeyState: 0,
+            },
+        };
+        let mut read = 0;
+        loop {
+            ReadConsoleInputA(handle, &mut record, 1, &mut read);
+            if record.event_type == KEY_EVENT && record.event.bKeyDown != 0 {
+                break;
+            }
+        }
+    }
+}
+
+
 pub fn to_static<T: Clone + Send + Sync + 'static>(value: T) -> &'static T {
     // what was i thinking with the static storage
     Box::leak(Box::new(value))
@@ -2432,6 +2516,23 @@ pub fn convert_json_value_to_lucia_value(json_value: &serde_json::Value) -> Valu
             ))
         }
     }
+}
+
+pub fn to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(match (b >> 4) & 0xF {
+            n @ 0..=9 => (b'0' + n) as char,
+            n @ 10..=15 => (b'a' + (n - 10)) as char,
+            _ => unreachable!(),
+        });
+        s.push(match b & 0xF {
+            n @ 0..=9 => (b'0' + n) as char,
+            n @ 10..=15 => (b'a' + (n - 10)) as char,
+            _ => unreachable!(),
+        });
+    }
+    s
 }
 
 static VALID_ALIAS_REGEX: Lazy<Regex> = Lazy::new(|| {

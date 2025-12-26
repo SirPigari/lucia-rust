@@ -103,6 +103,16 @@ impl Error {
         }
     }
 
+    pub fn with_some_location(error_type: &str, msg: &str, loc: Option<Location>) -> Self {
+        Self {
+            error_type: error_type.to_string(),
+            msg: msg.to_string(),
+            help: None,
+            loc,
+            ref_err: None,
+        }
+    }
+
     pub fn error_type(&self) -> &str {
         &self.error_type
     }

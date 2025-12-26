@@ -230,8 +230,11 @@ impl<'a> Lexer<'a> {
             let mut chars = s.char_indices().peekable();
             let mut rel_end = 0;
 
+            let prev_is_digit = start > 0
+                && self.code[..start].chars().last().is_some_and(|c| c.is_ascii_digit());
+
             if let Some(&(i, c)) = chars.peek() {
-                if c == '-' {
+                if (c == '-' || c == '+') && !prev_is_digit {
                     rel_end = i + c.len_utf8();
                     chars.next();
                 }

@@ -1411,6 +1411,7 @@ impl Interpreter {
             Node::Operation { left, operator, right } => self.handle_operation(*left, operator, *right),
             Node::UnaryOperation { operator, operand } => self.handle_unary_op(*operand, &operator),
             Node::PrefixOperation { operator, operand } => self.handle_prefix_op(*operand, &operator),
+            Node::PostfixOperation { operator, operand } => self.handle_postfix_op(*operand, &operator),
             Node::Pipeline { initial_value, arguments } => self.handle_pipeline(*initial_value, arguments),
 
             Node::Call { name, pos_args, named_args } => self.handle_call(&name, pos_args, named_args),
@@ -1531,20 +1532,19 @@ impl Interpreter {
             "++" => {
                 if is_var {
                     if let Some(var) = self.variables.get_mut(var_name) {
-                        let old = var.value.clone();
-                        match &old {
+                        match &var.value {
                             Value::Int(i) => {
                                 let new = Value::Int((i + Int::from_i64(1)).expect("int overflow"));
-                                var.set_value(new);
-                                return old;
+                                var.set_value(new.clone());
+                                return new;
                             }
                             Value::Float(f) => {
                                 let new = Value::Float((f + Float::from_f64(1.0)).expect("float overflow"));
-                                var.set_value(new);
-                                return old;
+                                var.set_value(new.clone());
+                                return new;
                             }
                             Value::Pointer(_) => {
-                                let mut p = old;
+                                let mut p = var.value.clone();
                                 while let Value::Pointer(inner) = p {
                                     p = inner.lock().0.clone();
                                 }
@@ -1573,6 +1573,103 @@ impl Interpreter {
                         }
                         p
                     }
+                    _ => self.raise(
+                        "TypeError",
+                        "Prefix ++ can only be applied to integers, floats and pointers"
+                    ),
+                }
+            }
+
+            "--" => {
+                if is_var {
+                    if let Some(var) = self.variables.get_mut(var_name) {
+                        let old = var.value.clone();
+                        match &old {
+                            Value::Int(i) => {
+                                let new = Value::Int((i - Int::from_i64(1)).expect("int underflow"));
+                                var.set_value(new);
+                                return old;
+                            }
+                            Value::Float(f) => {
+                                let new = Value::Float((f - Float::from_f64(1.0)).expect("float underflow"));
+                                var.set_value(new);
+                                return old;
+                            }
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    "Prefix -- can only be applied to integers and floats"
+                                );
+                            }
+                        }
+                    }
+                    return self.raise(
+                        "NameError",
+                        &format!("Variable '{}' not found for prefix --", var_name)
+                    );
+                }
+
+                match operand_val {
+                    Value::Int(i) => Value::Int(-i),
+                    Value::Float(f) => Value::Float(-f),
+                    _ => self.raise(
+                        "TypeError",
+                        "Prefix -- can only be applied to integers and floats"
+                    ),
+                }
+            }
+
+            _ => self.raise("SyntaxError", &format!("Unknown prefix operator '{}'", operator)),
+        }
+    }
+
+    fn handle_postfix_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
+        let operand_val = self.evaluate(&operand_stmt);
+        if self.err.is_some() {
+            return NULL;
+        }
+
+        let mut is_var = false;
+        let mut var_name = "";
+
+        if let Node::Variable { name, .. } = &operand_stmt.node {
+            is_var = true;
+            var_name = name;
+        }
+
+        match operator {
+            "++" => {
+                if is_var {
+                    if let Some(var) = self.variables.get_mut(var_name) {
+                        let old = var.value.clone();
+                        match &old {
+                            Value::Int(i) => {
+                                let new = Value::Int((i + Int::from_i64(1)).expect("int overflow"));
+                                var.set_value(new);
+                                return old;
+                            }
+                            Value::Float(f) => {
+                                let new = Value::Float((f + Float::from_f64(1.0)).expect("float overflow"));
+                                var.set_value(new);
+                                return old;
+                            }
+                            _ => {
+                                return self.raise(
+                                    "TypeError",
+                                    "Prefix ++ can only be applied to integers and floats"
+                                );
+                            }
+                        }
+                    }
+                    return self.raise(
+                        "NameError",
+                        &format!("Variable '{}' not found for prefix ++", var_name)
+                    );
+                }
+
+                match operand_val {
+                    Value::Int(i) => Value::Int(i.abs()),
+                    Value::Float(f) => Value::Float(f.abs()),
                     _ => self.raise(
                         "TypeError",
                         "Prefix ++ can only be applied to integers, floats and pointers"

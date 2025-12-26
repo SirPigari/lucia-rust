@@ -56,3 +56,16 @@ private mutable j: int = 200
 assert_eq!(j, 200)
 export public final j as public_j
 assert_eq!(public_j, 200)
+
+🔥 := "fire emoji" // you can also use emojis as names
+assert_eq!(🔥, "fire emoji")
+
+// or any other unicode characters
+
+変数: str = "变量"
+assert_eq!(変数, "变量")
+
+// even 'variation selector-16'
+// you might not see it but it is there
+️️ := "heart emoji"
+assert_eq!(️️, "heart emoji")

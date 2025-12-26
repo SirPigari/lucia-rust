@@ -1,51 +1,22 @@
-import lasm
+import (LasmFunction, compile, call, free) from lasm
 
-lasm.asm("
-#[register_prefix=%]
-#[comment=;]
+f: &LasmFunction = compile('
+load msg, r1
+mov r1, r0
+syscall strlen
 
-; Hello World in LASM
-; This program prints 'hello world!' to the console.
+mov r0, r2
+mov 1, r0
+syscall write
 
-mov %r0, 104                  ; 'h'
-mov %r1, 101                  ; 'e'
-mov %r2, 108                  ; 'l'
-mov %r3, 108                  ; 'l'
-mov %r4, 111                  ; 'o'
-mov %r5, 32                   ; ' '
-mov %r6, 119                  ; 'w'
-mov %r7, 111                  ; 'o'
-mov %r8, 114                  ; 'r'
-mov %r9, 108                  ; 'l'
-mov %r10, 100                 ; 'd'
-mov %r11, 33                  ; '!'
-mov %r12, 10                  ; newline '\\n'
-mov %r13, 0                   ; null terminator
+mov 69, r0
+syscall exit
+')
 
-str %r0, [100]      ; 'h'
-str %r1, [101]      ; 'e'
-str %r2, [102]      ; 'l'
-str %r3, [103]      ; 'l'
-str %r4, [104]      ; 'o'
-str %r5, [105]      ; ' '
-str %r6, [106]      ; 'w'
-str %r7, [107]      ; 'o'
-str %r8, [108]      ; 'r'
-str %r9, [109]      ; 'l'
-str %r10, [110]     ; 'd'
-str %r11, [111]     ; '!'
-str %r12, [112]     ; '\\n'
-str %r13, [113]     ; null terminator
+msg: str = "Hello, World!"
 
-; write syscall
-mov %rax, 3
-mov %rdi, 1
-mov %rsi, 100
-mov %rdx, 13
-syscall
-
-; exit syscall
-mov %rax, 0
-mov %rdi, 0
-syscall
-")
+print("------------------------------")
+(exit_code, _) := call(f, { "msg": msg+"\n" })
+print("------------------------------")
+print(f"Program exited with code {exit_code}")
+free(f)

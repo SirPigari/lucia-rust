@@ -142,6 +142,10 @@ impl Struct {
         }
     }
 
+    pub fn set_field(&mut self, field: String, value: Value) -> Option<Box<Value>> {
+        self.fields.insert(field, (Box::new(value.clone()), value.get_type())).map(|(v, _)| v)
+    }
+
     pub fn get_fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
         &self.fields
     }

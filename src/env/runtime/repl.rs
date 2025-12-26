@@ -9,11 +9,11 @@ use reedline::{
     Signal, Prompt, PromptEditMode,
     PromptHistorySearch, Completer, Suggestion,
     Validator, ValidationResult, Highlighter,
-    StyledText, FileBackedHistory, History,
+    StyledText, FileBackedHistory, History, PromptHistorySearchStatus,
 };
 use nu_ansi_term::Style;
 
-use crate::env::runtime::utils::{KEYWORDS, supports_color};
+use crate::env::runtime::utils::{KEYWORDS, supports_color, hex_to_ansi};
 use crate::env::runtime::types::VALID_TYPES;
 
 const COLOR_KEYWORD_RGB: (u8, u8, u8)       = (197, 134, 192);
@@ -352,9 +352,21 @@ impl Prompt for ReplPrompt {
 
     fn render_prompt_history_search_indicator(
         &self,
-        _history_search: PromptHistorySearch,
+        history_search: PromptHistorySearch,
     ) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed("")
+        match history_search.status {
+            PromptHistorySearchStatus::Passing => std::borrow::Cow::Owned(format!(
+                "{}search: ",
+                COLOR_RESET_ANSI
+            )), 
+            PromptHistorySearchStatus::Failing => std::borrow::Cow::Owned(format!(
+                "{}search: {}{}{}",
+                COLOR_RESET_ANSI,
+                hex_to_ansi("#F44350", true),
+                history_search.term,
+                COLOR_RESET_ANSI
+            )),
+        }
     }
 }
 
@@ -399,6 +411,21 @@ fn add_menu_keybindings(keybindings: &mut Keybindings) {
         KeyModifiers::CONTROL,
         KeyCode::Char('a'),
         ReedlineEvent::Edit(vec![EditCommand::SelectAll]),
+    );
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('r'),
+        ReedlineEvent::SearchHistory,
+    );
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('l'),
+        ReedlineEvent::ClearScreen,
+    );
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('e'),
+        ReedlineEvent::OpenEditor,
     );
 }
 
