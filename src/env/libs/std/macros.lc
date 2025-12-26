@@ -24,7 +24,7 @@
     for ((i, n) in values.enumerate()):
         // $!value means the stringified version of the value tokens
         // split by backticks to get the identifiers (backticks aren't used in lucia)
-        output += $!`value.split("`")[i].trim() + " = " + _collections.format_value(n).trim() + "\n\r"
+        output += $!`value.split("`")[i].trim() + " = " + _elevator.utils.format_value(n).trim() + "\n\r"
     end
     forget values
     print(output, end="")
@@ -37,7 +37,7 @@
 
 // uses ApolloTime from time module
 #macro time_it!($expr):
-    scope time_it_scope (_time): 
+    scope time_it_scope(*): 
         start_time := _time.ApolloTime.now()
         result: any = ($expr)
         return ((result, start_time.elapsed()))
@@ -48,7 +48,7 @@
     if ($value is str):
         return $value
     else:
-        return _collections.format_value($value)
+        return _elevator.utils.format_value($value)
     end
 #endmacro
 

@@ -531,6 +531,7 @@ pub struct InternalStorage {
     pub use_42: (bool, bool),
     pub in_try_block: bool,
     pub in_function: bool,
+    pub is_the_main_thread: bool,
 }
 
 #[derive(Serialize)]

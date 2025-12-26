@@ -1,6 +1,6 @@
 use crate::env::runtime::value::Value;
 use crate::env::runtime::internal_structs::{PathElement, EffectFlags};
-use crate::env::runtime::utils::{format_value, unescape_string_literal};
+use crate::env::runtime::utils::{format_value, escape_string};
 use std::collections::HashMap;
 use crate::env::runtime::tokens::Location;
 use serde::{Serialize, Deserialize};
@@ -670,15 +670,15 @@ impl Statement {
                 stmt.format_for_debug()
             ),
             Node::Number { value } => format!(", \"value\": \"{}\"", value),
-            Node::String { value, mods } => format!(", value: \"{}\", \"mods\": [{}]",
-                unescape_string_literal(value).unwrap_or(value.clone()),
+            Node::String { value, mods } => format!(", \"value\": \"{}\", \"mods\": [{}]",
+                escape_string(value).unwrap_or(value.clone()),
                 mods.iter()
-                    .map(|c| c.to_string())
+                    .map(|c| format!("\"{}\"", c))
                     .collect::<Vec<String>>()
                     .join(", "),
             ),
-            Node::Boolean { value } => format!("\"value\": {}", value.map_or("null".to_string(), |v| v.to_string())),
-            Node::Map { keys_stmts, values_stmts } => format!("\"keys_stmts\": [{}], \"values_stmts\": [{}]",
+            Node::Boolean { value } => format!(", \"value\": \"{}\"", value.map_or("null".to_string(), |v| v.to_string())),
+            Node::Map { keys_stmts, values_stmts } => format!(", \"keys_stmts\": [{}], \"values_stmts\": [{}]",
                 keys_stmts.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", "),
                 values_stmts.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
             ),

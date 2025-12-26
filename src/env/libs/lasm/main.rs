@@ -73,7 +73,7 @@ fn le_compile(args: &HashMap<String, Value>) -> Value {
 
     let function = match compile(asm, Target::Native) {
         Ok(func) => func,
-        Err(e) => return Value::Error("LasmCompileError", to_static(e.to_string()), None),
+        Err(e) => return handle_lasm_error(e),
     };
 
     let mut hasher = Sha256::new();

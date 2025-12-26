@@ -288,7 +288,7 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
         }
     }
 
-    let func_ptr_int: Int = (wrapper as usize as i64).into();
+    let func_ptr_int: Int = (wrapper as *const () as usize as i64).into();
     Value::Pointer(Arc::new(Mutex::new((Value::Int(func_ptr_int), 1))))
 }
 

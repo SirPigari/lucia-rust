@@ -1,7 +1,7 @@
 #ifndef LUCIA_STD_IMPORT
 #define LUCIA_STD_IMPORT
 
-import collections as _collections
+import elevator as _elevator
 import time as _time
 
 #endif

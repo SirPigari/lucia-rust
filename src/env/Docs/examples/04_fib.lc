@@ -14,7 +14,7 @@ fun fibonacci_iterative(n: int) -> int:
 
     a: int = 0
     b: int = 1    
-    for (i in [2..n]):
+    for (_ in [2..n]):
         (a, b) = (b, a + b)
     end
     return b

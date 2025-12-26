@@ -1667,7 +1667,7 @@ impl Preprocessor {
         while i < tokens.len() {
             if !skipping
                 && i + 2 < tokens.len()
-                && matches!(tokens[i], Token(ref a, _, _) if a == "IDENTIFIER")
+                && matches!(tokens[i], Token(ref a, ref b, _) if a == "IDENTIFIER" && !RESERVED_KEYWORDS.contains(&b.as_ref()))
                 && matches!(tokens[i + 1], Token(ref a, ref b, _) if a == "OPERATOR" && b == "!")
                 && matches!(tokens[i + 2], Token(_, ref b, _) if BracketType::is_bracket_type_start(&b))
             {
@@ -1847,7 +1847,7 @@ impl Preprocessor {
                 let value = if idx < args_values.len() {
                     Some(args_values[idx].clone())
                 } else {
-                    default.clone().map(|d| vec![expand_macros_in_default_string(&d, &replacement_map)])
+                    default.clone().map(|d| vec![self.expand_macros_in_default_string(&d, &replacement_map, current_dir, depth)])
                 };
 
                 if let Some(v) = value {
@@ -1979,7 +1979,7 @@ impl Preprocessor {
                     }
                 }
             } else if token.0 == "STRING" && !token.1.is_empty() {
-                expanded_tokens.push(expand_macros_in_default_string(token, &replacement_map));
+                expanded_tokens.push(self.expand_macros_in_default_string(token, &replacement_map, current_dir, depth));
             } else {
                 expanded_tokens.push(token.clone());
             }
@@ -2155,6 +2155,96 @@ impl Preprocessor {
                     });
 
                 result.push(Token::new_static(TK_IDENTIFIER, Cow::Owned(mangled), token.2.clone()));
+            } else if token.0 == "STRING" {
+                let s = token.1.as_ref();
+
+                let quote_pos = s.find('"').or_else(|| s.find('\''));
+                if let Some(qpos) = quote_pos {
+                    let prefix = &s[..qpos].to_lowercase();
+                    if prefix.contains('f') {
+                        let mut new_s = String::with_capacity(s.len());
+                        let mut chars = s[qpos+1..s.len()-1].chars().peekable();
+
+                        while let Some(c) = chars.next() {
+                            if c == '{' {
+                                let mut content = String::new();
+                                let mut level = 1;
+
+                                while let Some(&nc) = chars.peek() {
+                                    chars.next();
+                                    if nc == '{' {
+                                        level += 1;
+                                        content.push(nc);
+                                    } else if nc == '}' {
+                                        level -= 1;
+                                        if level == 0 {
+                                            break;
+                                        }
+                                        content.push(nc);
+                                    } else {
+                                        content.push(nc);
+                                    }
+                                }
+
+                                let parts: Vec<&str> = content.splitn(2, "::").collect();
+                                let before = parts[0];
+                                let after = if parts.len() > 1 { Some(parts[1]) } else { None };
+
+                                let lexer = Lexer::new(before, to_static(self.file_path.clone()));
+                                let mut toks = lexer.tokenize()
+                                    .into_iter()
+                                    .filter(|tok| tok.0 != "EOF")
+                                    .collect::<Vec<_>>();
+
+                                for tok in toks.iter_mut() {
+                                    if tok.0 == "IDENTIFIER" && declared.contains(&tok.1.as_ref().to_string()) {
+                                        let mangled = self.mangle_context.get_mangled(&tok.1)
+                                            .cloned()
+                                            .unwrap_or_else(|| self.mangle_context.mangle(&tok.1, &format!("__mangle_{}_{}", self.mangle_context.counter, tok.1)));
+                                        tok.1 = mangled.into();
+                                    }
+                                }
+
+                                let mut joined = String::with_capacity(before.len());
+                                let mut prev = "";
+                                for tok in toks.iter() {
+                                    let cur = tok.1.as_ref();
+                                    if prev == ":" && cur == ":" {
+                                        if joined.ends_with(' ') {
+                                            joined.pop();
+                                        }
+                                        joined.push_str(":");
+                                        prev = "";
+                                        continue;
+                                    } else {
+                                        if !joined.is_empty() && !joined.ends_with(':') {
+                                            joined.push(' ');
+                                        }
+                                        joined.push_str(cur);
+                                    }
+                                    prev = cur;
+                                }
+
+                                if let Some(after_part) = after {
+                                    joined.push_str("::");
+                                    joined.push_str(after_part);
+                                }
+
+                                new_s.push('{');
+                                new_s.push_str(&joined);
+                                new_s.push('}');
+                            } else {
+                                new_s.push(c);
+                            }
+                        }
+
+                        let mangled_string = format!("{}\"{}\"", &s[..qpos], new_s);
+                        result.push(Token::new_static(TK_STRING, Cow::Owned(mangled_string), token.2.clone()));
+                        continue;
+                    }
+                }
+
+                result.push(token.clone());
             } else {
                 result.push(token.clone());
             }
@@ -2162,63 +2252,76 @@ impl Preprocessor {
 
         result
     }
-}
 
-fn expand_macros_in_default_string(
-    token: &Token,
-    replacement_map: &HashMap<&str, Vec<Token>>,
-) -> Token {
-    if token.0 != "STRING" {
-        return token.clone();
-    }
+    fn expand_macros_in_default_string(
+        &mut self,
+        token: &Token,
+        replacement_map: &HashMap<&str, Vec<Token>>,
+        current_dir: &Path,
+        depth: usize,
+    ) -> Token {
+        if token.0 != "STRING" {
+            return token.clone();
+        }
 
-    let val = &token.1;
-    if val.len() < 3 || !(val.starts_with('f') || val.starts_with('F')) {
-        return token.clone();
-    }
+        let val = &token.1;
+        if val.len() < 3 || !(val.starts_with('f') || val.starts_with('F')) {
+            return token.clone();
+        }
 
-    let quote_char = val.chars().nth(1).unwrap_or('\0');
-    if quote_char != '"' && quote_char != '\'' {
-        return token.clone();
-    }
+        let quote_char = val.chars().nth(1).unwrap_or('\0');
+        if quote_char != '"' && quote_char != '\'' {
+            return token.clone();
+        }
 
-    let string_inside = &val[2..val.len() - 1];
-    let mut replaced = String::new();
-    let mut rest = string_inside;
+        let string_inside = &val[2..val.len() - 1];
+        let mut replaced = String::new();
+        let mut rest = string_inside;
 
-    while let Some(start_pos) = rest.find('$') {
-        replaced.push_str(&rest[..start_pos]);
-        rest = &rest[start_pos + 1..];
+        while let Some(start_pos) = rest.find('$') {
+            replaced.push_str(&rest[..start_pos]);
+            rest = &rest[start_pos + 1..];
 
-        if let Some(end_pos) = rest.find('$') {
-            let key = &rest[..end_pos];
-            rest = &rest[end_pos + 1..];
+            if let Some(end_pos) = rest.find('$') {
+                let key = &rest[..end_pos];
+                rest = &rest[end_pos + 1..];
 
-            if let Some(repl) = replacement_map.get(key) {
-                replaced.push('{');
-                replaced.push_str(
-                    &repl.iter().map(|t| t.1.clone()).collect::<Vec<_>>().join(" ")
-                );
-                replaced.push('}');
+                if let Some(repl) = replacement_map.get(key) {
+                    replaced.push('{');
+                    let s = match self.expand_tokens_with_macros(
+                        repl,
+                        false,
+                        token.2.clone(),
+                        current_dir,
+                        depth,
+                    ) {
+                        Ok(expanded) => expanded,
+                        Err(_) => repl.clone(),
+                    };
+                    replaced.push_str(
+                        &s.iter().map(|t| t.1.clone()).collect::<Vec<_>>().join(" ")
+                    );
+                    replaced.push('}');
+                } else {
+                    replaced.push('$');
+                    replaced.push_str(key);
+                    replaced.push('$');
+                }
             } else {
                 replaced.push('$');
-                replaced.push_str(key);
-                replaced.push('$');
+                replaced.push_str(rest);
+                rest = "";
             }
-        } else {
-            replaced.push('$');
-            replaced.push_str(rest);
-            rest = "";
         }
+
+        replaced.push_str(rest);
+
+        Token::new_static(
+            TK_STRING,
+            Cow::Owned(format!("f{}{}{}", quote_char, replaced, quote_char)),
+            token.2.clone(),
+        )
     }
-
-    replaced.push_str(rest);
-
-    Token::new_static(
-        TK_STRING,
-        Cow::Owned(format!("f{}{}{}", quote_char, replaced, quote_char)),
-        token.2.clone(),
-    )
 }
 
 fn join_tokens_sep(tokens: &[Token], sep: &str) -> String {

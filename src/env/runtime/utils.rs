@@ -659,6 +659,7 @@ pub fn get_inner_string(s: &str) -> Result<String, String> {
     Ok(remaining[1..remaining.len()-1].to_string())
 }
 
+#[allow(dead_code)]
 pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();

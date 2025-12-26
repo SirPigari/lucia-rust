@@ -24,7 +24,6 @@ use crate::env::runtime::utils::{
     get_inner_type,
     check_pattern,
     get_enum_idx,
-    unescape_string_premium_edition,
     apply_format_spec,
     type_matches,
     generate_name_variants,
@@ -127,6 +126,7 @@ impl Interpreter {
                 use_42: (false, false),
                 in_try_block: false,
                 in_function: false,
+                is_the_main_thread: false,
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
@@ -284,6 +284,11 @@ impl Interpreter {
         } else {
             false
         }
+    }
+
+    #[inline]
+    pub fn set_main_thread(&mut self, is_main: bool) {
+        self.internal_storage.is_the_main_thread = is_main;
     }
 
     fn to_index(&mut self, val: &Value, len: usize) -> Result<usize, Value> {
@@ -1340,10 +1345,6 @@ impl Interpreter {
             });
         }
 
-        if self.is_returning {
-            return NULL;
-        }
-
         self.current_statement = Some(statement.clone());
 
         if self.check_stop_flag() {
@@ -1528,8 +1529,13 @@ impl Interpreter {
             var_name = name;
         }
 
-        match operator {
-            "++" => {
+        let mut operand_val_clone: Option<Value> = None;
+        if self.config.debug {
+            operand_val_clone = Some(operand_val.clone());
+        }
+
+        let result = (|| match &operator {
+            &"++" => {
                 if is_var {
                     if let Some(var) = self.variables.get_mut(var_name) {
                         match &var.value {
@@ -1580,7 +1586,7 @@ impl Interpreter {
                 }
             }
 
-            "--" => {
+            &"--" => {
                 if is_var {
                     if let Some(var) = self.variables.get_mut(var_name) {
                         let old = var.value.clone();
@@ -1620,7 +1626,16 @@ impl Interpreter {
             }
 
             _ => self.raise("SyntaxError", &format!("Unknown prefix operator '{}'", operator)),
-        }
+        })();
+        self.debug_log(
+            format_args!(
+                "<{}{} -> {}>",
+                operator,
+                format_value(&operand_val_clone.unwrap_or(NULL)),
+                format_value(&result)
+            )
+        );
+        result
     }
 
     fn handle_postfix_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
@@ -1637,8 +1652,13 @@ impl Interpreter {
             var_name = name;
         }
 
-        match operator {
-            "++" => {
+        let mut operand_val_clone: Option<Value> = None;
+        if self.config.debug {
+            operand_val_clone = Some(operand_val.clone());
+        }
+
+        let result = (|| match &operator {
+            &"++" => {
                 if is_var {
                     if let Some(var) = self.variables.get_mut(var_name) {
                         let old = var.value.clone();
@@ -1677,7 +1697,7 @@ impl Interpreter {
                 }
             }
 
-            "--" => {
+            &"--" => {
                 if is_var {
                     if let Some(var) = self.variables.get_mut(var_name) {
                         let old = var.value.clone();
@@ -1717,7 +1737,16 @@ impl Interpreter {
             }
 
             _ => self.raise("SyntaxError", &format!("Unknown prefix operator '{}'", operator)),
-        }
+        })();
+        self.debug_log(
+            format_args!(
+                "<{}{} -> {}>",
+                format_value(&operand_val_clone.unwrap_or(NULL)),
+                operator,
+                format_value(&result)
+            )
+        );
+        result
     }
 
     fn handle_pipeline(&mut self, initial_value: Statement, arguments: Vec<Statement>) -> Value {
@@ -2528,6 +2557,7 @@ impl Interpreter {
                     _ => {}
                 }
             }
+            self.is_returning = false;
             return result;
         }
 
@@ -4297,6 +4327,7 @@ impl Interpreter {
             .map_or(NULL, |var| var.value.clone())
     }
 
+    #[track_caller]
     fn handle_throw(&mut self, throw_ast: ThrowNode) -> Value {
         let mut prev_err = None;
 
@@ -4306,14 +4337,14 @@ impl Interpreter {
                     Some(v) => self.evaluate(&v),
                     None => Value::String("LuciaError".to_string()),
                 };
-
+                
                 if self.err.is_some() {
                     prev_err = self.err.clone();
                     self.err = None;
                 }
                 
                 let error_msg_val = self.evaluate(&message);
-
+                
                 self.debug_log(
                     format_args!(
                         "<Throwing error: '{}: {}'>",
@@ -4321,7 +4352,7 @@ impl Interpreter {
                         error_msg_val.to_string()
                     )
                 );
-
+                
                 if self.err.is_some() {
                     if prev_err.is_some() {
                         self.raise_with_ref(
@@ -10012,14 +10043,14 @@ impl Interpreter {
     }
 
     fn evaluate_f_string_expression(&mut self, expr: &str) -> Result<Value, ()> {
-        let unescaped_expr = match unescape_string_premium_edition(expr) {
-            Ok(unescaped) => unescaped,
-            Err(err) => {
-                self.raise("UnescapeError", &err);
-                return Err(());
-            }
-        };
-
+        // let unescaped_expr = match unescape_string_premium_edition(expr) {
+        //     Ok(unescaped) => unescaped,
+        //     Err(err) => {
+        //         self.raise("UnescapeError", &err);
+        //         return Err(());
+        //     }
+        // };
+        let unescaped_expr = expr.to_string();
         let tokens = Lexer::new(&unescaped_expr, &self.file_path.clone()).tokenize();
 
         let filtered = tokens.iter()

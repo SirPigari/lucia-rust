@@ -1152,6 +1152,7 @@ fn execute_file(
             (home_dir_path.join("libs"), config_path.clone(), !effective_disable_preprocessor),
             argv,
         );
+        interpreter.set_main_thread(true);
 
         if config.cache_format.is_enabled() {
             if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
@@ -1349,6 +1350,7 @@ fn execute_code_string(
         ),
         argv,
     );
+    interpreter.set_main_thread(true);
 
     let interpreter_time_start = Instant::now();
     let result = interpreter.interpret(statements, false);
@@ -1404,6 +1406,7 @@ fn repl(
         ),
         argv,
     );
+    interpreter.set_main_thread(true);
 
     if config.cache_format.is_enabled() {
         let cache_dir = home_dir_path.join(".cache");
