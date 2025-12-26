@@ -23,7 +23,7 @@ bincode = "2.0.1"  # fuck you doxxers
 zstd = "0.13.3"
 rustc-hash = "2.1.1"
 parking_lot = "0.12.5"
-lasm = { version = "1.0.0", package = "lucia-lasm", optional = true }
+lasm = { version = "1.0.1", package = "lucia-lasm", optional = true }
 
 # [target.'cfg(feature = "hash")'.dependencies]
 md5 = { version = "0.8.0", optional = true }
