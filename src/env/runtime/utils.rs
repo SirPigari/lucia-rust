@@ -205,7 +205,8 @@ pub fn get_remaining_stack_size() -> Option<usize> {
 #[cfg(unix)]
 pub fn wait_any_key() {
     use std::os::unix::io::AsRawFd;
-    use libc::{tcgetattr, tcsetattr, termios, ECHO, ICANON, TCSANOW, c_int};
+    use std::io::Read;
+    use libc::{tcgetattr, tcsetattr, termios, ECHO, ICANON, TCSANOW};
 
     let stdin_fd = io::stdin().as_raw_fd();
 
