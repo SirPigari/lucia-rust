@@ -7,7 +7,7 @@ In this note i want to explain, walk trhough and apologise for this codebase.
 
 ## Building
 
-To build lucia from source you need to ofcoure have rust, cargo and make.
+To build lucia from source you need to ofcoure have rustc, cargo and make.
 
 Then run:
 

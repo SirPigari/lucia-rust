@@ -2,6 +2,9 @@
 
 You have to note that Lucia is *interpreted* and *slow as fuck*.
 
+>> NOTE: This and other benchmarks were run BEFORE refactors.
+>> Current state is much faster.
+
 ## Hello world
 
 ```lucia

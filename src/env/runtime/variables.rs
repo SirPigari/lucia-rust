@@ -2090,6 +2090,34 @@ impl Variable {
                         None,
                     )
                 };
+                let is_sorted = {
+                    let val_clone = self.value.clone();
+                    make_native_method_val(
+                        "is_sorted",
+                        move |_args| {
+                            if let Value::List(list) = &val_clone {
+                                if list.len() <= 1 {
+                                    return Value::Boolean(true);
+                                }
+                                for i in 0..list.len() - 1 {
+                                    if let Some(ordering) = list[i].partial_cmp(&list[i + 1]) {
+                                        if ordering == std::cmp::Ordering::Greater {
+                                            return Value::Boolean(false);
+                                        }
+                                    } else {
+                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                    }
+                                }
+                                return Value::Boolean(true);
+                            }
+                            Value::Null
+                        },
+                        vec![],
+                        "bool",
+                        false, true, true,
+                        None,
+                    )
+                }
 
                 self.properties.insert(
                     "max".to_string(),
@@ -2338,6 +2366,17 @@ impl Variable {
                     Variable::new(
                         "dedup".to_string(),
                         dedup,
+                        "function".to_string(),
+                        false,
+                        true,
+                        true,
+                    ),
+                );
+                self.properties.insert(
+                    "is_sorted".to_string(),
+                    Variable::new(
+                        "is_sorted".to_string(),
+                        is_sorted,
                         "function".to_string(),
                         false,
                         true,

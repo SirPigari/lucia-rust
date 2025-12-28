@@ -20,10 +20,10 @@ fun display(n: int):
 end
 
 fun next(n: int, mutable base: list) -> list:
-    state: int = (base[0] bor (base[1] << 1))
+    state: int = (base[0] | (base[1] << 1))
     for (i: int = 2, i < n, i++):
         state = (state << 1)
-        state = (state bor base[i])
+        state = (state | base[i])
         state = (state band 7)
         base[i - 1] = ((110 >> state) band 1)
     end

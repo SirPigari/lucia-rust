@@ -1,65 +1,65 @@
 #include <std/assert>
 
-public static final fun voidFunction() -> void:
+public static final fun void_function() -> void:
     print("This is a void function")
     return  // null
 end
 
-public static final fun intFunction() -> int:
+public static final fun int_function() -> int:
     print("This function returns an integer")
     return 42
 end
 
-public static final fun stringFunction() -> str:
+public static final fun string_function() -> str:
     print("This function returns a string")
     return ("Hello, World!")
 end
 
-public static final fun boolFunction() -> bool:
+public static final fun bool_function() -> bool:
     print("This function returns a boolean")
     return true
 end
 
-public static final fun listFunction() -> list[int]:
+public static final fun list_function() -> list[int]:
     print("This function returns a list of integers")
     return [1, 2, 3, 4, 5]
 end
 
 fun test() end  // This is the minimal function.
 
-fun parameterFunction(a: int, b: str) -> void:
+fun parameter_function(a: int, b: str) -> void:
     print("This function takes parameters: a =", a, ", b =", b)
 end
 
-fun defaultParameterFunction(a: int = 10, b: str = "default") -> void:
+fun default_parameter_function(a: int = 10, b: str = "default") -> void:
     print("This function has default parameters: a =", a.to_string(), ", b =", b)
 end
 
-fun combinedFunction(a: int, b: str = "default") -> str:
+fun combined_parameter_function(a: int, b: str = "default") -> str:
     print("This function combines parameters and returns a string")
     return ("Combined: " + a.to_string() + ", " + b.to_string())
 end
 
-public static final fun recursiveFunction(n: int) -> int:
+public static final fun recursive_function(n: int) -> int:
     if (n <= 1):
         return n
     else:
-        return n + recursiveFunction(n - 1)
+        return n + recursive_function(n - 1)
     end
 end
 
-public static final fun higherOrderFunction(func: function[int] -> int, value: int) -> int:
+public static final fun higher_order_function(func: function[int] -> int, value: int) -> int:
     print(func, value)
     print("This function takes another function as a parameter")
     return func(value)
 end
 
-private static mutable fun lowerOrderFunction(value: int) -> int:
+private static mutable fun lower_order_function(value: int) -> int:
     print("This is a lower-order function")
     return value * 2
 end
 
-public static final fun mutableArgumentsFunction(mutable a: int, b: str) -> int:
+public static final fun mutable_arguments_function(mutable a: int, b: str) -> int:
     print("This function takes mutable arguments")
     print("a =", a, ", b =", b)
     a += 5
@@ -67,30 +67,40 @@ public static final fun mutableArgumentsFunction(mutable a: int, b: str) -> int:
     return a
 end
 
-fun variadicFunction(*args: list[int]) -> int:
+fun variadic_function(*args: list[int]) -> int:
     print("This function takes a variable number of arguments")
     return sum(args) as int
 end
 
-fun printNoEndline(*args: list[any]) -> void:
+fun unpacking_variadics(*args: list[any]) -> void:
     print(~args, end="")
+end
+
+fun early_return_function(a: int) -> int:
+    if (a < 0):
+        return -1
+    end
+    return a * 2
+    throw "This line is never reached"
 end
 
 // === Assertions ===
 
-assert_eq!(voidFunction(), null)
-assert_eq!(intFunction(), 42)
-assert_eq!(stringFunction(), "Hello, World!")
-assert_eq!(boolFunction(), true)
-assert_eq!(listFunction(), ([1, 2, 3, 4, 5]))
-assert_eq!(parameterFunction(5, "test"), null)
-assert_eq!(defaultParameterFunction(), null)
-assert_eq!(combinedFunction(15), "Combined: 15, default")
-assert_eq!(combinedFunction(25, "override"), "Combined: 25, override")
-assert_eq!(recursiveFunction(5), 15)
-assert_eq!(recursiveFunction(0), 0)
-assert_eq!(recursiveFunction(1), 1)
-assert_eq!(higherOrderFunction(lowerOrderFunction, 10), 20)
-assert_eq!(mutableArgumentsFunction(10, "test"), 15)
-assert_eq!(variadicFunction(1, 2, 3, 4, 5), 15)
-assert_eq!(printNoEndline("Hello", "World!"), null)
+assert_eq!(void_function(), null)
+assert_eq!(int_function(), 42)
+assert_eq!(string_function(), "Hello, World!")
+assert_eq!(bool_function(), true)
+assert_eq!(list_function(), ([1, 2, 3, 4, 5]))
+assert_eq!(parameter_function(5, "test"), null)
+assert_eq!(default_parameter_function(), null)
+assert_eq!(combined_parameter_function(15), "Combined: 15, default")
+assert_eq!(combined_parameter_function(25, "override"), "Combined: 25, override")
+assert_eq!(recursive_function(5), 15)
+assert_eq!(recursive_function(0), 0)
+assert_eq!(recursive_function(1), 1)
+assert_eq!(higher_order_function(lower_order_function, 10), 20)
+assert_eq!(mutable_arguments_function(10, "test"), 15)
+assert_eq!(variadic_function(1, 2, 3, 4, 5), 15)
+assert_eq!(unpacking_variadics("Hello", "World!"), null)
+assert_eq!(early_return_function(10), 20)
+assert_eq!(early_return_function(-5), -1)

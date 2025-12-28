@@ -1,7 +1,7 @@
 import (LasmFunction, compile, call, free) from lasm
 
 f: &LasmFunction = compile('
-load msg, r1
+load msg, r1           ; load value of msg into r1
 mov r1, r0
 syscall strlen
 
@@ -19,4 +19,4 @@ print("------------------------------")
 (exit_code, _) := call(f, { "msg": msg+"\n" })
 print("------------------------------")
 print(f"Program exited with code {exit_code}")
-free(f)
+free(f) // optional

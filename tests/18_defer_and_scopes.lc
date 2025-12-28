@@ -28,6 +28,7 @@ exit(0)
 
 // groups
 // note: groups were mainly added for macros under the hood
+// note again: groups were replaced by scope (*) in macros because groups are hard to parse
 assert_eq!(\ 1 + 1 \, 2) // groups are like () but for multiple expressions
 assert_eq!(
     \ 1 + 1 m := (x) => (x + 1) m(10) \, 10,
@@ -53,3 +54,14 @@ b (5 + 5)
 \
 // Now the parser treats the whole block as one group,
 // so it doesn't get confused by 'b (5 + 5)' being a call.
+
+// well now it expands to
+
+// scope (*) is the same as a group
+scope (*):
+    b := 5 + 5
+    b
+end
+
+// but it works the same way
+assert_eq!(b, 10)

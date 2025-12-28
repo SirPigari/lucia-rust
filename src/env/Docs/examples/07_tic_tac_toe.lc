@@ -7,7 +7,7 @@
 // its not supposed to be fast or anything just easy to prototype simple stuff
 // (or as a calculator)
 
-fun printBoard(board: list) -> void:
+fun print_board(board: list) -> void:
     print("╔═══════════╗")
 
     for (i in [0..2]):
@@ -20,7 +20,7 @@ fun printBoard(board: list) -> void:
             if (cell == " "):
                 styledprint(str(idx + 1), fg_color="#434343", end="")
             else:
-                styledprint(getPlayerString(cell), end="")
+                styledprint(get_player_string(cell), end="")
             end
 
             if (j < 2):
@@ -38,7 +38,7 @@ fun printBoard(board: list) -> void:
     print("╚═══════════╝")
 end
 
-fun checkWin(board: list, player: str) -> bool:
+fun check_win(board: list, player: str) -> bool:
     wins: list = [
         [0, 1, 2], [3, 4, 5], [6, 7, 8],  // rows
         [0, 3, 6], [1, 4, 7], [2, 5, 8],  // cols
@@ -53,7 +53,7 @@ fun checkWin(board: list, player: str) -> bool:
     return false
 end
 
-fun isDraw(board: list) -> bool:
+fun is_draw(board: list) -> bool:
     for (cell in board):
         if (cell == " "):
             return false
@@ -62,20 +62,20 @@ fun isDraw(board: list) -> bool:
     return true
 end
 
-fun getPlayerString(player: str) -> str:
+fun get_player_string(player: str) -> str:
     if (player == "X"):
-        return styledstr("X", fg_color="#FF0000", end="")
+        return styledstr("X", fg_color="#FF0000")
     else:
-        return styledstr("O", fg_color="#0000FF", end="")
+        return styledstr("O", fg_color="#0000FF")
     end
 end
 
-fun ticTacToe() -> void:
+fun tic_tac_toe() -> void:
     board: list = array(9, " ")
     currentPlayer: str = "X"
 
     while (true):
-        printBoard(board)
+        print_board(board)
 
         moveStr: str = input(f"Player {currentPlayer}, enter your move (1-9): ")
 
@@ -100,14 +100,14 @@ fun ticTacToe() -> void:
 
         board[move] = currentPlayer
 
-        if (checkWin(board, currentPlayer)):
-            printBoard(board)
-            print("Player " + getPlayerString(currentPlayer) + " wins!")
+        if (check_win(board, currentPlayer)):
+            print_board(board)
+            print("Player " + get_player_string(currentPlayer) + " wins!")
             break
         end
 
-        if (isDraw(board)):
-            printBoard(board)
+        if (is_draw(board)):
+            print_board(board)
             print("It's a draw!")
             break
         end
@@ -120,4 +120,4 @@ fun ticTacToe() -> void:
     end
 end
 
-ticTacToe()
+tic_tac_toe()
