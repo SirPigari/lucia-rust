@@ -2117,7 +2117,7 @@ impl Variable {
                         false, true, true,
                         None,
                     )
-                }
+                };
 
                 self.properties.insert(
                     "max".to_string(),

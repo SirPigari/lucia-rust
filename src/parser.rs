@@ -184,7 +184,7 @@ impl Parser {
     
     pub fn parse_safe(&mut self) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::with_capacity(self.tokens.len() / 4);
-        while let Some(_) = self.token().cloned() {
+        while self.token().is_some() {
             let stmt = self.parse_expression();
             if self.err.is_some() {
                 return Err(self.err.clone().unwrap());
@@ -410,35 +410,29 @@ impl Parser {
 
                 ("SEPARATOR", ".") => {
                     self.next();
-                    let property_token = self.token().cloned().unwrap_or_else(|| {
-                        self.raise("SyntaxError", "Expected identifier after '.'");
-                        DEFAULT_TOKEN.clone()
-                    });
-        
-                    if property_token.0 != "IDENTIFIER" {
-                        self.raise("SyntaxError", &format!(
-                            "Expected identifier after '.', found '{}'", property_token.1
-                        ));
-                        return Statement::Null;
-                    }
-        
+                    let property_name = match self.token() {
+                        Some(t) if t.0.as_ref() == "IDENTIFIER" => t.1.as_ref().to_string(),
+                        Some(_) => { self.raise("SyntaxError", &format!("Expected identifier after '.', found '{}'", self.token().unwrap().1.as_ref())); return Statement::Null; },
+                        None => { self.raise("SyntaxError", "Expected identifier after '.'"); return Statement::Null; }
+                    };
+
                     self.next();
-        
+
                     if let Some(next_tok) = self.token() {
                         if next_tok.0 == "SEPARATOR" && next_tok.1 == "(" {
                             self.next();
                             let (pos_args, named_args) = self.parse_arguments();
                             self.check_for("SEPARATOR", ")");
                             self.next();
-        
+
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
-        
+
                             expr = Statement {
                                 node: Node::MethodCall {
                                     object: Box::new(expr),
-                                    method_name: property_token.1.to_string(),
+                                    method_name: property_name.clone(),
                                     pos_args,
                                     named_args,
                                 },
@@ -448,7 +442,7 @@ impl Parser {
                             expr = Statement {
                                 node: Node::PropertyAccess {
                                     object: Box::new(expr),
-                                    property_name: property_token.1.to_string(),
+                                    property_name: property_name.clone(),
                                 },
                                 loc: alloc_loc(self.get_loc()),
                             };

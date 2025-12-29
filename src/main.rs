@@ -451,6 +451,47 @@ fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config)
         );
     }
 
+    // env var for quick prototype
+    if std_env::var_os("LUCIA_DUMP_PP_JSON").is_some() {
+        let json_path = format!("{}.pp.json", base_path);
+        let json_data = match serde_json::to_string_pretty(&tokens) {
+            Ok(j) => j,
+            Err(e) => {
+                print_colored(
+                    &format!(
+                        "{}Failed to serialize preprocessed tokens to JSON: {}",
+                        hex_to_ansi(&config.color_scheme.exception, use_colors),
+                        e
+                    ),
+                    &config.color_scheme.exception,
+                    use_colors,
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = File::create(&json_path)
+            .and_then(|mut f| f.write_all(json_data.as_bytes()))
+        {
+            eprintln!(
+                "{} Failed to write to {}: {}",
+                hex_to_ansi(&config.color_scheme.exception, use_colors),
+                json_path,
+                err
+            );
+        } else {
+            print_colored(
+                &format!(
+                    "{}Dumped preprocessed tokens to {}",
+                    hex_to_ansi(&config.color_scheme.debug, use_colors),
+                    json_path
+                ),
+                &config.color_scheme.debug,
+                use_colors,
+            );
+        }
+    }
+
     print_colored(
         &format!(
             "{}Preprocessed source code dumped to {}.i and {}.pp",
