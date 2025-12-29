@@ -341,6 +341,14 @@ impl Parser {
                     }
                     let mut fields = HashMap::new();
                     while !self.token_is("SEPARATOR", "}") {
+                        if self.token_is("SEPARATOR", ".") {
+                            if self.peek(1).is_some() && self.peek(1).unwrap().0 == "IDENTIFIER" {
+                                self.raise_with_help("SyntaxError", "Unexpected '.' in struct definition", "Struct fields don't need a '.' prefix. You can safely remove it.");
+                                return Statement::Null;
+                            }
+                            self.raise("SyntaxError", "Unexpected '.' in struct definition");
+                            return Statement::Null;
+                        }
                         let name = match self.token() {
                             Some(Token(ty, id, _)) if ty == "IDENTIFIER" => id.clone(),
                             _ => {

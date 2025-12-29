@@ -48,8 +48,8 @@ num2: int = 7
 assert_err!(f"{num2 :: .2}")  // should error because .2 without float type
 
 // combined f-string with width and hex
-val: int = 7
-assert_eq!(f"The number {val :: <3} in hex is {val :: x}", "The number 7   in hex is 7")
+val: int = 42
+assert_eq!(f"The number {val :: <3} in hex is {val :: x}", "The number 42  in hex is 2a")
 
 // nested strings in f-strings
 

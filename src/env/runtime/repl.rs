@@ -184,12 +184,12 @@ impl Highlighter for ReplHighlighter {
                 word.push(ch);
                 if ch == '*' && chars.peek() == Some(&'/') {
                     word.push(chars.next().unwrap());
-                    let (r, g, b) = COLOR_COMMENTS_RGB;
-                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                    styled.push((s, word.clone()));
-                    word.clear();
                     in_multiline_comment = false;
                 }
+                let (r, g, b) = COLOR_COMMENTS_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, word.clone()));
+                word.clear();
                 continue;
             }
 
@@ -213,6 +213,10 @@ impl Highlighter for ReplHighlighter {
                 chars.next();
                 word.push_str("/*");
                 in_multiline_comment = true;
+                let (r, g, b) = COLOR_COMMENTS_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, word.clone()));
+                word.clear();
                 continue;
             }
 
@@ -234,7 +238,8 @@ impl Highlighter for ReplHighlighter {
                 continue;
             }
 
-            if ch == '"' || ch == '\'' || ch == 'f' || ch == 'r' || ch == 'b' {
+            let is_prefix = (ch == 'f' || ch == 'r' || ch == 'b') && chars.peek().map_or(false, |&c| c == '"' || c == '\'');
+            if ch == '"' || ch == '\'' || is_prefix {
                 if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
 
                 let mut prefixes = String::new();
@@ -242,25 +247,13 @@ impl Highlighter for ReplHighlighter {
                 let mut raw = false;
                 let mut is_f = false;
 
-                if ch == 'f' || ch == 'r' || ch == 'b' {
+                if is_prefix {
                     prefixes.push(ch);
                     if ch == 'f' { is_f = true; }
                     if ch == 'r' { raw = true; }
-
                     if let Some(&next_ch) = chars.peek() {
                         if next_ch == '"' || next_ch == '\'' {
-                            quote_char = next_ch;
-                            chars.next();
-                        } else if next_ch == 'f' || next_ch == 'r' || next_ch == 'b' {
-                            prefixes.push(next_ch);
-                            if next_ch == 'f' { is_f = true; }
-                            if next_ch == 'r' { raw = true; }
-                            if let Some(&q) = chars.peek() {
-                                if q == '"' || q == '\'' {
-                                    quote_char = q;
-                                    chars.next();
-                                }
-                            }
+                            quote_char = chars.next().unwrap();
                         }
                     }
                 } else if ch == '"' || ch == '\'' {
@@ -291,39 +284,37 @@ impl Highlighter for ReplHighlighter {
                             continue;
                         }
 
-                        if is_f {
-                            if c == '{' && brace_depth == 0 {
-                                if !string_word.is_empty() {
-                                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                                    styled.push((s, string_word.clone()));
-                                    string_word.clear();
-                                }
-                                styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "{".to_string()));
-                                let mut code_word = String::new();
-                                brace_depth += 1;
-                                while let Some(inner) = chars.next() {
-                                    if inner == '{' {
-                                        brace_depth += 1;
-                                        code_word.push(inner);
-                                    } else if inner == '}' {
-                                        brace_depth -= 1;
-                                        if brace_depth == 0 {
-                                            if !code_word.is_empty() {
-                                                let inner_styled = self.highlight(&code_word, 0);
-                                                styled.buffer.extend(inner_styled.buffer);
-                                                code_word.clear();
-                                            }
-                                            styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "}".to_string()));
-                                            break;
-                                        } else {
-                                            code_word.push(inner);
+                        if is_f && c == '{' && brace_depth == 0 {
+                            if !string_word.is_empty() {
+                                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                                styled.push((s, string_word.clone()));
+                                string_word.clear();
+                            }
+                            styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "{".to_string()));
+                            let mut code_word = String::new();
+                            brace_depth += 1;
+                            while let Some(inner) = chars.next() {
+                                if inner == '{' {
+                                    brace_depth += 1;
+                                    code_word.push(inner);
+                                } else if inner == '}' {
+                                    brace_depth -= 1;
+                                    if brace_depth == 0 {
+                                        if !code_word.is_empty() {
+                                            let inner_styled = self.highlight(&code_word, 0);
+                                            styled.buffer.extend(inner_styled.buffer);
+                                            code_word.clear();
                                         }
+                                        styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "}".to_string()));
+                                        break;
                                     } else {
                                         code_word.push(inner);
                                     }
+                                } else {
+                                    code_word.push(inner);
                                 }
-                                continue;
                             }
+                            continue;
                         }
 
                         string_word.push(c);
@@ -338,7 +329,7 @@ impl Highlighter for ReplHighlighter {
 
                     continue;
                 } else {
-                    styled.push((Style::new(), ch.to_string()));
+                    word.push(ch);
                     continue;
                 }
             }
@@ -347,7 +338,6 @@ impl Highlighter for ReplHighlighter {
                 if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
 
                 word.push('#');
-
                 while let Some(&ch) = chars.peek() {
                     if !(ch.is_ascii_alphanumeric() || ch == '-') { break; }
                     word.push(chars.next().unwrap());
