@@ -90,7 +90,8 @@ impl Parser {
     #[track_caller]
     fn check_for(&mut self, expected_type: &str, expected_value: &str) {
         if let Some(token) = self.token() {
-            let (token_type, token_value) = (token.0.clone(), token.1.clone());
+            let token_type = token.0.as_ref();
+            let token_value = token.1.as_ref();
             let value_matches = expected_value.is_empty() || token_value == expected_value;
 
             if !(token_type == "EOF" && expected_type != "EOF") {
@@ -105,31 +106,18 @@ impl Parser {
             }
         }
         if expected_type == "SEPARATOR" && [")", "]", "}", "end"].contains(&expected_value) {
-            let mut opening = "".to_string();
-            match expected_value {
-                ")" => opening = "(".to_string(),
-                "]" => opening = "[".to_string(),
-                "}" => opening = "{".to_string(),
-                "end" => opening = ":".to_string(),
-                _ => {}
-            }
-            self.raise_with_help("SyntaxError", &format!(
-                "\"{}\" was never closed",
-                opening
-            ),
-            &format!("Maybe you forgot '{}'?", expected_value));
+            let opening = match expected_value {
+                ")" => "(",
+                "]" => "[",
+                "}" => "{",
+                "end" => ":",
+                _ => "",
+            };
+            self.raise_with_help("SyntaxError", &format!("\"{}\" was never closed", opening), &format!("Maybe you forgot '{}'?", expected_value));
             return;
         } else if expected_type == "OPERATOR" && ["|"].contains(&expected_value) {
-            let mut opening = "".to_string();
-            match expected_value {
-                "|" => opening = "|".to_string(),
-                _ => {}
-            }
-            self.raise_with_help("SyntaxError", &format!(
-                "\"{}\" is missing its closing pair",
-                opening
-            ),
-            &format!("Maybe you forgot '{}'?", expected_value));
+            let opening = match expected_value { "|" => "|", _ => "", };
+            self.raise_with_help("SyntaxError", &format!("\"{}\" is missing its closing pair", opening), &format!("Maybe you forgot '{}'?", expected_value));
             return;
         }
         self.raise("UEFError", &format!(
@@ -324,7 +312,7 @@ impl Parser {
                             self.next();
                             return Statement {
                                 node: Node::StructCreation {
-                                    name: struct_name.to_string(),
+                                    name: struct_name.clone(),
                                     fields_ast: HashMap::new(),
                                     is_null: true,
                                 },
@@ -344,7 +332,7 @@ impl Parser {
                         self.next();
                         return Statement {
                             node: Node::StructCreation {
-                                name: struct_name.to_string(),
+                                name: struct_name.clone(),
                                 fields_ast: HashMap::new(),
                                 is_null: false,
                             },
@@ -353,13 +341,8 @@ impl Parser {
                     }
                     let mut fields = HashMap::new();
                     while !self.token_is("SEPARATOR", "}") {
-                        let name = match self.token().cloned() {
-                            Some(Token(ty, id, _)) => if ty == "IDENTIFIER" {
-                                id
-                            } else {
-                                self.raise("SyntaxError", "Expected identifier for a struct field");
-                                return Statement::Null;
-                            }
+                        let name = match self.token() {
+                            Some(Token(ty, id, _)) if ty == "IDENTIFIER" => id.clone(),
                             _ => {
                                 self.raise("SyntaxError", "Expected identifier for a struct field");
                                 return Statement::Null;
@@ -376,7 +359,7 @@ impl Parser {
                         if self.token_is("SEPARATOR", ",") || self.token_is("SEPARATOR", "}") {
                             value = Statement {
                                 node: Node::Variable {
-                                    name: name.to_string(),
+                                    name: name.clone().into_owned(),
                                 },
                                 loc: alloc_loc(self.get_loc())
                             };
@@ -400,7 +383,7 @@ impl Parser {
 
                     return Statement {
                         node: Node::StructCreation {
-                            name: struct_name.to_string(),
+                            name: struct_name.clone(),
                             fields_ast: fields,
                             is_null: false,
                         },
@@ -411,7 +394,7 @@ impl Parser {
                 ("SEPARATOR", ".") => {
                     self.next();
                     let property_name = match self.token() {
-                        Some(t) if t.0.as_ref() == "IDENTIFIER" => t.1.as_ref().to_string(),
+                        Some(t) if t.0.as_ref() == "IDENTIFIER" => t.1.clone().into_owned(),
                         Some(_) => { self.raise("SyntaxError", &format!("Expected identifier after '.', found '{}'", self.token().unwrap().1.as_ref())); return Statement::Null; },
                         None => { self.raise("SyntaxError", "Expected identifier after '.'"); return Statement::Null; }
                     };
@@ -573,7 +556,7 @@ impl Parser {
                             if self.err.is_some() {
                                 return Statement::Null;
                             }
-                            then_body.push(ThenOp::Op(op.to_string(), right));
+                            then_body.push(ThenOp::Op(op.into_owned(), right));
                         } else {
                             let then_expr = self.parse_expression();
                             if self.err.is_some() {
@@ -1883,7 +1866,7 @@ impl Parser {
                             loop {
                                 if let Some(tok) = self.token() {
                                     if tok.0 == "IDENTIFIER" {
-                                        exception_vars.push(tok.1.to_string());
+                                        exception_vars.push(tok.1.clone().into_owned());
                                         self.next();
 
                                         if let Some(tok) = self.token() {
@@ -1963,8 +1946,8 @@ impl Parser {
 
                     if ["public", "private", "static", "non-static", "final", "mutable"].contains(&token.1.as_ref()) {
                         while let Some(tok) = self.token() {
-                            if tok.0 == "IDENTIFIER" && ["public", "private", "static", "non-static", "final", "mutable"].contains(&tok.1.as_ref()) {
-                                modifiers.push(tok.1.to_string());
+                                if tok.0 == "IDENTIFIER" && ["public", "private", "static", "non-static", "final", "mutable"].contains(&tok.1.as_ref()) {
+                                modifiers.push(tok.1.clone().into_owned());
                                 self.next();
                             } else {
                                 break;
@@ -1980,7 +1963,7 @@ impl Parser {
                     match self.token().cloned().unwrap_or_default().1.as_ref() {
                         x if ["fun", "gen"].contains(&x) => {
                             self.next();
-                            let name = self.token().cloned().map(|tok|  if tok.0 == "IDENTIFIER".to_string() { tok.1.to_string() } else { "".to_string() }).unwrap_or_default();
+                            let name = self.token().map(|tok| if tok.0.as_ref() == "IDENTIFIER" { tok.1.clone().into_owned() } else { "".to_string() }).unwrap_or_default();
                             let is_function = x == "fun";
                             if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a {} name", name, if is_function { "function" } else { "generator" }));
@@ -2003,7 +1986,7 @@ impl Parser {
                                 while current_tok.0 == "IDENTIFIER" &&
                                     ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_ref())
                                 {
-                                    param_modifiers.push(current_tok.1.to_string());
+                                    param_modifiers.push(current_tok.1.clone().into_owned());
                                     self.next();
                                     if let Some(tok) = self.token() {
                                         current_tok = tok.clone();
@@ -2018,7 +2001,7 @@ impl Parser {
                                         if current_tok.0 == "IDENTIFIER" &&
                                         ["mutable", "final", "static", "non-static"].contains(&current_tok.1.as_ref())
                                         {
-                                            param_modifiers.push(current_tok.1.to_string());
+                                            param_modifiers.push(current_tok.1.clone().into_owned());
                                             self.next();
                                             if let Some(tok2) = self.token() { current_tok = tok2.clone(); }
                                         }
@@ -2246,7 +2229,7 @@ impl Parser {
                                 return Statement::Null;
                             }
 
-                            let name = type_token.1.to_string();
+                            let name = type_token.1.clone().into_owned();
                             let name_loc = type_token.2.clone();
 
                             if RESERVED_KEYWORDS.contains(&name.as_ref()) {
@@ -2265,7 +2248,7 @@ impl Parser {
                                         self.raise("SyntaxError", "Expected generic parameter");
                                         return Statement::Null;
                                     }
-                                    generics.push(gen_token.1.to_string());
+                                    generics.push(gen_token.1.clone().into_owned());
                                     self.next();
 
                                     if self.token_is("SEPARATOR", ",") {
@@ -2290,7 +2273,7 @@ impl Parser {
                                         return Statement::Null;
                                     }
 
-                                    variables.push(var_token.1.to_string());
+                                    variables.push(var_token.1.clone().into_owned());
                                     self.next();
 
                                     if self.token_is("SEPARATOR", ",") {
@@ -2484,7 +2467,7 @@ impl Parser {
                                             ["public","private","static","non-static","final","mutable"]
                                                 .contains(&t.1.as_ref())
                                         }) {
-                                            mods.push(self.token().unwrap().1.to_string());
+                                            mods.push(self.token().unwrap().1.clone().into_owned());
                                             self.next();
                                         }
 
@@ -2507,7 +2490,7 @@ impl Parser {
                                             return Statement::Null;
                                         }
 
-                                        fields.push((field_name.to_string(), field_type, mods));
+                                        fields.push((field_name.into_owned(), field_type, mods));
 
                                         if self.token_is("SEPARATOR", ",") {
                                             self.next();

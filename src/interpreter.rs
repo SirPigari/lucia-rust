@@ -357,7 +357,7 @@ impl Interpreter {
     pub fn get_traceback(&self) -> BTreeMap<String, String> {
         let mut traceback = BTreeMap::new();
         for (file, loc, _) in self.stack.iter() {
-            let location = loc.as_ref().map_or("unknown location".to_string(), |l| format!("{}:{}:{}", l.file, l.line_number, l.range.0));
+            let location = loc.as_ref().map_or("unknown location".to_owned(), |l| format!("{}:{}:{}", l.file, l.line_number, l.range.0));
             traceback.insert(file.clone(), location);
         }
         traceback
@@ -832,9 +832,9 @@ impl Interpreter {
     
         Ok(Value::Map(
             HashMap::from_iter([
-                (Value::String("status".to_string()), Value::Int(Int::from_i64(status as i64))),
-                (Value::String("headers".to_string()), Value::Map(headers_map)),
-                (Value::String("body".to_string()), Value::String(body)),
+                (Value::String("status".to_owned()), Value::Int(Int::from_i64(status as i64))),
+                (Value::String("headers".to_owned()), Value::Map(headers_map)),
+                (Value::String("body".to_owned()), Value::String(body)),
             ])
         ))
     }
@@ -925,7 +925,7 @@ impl Interpreter {
 
         let method = match args.get("method") {
             Some(Value::String(s)) => s.clone(),
-            _ => "GET".to_string(),
+            _ => "GET".to_owned(),
         };
 
         let headers_map = match args.get("headers") {
@@ -985,16 +985,16 @@ impl Interpreter {
                     let text = JsFuture::from(resp.text().unwrap())
                         .await
                         .map(|v| v.as_string().unwrap_or_default())
-                        .unwrap_or_else(|_| "Failed to read response".to_string());
+                        .unwrap_or_else(|_| "Failed to read response".to_owned());
                     tx_clone.send(text).ok();
                 }
                 Err(_) => {
-                    tx_clone.send("Fetch failed".to_string()).ok();
+                    tx_clone.send("Fetch failed".to_owned()).ok();
                 }
             }
         });
 
-        let result_text = rx.recv().unwrap_or_else(|_| "Fetch failed".to_string());
+        let result_text = rx.recv().unwrap_or_else(|_| "Fetch failed".to_owned());
         Value::String(result_text)
     }
 
@@ -1107,7 +1107,7 @@ impl Interpreter {
                                         shared_interpreter.clone(),
                                     )),
                                 )),
-                                "function".to_string(),
+                                "function".to_owned(),
                                 var.is_static(),
                                 var.is_public(),
                                 var.is_final(),
@@ -1235,7 +1235,7 @@ impl Interpreter {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
-            line_string: "".to_string(),
+            line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
@@ -1257,7 +1257,7 @@ impl Interpreter {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: fix_path(self.file_path.clone()),
-            line_string: "".to_string(),
+            line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
@@ -1281,7 +1281,7 @@ impl Interpreter {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
-            line_string: "".to_string(),
+            line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
@@ -1303,7 +1303,7 @@ impl Interpreter {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
             file: self.file_path.clone(),
-            line_string: "".to_string(),
+            line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
@@ -1351,15 +1351,15 @@ impl Interpreter {
             return NULL;
         }
 
-        self.variables.entry("_".to_string()).or_insert_with(|| {
-            Variable::new("_".to_string(), NULL.clone(), "any".to_string(), true, false, false)
+        self.variables.entry("_".to_owned()).or_insert_with(|| {
+            Variable::new("_".to_owned(), NULL.clone(), "any".to_owned(), true, false, false)
         });
     
-        self.variables.entry("_err".to_string()).or_insert_with(|| {
+        self.variables.entry("_err".to_owned()).or_insert_with(|| {
             Variable::new(
-                "_err".to_string(),
+                "_err".to_owned(),
                 Value::Tuple(vec![]),
-                "tuple".to_string(),
+                "tuple".to_owned(),
                 true,
                 false,
                 true,
@@ -1851,11 +1851,11 @@ impl Interpreter {
 
                 _ => {
                     self.variables.insert(
-                        "_".to_string(),
+                        "_".to_owned(),
                         Variable::new(
-                            "_".to_string(),
+                            "_".to_owned(),
                             current_val.clone(),
-                            "any".to_string(),
+                            "any".to_owned(),
                             true,
                             false,
                             false
@@ -1901,20 +1901,20 @@ impl Interpreter {
         let saved_variables = self.variables.clone();
         let mut methods: HashMap<String, Value> = HashMap::with_capacity(methods_ast.len());
         self.variables.extend::<HashMap<String, Variable>>(HashMap::from_iter(vec![
-            ("Self".to_string(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_string(), false, true, false)),
+            ("Self".to_owned(), Variable::new(struct_name.clone(), struct_value.clone(), "any".to_owned(), false, true, false)),
         ]));
         for generic in if let Value::Type(Type::Struct { generics, .. }) = &struct_value {
             generics
         } else {
             to_static(vec![])
         } {
-            self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, false));
+            self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_owned(), false, true, false));
         }
         for method in methods_ast {
             let mut m = method.node;
             let func;
             if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags } = &mut m {
-                modifiers.insert(0, "final".to_string());
+                modifiers.insert(0, "final".to_owned());
                 func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags, true);
                 if self.err.is_some() {
                     self.variables = saved_variables;
@@ -2039,7 +2039,7 @@ impl Interpreter {
                     &vec![]
                 };
                 for generic in generics {
-                    self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), true, false, true));
+                    self.variables.insert(generic.clone(), Variable::new(generic.clone(), Value::Type(Type::new_simple("any")), "type".to_owned(), true, false, true));
                 }
                 let expected_type = ty_opt.as_ref().map(|ty| self.evaluate(ty)).unwrap_or(Value::Null);
                 self.variables = saved_variables;
@@ -2276,7 +2276,7 @@ impl Interpreter {
                     None,
                     effect_flags,
                 )))),
-                "generator".to_string(),
+                "generator".to_owned(),
                 is_static,
                 is_public,
                 is_final,
@@ -2335,7 +2335,7 @@ impl Interpreter {
                     Variable::new(
                         name.clone(),
                         alias_type,
-                        "type".to_string(),
+                        "type".to_owned(),
                         is_static,
                         is_public,
                         is_final,
@@ -2348,7 +2348,7 @@ impl Interpreter {
                 let eval_wheres: Vec<(String, Value)> = wheres.iter().map(|(k, v)| {
                     let val = self.evaluate(&v);
                     if self.err.is_some() {
-                        return ("".to_string(), NULL);
+                        return ("".to_owned(), NULL);
                     }
                     (k.clone(), val)
                 }).filter(|(k, _)| !k.is_empty()).collect();
@@ -2375,7 +2375,7 @@ impl Interpreter {
                     Variable::new(
                         name.clone(),
                         enum_type,
-                        "type".to_string(),
+                        "type".to_owned(),
                         is_static,
                         is_public,
                         is_final,
@@ -2389,7 +2389,7 @@ impl Interpreter {
                 let eval_wheres: Vec<(String, Value)> = wheres.iter().map(|(k, v)| {
                     let val = self.evaluate(&v);
                     if self.err.is_some() {
-                        return ("".to_string(), NULL);
+                        return ("".to_owned(), NULL);
                     }
                     (k.clone(), val)
                 }).filter(|(k, _)| !k.is_empty()).collect();
@@ -2417,7 +2417,7 @@ impl Interpreter {
                     Variable::new(
                         name.clone(),
                         struct_type,
-                        "type".to_string(),
+                        "type".to_owned(),
                         is_static,
                         is_public,
                         is_final,
@@ -3842,7 +3842,7 @@ impl Interpreter {
                                 "<Importing module '{}', version: {}{}>",
                                 print_name,
                                 version,
-                                if description.is_empty() { "".to_string() } else { format!(", description: {}", description) }
+                                if description.is_empty() { "".to_owned() } else { format!(", description: {}", description) }
                             )
                         );
                         
@@ -4147,7 +4147,7 @@ impl Interpreter {
 
             self.variables.insert(
                 alias.to_string(),
-                Variable::new(alias.to_string(), module, "module".to_string(), is_static, is_public, is_final),
+                Variable::new(alias.to_owned(), module, "module".to_owned(), is_static, is_public, is_final),
             );
         
             self.stack.pop();
@@ -4317,7 +4317,7 @@ impl Interpreter {
             Variable::new(
                 name.to_string(),
                 function,
-                "function".to_string(),
+                "function".to_owned(),
                 is_static,
                 is_public,
                 is_final,
@@ -4335,7 +4335,7 @@ impl Interpreter {
             ThrowNode::Message { message, from } => {
                 let error_type_val = match from {
                     Some(v) => self.evaluate(&v),
-                    None => Value::String("LuciaError".to_string()),
+                    None => Value::String("LuciaError".to_owned()),
                 };
                 
                 if self.err.is_some() {
@@ -5060,7 +5060,7 @@ impl Interpreter {
                             &[]
                         );
                         interp.variables.extend(generics_evaluated.clone().into_iter().map(|(k, v)| {
-                            (k.clone(), Variable::new(k, Value::Type(v), "type".to_string(), false, true, true))
+                            (k.clone(), Variable::new(k, Value::Type(v), "type".to_owned(), false, true, true))
                         }));
                         for (field_name, field_type, field_mods) in fields.iter() {
                             let v = match interp.evaluate(&field_type.clone()) {
@@ -5202,7 +5202,7 @@ impl Interpreter {
                 let mut impls: Vec<(String, Box<Type>, Vec<String>)> = Vec::new();
                 for (name, args, mods, return_type) in impls_ast {
                     let vars_clone = self.variables.clone();
-                    self.variables.insert("Self".to_string(), Variable::new("Self".to_string(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true));
+                    self.variables.insert("Self".to_owned(), Variable::new("Self".to_owned(), Value::Type(Type::new_simple("any")), "type".to_owned(), false, true, true));
                     
                     let return_type = match self.handle_type(*return_type) {
                         Value::Type(t) => t,
