@@ -50,3 +50,12 @@ assert_err!(f"{num2 :: .2}")  // should error because .2 without float type
 // combined f-string with width and hex
 val: int = 7
 assert_eq!(f"The number {val :: <3} in hex is {val :: x}", "The number 7   in hex is 7")
+
+// nested strings in f-strings
+
+name: str = "WORLD"
+greeting: str = f"Hello {f"{name.to_lower()}!"}"
+assert_eq!(greeting, "Hello world!")
+
+complex: str = f"Outer {f"Inner {f"Deep {42}"}"}"
+assert_eq!(complex, "Outer Inner Deep 42")

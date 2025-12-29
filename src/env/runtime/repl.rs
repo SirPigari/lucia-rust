@@ -176,8 +176,6 @@ impl Highlighter for ReplHighlighter {
     fn highlight(&self, line: &str, _pos: usize) -> StyledText {
         let mut styled = StyledText::new();
         let mut word = String::new();
-        let mut in_str = false;
-        let mut quote = '\0';
         let mut in_multiline_comment = false;
         let mut chars = line.chars().peekable();
 
@@ -195,54 +193,14 @@ impl Highlighter for ReplHighlighter {
                 continue;
             }
 
-            if in_str {
-                word.push(ch);
-                if ch == quote {
-                    let (r, g, b) = COLOR_STRING_RGB;
-                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                    styled.push((s, word.clone()));
-                    word.clear();
-                    in_str = false;
-                }
-                continue;
-            }
-
-            if ch == '#' {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
-                }
-
-                word.push('#');
-
-                while let Some(ch) = chars.peek() {
-                    if !(ch.is_ascii_alphanumeric() || *ch == '-') {
-                        break;
-                    }
-                    word.push(chars.next().unwrap());
-                }
-                let (r,g,b) = COLOR_PREPROCESSOR_RGB;
-                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r,g,b));
-                styled.push((s, word.clone()));
-                word.clear();
-                continue;
-            }
-
             if ch == '/' && chars.peek() == Some(&'/') {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
-                }
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
                 word.push_str("//");
                 chars.next();
-
                 while let Some(&c) = chars.peek() {
                     word.push(chars.next().unwrap());
-                    if c == '\n' || c == '\r' {
-                        break;
-                    }
+                    if c == '\n' || c == '\r' { break; }
                 }
-
                 let (r, g, b) = COLOR_COMMENTS_RGB;
                 let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
                 styled.push((s, word.clone()));
@@ -251,10 +209,7 @@ impl Highlighter for ReplHighlighter {
             }
 
             if ch == '/' && chars.peek() == Some(&'*') {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
-                }
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
                 chars.next();
                 word.push_str("/*");
                 in_multiline_comment = true;
@@ -262,10 +217,7 @@ impl Highlighter for ReplHighlighter {
             }
 
             if ch == '<' && chars.peek() == Some(&'#') {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
-                }
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
                 chars.next();
                 word.push_str("<#");
                 while let Some(c) = chars.next() {
@@ -282,40 +234,142 @@ impl Highlighter for ReplHighlighter {
                 continue;
             }
 
-            if ch == '"' || ch == '\'' {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
+            if ch == '"' || ch == '\'' || ch == 'f' || ch == 'r' || ch == 'b' {
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
+
+                let mut prefixes = String::new();
+                let mut quote_char = '\0';
+                let mut raw = false;
+                let mut is_f = false;
+
+                if ch == 'f' || ch == 'r' || ch == 'b' {
+                    prefixes.push(ch);
+                    if ch == 'f' { is_f = true; }
+                    if ch == 'r' { raw = true; }
+
+                    if let Some(&next_ch) = chars.peek() {
+                        if next_ch == '"' || next_ch == '\'' {
+                            quote_char = next_ch;
+                            chars.next();
+                        } else if next_ch == 'f' || next_ch == 'r' || next_ch == 'b' {
+                            prefixes.push(next_ch);
+                            if next_ch == 'f' { is_f = true; }
+                            if next_ch == 'r' { raw = true; }
+                            if let Some(&q) = chars.peek() {
+                                if q == '"' || q == '\'' {
+                                    quote_char = q;
+                                    chars.next();
+                                }
+                            }
+                        }
+                    }
+                } else if ch == '"' || ch == '\'' {
+                    quote_char = ch;
                 }
-                in_str = true;
-                quote = ch;
-                word.push(ch);
+
+                if quote_char != '\0' {
+                    let mut string_word = prefixes.clone();
+                    string_word.push(quote_char);
+                    let (r, g, b) = COLOR_STRING_RGB;
+                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                    styled.push((s, string_word.clone()));
+                    string_word.clear();
+
+                    let mut brace_depth = 0;
+                    let mut in_escape = false;
+
+                    while let Some(c) = chars.next() {
+                        if !raw && c == '\\' && !in_escape {
+                            in_escape = true;
+                            string_word.push(c);
+                            continue;
+                        }
+
+                        if in_escape {
+                            string_word.push(c);
+                            in_escape = false;
+                            continue;
+                        }
+
+                        if is_f {
+                            if c == '{' && brace_depth == 0 {
+                                if !string_word.is_empty() {
+                                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                                    styled.push((s, string_word.clone()));
+                                    string_word.clear();
+                                }
+                                styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "{".to_string()));
+                                let mut code_word = String::new();
+                                brace_depth += 1;
+                                while let Some(inner) = chars.next() {
+                                    if inner == '{' {
+                                        brace_depth += 1;
+                                        code_word.push(inner);
+                                    } else if inner == '}' {
+                                        brace_depth -= 1;
+                                        if brace_depth == 0 {
+                                            if !code_word.is_empty() {
+                                                let inner_styled = self.highlight(&code_word, 0);
+                                                styled.buffer.extend(inner_styled.buffer);
+                                                code_word.clear();
+                                            }
+                                            styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "}".to_string()));
+                                            break;
+                                        } else {
+                                            code_word.push(inner);
+                                        }
+                                    } else {
+                                        code_word.push(inner);
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+
+                        string_word.push(c);
+
+                        if c == quote_char && brace_depth == 0 {
+                            let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                            styled.push((s, string_word.clone()));
+                            string_word.clear();
+                            break;
+                        }
+                    }
+
+                    continue;
+                } else {
+                    styled.push((Style::new(), ch.to_string()));
+                    continue;
+                }
+            }
+
+            if ch == '#' {
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
+
+                word.push('#');
+
+                while let Some(&ch) = chars.peek() {
+                    if !(ch.is_ascii_alphanumeric() || ch == '-') { break; }
+                    word.push(chars.next().unwrap());
+                }
+
+                let (r,g,b) = COLOR_PREPROCESSOR_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r,g,b));
+                styled.push((s, word.clone()));
+                word.clear();
                 continue;
             }
 
             if ch.is_alphanumeric() || ch == '_' {
                 word.push(ch);
             } else {
-                if !word.is_empty() {
-                    push_highlighted_word(&mut styled, &word);
-                    word.clear();
-                }
+                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
                 styled.push((Style::new(), ch.to_string()));
             }
         }
 
         if !word.is_empty() {
-            let (r, g, b) = if in_str || in_multiline_comment { 
-                if in_str { COLOR_STRING_RGB } else { COLOR_COMMENTS_RGB } 
-            } else { 
-                (0, 0, 0)
-            };
-            if in_str || in_multiline_comment {
-                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                styled.push((s, word));
-            } else {
-                push_highlighted_word(&mut styled, &word);
-            }
+            push_highlighted_word(&mut styled, &word);
         }
 
         styled

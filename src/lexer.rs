@@ -130,22 +130,27 @@ impl<'a> Lexer<'a> {
                 let mut end = pos;
                 let mut quote = '\0';
                 let mut raw = false;
+                let mut is_f = false;
 
                 let mut iter = slice.char_indices();
                 let (_, first) = iter.next().unwrap();
 
                 if first == 'r' || first == 'f' || first == 'b' {
+                    if first == 'r' { raw = true; }
+                    if first == 'f' { is_f = true; }
+
                     if let Some((idx2, c2)) = iter.next() {
                         if c2 == '"' || c2 == '\'' {
                             quote = c2;
                             end += idx2 + c2.len_utf8();
-                            raw = first == 'r';
-                        } else if c2 == 'r' {
+                        } else if c2 == 'r' || c2 == 'f' {
+                            if c2 == 'r' { raw = true; }
+                            if c2 == 'f' { is_f = true; }
+
                             if let Some((idx3, q)) = iter.next() {
                                 if q == '"' || q == '\'' {
                                     quote = q;
                                     end += idx3 + q.len_utf8();
-                                    raw = true;
                                 }
                             }
                         }
@@ -158,20 +163,44 @@ impl<'a> Lexer<'a> {
                 if quote != '\0' {
                     let mut closed = false;
                     let mut local_end = end;
+                    let mut brace_depth = 0;
 
                     while local_end < len {
                         let c = self.code[local_end..].chars().next().unwrap();
                         let c_len = c.len_utf8();
-
                         local_end += c_len;
 
-                        if c == quote {
+                        if is_f {
+                            if c == '{' {
+                                if local_end < len && self.code[local_end..].starts_with("{") {
+                                    local_end += 1;
+                                } else {
+                                    brace_depth += 1;
+                                }
+                                continue;
+                            }
+
+                            if c == '}' && brace_depth > 0 {
+                                if local_end < len && self.code[local_end..].starts_with("}") {
+                                    local_end += 1;
+                                } else {
+                                    brace_depth -= 1;
+                                }
+                                continue;
+                            }
+                        }
+
+                        if c == quote && brace_depth == 0 {
                             closed = true;
                             break;
                         }
 
                         if c == '\\' && !raw && local_end < len {
-                            local_end += self.code[local_end..].chars().next().unwrap().len_utf8();
+                            local_end += self.code[local_end..]
+                                .chars()
+                                .next()
+                                .unwrap()
+                                .len_utf8();
                         }
                     }
 
@@ -186,7 +215,11 @@ impl<'a> Lexer<'a> {
                     if token_kind == TK_INVALID {
                         let mut invalid_pos = pos;
                         while invalid_pos < local_end {
-                            let c_len = self.code[invalid_pos..].chars().next().unwrap().len_utf8();
+                            let c_len = self.code[invalid_pos..]
+                                .chars()
+                                .next()
+                                .unwrap()
+                                .len_utf8();
                             tokens.push(self.make_token(
                                 TK_INVALID,
                                 &self.code[invalid_pos..invalid_pos + c_len],
@@ -198,9 +231,7 @@ impl<'a> Lexer<'a> {
                     } else {
                         let mut raw_text = String::new();
                         for ch in self.code[pos..local_end].chars() {
-                            if ch == '\n' {
-                                raw_text.push_str("\\n");
-                            } else if ch == '\r' {
+                            if ch == '\n' || ch == '\r' {
                                 raw_text.push_str("\\n");
                             } else {
                                 raw_text.push(ch);
