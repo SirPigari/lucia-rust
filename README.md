@@ -45,7 +45,7 @@ It's designed for speed and safety, without sacrificing elegance.
 - [x] [REPL Guide](src/env/Docs/repl-guide.md)
 - [x] [Versioning](src/env/Docs/versioning.md)
 - [x] [Contributing guide](src/env/Docs/contributing.md)
-- [ ] [Changelog](src/env/Docs/changelog.md)
+- [x] [Changelog](src/env/Docs/CHANGELOG.md)
 - [x] [Known issues/bugs](src/env/Docs/known-issues.md)
 - [x] [TODOs](src/env/Docs/todos.md)
 
@@ -93,7 +93,7 @@ Tested on:
 - ![Ubuntu Linux](https://img.shields.io/badge/Ubuntu_Linux-Supported-E95420?logo=ubuntu&logoColor=white)  
 - ![Arch Linux](https://img.shields.io/badge/Arch_Linux-Supported-1793D1?logo=arch-linux&logoColor=white)  
 
-Build on:
+Built on:
 
 - Everything above
 - ![WASM 32](https://img.shields.io/badge/WebAssembly-Supported-654FF0?logo=webassembly&logoColor=white)
