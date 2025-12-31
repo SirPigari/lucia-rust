@@ -1,7 +1,10 @@
 #ifndef LUCIA_STD_MATH
 #define LUCIA_STD_MATH true
 
-private mutable import (sin, cos, tan, sqrt, log, pow) from math
+private mutable import (sin, cos, tan, sqrt, log, pow, E, PI) from math
+
+private final π: float = PI
+private final e: float = E
 
 // approximate limit of f as x -> a
 private mutable fun lim(f: function[float | int] -> float, a: float, delta: float = 1e-7, tolerance: float = 1e-5) -> float:
@@ -37,7 +40,7 @@ private mutable fun integrate(f: function[float] -> float, a: float, b: float, n
         x0 := a + i * delta_x
         x1 := a + (i + 1) * delta_x
         area := (f(x0) + f(x1)) / 2 * delta_x
-        total := total + area
+        total += area
     end
 
     return total
@@ -101,6 +104,42 @@ private mutable fun partial_sum_series(term: function[int] -> float, n: int) -> 
         sum := sum + term(i)
     end
     return sum
+end
+
+// approximate infinite series sum up to tolerance
+private mutable fun infinite_series_sum(term: function[int] -> float, tol: float = 1e-6, max_terms: int = 100000) -> float:
+    sum := 0.0
+    for i in [0..max_terms - 1]:
+        term_val := term(i)
+        sum := sum + term_val
+        if (|term_val| < tol):
+            break
+        end
+    end
+    return sum
+end
+
+// approximate e using series expansion
+private mutable fun approximate_e(tol: float = 1e-6) -> float:
+    return infinite_series_sum((n: int) =>
+        1.0 / factorial(n) as float
+    , tol)
+end
+
+// approximate pi using Leibniz formula
+private mutable fun approximate_pi(tol: float = 1e-6) -> float:
+    return 4.0 * infinite_series_sum((n: int) =>
+        ((-1) ^ n) / (2 * n + 1) as float
+    , tol)
+end
+
+// approximate product of series: product_{i=0}^{n-1} term(i)
+private mutable fun partial_product_series(term: function[int] -> float, n: int) -> float:
+    product := 1.0
+    for i in [0..n - 1]:
+        product := product * term(i)
+    end
+    return product
 end
 
 null

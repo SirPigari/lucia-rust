@@ -2,8 +2,6 @@
 
 ## 2.0.0
 
-A big overhaul since 1.3; the **whole** language has been rewritten in 
-
 ### Major Changes
 - **Complete rewrite**: The entire interpreter is now written in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>, providing better performance, memory safety, and maintainability
 - **New syntax**: 

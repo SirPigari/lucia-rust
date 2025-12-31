@@ -5,7 +5,7 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 8_
+_Total TODOs found: 9_
 ---
 
 ### [`src/env/libs/collections/main.rs:19:1`](../../../src/env/libs/collections/main.rs#L19) _(added by **SirPigari** on **2025-12-24**)_
@@ -20,7 +20,7 @@ _Total TODOs found: 8_
 ### [`src/env/libs/std/types.lc:77:1`](../../../src/env/libs/std/types.lc#L77) _(added by **SirPigari** on **2025-10-13**)_
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3262:1`](../../../src/interpreter.rs#L3262) _(added by **SirPigari** on **2025-10-12**)_
+### [`src/interpreter.rs:3276:1`](../../../src/interpreter.rs#L3276) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
 ### [`src/env/runtime/fmt.rs:5:1`](../../../src/env/runtime/fmt.rs#L5) _(added by **SirPigari** on **2025-08-30**)_
@@ -31,6 +31,9 @@ _Total TODOs found: 8_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
+
+### [`src/env/runtime/plugins.rs:189:1`](../../../src/env/runtime/plugins.rs#L189) _(added by unknown)_
+- Add use cases
 
 ---
 *Report generated automatically.*

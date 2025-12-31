@@ -822,6 +822,7 @@ impl Statement {
         buffer.push('}');
         buffer
     }
+    
     pub fn make_value(v: Value) -> Self {
         Statement {
             node: Node::Value { value: v },

@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::functions::Function;
+use crate::env::runtime::plugins::PluginRuntime;
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Encode, Decode, Hash)]
@@ -532,6 +533,7 @@ pub struct InternalStorage {
     pub in_try_block: bool,
     pub in_function: bool,
     pub is_the_main_thread: bool,
+    pub plugin_runtime: Option<PluginRuntime>,
 }
 
 #[derive(Serialize)]

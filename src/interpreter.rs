@@ -53,6 +53,7 @@ use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind,
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::{STD_LIBS, get_lib_names};
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement};
+use crate::env::runtime::plugins::{PluginRuntime};
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::path::{PathBuf, Path};
@@ -127,6 +128,7 @@ impl Interpreter {
                 in_try_block: false,
                 in_function: false,
                 is_the_main_thread: false,
+                plugin_runtime: None,
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
@@ -250,6 +252,18 @@ impl Interpreter {
     #[inline]
     pub fn set_scope(&mut self, scope: &str) {
         self.scope = scope.to_owned();
+    }
+
+    #[inline]
+    pub fn set_plugin_runtime(&mut self, plugin_runtime: PluginRuntime) {
+        self.internal_storage.plugin_runtime = Some(plugin_runtime);
+    }
+
+    #[inline]
+    pub fn call_hook(&mut self, hook_name: &str, args: Vec<Value>) {
+        if let Some(plugin_runtime) = &mut self.internal_storage.plugin_runtime {
+            plugin_runtime.call_hook(hook_name, args);
+        }
     }
 
     #[inline]

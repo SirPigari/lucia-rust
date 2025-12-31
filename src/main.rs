@@ -36,6 +36,7 @@ mod env {
         pub mod fmt;
         pub mod static_checker;
         pub mod repl;
+        pub mod plugins;
     }
     pub mod libs {
         #[cfg(feature = "math")]
@@ -134,6 +135,7 @@ use crate::env::runtime::libs::{load_std_libs, check_project_deps};
 use crate::env::runtime::static_checker::Checker;
 use crate::env::runtime::fmt;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
+use crate::env::runtime::plugins::PluginRuntime;
 use crate::parser::Parser;
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
@@ -851,6 +853,7 @@ fn lucia(
     static_check_args: (bool, bool, bool),
     create_lcx: bool,
     cache_dir: PathBuf,
+    plugin_runtime: PluginRuntime,
 ) {
     let dump_dir: (&str, bool) = (dump_dir.0.as_str(), dump_dir.1);
 
@@ -862,7 +865,7 @@ fn lucia(
         };
         
         std_env::set_current_dir(&cwd).ok();
-    execute_code_string(code, &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args);
+        execute_code_string(code, &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, plugin_runtime);
         return;
     }
 
@@ -877,7 +880,7 @@ fn lucia(
             };
             
             std_env::set_current_dir(&cwd).ok();
-            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, create_lcx);
+            execute_file(path, file_path.clone(), &config, disable_preprocessor, home_dir_path.clone(), config_path.clone(), debug_mode_some, &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, create_lcx, plugin_runtime.clone());
         }
     } else {
         let debug_mode_some = if config.debug {
@@ -887,7 +890,7 @@ fn lucia(
         };
 
         std_env::set_current_dir(&cwd).ok();
-    repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, cache_dir);
+        repl(config, disable_preprocessor, home_dir_path, config_path, debug_mode_some, cwd.clone(), &argv, dump_dir, &dump_pp_flag, &dump_ast_flag, timer_flag, project_env_path.as_ref(), static_check_args, cache_dir, plugin_runtime);
     }
 }
 
@@ -907,6 +910,7 @@ fn execute_file(
     project_env_path: Option<&PathBuf>,
     static_check_args: (bool, bool, bool),
     create_lcx: bool,
+    plugin_runtime: PluginRuntime,
 ) {
     if path.exists() && path.is_file() {
         debug_log(&format!("Executing file: {}", fix_path(path.display().to_string())), &config);
@@ -962,7 +966,7 @@ fn execute_file(
             println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
         }
 
-    let processed_tokens = if !effective_disable_preprocessor {
+        let processed_tokens = if !effective_disable_preprocessor {
             if !config.cache_format.is_enabled() {
                 if debug_mode.as_deref() == Some("full") || debug_mode.as_deref() == Some("minimal") {
                     debug_log("Cache disabled, reprocessing tokens", &config);
@@ -1075,7 +1079,7 @@ fn execute_file(
         }
 
         let parsing_time = Instant::now();
-    let tokens: Vec<Token> = processed_tokens.clone();
+        let tokens: Vec<Token> = processed_tokens.clone();
         let mut parser = Parser::new(tokens.clone());
 
         let statements = match parser.parse_safe() {
@@ -1194,6 +1198,7 @@ fn execute_file(
             argv,
         );
         interpreter.set_main_thread(true);
+        interpreter.set_plugin_runtime(plugin_runtime);
 
         if config.cache_format.is_enabled() {
             if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
@@ -1260,7 +1265,8 @@ fn execute_code_string(
     dump_ast_flag: &bool,
     timer_flag: bool,
     project_env_path: Option<&PathBuf>,
-    static_check_args: (bool, bool, bool)
+    static_check_args: (bool, bool, bool),
+    plugin_runtime: PluginRuntime,
 ) {
     let cache_dir = home_dir_path.join(".cache");
     if !cache_dir.exists() {
@@ -1392,6 +1398,7 @@ fn execute_code_string(
         argv,
     );
     interpreter.set_main_thread(true);
+    interpreter.set_plugin_runtime(plugin_runtime);
 
     let interpreter_time_start = Instant::now();
     let result = interpreter.interpret(statements, false);
@@ -1428,6 +1435,7 @@ fn repl(
     project_env_path: Option<&PathBuf>,
     static_check_args: (bool, bool, bool),
     cache_dir: PathBuf,
+    plugin_runtime: PluginRuntime,
 ) {
     println!(
         "{}Lucia-{} REPL\nType 'exit()' to exit or 'help()' for help.{}",
@@ -1448,6 +1456,7 @@ fn repl(
         argv,
     );
     interpreter.set_main_thread(true);
+    interpreter.set_plugin_runtime(plugin_runtime);
 
     if config.cache_format.is_enabled() {
         let cache_dir = home_dir_path.join(".cache");
@@ -2829,6 +2838,17 @@ fn main() {
         }
     }
 
+    let mut plugin_runtime = PluginRuntime::new();
+
+    let plugin_errors = plugin_runtime.load_plugins(&home_dir_path.join("libs"), config.clone()); 
+
+    if !plugin_errors.is_empty() {
+        for e in plugin_errors {
+            handle_error(&e, "", &config);
+        }
+        exit(1);
+    }
+
     let deps_file = project_env_path.join("dependencies.json");
 
     if deps_file.exists() && deps_file.is_file() {
@@ -2982,6 +3002,7 @@ fn main() {
                 static_check_args,
                 create_lcx,
                 cache_dir,
+                plugin_runtime,
             );
         })
         .unwrap();

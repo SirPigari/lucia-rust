@@ -5,5 +5,10 @@
     "description": "This module provides HTTP request functionality.",
     "config": {
         "allow_fetch": true
-    }
+    },
+    "license": "GPL v3",
+    "authors": [
+        "Markofwitch"
+    ],
+    "entry_point": "main.lc"
 }
