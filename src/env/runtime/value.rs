@@ -847,6 +847,8 @@ impl From<&str> for Value {
     }
 }
 
+
+#[cfg(not(target_arch = "wasm32"))]
 impl From<lasm::Value> for Value {
     fn from(v: lasm::Value) -> Self {
         match v {

@@ -8,6 +8,7 @@ use crate::env::runtime::config::{get_from_config, Config};
 use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::utils::{MAX_PTR};
 use crate::env::runtime::modules::Module;
+#[cfg(not(target_arch = "wasm32"))]
 use rustc_hash::FxHashMap;
 use crate::{insert_native_fn, insert_native_var};
 #[cfg(not(target_arch = "wasm32"))]

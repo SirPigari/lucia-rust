@@ -160,6 +160,7 @@ mod env {
         pub mod structs_and_enums;
         pub mod precompile;
         pub mod static_checker;
+        pub mod plugins;
     }
     pub mod libs {
         pub mod math {
@@ -180,15 +181,15 @@ mod env {
         }
         pub mod collections {
             pub mod main;
+            pub mod deprecated_stuff;
         }
         pub mod random {
             pub mod main;
         }
-        pub mod lasm {
-            pub mod main;
-            pub mod cpu;
-        }
         pub mod nest {
+            pub mod main;
+        }
+        pub mod hash {
             pub mod main;
         }
     }

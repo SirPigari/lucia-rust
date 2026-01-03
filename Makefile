@@ -89,13 +89,13 @@ build-wasm:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@cd $(LUCIA_DIR) && if exist build.rs rename build.rs _build.rs
 	@cd $(LUCIA_DIR) && if exist src\env\runtime\wasm.rs copy src\env\runtime\wasm.rs src\main_wasm.rs
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std || echo Build failed
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config 'build.rustflags=["--cfg","getrandom_backend=\"wasm_js\""]' || echo Build failed
 	@cd $(LUCIA_DIR) && if exist _build.rs rename _build.rs build.rs
 	@cd $(LUCIA_DIR) && if exist src\main_wasm.rs del src\main_wasm.rs
 else
 	@cd $(LUCIA_DIR) && [ -f build.rs ] && mv build.rs _build.rs || true
 	@cd $(LUCIA_DIR) && [ -f src/env/runtime/wasm.rs ] && cp src/env/runtime/wasm.rs src/main_wasm.rs || true
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release || true
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config 'build.rustflags=["--cfg","getrandom_backend=\"wasm_js\""]' || true
 	@cd $(LUCIA_DIR) && [ -f _build.rs ] && mv _build.rs build.rs || true
 	@cd $(LUCIA_DIR) && [ -f src/main_wasm.rs ] && rm src/main_wasm.rs || true
 endif
@@ -251,10 +251,10 @@ installer:
 	@$(MKDIR)
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(RM) "$(LUCIA_DIR)\src\env\assets\installer\LuciaInstaller.exe"
-	@cd $(LUCIA_DIR) && cd src\env\assets\installer && "C:\Program Files (x86)\NSIS\makensis.exe" /DRELEASE_BUILD LuciaInstaller.nsi
+	@cd $(LUCIA_DIR) && cd src\env\assets\installer && "C:\Program Files (x86)\NSIS\makensis.exe" "/DRELEASE_BUILD" LuciaInstaller.nsi
 else
 	@$(RM) "$(LUCIA_DIR)/src/env/assets/installer/LuciaInstaller.exe"
-	@cd $(LUCIA_DIR) && cd src/env/assets/installer && makensis /DRELEASE_BUILD LuciaInstaller.nsi
+	@cd $(LUCIA_DIR) && cd src/env/assets/installer && makensis "-DRELEASE_BUILD" LuciaInstaller.nsi
 endif
 
 build-test: build-tests

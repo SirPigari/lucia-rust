@@ -16,10 +16,11 @@ use blake3;
 use md5;
 use sha1::Sha1;
 use ripemd::Ripemd160;
-use argon2::{Argon2, PasswordHasher};
-use argon2::password_hash::SaltString;
+#[cfg(not(target_arch = "wasm32"))]
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use pbkdf2::pbkdf2_hmac;
 use bcrypt::hash as bcrypt_hash;
+#[cfg(not(target_arch = "wasm32"))]
 use scrypt::{scrypt, Params as ScryptParams};
 use crc32fast;
 use fnv::FnvHasher;
@@ -80,6 +81,8 @@ pub fn register() -> HashMap<String, Variable> {
     hash_fn!("blake3", |b: &[u8]| blake3::hash(b).as_bytes().to_vec());
     hash_fn!("ripemd160", |b: &[u8]| Ripemd160::digest(b).as_slice().to_vec());
 
+    
+    #[cfg(not(target_arch = "wasm32"))]
     insert_native_fn_pt!(map, "argon2", |args: &HashMap<String, Value>| {
         let mut is_list_input = false;
         let password = match args.get("password") {
@@ -232,6 +235,8 @@ pub fn register() -> HashMap<String, Variable> {
         Parameter::positional_optional("output_len", "int", Value::Int(Int::from_i64(32))),
     ], &output_type, EffectFlags::PURE);
 
+    
+    #[cfg(not(target_arch = "wasm32"))]
     insert_native_fn_pt!(map, "scrypt", |args: &HashMap<String, Value>| {
         let mut is_list_input = false;
         let password = match args.get("password") {

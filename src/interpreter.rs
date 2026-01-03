@@ -946,23 +946,21 @@ impl Interpreter {
         };
 
         let headers_map = match args.get("headers") {
-            Some(Value::Map { keys, values }) => {
-                let mut map = HashMap::with_capacity(keys.len());
-                for (k, v) in keys.iter().zip(values.iter()) {
-                    if let (Value::String(k), Value::String(v)) = (k, v) {
-                        map.insert(k.clone(), v.clone());
-                    }
+            Some(Value::Map(map)) => {
+                let mut new_map: HashMap<String, String> = HashMap::with_capacity(map.keys().len());
+                for (k, v) in map.iter() {
+                    new_map.insert(k.to_string(), v.to_string());
                 }
-                Some(map)
+                Some(new_map)
             }
             _ => None,
         };
 
         let body = if let Some(json_val) = args.get("json") {
             to_value(json_val).ok().map(|jsv| JsString::from(jsv.as_string().unwrap_or_default()))
-        } else if let Some(Value::Map { keys, values }) = args.get("data") {
+        } else if let Some(Value::Map(map)) = args.get("data") {
             let mut form = vec![];
-            for (k, v) in keys.iter().zip(values.iter()) {
+            for (k, v) in map.iter() {
                 if let (Value::String(k), Value::String(v)) = (k, v) {
                     form.push(format!("{}={}", k, v));
                 }
@@ -3548,7 +3546,7 @@ impl Interpreter {
                     let random_module_props = random::register();
                     properties.extend(random_module_props);
                 }
-                #[cfg(feature = "lasm")]
+                #[cfg(all(feature = "lasm", not(target_arch = "wasm32")))]
                 "lasm" => {
                     use crate::env::libs::lasm::main as lasm;
                     let lasm_module_props = lasm::register();
