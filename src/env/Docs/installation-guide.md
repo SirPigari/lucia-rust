@@ -55,9 +55,9 @@ To install Lucia by cloning the repository and building from source, follow thes
 
 Alternatively, you can download and run the pre-built installer:
 
-1. Go to the [Lucia GitHub repository](https://github.com/SirPigari/lucia-rust).
+1. Go to the [Lucia releases](https://github.com/SirPigari/lucia-rust/releases/latest).
 
-2. Download the latest installer (only on Windows).
+2. Download the installer (only on Windows).
 
 3. Run the installer and follow the on-screen instructions.
 

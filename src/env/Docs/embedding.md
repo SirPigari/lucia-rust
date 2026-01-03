@@ -40,6 +40,9 @@ There is a static and a dynamic version of `liblucia` located in the [bin](../bi
 - [lucia.so](../bin/lucia.so)
 - [lucia.a](../bin/lucia.a)
 
+> NOTE:  
+> For the static library you must link with math library using `-lm`
+
 Example compiling with GCC on MSVC Windows:
 
 ```console
