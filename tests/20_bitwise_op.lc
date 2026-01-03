@@ -6,6 +6,11 @@ assert_eq!(16 lshift 4, 256)
 assert_eq!(32 rshift 1, 16)
 assert_eq!(64 rshift 3, 8)
 
+assert_eq!(8 << 2, 32)
+assert_eq!(16 << 4, 256)
+assert_eq!(32 >> 1, 16)
+assert_eq!(64 >> 3, 8)
+
 // bitwise not
 assert_eq!(bnot 0, -1)
 assert_eq!(bnot 1, -2)

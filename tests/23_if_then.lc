@@ -46,10 +46,10 @@ out: ?str = null
 
 fun print_state(state: bool) -> str:
     if (state):
-        print("State is true")
+        println("State is true")
         return "State is true"
     else:
-        print("State is false")
+        println("State is false")
         return "State is false"
     end
 end

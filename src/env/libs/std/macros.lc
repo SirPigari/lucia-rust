@@ -27,7 +27,7 @@
         output += $!`value.split("`")[i].trim() + " = " + _elevator.utils.format_value(n).trim() + "\n\r"
     end
     forget values
-    print(output, end="")
+    print(output)
     null  // otherwise it will return the last value (values)
 #endmacro
 
@@ -76,13 +76,12 @@
 #endmacro
 
 #macro mod!{$code}:
-    import fs as _fs
-    module_code: str = $!code
-    tmp_file := _fs.temp_file()
-    _fs.write_file(tmp_file, module_code)
-    mod := module(tmp_file)
-    _fs.delete_file(tmp_file)
-    return mod
+    module($!code)
+#endmacro
+
+#macro mod!($path, $name="<module>"):
+    code := _fs.read_file($path)
+    module(code, name=$name)
 #endmacro
 
 // return null

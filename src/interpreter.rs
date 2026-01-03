@@ -87,6 +87,7 @@ pub struct Interpreter {
     pub state: State,
     stack: Stack,
     pub current_statement: Option<Statement>,
+    pub statement_before: Option<Statement>,
     pub variables: FxHashMap<String, Variable>,
     file_path: String,
     cwd: PathBuf,
@@ -112,6 +113,7 @@ impl Interpreter {
             state: State::Normal,
             stack: Stack::new(),
             current_statement: None,
+            statement_before: None,
             variables: FxHashMap::with_capacity_and_hasher(32, Default::default()),
             file_path: file_path.to_owned(),
             cwd: cwd.clone(),
@@ -219,6 +221,7 @@ impl Interpreter {
         };
     
         insert_builtin("print", Value::Function(native::print_fn()));
+        insert_builtin("println", Value::Function(native::println_fn()));
         insert_builtin("styledprint", Value::Function(native::styled_print_fn()));
         insert_builtin("input", Value::Function(native::input_fn()));
         insert_builtin("len", Value::Function(native::len_fn()));
@@ -1027,7 +1030,7 @@ impl Interpreter {
     
         false
     }
-
+    
     fn get_properties_from_file(&mut self, path: &PathBuf) -> HashMap<String, Variable> {
         if !path.exists() || !path.is_file() {
             self.raise("ImportError", to_static(format!("File '{}' does not exist or is not a file", path.display())));
@@ -1040,22 +1043,30 @@ impl Interpreter {
                 return HashMap::new();
             }
         };
-        
-        let lexer = Lexer::new(&content, to_static(path.display().to_string()));
+
+        self.get_properties_from_str(&content, Some(path))
+    }
+
+    fn get_properties_from_str(&mut self, code: &str, path: Option<&Path>) -> HashMap<String, Variable> {
+        let path_str = path.map_or("<module>".to_owned(), |p| p.display().to_string());
+        let path = path.unwrap_or(Path::new("."));
+
+        let binding = path.display().to_string();
+        let lexer = Lexer::new(&code, &binding);
         let raw_tokens = lexer.tokenize();
 
         let (pr1, _, ep) = self.preprocessor_info.clone();
         let processed_tokens = if ep {
             let mut preprocessor = Preprocessor::new(
                 pr1,
-                path.clone().display().to_string().as_str(),
+                path.display().to_string().as_str(),
             );
             match preprocessor.process(raw_tokens, path.parent().unwrap_or(Path::new(""))) {
                 Ok(tokens) => tokens,
                 Err(e) => {
                     self.raise_with_ref(
                         "ImportError",
-                        &format!("Error while preprocessing '{}'", path.display()),
+                        &format!("Error while preprocessing '{}'", path_str),
                         e,
                     );
                     return HashMap::new();
@@ -1070,14 +1081,14 @@ impl Interpreter {
             Err(error) => {
                 self.raise_with_ref(
                     "ImportError",
-                    &format!("Error while parsing '{}'", path.display()),
+                    &format!("Error while parsing '{}'", path_str),
                     error,
                 );
                 return HashMap::new();
             }
         };
     
-        let parent_dir = path
+        let parent_dir = Path::new(path)
             .parent()
             .unwrap_or(Path::new("."))
             .canonicalize()
@@ -1100,7 +1111,7 @@ impl Interpreter {
         if let Some(err) = shared_interpreter.lock().err.clone() {
             self.raise_with_ref(
                 "ImportError",
-                &format!("Error while importing '{}'", path.display()),
+                &format!("Error while importing '{}'", path_str),
                 err,
             );
             return HashMap::new();
@@ -1139,7 +1150,7 @@ impl Interpreter {
             Err(e) => {
                 self.raise_with_ref(
                     "ImportError",
-                    &format!("Error while importing '{}'", path.display()),
+                    &format!("Error while importing '{}'", path_str),
                     e.clone(),
                 );
                 return HashMap::new();
@@ -1162,6 +1173,7 @@ impl Interpreter {
         self.return_value = NULL;
         self.err = None;
         self.current_statement = None;
+        self.statement_before = None;
         self.state = State::Normal;
         self.stack.clear();
         self.stack.push((
@@ -1224,6 +1236,17 @@ impl Interpreter {
         }
     }
 
+    #[track_caller]
+    fn get_location_from_statement_before(&self) -> Option<Location> {
+        match &self.statement_before {
+            Some(Statement { loc, .. }) => match loc {
+                Some(loc) => Some(get_loc(*loc).set_lucia_source_loc(format!("{}:{}:{}", PanicLocation::caller().file(), PanicLocation::caller().line(), PanicLocation::caller().column()))),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
     fn get_location_from_current_statement_id(&self) -> Option<usize> {
         match &self.current_statement {
             Some(Statement { loc, .. }) => match loc {
@@ -1247,13 +1270,13 @@ impl Interpreter {
     #[track_caller]
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Value {
         let rust_loc = PanicLocation::caller();
-        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
-            file: self.file_path.clone(),
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
+            file: fix_path(self.file_path.clone()),
             line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
-        });
+        }));
 
         self.err = Some(Error {
             error_type: error_type.to_string(),
@@ -1269,13 +1292,13 @@ impl Interpreter {
     #[track_caller]
     pub fn warn(&mut self, warning_str: &str) -> Value {
         let rust_loc = PanicLocation::caller();
-        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
             file: fix_path(self.file_path.clone()),
             line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
-        });
+        }));
         let loc_str = format!("{}:{}:{}", fix_path(loc.file), loc.line_number, loc.range.0);
 
 
@@ -1293,13 +1316,13 @@ impl Interpreter {
     #[track_caller]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
         let rust_loc = PanicLocation::caller();
-        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
             file: self.file_path.clone(),
             line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
-        });
+        }));
 
         self.err = Some(Error {
             error_type: error_type.to_string(),
@@ -1315,13 +1338,13 @@ impl Interpreter {
     #[track_caller]
     pub fn raise_with_ref(&mut self, error_type: &str, msg: &str, ref_err: Error) -> Value {
         let rust_loc = PanicLocation::caller();
-        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| Location {
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
             file: self.file_path.clone(),
             line_string: "".to_owned(),
             line_number: 0,
             range: (0, 0),
             lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
-        });
+        }));
 
         self.err = Some(Error {
             error_type: error_type.to_string(),
@@ -1359,6 +1382,7 @@ impl Interpreter {
             });
         }
 
+        self.statement_before = self.current_statement.clone();
         self.current_statement = Some(statement.clone());
 
         if self.check_stop_flag() {
@@ -1496,6 +1520,7 @@ impl Interpreter {
         let saved_is_returning = self.is_returning;
         let saved_return_value = self.return_value.clone();
         let saved_current_statement = std::mem::replace(&mut self.current_statement, None);
+        let saved_statement_before = std::mem::replace(&mut self.statement_before, None);
 
         self.err = None;
         self.is_returning = false;
@@ -1525,6 +1550,7 @@ impl Interpreter {
             self.is_returning = saved_is_returning;
         }
         self.current_statement = saved_current_statement;
+        self.statement_before = saved_statement_before;
 
         (res, end_state, err, resulting_vars)
     }
@@ -8089,18 +8115,27 @@ impl Interpreter {
                 }
                 "module" => {
                     self.stack.pop();
-                    if let Some(Value::String(module_name)) = final_args_no_mods.get("path") {
-                        let module_path = PathBuf::from(module_name);   
-                        let properties = self.get_properties_from_file(&module_path);
+                    if let Some(Value::String(code)) = final_args_no_mods.get("code") {
+                        let name = if let Some(Value::String(n)) = final_args_no_mods.get("name") {
+                            n.clone()
+                        } else {
+                            "<module>".to_string()
+                        };
+                        let path = if let Some(Value::String(p)) = final_args_no_mods.get("path") {
+                            p.clone()
+                        } else {
+                            "<module>".to_string()
+                        };
+                        let properties = self.get_properties_from_str(&code, Some(Path::new(&path)));
                         let module = Value::Module(Module {
-                            name: module_name.clone(),
+                            name,
                             properties,
                             parameters: Vec::new(),
                             is_public: false,
                             is_static: false,
                             is_final: false,
                             state: None,
-                            path: PathBuf::from(module_path.clone())
+                            path: PathBuf::from(path)
                         });
                         return module;
                     } else {

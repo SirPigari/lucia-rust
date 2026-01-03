@@ -1279,7 +1279,11 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
         "module".to_string(),
         FunctionMetadata {
             name: "module".to_string(),
-            parameters: vec![Parameter::positional("path", "str")],
+            parameters: vec![
+                Parameter::positional("code", "str"),
+                Parameter::positional_optional("name", "str", Value::Null),
+                Parameter::positional_optional("path", "str", Value::Null),
+            ],
             return_type: Type::new_simple("module"),
             is_public: true,
             is_static: true,
@@ -2551,8 +2555,7 @@ pub const KEYWORDS: &[&str] = &[
     "while", "as", "from", "import", "in", "forget", "and", "or", "not",
     "isnt", "is", "xor", "xnor", "nein", "match", "break", "continue",
     "defer", "scope", "pass", "band", "lshift", "rshift", "bor", "bnot",
-    "type", "typedef", "where", "enum", "struct", "true", "false", "null", "void", "any", "int",
-    "float", "bool", "str", "map", "list", "function", "bytes", "tuple", "module", 
+    "typedef", "where", "enum", "struct", "true", "false", "null",
     "auto", "generator", "impl"
 ];
 

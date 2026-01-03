@@ -2,7 +2,7 @@
 
 // test functions
 
-print("hello!")
+println("hello!")
 assert_eq!(len("this is 26 characters long"), 26)
 
 // styled prints

@@ -18,4 +18,4 @@ fun is_prime(n: int) -> bool:
     return true
 end
 
-is_prime(29) // true
+println(is_prime(29)) // true

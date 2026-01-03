@@ -11,16 +11,16 @@ while (running):
     end
     parts: list = prompt.split(" ")
     if (len(parts) != 3):
-        print("Usage: <num1> <operator> <num2>")
+        println("Usage: <num1> <operator> <num2>")
         continue
     end
     a: int = int(parts[0])
     b: int = int(parts[2])
     op: str = parts[1]
     if (!op in ["+", "-", "*", "/", "%", "^"]):
-        print("Invalid operator. Use +, -, *, /, %, ^")
+        println("Invalid operator. Use +, -, *, /, %, ^")
         continue
     end
     result: int | float = calc(a, b, op)
-    print(f"    = {result}")
+    println(f"    = {result}")
 end

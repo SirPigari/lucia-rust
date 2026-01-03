@@ -6,8 +6,7 @@ test.lc
 t.lc
 
 # Binary outputs
-/src/env/bin/lucia.exe
-/src/env/bin/lucia
+/src/env/bin/*
 /tests/run_tests.exe
 /tests/run_tests
 /tests/run_benchmarks.exe

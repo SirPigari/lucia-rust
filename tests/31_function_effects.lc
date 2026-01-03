@@ -18,7 +18,7 @@ unsafe_operation()  // should work now
 
 //                                V -- when the function has a return type you must put '<' before the effects and '>' after them
 fun print_data(data: str) -> void <![io]>:
-    print(data)
+    println(data)
 end
 
 print_data("Hello, World!")  // should work
@@ -44,7 +44,7 @@ mutable global_state: &int = &0
 
 fun m() -> void <![io, state]>:
     *global_state += 42
-    print("Global state modified to ", global_state.to_string())
+    println("Global state modified to ", global_state.to_string())
 end
 
 m()

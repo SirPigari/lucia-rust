@@ -11,6 +11,9 @@
 
 ---
 
+> NOTE:  
+> Lucia is not done yet. Anything can change at any moment.
+
 ## Why Lucia?
 
 Lucia is built to be clean, expressive, and simple to learn -  
@@ -38,7 +41,9 @@ It's designed for speed and safety, without sacrificing elegance.
 - [x] [Introduction](src/env/Docs/introduction.md)
 - [x] [Installation guide](src/env/Docs/installation-guide.md)
 - [x] [Config guide](src/env/Docs/config-guide.md)
-- [ ] [Syntax](src/env/Docs/language-syntax.md)
+- [x] [Syntax](src/env/Docs/language-syntax.md)
+- [x] [C FFI](src/env/Docs/c-ffi.md)
+- [x] [Embedding](src/env/Docs/embedding.md)
 - [x] [Examples](src/env/Docs/examples/)
 - [x] [Conventions](src/env/Docs/conventions.md)
 - [ ] [Standard libraries API](src/env/Docs/standard-libs.md)

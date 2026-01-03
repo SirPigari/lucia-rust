@@ -126,6 +126,99 @@ pub fn parse_str_ptr(args: &HashMap<String, Value>) -> Value {
     }
 }
 
+
+pub fn parse_array_ptr(args: &HashMap<String, Value>) -> Value {
+    let ptr_val = args.get("ptr");
+    let len_val = args.get("len");
+
+    let ptr = match ptr_val {
+        Some(Value::Pointer(arc)) => {
+            let guard = arc.lock();
+            if let (Value::Int(i), _) = &*guard {
+                i.to_i64().unwrap_or(0) as *const i64
+            } else {
+                return Value::Error("TypeError", "Pointer must wrap Int", None);
+            }
+        }
+        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+    };
+
+    let length = match len_val {
+        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
+        _ => return Value::Error("TypeError", "Expected length int argument", None),
+    };
+
+    if ptr.is_null() {
+        return Value::Error("ValueError", "Null pointer provided", None);
+    }
+
+    let binding = (unsafe { std::slice::from_raw_parts(ptr as *const *const c_void, length) }).into_iter().map(|&p| p as usize as i64).collect::<Vec<i64>>();
+    let array: &[i64] = binding.as_slice();
+
+    dbg!(array);
+
+    let pointers: Vec<Value> = array
+        .iter()
+        .map(|&i| {
+            let arc = Arc::new(Mutex::new((Value::Int(i.into()), 0)));
+            Value::Pointer(arc)
+        })
+        .collect();
+
+    Value::List(pointers)
+}
+
+pub fn parse_ptr_as(args: &HashMap<String, Value>) -> Value {
+    let ptr_val = args.get("ptr");
+    let as_type_val = args.get("as_type");
+
+    let ptr = match ptr_val {
+        Some(Value::Pointer(arc)) => {
+            let guard = arc.lock();
+            if let (Value::Int(i), _) = &*guard {
+                i.to_i64().unwrap_or(0) as *const c_void
+            } else {
+                return Value::Error("TypeError", "Pointer must wrap Int", None);
+            }
+        }
+        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+    };
+
+    let as_type = match as_type_val {
+        Some(Value::String(s)) => s.as_str(),
+        _ => return Value::Error("TypeError", "Expected as_type: str argument", None),
+    };
+
+    if ptr.is_null() {
+        return Value::Error("ValueError", "Null pointer provided", None);
+    }
+
+    let t = match as_type {
+        "int" => ValueType::Int,
+        "double" | "float64" => ValueType::Float64,
+        "float" | "float32" => ValueType::Float32,
+        "bool" => ValueType::Boolean,
+        "void" => ValueType::Void,
+        "byte" => ValueType::Byte,
+        "" => ValueType::Ptr,
+        _ => return Value::Error("TypeError", "Unsupported as_type", None),
+    };
+
+    dbg!(&ptr);
+
+    unsafe {
+        match t {
+            ValueType::Int => Value::Int((*(ptr as *const i64)).into()),
+            ValueType::Float64 => Value::Float((*(ptr as *const f64)).into()),
+            ValueType::Float32 => Value::Float((*(ptr as *const f32)).into()),
+            ValueType::Boolean => Value::Boolean(*(ptr as *const bool)),
+            ValueType::Byte => Value::Int((*(ptr as *const u8)).into()),
+            ValueType::Void => Value::Null,
+            ValueType::Ptr => Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 0)))),
+        }
+    }
+}
+
 fn get_list_native(args: &HashMap<String, Value>) -> Value {
     let ptr_val = args.get("ptr");
     let type_val = args.get("type");
@@ -397,7 +490,7 @@ fn create_array_ptr(args: &HashMap<String, Value>) -> Value {
 
     std::mem::forget(boxed_slice);
 
-    let arc_ptr = Arc::new(Mutex::new((Value::Int(ptr_val), 1)));
+    let arc_ptr = Arc::new(Mutex::new((Value::Int(ptr_val), 0)));
     Value::Pointer(arc_ptr)
 }
 
@@ -467,7 +560,7 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
 
             let parse_ty = |s: &str| match s {
                 "int" => Some(ValueType::Int),
-                "float64" => Some(ValueType::Float64),
+                "double" | "float64" => Some(ValueType::Float64),
                 "float" | "float32" => Some(ValueType::Float32),
                 "bool" => Some(ValueType::Boolean),
                 "void" => Some(ValueType::Void),
@@ -1007,6 +1100,30 @@ pub fn register() -> HashMap<String, Variable> {
         parse_str_ptr,
         vec![Parameter::positional("ptr", "any")],
         "str",
+        EffectFlags::UNSAFE
+    );
+
+    insert_native_fn!(
+        map,
+        "parse_array_ptr",
+        parse_array_ptr,
+        vec![
+            Parameter::positional("ptr", "any"),
+            Parameter::positional("len", "int")
+        ],
+        "list",
+        EffectFlags::UNSAFE
+    );
+    
+    insert_native_fn!(
+        map,
+        "parse_ptr_as",
+        parse_ptr_as,
+        vec![
+            Parameter::positional("ptr", "any"),
+            Parameter::positional("as_type", "str")
+        ],
+        "any",
         EffectFlags::UNSAFE
     );
 

@@ -198,8 +198,8 @@ impl Highlighter for ReplHighlighter {
                 word.push_str("//");
                 chars.next();
                 while let Some(&c) = chars.peek() {
-                    word.push(chars.next().unwrap());
                     if c == '\n' || c == '\r' { break; }
+                    word.push(chars.next().unwrap());
                 }
                 let (r, g, b) = COLOR_COMMENTS_RGB;
                 let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
@@ -238,100 +238,134 @@ impl Highlighter for ReplHighlighter {
                 continue;
             }
 
-            let is_prefix = (ch == 'f' || ch == 'r' || ch == 'b') && chars.peek().map_or(false, |&c| c == '"' || c == '\'');
-            if ch == '"' || ch == '\'' || is_prefix {
-                if !word.is_empty() { push_highlighted_word(&mut styled, &word); word.clear(); }
+            let mut is_string_start = false;
+
+            if ch == '"' || ch == '\'' {
+                is_string_start = true;
+            } else if ch == 'f' || ch == 'r' || ch == 'b' {
+                let mut it = chars.clone();
+                let mut saw_prefix = true;
+
+                while let Some(c) = it.next() {
+                    if c == 'f' || c == 'r' || c == 'b' {
+                        saw_prefix = true;
+                        continue;
+                    }
+                    if (c == '"' || c == '\'') && saw_prefix {
+                        is_string_start = true;
+                    }
+                    break;
+                }
+            }
+
+            if is_string_start {
+                if !word.is_empty() {
+                    push_highlighted_word(&mut styled, &word);
+                    word.clear();
+                }
 
                 let mut prefixes = String::new();
-                let mut quote_char = '\0';
                 let mut raw = false;
                 let mut is_f = false;
 
-                if is_prefix {
-                    prefixes.push(ch);
-                    if ch == 'f' { is_f = true; }
-                    if ch == 'r' { raw = true; }
-                    if let Some(&next_ch) = chars.peek() {
-                        if next_ch == '"' || next_ch == '\'' {
-                            quote_char = chars.next().unwrap();
+                let mut first = ch;
+                loop {
+                    if first == 'f' || first == 'r' || first == 'b' {
+                        prefixes.push(first);
+                        if first == 'f' { is_f = true; }
+                        if first == 'r' { raw = true; }
+
+                        if let Some(&next) = chars.peek() {
+                            if next == 'f' || next == 'r' || next == 'b' {
+                                first = chars.next().unwrap();
+                                continue;
+                            }
                         }
                     }
-                } else if ch == '"' || ch == '\'' {
-                    quote_char = ch;
+                    break;
                 }
 
-                if quote_char != '\0' {
-                    let mut string_word = prefixes.clone();
-                    string_word.push(quote_char);
-                    let (r, g, b) = COLOR_STRING_RGB;
-                    let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                    styled.push((s, string_word.clone()));
-                    string_word.clear();
+                let quote_char = if first == '"' || first == '\'' {
+                    first
+                } else if let Some(&q) = chars.peek() {
+                    if q == '"' || q == '\'' {
+                        chars.next().unwrap()
+                    } else {
+                        word.push_str(&prefixes);
+                        continue;
+                    }
+                } else {
+                    word.push_str(&prefixes);
+                    continue;
+                };
 
-                    let mut brace_depth = 0;
-                    let mut in_escape = false;
+                let mut string_word = prefixes.clone();
+                string_word.push(quote_char);
 
-                    while let Some(c) = chars.next() {
-                        if !raw && c == '\\' && !in_escape {
-                            in_escape = true;
-                            string_word.push(c);
-                            continue;
-                        }
+                let (r, g, b) = COLOR_STRING_RGB;
+                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                styled.push((s, string_word.clone()));
+                string_word.clear();
 
-                        if in_escape {
-                            string_word.push(c);
-                            in_escape = false;
-                            continue;
-                        }
+                let mut brace_depth = 0;
+                let mut in_escape = false;
 
-                        if is_f && c == '{' && brace_depth == 0 {
-                            if !string_word.is_empty() {
-                                let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
-                                styled.push((s, string_word.clone()));
-                                string_word.clear();
-                            }
-                            styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "{".to_string()));
-                            let mut code_word = String::new();
-                            brace_depth += 1;
-                            while let Some(inner) = chars.next() {
-                                if inner == '{' {
-                                    brace_depth += 1;
-                                    code_word.push(inner);
-                                } else if inner == '}' {
-                                    brace_depth -= 1;
-                                    if brace_depth == 0 {
-                                        if !code_word.is_empty() {
-                                            let inner_styled = self.highlight(&code_word, 0);
-                                            styled.buffer.extend(inner_styled.buffer);
-                                            code_word.clear();
-                                        }
-                                        styled.push((Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b)), "}".to_string()));
-                                        break;
-                                    } else {
-                                        code_word.push(inner);
-                                    }
-                                } else {
-                                    code_word.push(inner);
-                                }
-                            }
-                            continue;
-                        }
-
+                while let Some(c) = chars.next() {
+                    if !raw && c == '\\' && !in_escape {
+                        in_escape = true;
                         string_word.push(c);
+                        continue;
+                    }
 
-                        if c == quote_char && brace_depth == 0 {
-                            let s = Style::new().fg(nu_ansi_term::Color::Rgb(r, g, b));
+                    if in_escape {
+                        string_word.push(c);
+                        in_escape = false;
+                        continue;
+                    }
+
+                    if is_f && c == '{' {
+                        if brace_depth == 0 && !string_word.is_empty() {
                             styled.push((s, string_word.clone()));
                             string_word.clear();
-                            break;
                         }
+
+                        styled.push((s, "{".to_string()));
+                        brace_depth += 1;
+
+                        let mut code = String::new();
+                        while let Some(inner) = chars.next() {
+                            if inner == '{' {
+                                brace_depth += 1;
+                                code.push(inner);
+                            } else if inner == '}' {
+                                brace_depth -= 1;
+                                if brace_depth == 0 {
+                                    let inner_styled = self.highlight(&code, 0);
+                                    styled.buffer.extend(inner_styled.buffer);
+                                    styled.push((s, "}".to_string()));
+                                    break;
+                                } else {
+                                    code.push(inner);
+                                }
+                            } else {
+                                code.push(inner);
+                            }
+                        }
+                        continue;
                     }
 
-                    continue;
-                } else {
-                    word.push(ch);
-                    continue;
+                    string_word.push(c);
+
+                    if c == quote_char && brace_depth == 0 {
+                        break;
+                    }
                 }
+
+                if !string_word.is_empty() {
+                    styled.push((s, string_word.clone()));
+                }
+
+                continue;
             }
 
             if ch == '#' {
@@ -473,6 +507,7 @@ fn add_menu_keybindings(keybindings: &mut Keybindings) {
     );
 }
 
+#[cfg_attr(feature = "single_executable", allow(unused_variables))]
 pub fn read_input(
     prompt: &str,
     multiline_prompt: &str,
@@ -491,6 +526,7 @@ pub fn read_input(
     let completer    = ReplCompleter { completions: completions.to_vec() };
     let validator    = ReplValidator;
     let highlighter  = ReplHighlighter;
+    #[cfg(not(feature = "single_executable"))]
     let history_file = FileBackedHistory::with_file(10_000, history_path.to_owned())
         .expect("Failed to open history file");
 
@@ -518,9 +554,13 @@ pub fn read_input(
         .with_completer(Box::new(completer))
         .with_validator(Box::new(validator))
         .with_highlighter(Box::new(highlighter))
-        .with_history(Box::new(history_file))
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode);
+
+    #[cfg(not(feature = "single_executable"))]
+    {
+        editor = editor.with_history(Box::new(history_file));
+    }
 
     let mut full_input = String::new();
 

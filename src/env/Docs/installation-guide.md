@@ -57,7 +57,7 @@ Alternatively, you can download and run the pre-built installer:
 
 1. Go to the [Lucia GitHub repository](https://github.com/SirPigari/lucia-rust).
 
-2. Download the latest installer for your OS (Windows, macOS, Linux).
+2. Download the latest installer (only on Windows).
 
 3. Run the installer and follow the on-screen instructions.
 

@@ -2,9 +2,9 @@
 
 #macro hello($name):
     // f-strings wont work here you would need to assign $name to a variable first
-    // print("Hello, " + $name + "!")
+    // println("Hello, " + $name + "!")
     // muahahah they work now
-    print(f"Hello, $name$!")
+    println(f"Hello, $name$!")
 #endmacro
 
 
@@ -48,7 +48,7 @@ assert_err!(assert_type!(i, str, "Expected i to be a string"))
 )
 formatted_time: str = elapsed.format("%S.%mss")
 
-print(formatted_time, elapsed)
+println(formatted_time, elapsed)
 
 #macro #no-mangle m!():
     h = 100
@@ -73,7 +73,7 @@ g!()
 // deprecated macro example
 // does the same as warn inside the macro
 #macro #deprecated("This macro is deprecated") deprecated_macro():
-    print("This macro is deprecated")
+    println("This macro is deprecated")
 #endmacro
 
 deprecated_macro!()

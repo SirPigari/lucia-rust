@@ -29,7 +29,7 @@ fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
     let end = match args.get("end") {
         Some(Value::String(s)) => s.clone(),
         Some(other) => format_value(other, interpreter),
-        None => "\n".to_string(),
+        None => "".to_string(),
     };
 
     let values = match args.get("args") {
@@ -58,6 +58,12 @@ fn print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
     }
 
     Value::Null
+}
+
+fn println(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
+    let mut args = args.clone();
+    args.insert("end".to_string(), Value::String("\n".to_string()));
+    print(&args, interpreter)
 }
 
 fn styledstr(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
@@ -600,7 +606,22 @@ pub fn print_fn() -> Function {
         print,
         vec![  
             Parameter::variadic_optional("args", "any", Value::String("".to_string())), 
-            Parameter::positional_optional("end", "str", Value::String("\n".to_string())),
+            Parameter::positional_optional("end", "str", Value::String("".to_string())),
+            Parameter::positional_optional("sep", "str", Value::String(" ".to_string())),
+        ],
+        "void",
+        true, true, true,
+        None,
+        EffectFlags::IO,
+    )))
+}
+
+pub fn println_fn() -> Function {
+    Function::SharedNative(Arc::new(SharedNativeFunction::new(
+        "println",
+        println,
+        vec![
+            Parameter::variadic_optional("args", "any", Value::String("".to_string())), 
             Parameter::positional_optional("sep", "str", Value::String(" ".to_string())),
         ],
         "void",

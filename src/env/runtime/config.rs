@@ -118,7 +118,10 @@ impl Default for Config {
             allow_unsafe: false,
             allow_inline_config: false,
             disable_runtime_type_checking: false,
-            home_dir: "lucia/src/env/".to_string(),
+            home_dir: std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|parent| parent.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| ".".to_string()),
             stack_size: 16777216, // 16 MB
             type_checker: TypeCheckerConfig::default(),
             color_scheme: ColorScheme::default(),

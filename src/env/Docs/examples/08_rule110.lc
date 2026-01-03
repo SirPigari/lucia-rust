@@ -11,12 +11,12 @@ base[n - 1] = 1
 fun display(n: int):
     for (b in base):
         if b:
-            print("#", end="")
+            print("#")
         else:
-            print(".", end="")
+            print(".")
         end
     end
-    print()
+    println()
 end
 
 fun next(n: int, mutable base: list) -> list:

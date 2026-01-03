@@ -16,4 +16,4 @@ fun bubble_sort(arr: list) -> list:
 end
 
 arr: list = [64, 34, 25, 12, 22, 11, 90]
-print(bubble_sort(arr))
+println(bubble_sort(arr))

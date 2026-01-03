@@ -3,5 +3,6 @@
 
 import elevator as _elevator
 import time as _time
+import fs as _fs
 
 #endif

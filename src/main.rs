@@ -131,7 +131,7 @@ use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::{Statement, Node, get_loc};
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
 use crate::env::runtime::tokens::{Token, Location};
-use crate::env::runtime::libs::{load_std_libs, check_project_deps};
+use crate::env::runtime::libs::{check_project_deps};
 use crate::env::runtime::static_checker::Checker;
 use crate::env::runtime::fmt;
 use crate::env::runtime::cache::{save_tokens_to_cache, load_tokens_from_cache, save_interpreter_cache, load_interpreter_cache};
@@ -140,6 +140,11 @@ use crate::parser::Parser;
 use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 use crate::env::bundler::bundle::bundle_to_exe;
+
+#[cfg(feature = "single_executable")]
+use crate::env::runtime::libs::load_std_libs_embedded;
+#[cfg(not(feature = "single_executable"))]
+use crate::env::runtime::libs::load_std_libs;
 
 const VERSION: &str = env!("VERSION");
 
@@ -589,6 +594,7 @@ fn load_config(config_path: &Path) -> Result<Config, String> {
     Ok(config)
 }
 
+#[cfg(not(feature = "single_executable"))]
 fn load_config_with_fallback(primary_path: &Path, fallback_path: &Path, env_path: &Path) -> Result<Config, String> {
     if primary_path.exists() {
         match load_config(primary_path) {
@@ -623,6 +629,7 @@ fn load_config_with_fallback(primary_path: &Path, fallback_path: &Path, env_path
     }
 }
 
+#[cfg(not(feature = "single_executable"))]
 fn merge_configs(primary: Config, fallback: Config) -> Config {
     Config {
         version: if primary.version.is_empty() { fallback.version } else { primary.version },
@@ -644,6 +651,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
     }
 }
 
+#[cfg(not(feature = "single_executable"))]
 fn merge_color_schemes(primary: ColorScheme, fallback: ColorScheme) -> ColorScheme {
     ColorScheme {
         exception: if primary.exception.is_empty() { fallback.exception } else { primary.exception },
@@ -657,6 +665,7 @@ fn merge_color_schemes(primary: ColorScheme, fallback: ColorScheme) -> ColorSche
     }
 }
 
+#[cfg(not(feature = "single_executable"))]
 fn merge_type_checker_configs(primary: TypeCheckerConfig, fallback: TypeCheckerConfig) -> TypeCheckerConfig {
     TypeCheckerConfig {
         enabled: primary.enabled,
@@ -2030,6 +2039,7 @@ fn main() {
             exit(1);
         });
 
+    #[allow(unused_mut)]
     let mut config_path = exe_path
         .parent()
         .map(|p| p.join("..").join("config.json"))
@@ -2039,6 +2049,7 @@ fn main() {
         })
         .unwrap();
     
+    #[cfg(not(feature = "single_executable"))]
     let mut libs_path = exe_path
         .parent()
         .map(|p| p.join("..").join("libs.json"))
@@ -2192,18 +2203,24 @@ fn main() {
     all_args.extend(normalized_additional_args.clone());
     let args: HashSet<String> = all_args.into_iter().collect();
 
+    #[cfg(not(feature = "single_executable"))]
     let has_explicit_config = vec_args.iter().any(|arg| arg == "--config" || arg.starts_with("--config="));
+    #[cfg(not(feature = "single_executable"))]
     let (primary_config_path, primary_libs_path) = if use_project_env && !has_explicit_config {
         (project_env_path.join("config.json"), project_env_path.join("libs.json"))
     } else {
         (config_path.clone(), libs_path.clone())
     };
 
+    #[cfg(not(feature = "single_executable"))]
     let fallback_config_path = config_path.clone();
+    #[cfg(not(feature = "single_executable"))]
     let fallback_libs_path = libs_path.clone();
 
-    config_path = primary_config_path;
-    libs_path = primary_libs_path;
+    #[cfg(not(feature = "single_executable"))] {
+        config_path = primary_config_path;
+        libs_path = primary_libs_path;
+    }
 
     if args.contains("--bundle") || args.contains("-b") {
         let args: Vec<String> = vec_args.clone();
@@ -2391,6 +2408,7 @@ fn main() {
                 println!("{:<35}{}", "Rust lines of code:".green(), env!("RUST_LOC"));
                 println!("{:<35}{}", "Lucia lines of code:".green(), env!("LUCIA_LOC"));
                 println!("{:<35}{}", "Total lines of code:".green(), env!("TOTAL_LOC"));
+                println!("{:<35}{}", "Total amount of semicolons:".green(), env!("SEMICOLONS"));
                 println!("{:<35}{}", "Rust files:".green(), env!("RUST_FILES"));
                 println!("{:<35}{}", "Total files:".green(), env!("TOTAL_FILES"));
                 
@@ -2519,17 +2537,26 @@ fn main() {
         exit(0);
     }
 
-    if config_arg.is_some() {
-        let config_path_str = config_arg.as_ref().unwrap();
-        if config_path_str.is_empty() {
-            eprintln!("No config path provided. Use --config <path> to specify a config file.");
-            exit(1);
+    #[cfg(not(feature = "single_executable"))]
+    {
+        if config_arg.is_some() {
+            let config_path_str = config_arg.as_ref().unwrap();
+            if config_path_str.is_empty() {
+                eprintln!("No config path provided. Use --config <path> to specify a config file.");
+                exit(1);
+            }
+            config_path = PathBuf::from(config_path_str);
+            libs_path = config_path.parent().unwrap().join("libs.json");
+            if !config_path.exists() {
+                eprintln!("Config file does not exist: {}", config_path.display());
+                exit(1);
+            }
         }
-        config_path = PathBuf::from(config_path_str);
-        libs_path = config_path.parent().unwrap().join("libs.json");
-        if !config_path.exists() {
-            eprintln!("Config file does not exist: {}", config_path.display());
-            exit(1);
+    }
+    #[cfg(feature = "single_executable")]
+    {
+        if config_arg.is_some() {
+            eprintln!("Note: --config ignored in single_executable build; using default config");
         }
     }
 
@@ -2547,6 +2574,12 @@ fn main() {
         }))
         .unwrap();
 
+    #[cfg(feature = "single_executable")]
+    let mut config = {
+        create_default_config(&enviroment_dir)
+    };
+
+    #[cfg(not(feature = "single_executable"))]
     let mut config = if config_arg.is_some() {
         match load_config(&config_path) {
             Ok(config) => config,
@@ -2792,7 +2825,11 @@ fn main() {
     }
 
     let libs_load_time_start = Instant::now();
-    
+
+    #[cfg(feature = "single_executable")]
+    let libs_result = load_std_libs_embedded();
+
+    #[cfg(not(feature = "single_executable"))]
     let libs_result = if libs_path.exists() {
         load_std_libs(&libs_path.display().to_string(), moded)
     } else if fallback_libs_path.exists() && fallback_libs_path != libs_path {

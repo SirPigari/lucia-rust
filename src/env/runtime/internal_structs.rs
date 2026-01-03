@@ -497,6 +497,12 @@ impl CacheFormat {
     }
 }
 
+impl Default for CacheFormat {
+    fn default() -> Self {
+        CacheFormat::NoCache
+    }
+}
+
 impl Serialize for CacheFormat {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

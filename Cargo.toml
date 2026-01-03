@@ -97,6 +97,11 @@ path = "tests/source/run_tests.rs"
 name = "run_benchmarks"
 path = "tests/source/run_benchmarks.rs"
 
+[lib]
+name = "lucia"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib"]
+
 [features]
 lucia_std = [
     "request",
@@ -147,6 +152,8 @@ hash = [
 
 preprocessor_include_std = []
 preprocessor_linking = []
+
+single_executable = []
 
 default = ["lucia_std", "preprocessor_linking"]
 

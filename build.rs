@@ -359,9 +359,10 @@ fn is_ignored(path: &Path, manifest_dir: &Path, ignore_patterns: &[String]) -> b
     false
 }
 
-fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: &[String]) -> (usize, usize) {
+fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: &[String]) -> (usize, usize, usize) {
     let mut lines = 0;
     let mut files = 0;
+    let mut semicolons = 0;
 
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -370,9 +371,10 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
                 continue;
             }
             if path.is_dir() {
-                let (sub_lines, sub_files) = count_lines(&path, exts, manifest_dir, ignore_patterns);
+                let (sub_lines, sub_files, sub_semicolons) = count_lines(&path, exts, manifest_dir, ignore_patterns);
                 lines += sub_lines;
                 files += sub_files;
+                semicolons += sub_semicolons;
             } else {
                 let should_count = if exts.is_empty() {
                     false
@@ -386,34 +388,72 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
                     if let Ok(file) = fs::File::open(&path) {
                         let reader = std::io::BufReader::new(file);
                         let mut in_block_comment = false;
+
                         for line_result in reader.lines() {
                             if let Ok(line) = line_result {
-                                let line = line.trim();
+                                let mut chars = line.chars().peekable();
+
+                                let mut in_string = false;
+                                let mut in_char = false;
+                                let mut escape = false;
+
+                                let trimmed = line.trim();
 
                                 if in_block_comment {
-                                    if line.contains("*/") {
+                                    if trimmed.contains("*/") {
                                         in_block_comment = false;
                                     }
                                     continue;
                                 }
 
-                                if line.is_empty() {
-                                    continue; // skip empty lines
+                                if trimmed.is_empty() || trimmed.starts_with("//") {
+                                    continue;
                                 }
-                                if line.starts_with("//") {
-                                    continue; // skip single line comment
-                                }
-                                if line.starts_with("/*") {
+
+                                if trimmed.starts_with("/*") {
                                     in_block_comment = true;
-                                    if line.contains("*/") {
-                                        // comment ends on same line
+                                    if trimmed.contains("*/") {
                                         in_block_comment = false;
                                     }
                                     continue;
                                 }
+
                                 lines += 1;
+
+                                while let Some(c) = chars.next() {
+                                    if escape {
+                                        escape = false;
+                                        continue;
+                                    }
+
+                                    if c == '\\' && (in_string || in_char) {
+                                        escape = true;
+                                        continue;
+                                    }
+
+                                    if !in_char && c == '"' {
+                                        in_string = !in_string;
+                                        continue;
+                                    }
+
+                                    if !in_string && c == '\'' {
+                                        in_char = !in_char;
+                                        continue;
+                                    }
+
+                                    if !in_string && !in_char {
+                                        if c == '/' && chars.peek() == Some(&'/') {
+                                            break;
+                                        }
+
+                                        if c == ';' {
+                                            semicolons += 1;
+                                        }
+                                    }
+                                }
                             }
                         }
+
                         files += 1;
                     }
                 }
@@ -421,7 +461,7 @@ fn count_lines(dir: &Path, exts: &[&str], manifest_dir: &Path, ignore_patterns: 
         }
     }
 
-    (lines, files)
+    (lines, files, semicolons)
 }
 
 fn join_lc_tests() -> std::io::Result<()> {
@@ -554,11 +594,12 @@ fn main() {
 
     let path = Path::new(&manifest_dir);
     let ignore_patterns = load_gitignore(path);
-    let (rust_lines, rust_files) = count_lines(path, &["rs"], path, &ignore_patterns);
-    let (lucia_lines, _) = count_lines(path, &["lc", "lucia"], path, &ignore_patterns);
-    let (total_lines, total_files) = count_lines(path, &["rs", "lc", "lucia", "yml"], path, &ignore_patterns);
+    let (rust_lines, rust_files, n_semicolons) = count_lines(path, &["rs"], path, &ignore_patterns);
+    let (lucia_lines, _, _) = count_lines(path, &["lc", "lucia"], path, &ignore_patterns);
+    let (total_lines, total_files, _) = count_lines(path, &["rs", "lc", "lucia", "yml"], path, &ignore_patterns);
 
     println!("cargo:rustc-env=RUST_LOC={}", rust_lines);
+    println!("cargo:rustc-env=SEMICOLONS={}", n_semicolons);
     println!("cargo:rustc-env=LUCIA_LOC={}", lucia_lines);
     println!("cargo:rustc-env=TOTAL_LOC={}", total_lines);
     println!("cargo:rustc-env=RUST_FILES={}", rust_files);

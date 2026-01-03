@@ -50,17 +50,17 @@ end
 fun draw(grid: Grid, cx: int, cy: int, t: str) -> void:
     clear_screen()
     move_cursor(0, 0)
-    print(t)
+    println(t)
     for y in [0..height - 1]:
         for x in [0..width - 1]:
             c := if grid[y][x] then ' # ' else ' . '
             if x == cx && y == cy:
                 styledprint(c, reverse=true, end="")
             else:
-                print(c, end="")
+                print(c)
             end
         end
-        print("\n")
+        println("\n")
     end
 end
 

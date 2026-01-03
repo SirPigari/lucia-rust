@@ -643,6 +643,8 @@ Section "Install"
     ${If} $PATH_Enabled = ${BST_CHECKED}
         Push "$INSTDIR\src\env\bin"
         Call AddToPath
+        Push "$INSTDIR\src\env\assets\include"
+        Call AddToPath
     ${EndIf}
 
     ${If} $LYM_Enabled = ${BST_CHECKED}

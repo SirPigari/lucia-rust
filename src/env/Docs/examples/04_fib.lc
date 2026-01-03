@@ -55,7 +55,7 @@ fun fibonacci_pattern_reg(n: int) -> int:
 end
 
 
-print(fibonacci_recursive(10))
-print(fibonacci_iterative(10))
-print(fibonacci_binet(10))
-print(fibonacci_pattern_reg(10))
+println(fibonacci_recursive(10))
+println(fibonacci_iterative(10))
+println(fibonacci_binet(10))
+println(fibonacci_pattern_reg(10))

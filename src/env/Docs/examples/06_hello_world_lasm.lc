@@ -15,8 +15,8 @@ syscall exit
 
 msg: str = "Hello, World!"
 
-print("------------------------------")
+println("------------------------------")
 (exit_code, _) := call(f, { "msg": msg+"\n" })
-print("------------------------------")
-print(f"Program exited with code {exit_code}")
+println("------------------------------")
+println(f"Program exited with code {exit_code}")
 free(f) // optional

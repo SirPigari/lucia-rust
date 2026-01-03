@@ -42,7 +42,7 @@ assert_eq!(i, 3)
 #endmacro
 
 for (i in precompile!([0...100])):
-    print(i)  // precompile is evaluated at preprocessor time
+    println(i)  // precompile is evaluated at preprocessor time
 end
 
 // link preprocessor

@@ -3,6 +3,7 @@
 ## 2.0.0
 
 ### Major Changes
+
 - **Complete rewrite**: The entire interpreter is now written in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>, providing better performance, memory safety, and maintainability
 - **New syntax**: 
   - `:=` for automatic type inference
@@ -26,6 +27,7 @@
 - **Expression-based**: Everything is an expression, including blocks and control flow
 
 ### New Features
+
 - **Advanced data types**:
   - Structs with `typedef struct`
   - Enums with variants and associated data `typedef enum`
@@ -55,6 +57,7 @@
 - **FFI**: Foreign function interface with C libraries
 
 ### Standard Library Additions
+
 - `collections`: Advanced collection utilities
 - `hash`: Hashing functions
 - `json`: JSON parsing and serialization
@@ -67,6 +70,7 @@
 - `elevator`: System-level utilities
 
 ### Enhanced Features
+
 - **REPL improvements**:
   - Syntax highlighting for keywords, strings, comments, numbers, types
   - Multiline input support with Alt+Enter
@@ -91,6 +95,7 @@
 - **String/bytes literals**: Raw strings `r"..."` and byte strings `b"..."`
 
 ### Bug Fixes and Improvements
+
 - Improved performance through Rust implementation
 - Better memory management
 - Enhanced error messages

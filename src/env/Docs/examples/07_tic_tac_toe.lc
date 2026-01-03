@@ -7,11 +7,11 @@
 // its not supposed to be fast or anything just easy to prototype simple stuff
 // (or as a calculator)
 
-fun print_board(board: list) -> void:
-    print("╔═══════════╗")
+fun println_board(board: list) -> void:
+    println("╔═══════════╗")
 
     for (i in [0..2]):
-        print("║ ", end="")
+        print("║ ")
 
         for (j in [0..2]):
             idx: int = i * 3 + j
@@ -24,18 +24,18 @@ fun print_board(board: list) -> void:
             end
 
             if (j < 2):
-                print(" | ", end="")
+                print(" | ")
             end
         end
 
-        print(" ║")
+        println(" ║")
 
         if (i < 2):
-            print("║---+---+---║")
+            println("║---+---+---║")
         end
     end
 
-    print("╚═══════════╝")
+    println("╚═══════════╝")
 end
 
 fun check_win(board: list, player: str) -> bool:
@@ -75,40 +75,40 @@ fun tic_tac_toe() -> void:
     currentPlayer: str = "X"
 
     while (true):
-        print_board(board)
+        println_board(board)
 
         moveStr: str = input(f"Player {currentPlayer}, enter your move (1-9): ")
 
         if (len(moveStr) != 1):
-            print("Invalid input, please enter a number from 1 to 9.")
+            println("Invalid input, please enter a number from 1 to 9.")
             continue
         end
 
         moveCharCode: int = ord(moveStr[0])
 
         if (!((moveCharCode >= ord("1")) && (moveCharCode <= ord("9")))):
-            print("Invalid input, please enter a number from 1 to 9.")
+            println("Invalid input, please enter a number from 1 to 9.")
             continue
         end
 
         move: int = int(moveStr) - 1
 
         if (board[move] != " "):
-            print("That spot is already taken, try again.")
+            println("That spot is already taken, try again.")
             continue
         end
 
         board[move] = currentPlayer
 
         if (check_win(board, currentPlayer)):
-            print_board(board)
-            print("Player " + get_player_string(currentPlayer) + " wins!")
+            println_board(board)
+            println("Player " + get_player_string(currentPlayer) + " wins!")
             break
         end
 
         if (is_draw(board)):
-            print_board(board)
-            print("It's a draw!")
+            println_board(board)
+            println("It's a draw!")
             break
         end
 

@@ -55,6 +55,18 @@ impl Location {
     }
 }
 
+impl Default for Location {
+    fn default() -> Self {
+        Location {
+            file: String::new(),
+            lucia_source_loc: String::new(),
+            line_string: String::new(),
+            line_number: 0,
+            range: (0, 0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct Token(pub Cow<'static, str>, pub Cow<'static, str>, pub Option<Location>);
 

@@ -1,5 +1,5 @@
 fun hello() -> void:
-    print("Hello, World!")
+    println("Hello, World!")
 end
 
 hello()

@@ -161,7 +161,7 @@ pub fn load_std_libs() -> Result<HashMap<String, LibInfo>, String> {
     Ok(libs)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "single_executable")))]
 pub fn load_std_libs(file: &str, moded: bool) -> Result<(HashMap<String, LibInfo>, (bool, String)), (String, bool)> {
     let content = fs::read_to_string(Path::new(file))
         .map_err(|e| (format!("Failed to read libs file: {}", e), false))?;
@@ -273,6 +273,18 @@ pub fn check_project_deps(
     Ok(())
 }
 
+#[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_std_libs_embedded() -> Result<(HashMap<String, LibInfo>, (bool, String)), (String, bool)> {
+    let libs: HashMap<String, LibInfo> = _STD_LIBS.iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+
+    STD_LIBS.set_all(libs.clone());
+
+    Ok((libs, (false, String::new())))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[inline(always)]
 pub fn is_in_std_libs(lib_name: &str) -> bool {
@@ -299,6 +311,10 @@ fn _get_lib_names_raw() -> Vec<LibName> {
     let libs_dir = grandparent.join("libs");
 
     let mut out = Vec::new();
+
+    if !libs_dir.exists() {
+        return out;
+    }
 
     for entry in fs::read_dir(&libs_dir).unwrap() {
         let entry = entry.unwrap();

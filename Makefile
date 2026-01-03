@@ -5,6 +5,7 @@ LUCIA_DIR := .
 TARGET_DIR := $(LUCIA_DIR)/src/env/bin
 TARGET_EXE := lucia$(if $(IS_WINDOWS_CMD),.exe,)
 TARGET := $(TARGET_DIR)/$(TARGET_EXE)
+TARGET_STANDALONE := $(TARGET_DIR)/lucia-standalone$(if $(IS_WINDOWS_CMD),.exe,)
 
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	CARGO_ENV := cargo
@@ -26,6 +27,17 @@ else
 	RUN_FULL := $(TARGET_DIR)/$(TARGET_EXE)
 	TEST_LOOP := for f in src/env/Docs/examples/tests/*.lc; do
 	TEST_FILE := $$f
+endif
+
+ifeq ($(OS),Windows_NT)
+    TARGET_LIB_STATIC  := lucia.lib
+    TARGET_LIB_DYNAMIC := lucia.dll
+else ifeq ($(shell uname -s),Darwin)
+    TARGET_LIB_STATIC  := liblucia.a
+    TARGET_LIB_DYNAMIC := liblucia.dylib
+else
+    TARGET_LIB_STATIC  := liblucia.a
+    TARGET_LIB_DYNAMIC := liblucia.so
 endif
 
 .PHONY: all build release run activate test benchmark benchmark-save build-tests clean deps help lucia
@@ -53,22 +65,45 @@ else
 	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_EXE)" "$(TARGET)"
 endif
 
-build-wasm:
-ifeq ($(OS),Windows_NT)
-	cd $(LUCIA_DIR) && if exist build.rs rename build.rs _build.rs
-	cd $(LUCIA_DIR) && if exist src\env\runtime\wasm.rs copy src\env\runtime\wasm.rs src\main_wasm.rs
-	cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std || echo Build failed
-	cd $(LUCIA_DIR) && if exist _build.rs rename _build.rs build.rs
-	cd $(LUCIA_DIR) && if exist src\main_wasm.rs del src\main_wasm.rs
+build-lib:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --lib
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MOVE) "$(LUCIA_DIR)\target\debug\$(TARGET_LIB_STATIC)" $(TARGET_DIR)/"$(subst /,\,$(TARGET_LIB_STATIC))"
+	@$(MOVE) "$(LUCIA_DIR)\target\debug\$(TARGET_LIB_DYNAMIC)" $(TARGET_DIR)/"$(subst /,\,$(TARGET_LIB_DYNAMIC))"
 else
-	cd $(LUCIA_DIR) && [ -f build.rs ] && mv build.rs _build.rs || true
-	cd $(LUCIA_DIR) && [ -f src/env/runtime/wasm.rs ] && cp src/env/runtime/wasm.rs src/main_wasm.rs --feature preprocessor_include_std || true
-	cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release || true
-	cd $(LUCIA_DIR) && [ -f _build.rs ] && mv _build.rs build.rs || true
-	cd $(LUCIA_DIR) && [ -f src/main_wasm.rs ] && rm src/main_wasm.rs || true
+	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_LIB_STATIC)" $(TARGET_DIR)/"$(TARGET_LIB_STATIC)"
+	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_LIB_DYNAMIC)" $(TARGET_DIR)/"$(TARGET_LIB_DYNAMIC)"
+endif
+
+build-single:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --bin lucia --features single_executable
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MOVE) "$(LUCIA_DIR)\target\debug\$(TARGET_EXE)" "$(subst /,\,$(TARGET_STANDALONE))"
+else
+	@$(MOVE) "$(LUCIA_DIR)/target/debug/$(TARGET_EXE)" "$(TARGET_STANDALONE)"
+endif
+
+build-wasm:
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@cd $(LUCIA_DIR) && if exist build.rs rename build.rs _build.rs
+	@cd $(LUCIA_DIR) && if exist src\env\runtime\wasm.rs copy src\env\runtime\wasm.rs src\main_wasm.rs
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std || echo Build failed
+	@cd $(LUCIA_DIR) && if exist _build.rs rename _build.rs build.rs
+	@cd $(LUCIA_DIR) && if exist src\main_wasm.rs del src\main_wasm.rs
+else
+	@cd $(LUCIA_DIR) && [ -f build.rs ] && mv build.rs _build.rs || true
+	@cd $(LUCIA_DIR) && [ -f src/env/runtime/wasm.rs ] && cp src/env/runtime/wasm.rs src/main_wasm.rs || true
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release || true
+	@cd $(LUCIA_DIR) && [ -f _build.rs ] && mv _build.rs build.rs || true
+	@cd $(LUCIA_DIR) && [ -f src/main_wasm.rs ] && rm src/main_wasm.rs || true
 endif
 
 wasm: build-wasm
+single: build-single
+standalone: build-single
+lib: build-lib
 
 run-wasm: build-wasm
 	@wasmtime $(LUCIA_DIR)/target/wasm32-unknown-unknown/debug/lucia_wasm.wasm
@@ -81,6 +116,28 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 else
 	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_EXE)" "$(TARGET)"
 endif
+
+release-lib:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --lib
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_LIB_STATIC)" $(TARGET_DIR)/"$(subst /,\,$(TARGET_LIB_STATIC))"
+	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_LIB_DYNAMIC)" $(TARGET_DIR)/"$(subst /,\,$(TARGET_LIB_DYNAMIC))"
+else
+	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_LIB_STATIC)" $(TARGET_DIR)/"$(TARGET_LIB_STATIC)"
+	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_LIB_DYNAMIC)" $(TARGET_DIR)/"$(TARGET_LIB_DYNAMIC)"
+endif
+
+release-single:
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --release --bin lucia --features single_executable
+	@$(MKDIR)
+ifeq ($(IS_WINDOWS_CMD),cmd.exe)
+	@$(MOVE) "$(LUCIA_DIR)\target\release\$(TARGET_EXE)" "$(subst /,\,$(TARGET_STANDALONE))"
+else
+	@$(MOVE) "$(LUCIA_DIR)/target/release/$(TARGET_EXE)" "$(TARGET_STANDALONE)"
+endif
+
+full: release release-lib release-single wasm installer
 
 run: $(TARGET)
 	@$(MKDIR)
