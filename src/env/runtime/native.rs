@@ -151,7 +151,7 @@ fn styled_print(args: &HashMap<String, Value>, interpreter: &mut Interpreter) ->
 
     print!("{}", match str_to_print {
         Value::String(s) => s,
-        _ => return Value::Error("RuntimeError", "styledstr did not return a string", None),
+        _ => return Value::new_error("RuntimeError", "styledstr did not return a string", None),
     });
     return Value::Null;
 }
@@ -176,7 +176,7 @@ fn input(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value 
 
     match read_input_no_repl(prompt, multiline.as_deref()) {
         Ok(input) => Value::String(input),
-        Err((err_type, err_msg)) => if err { Value::Error(to_static(err_type), to_static(err_msg), None) } else { Value::String("".to_string()) },
+        Err((err_type, err_msg)) => if err { Value::new_error(&err_type, &err_msg, None) } else { Value::String("".to_string()) },
     }
 }
 
@@ -207,16 +207,16 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
             let mut var = Variable::new_pt(s.name().to_string(), Value::Struct(s.clone()), s.get_type(), false, false, false);
             if let Ok(method) = find_struct_method(&s, None, "op_len", &[s.get_type()], &Type::new_simple("int")) {
                 if method.is_static() {
-                    return Value::Error("TypeError", "Cannot call static method 'op_len' on struct instance", None);
+                    return Value::new_error("TypeError", "Cannot call static method 'op_len' on struct instance", None);
                 }
                 let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, Some(&mut var))));
                 if interpreter.err.is_some() {
                     let err = interpreter.err.clone().expect("Error should be present");
-                    return Value::Error(to_static(err.error_type), to_static(err.msg), None);
+                    return Value::Error(Arc::new(err));
                 }
                 return result;
             } else {
-                return Value::Error("TypeError", "Struct not indexable", None);
+                return Value::new_error("TypeError", "Struct not indexable", None);
             }
         }
         Some(v) => {
@@ -224,7 +224,7 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
                 "Function 'len()' doesn't support type '{}'",
                 v.get_type().display_simple()
             );
-            Value::Error("TypeError", to_static(msg), None)
+            Value::new_error("TypeError", to_static(msg), None)
         }
         None => Value::Null,
     }
@@ -260,14 +260,14 @@ fn type_name(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("obj") {
         return Value::Type(value.get_type());
     }
-    Value::Error("TypeError", "No value provided for type_name()", None)
+    Value::new_error("TypeError", "No value provided for type_name()", None)
 }
 
 fn size_of(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("obj") {
         return Value::Int(Int::from_i64(value.get_size() as i64));
     }
-    Value::Error("TypeError", "No value provided for size_of()", None)
+    Value::new_error("TypeError", "No value provided for size_of()", None)
 }
 
 fn sum(args: &HashMap<String, Value>) -> Value {
@@ -283,7 +283,7 @@ fn sum(args: &HashMap<String, Value>) -> Value {
                             total += Float::from_f64(n as f64);
                         }
                         Err(_) => {
-                            return Value::Error("TypeError", "Failed to convert BigInt to f64", None);
+                            return Value::new_error("TypeError", "Failed to convert BigInt to f64", None);
                         }
                     }
                 }
@@ -295,13 +295,13 @@ fn sum(args: &HashMap<String, Value>) -> Value {
                         stack.push(v);
                     }
                 }
-                _ => return Value::Error("TypeError", "Value is not summable", None),
+                _ => return Value::new_error("TypeError", "Value is not summable", None),
             }
         }
 
         Value::Float(total)
     } else {
-        Value::Error("TypeError", "Expected a list of numeric values", None)
+        Value::new_error("TypeError", "Expected a list of numeric values", None)
     }
 }
 
@@ -311,7 +311,7 @@ fn ord(args: &HashMap<String, Value>) -> Value {
             return Value::Int(Int::from_i64(c as i64));
         }
     }
-    Value::Error("TypeError", "Expected a string with at least one character", None)
+    Value::new_error("TypeError", "Expected a string with at least one character", None)
 }
 
 fn char(args: &HashMap<String, Value>) -> Value {
@@ -320,7 +320,7 @@ fn char(args: &HashMap<String, Value>) -> Value {
             return Value::String(c.to_string());
         }
     }
-    Value::Error("TypeError", "Expected an integer representing a Unicode code point", None)
+    Value::new_error("TypeError", "Expected an integer representing a Unicode code point", None)
 }
 
 fn array(args: &HashMap<String, Value>) -> Value {
@@ -334,17 +334,17 @@ fn array(args: &HashMap<String, Value>) -> Value {
             }
             return Value::List(list);
         } else {
-            return Value::Error("TypeError", "Size must be a positive integer", None);
+            return Value::new_error("TypeError", "Size must be a positive integer", None);
         }
     }
-    Value::Error("TypeError", "Expected 'size' parameter of type int", None)
+    Value::new_error("TypeError", "Expected 'size' parameter of type int", None)
 }
 
 fn range(args: &HashMap<String, Value>) -> Value {
     let (as_gen, use_tuple) = if let Some(Value::Type(as_type)) = args.get("as") {
         let (_, inner) = match get_inner_type(as_type) {
             Ok(t) => t,
-            Err(e) => return Value::Error("TypeError", to_static(e), None),
+            Err(e) => return Value::new_error("TypeError", to_static(e), None),
         };
         match inner {
             Type::Simple { name, .. } => match name.as_str() {
@@ -352,7 +352,7 @@ fn range(args: &HashMap<String, Value>) -> Value {
                 "tuple" => (false, true),
                 "list" => (false, false),
                 _ => {
-                    return Value::Error(
+                    return Value::new_error(
                         "TypeError",
                         to_static(format!("unsupported type '{}' for 'as'", name)),
                         None,
@@ -360,7 +360,7 @@ fn range(args: &HashMap<String, Value>) -> Value {
                 }
             },
             _ => {
-                return Value::Error(
+                return Value::new_error(
                     "TypeError",
                     "unsupported complex type for 'as'",
                     None,
@@ -374,7 +374,7 @@ fn range(args: &HashMap<String, Value>) -> Value {
     let (start, end) = match (args.get("a"), args.get("b")) {
         (Some(a), Some(Value::Null)) | (Some(a), None) => (Value::Int(Int::from(0)), a.clone()),
         (Some(a), Some(b)) => (a.clone(), b.clone()),
-        _ => return Value::Error("TypeError", "expected at least 'a'", None),
+        _ => return Value::new_error("TypeError", "expected at least 'a'", None),
     };
 
     let step_val = match args.get("step") {
@@ -387,24 +387,24 @@ fn range(args: &HashMap<String, Value>) -> Value {
         _ => true,
     };
     if zero_step {
-        return Value::Error("ValueError", "step cannot be zero", None);
+        return Value::new_error("ValueError", "step cannot be zero", None);
     }
 
     if as_gen {
         let start_val = match start {
             Value::Int(i) => i.clone(),
-            _ => return Value::Error("TypeError", "generator only supports integers", None),
+            _ => return Value::new_error("TypeError", "generator only supports integers", None),
         };
         let end_val = match end {
             Value::Int(i) => i.clone(),
-            _ => return Value::Error("TypeError", "generator only supports integers", None),
+            _ => return Value::new_error("TypeError", "generator only supports integers", None),
         };
         let step = match step_val {
             Value::Int(s) if s > Int::from(0) => match s.to_usize() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("ValueError", "step too large", None),
+                Err(_) => return Value::new_error("ValueError", "step too large", None),
             },
-            _ => return Value::Error("TypeError", "generator step must be positive integer", None),
+            _ => return Value::new_error("TypeError", "generator step must be positive integer", None),
         };
 
         let start_val = Value::Int(start_val);
@@ -427,7 +427,7 @@ fn range(args: &HashMap<String, Value>) -> Value {
             _ => false,
         };
         if zero_step {
-            return Value::Error("ValueError", "step cannot be zero", None);
+            return Value::new_error("ValueError", "step cannot be zero", None);
         }
 
         let mut elements = Vec::new();
@@ -461,27 +461,27 @@ fn range(args: &HashMap<String, Value>) -> Value {
             current = match (&current, &step_val) {
                 (Value::Int(c), Value::Int(s)) => match c + s {
                     Ok(r) => Value::Int(r),
-                    Err(_) => return Value::Error("OverflowError", "integer overflow", None),
+                    Err(_) => return Value::new_error("OverflowError", "integer overflow", None),
                 },
                 (Value::Float(c), Value::Float(s)) => match c + s {
                     Ok(r) => Value::Float(r),
-                    Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                    Err(_) => return Value::new_error("OverflowError", "float overflow", None),
                 },
                 (Value::Int(c), Value::Float(s)) => {
                     let c_f = Float::from(c.to_i64().unwrap_or(0) as f64);
                     match &c_f + s {
                         Ok(r) => Value::Float(r),
-                        Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                        Err(_) => return Value::new_error("OverflowError", "float overflow", None),
                     }
                 }
                 (Value::Float(c), Value::Int(s)) => {
                     let s_f = Float::from(s.to_i64().unwrap_or(0) as f64);
                     match c + &s_f {
                         Ok(r) => Value::Float(r),
-                        Err(_) => return Value::Error("OverflowError", "float overflow", None),
+                        Err(_) => return Value::new_error("OverflowError", "float overflow", None),
                     }
                 }
-                _ => return Value::Error("TypeError", "unsupported numeric types", None),
+                _ => return Value::new_error("TypeError", "unsupported numeric types", None),
             };
         }
 
@@ -497,26 +497,26 @@ fn complex(args: &HashMap<String, Value>) -> Value {
     let real = match args.get("real") {
         Some(Value::Int(i)) => match i.to_float() {
             Ok(f) => f,
-            Err(_) => return Value::Error("TypeError", "failed to convert int to float for real part", None),
+            Err(_) => return Value::new_error("TypeError", "failed to convert int to float for real part", None),
         },
         Some(Value::Float(f)) => f.clone(),
-        Some(_) => return Value::Error("TypeError", "real part must be int or float", None),
-        None => return Value::Error("TypeError", "real part is required", None),
+        Some(_) => return Value::new_error("TypeError", "real part must be int or float", None),
+        None => return Value::new_error("TypeError", "real part is required", None),
     };
     let imag = match args.get("imaginary") {
         Some(Value::Int(i)) => match i.to_float() {
             Ok(f) => f,
-            Err(_) => return Value::Error("TypeError", "failed to convert int to float for imaginary part", None),
+            Err(_) => return Value::new_error("TypeError", "failed to convert int to float for imaginary part", None),
         },
         Some(Value::Float(f)) => f.clone(),
-        Some(_) => return Value::Error("TypeError", "imaginary part must be int or float", None),
-        None => return Value::Error("TypeError", "imaginary part is required", None),
+        Some(_) => return Value::new_error("TypeError", "imaginary part must be int or float", None),
+        None => return Value::new_error("TypeError", "imaginary part is required", None),
     };
     Value::Float(Float::complex(real, imag))
 }
 
 fn __placeholder__(_args: &HashMap<String, Value>) -> Value {
-    Value::Error("PlaceholderError", "This is a placeholder function and should not be called.", None)
+    Value::new_error("PlaceholderError", "This is a placeholder function and should not be called.", None)
 }
 
 // -------------------------------
@@ -573,8 +573,8 @@ pub fn format_value(value: &Value, interpreter: &mut Interpreter) -> String {
         Value::Generator(gener) => {
             format!("<generator '{}' at {:p}>", gener.name().unwrap_or("<unnamed>"), gener)
         }
-        Value::Error(err_type, err_msg, _) => {
-            format!("<{}: {}>", err_type, err_msg)
+        Value::Error(e) => {
+            format!("<{}: {}>", e.err_type, e.err_msg)
         }
         Value::Module(obj) => {
             format!("<module '{}' from '{}' at {:p}>", obj.name(), fix_path(obj.path().display().to_string()), obj.ptr())
@@ -974,10 +974,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         (Value::String(s), Value::String(suffix)) => {
                             Value::Boolean(s.ends_with(&*suffix))
                         }
-                        _ => Value::Error("TypeError", "endswith() expects a string suffix", None),
+                        _ => Value::new_error("TypeError", "endswith() expects a string suffix", None),
                     }
                 } else {
-                    Value::Error("TypeError", "endswith() missing required argument 'suffix'", None)
+                    Value::new_error("TypeError", "endswith() missing required argument 'suffix'", None)
                 }
             },
             vec![
@@ -998,10 +998,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         (Value::String(s), Value::String(prefix)) => {
                             Value::Boolean(s.starts_with(&*prefix))
                         }
-                        _ => Value::Error("TypeError", "startswith() expects a string prefix", None),
+                        _ => Value::new_error("TypeError", "startswith() expects a string prefix", None),
                     }
                 } else {
-                    Value::Error("TypeError", "startswith() missing required argument 'prefix'", None)
+                    Value::new_error("TypeError", "startswith() missing required argument 'prefix'", None)
                 }
             },
             vec![
@@ -1025,10 +1025,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                                 .collect();
                             Value::List(parts)
                         }
-                        _ => Value::Error("TypeError", "split() expects a string delimiter", None),
+                        _ => Value::new_error("TypeError", "split() expects a string delimiter", None),
                     }
                 } else {
-                    Value::Error("TypeError", "split() missing required argument 'delimiter'", None)
+                    Value::new_error("TypeError", "split() missing required argument 'delimiter'", None)
                 }
             },
             vec![
@@ -1051,7 +1051,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             .collect();
                         Value::List(parts)
                     }
-                    _ => Value::Error("TypeError", "split_lines() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "split_lines() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1074,10 +1074,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                                 .join(&s);
                             Value::String(joined)
                         }
-                        _ => Value::Error("TypeError", "join() expects a list of strings", None),
+                        _ => Value::new_error("TypeError", "join() expects a list of strings", None),
                     }
                 } else {
-                    Value::Error("TypeError", "join() missing required argument 'parts'", None)
+                    Value::new_error("TypeError", "join() missing required argument 'parts'", None)
                 }
             },
             vec![
@@ -1095,7 +1095,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.trim().to_string()),
-                    _ => Value::Error("TypeError", "trim() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "trim() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1114,7 +1114,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         let char_list: Vec<Value> = s.chars().map(|c| Value::String(c.to_string())).collect();
                         Value::List(char_list)
                     }
-                    _ => Value::Error("TypeError", "chars() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "chars() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1130,7 +1130,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphabetic())),
-                    _ => Value::Error("TypeError", "isalpha() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isalpha() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1146,7 +1146,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_digit(10))),
-                    _ => Value::Error("TypeError", "isdigit() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isdigit() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1162,7 +1162,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_lowercase()) && s.chars().all(|c| !c.is_uppercase())),
-                    _ => Value::Error("TypeError", "islower() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "islower() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1178,7 +1178,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_uppercase()) && s.chars().all(|c| !c.is_lowercase())),
-                    _ => Value::Error("TypeError", "isupper() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isupper() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1194,7 +1194,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphanumeric())),
-                    _ => Value::Error("TypeError", "isalnum() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isalnum() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1210,7 +1210,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_whitespace())),
-                    _ => Value::Error("TypeError", "isspace() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isspace() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1226,7 +1226,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_numeric())),
-                    _ => Value::Error("TypeError", "isnumeric() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "isnumeric() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1332,10 +1332,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
 
                             Value::String(result)
                         }
-                        _ => Value::Error("TypeError", "replace() expects string arguments", None),
+                        _ => Value::new_error("TypeError", "replace() expects string arguments", None),
                     }
                 } else {
-                    Value::Error("TypeError", "replace() missing required arguments 'old' and 'new'", None)
+                    Value::new_error("TypeError", "replace() missing required arguments 'old' and 'new'", None)
                 }
             },
             vec![
@@ -1358,7 +1358,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.to_uppercase()),
-                    _ => Value::Error("TypeError", "to_upper() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "to_upper() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1374,7 +1374,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.to_lowercase()),
-                    _ => Value::Error("TypeError", "to_lower() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "to_lower() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1395,13 +1395,13 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             if chars.next().is_none() {
                                 Value::Int((c as u32).into())
                             } else {
-                                Value::Error("ValueError", "ord() expected a single character string", None)
+                                Value::new_error("ValueError", "ord() expected a single character string", None)
                             }
                         } else {
-                            Value::Error("ValueError", "ord() expected a non-empty string", None)
+                            Value::new_error("ValueError", "ord() expected a non-empty string", None)
                         }
                     }
-                    _ => Value::Error("TypeError", "ord() can only be called on strings", None),
+                    _ => Value::new_error("TypeError", "ord() can only be called on strings", None),
                 }
             },
             vec![],
@@ -1442,9 +1442,9 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 match value {
                     Value::Int(i) => match i.to_float() {
                         Ok(f) => Value::Float(f),
-                        Err(_) => Value::Error("TypeError", "Failed to convert int to float", None),
+                        Err(_) => Value::new_error("TypeError", "Failed to convert int to float", None),
                     },
-                    _ => Value::Error("TypeError", "to_float() can only be called on int", None),
+                    _ => Value::new_error("TypeError", "to_float() can only be called on int", None),
                 }
             },
             vec![],
@@ -1550,7 +1550,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     }
                     Value::String(s)
                 } else {
-                    Value::Error("TypeError", "format() can only be called on int", None)
+                    Value::new_error("TypeError", "format() can only be called on int", None)
                 }
             },
             vec![
@@ -1587,7 +1587,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::Int(i) => Value::Boolean((&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
-                    _ => Value::Error("TypeError", "is_even() can only be called on int", None),
+                    _ => Value::new_error("TypeError", "is_even() can only be called on int", None),
                 }
             },
             vec![],
@@ -1603,7 +1603,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 match value {
                     Value::Int(i) => Value::Boolean(!(&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
-                    _ => Value::Error("TypeError", "is_odd() can only be called on int", None),
+                    _ => Value::new_error("TypeError", "is_odd() can only be called on int", None),
                 }
             },
             vec![],
@@ -1630,9 +1630,9 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 match value {
                     Value::Float(f) => match f.to_int() {
                         Ok(i) => Value::Int(i),
-                        Err(_) => Value::Error("TypeError", "Failed to convert Float to Int", None),
+                        Err(_) => Value::new_error("TypeError", "Failed to convert Float to Int", None),
                     },
-                    _ => Value::Error("TypeError", "to_int() can only be called on float", None),
+                    _ => Value::new_error("TypeError", "to_int() can only be called on float", None),
                 }
             },
             vec![],
@@ -1753,7 +1753,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     }
                     Value::String(s)
                 } else {
-                    Value::Error("TypeError", "format() can only be called on float", None)
+                    Value::new_error("TypeError", "format() can only be called on float", None)
                 }
             },
             vec![
@@ -1799,7 +1799,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     return Value::Float(val.round(precision as usize));
                 }
         
-                Value::Error("TypeError", "round() can only be called on float", None)
+                Value::new_error("TypeError", "round() can only be called on float", None)
             },
             vec![Parameter::positional_optional("precision", "int", Value::Int(0.into()))],
             "float",
@@ -1828,10 +1828,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             new_list.push(item.clone());
                             Value::List(new_list)
                         }
-                        _ => Value::Error("TypeError", "append() can only be called on lists", None),
+                        _ => Value::new_error("TypeError", "append() can only be called on lists", None),
                     }
                 } else {
-                    Value::Error("TypeError", "append() missing required argument 'item'", None)
+                    Value::new_error("TypeError", "append() missing required argument 'item'", None)
                 }
             },
             vec![Parameter::positional("item", "any")],
@@ -1851,10 +1851,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             list.push(item.clone());
                             Value::Null
                         }
-                        _ => Value::Error("TypeError", "push() can only be called on lists", None),
+                        _ => Value::new_error("TypeError", "push() can only be called on lists", None),
                     }
                 } else {
-                    Value::Error("TypeError", "push() missing required argument 'item'", None)
+                    Value::new_error("TypeError", "push() missing required argument 'item'", None)
                 }
             },
             vec![Parameter::positional("item", "any")],
@@ -1873,10 +1873,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         if let Some(item) = list.pop() {
                             item
                         } else {
-                            Value::Error("IndexError", "pop() from empty list", None)
+                            Value::new_error("IndexError", "pop() from empty list", None)
                         }
                     }
-                    _ => Value::Error("TypeError", "pop() can only be called on lists", None),
+                    _ => Value::new_error("TypeError", "pop() can only be called on lists", None),
                 }
             },
             vec![],
@@ -1896,10 +1896,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             list.extend(to_extend.clone());
                             Value::Null
                         }
-                        _ => Value::Error("TypeError", "extend() can only be called on lists", None),
+                        _ => Value::new_error("TypeError", "extend() can only be called on lists", None),
                     }
                 } else {
-                    Value::Error("TypeError", "extend() missing required argument 'item'", None)
+                    Value::new_error("TypeError", "extend() missing required argument 'item'", None)
                 }
             },
             vec![Parameter::positional("item", "list")],
@@ -1920,14 +1920,14 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
 
                 let item_vec = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "into() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "into() can only be called on lists", None),
                 };
 
                 let mut list = Vec::with_capacity(item_vec.len());
                 for item in item_vec {
                     match convert_value_to_type(&type_, &item) {
                         Ok(converted) => list.push(converted),
-                        Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                        Err((err_type, err_msg, _)) => return Value::new_error(err_type, err_msg, None),
                     }
                 }
 
@@ -1946,7 +1946,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "into_gen() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "into_gen() can only be called on lists", None),
                 };
                 
                 let vec_iter = VecIter::new(&vec);
@@ -1974,7 +1974,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "into_repeating_gen() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "into_repeating_gen() can only be called on lists", None),
                 };
                 
                 let vec_iter = VecIter::new(&vec);
@@ -2009,7 +2009,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "enumerate() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "enumerate() can only be called on lists", None),
                 };
                 let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
                     Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
@@ -2041,7 +2041,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let vec = match value {
                         Value::List(list) => list.clone(),
-                        _ => return Value::Error("TypeError", "map() can only be called on lists", None),
+                        _ => return Value::new_error("TypeError", "map() can only be called on lists", None),
                     };
                     let vec_iter = VecIter::new(&vec);
                     let vec_gen = Generator::new_anonymous(
@@ -2061,7 +2061,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     );
                     return Value::Generator(generator);
                 } else {
-                    return Value::Error("TypeError", "map() missing required argument 'f'", None);
+                    return Value::new_error("TypeError", "map() missing required argument 'f'", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -2079,7 +2079,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let vec = match value {
                         Value::List(list) => list.clone(),
-                        _ => return Value::Error("TypeError", "filter() can only be called on lists", None),
+                        _ => return Value::new_error("TypeError", "filter() can only be called on lists", None),
                     };
                     let vec_iter = VecIter::new(&vec);
                     let vec_gen = Generator::new_anonymous(
@@ -2099,7 +2099,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     );
                     return Value::Generator(generator);
                 } else {
-                    return Value::Error("TypeError", "filter() missing required argument 'f'", None);
+                    return Value::new_error("TypeError", "filter() missing required argument 'f'", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -2120,12 +2120,12 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 let function: Option<_> = match args.get("f") {
                     Some(Value::Function(func)) => Some(func.clone()),
                     Some(Value::Null) | None => None,
-                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                    _ => return Value::new_error("RuntimeError", "Expected 'f' to be a function or null", None),
                 };
 
                 let items = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "sort() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "sort() can only be called on lists", None),
                 };
                 let mut keys = Vec::with_capacity(items.len());
                 if let Some(function) = function {
@@ -2177,7 +2177,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 let function = match args.get("f") {
                     Some(Value::Function(func)) => func.clone(),
                     _ => {
-                        return Value::Error(
+                        return Value::new_error(
                             "RuntimeError",
                             "Expected 'f' to be a function",
                             None,
@@ -2187,7 +2187,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
 
                 let items: Vec<Value> = match &value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "Expected a list", None),
+                    _ => return Value::new_error("TypeError", "Expected a list", None),
                 };
 
                 let mut indices: Vec<usize> = (0..items.len()).collect();
@@ -2278,12 +2278,12 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 let function: Option<_> = match args.get("f") {
                     Some(Value::Function(func)) => Some(func.clone()),
                     Some(Value::Null) | None => None,
-                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                    _ => return Value::new_error("RuntimeError", "Expected 'f' to be a function or null", None),
                 };
 
                 let items = match value {
                     Value::List(list) => list.clone(),
-                    _ => return Value::Error("TypeError", "all() can only be called on lists", None),
+                    _ => return Value::new_error("TypeError", "all() can only be called on lists", None),
                 };
 
                 for item in &items {
@@ -2310,7 +2310,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                                 return Value::Boolean(false);
                             }
                         }
-                        _ => return Value::Error("TypeError", "Function must return a boolean", None),
+                        _ => return Value::new_error("TypeError", "Function must return a boolean", None),
                     }
                 }
 
@@ -2331,7 +2331,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         list.clear();
                         Value::Null
                     }
-                    _ => Value::Error("TypeError", "clear() can only be called on lists", None),
+                    _ => Value::new_error("TypeError", "clear() can only be called on lists", None),
                 }
             },
             vec![],
@@ -2354,10 +2354,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             }
                             Value::Boolean(false)
                         }
-                        _ => Value::Error("TypeError", "contains() can only be called on lists", None),
+                        _ => Value::new_error("TypeError", "contains() can only be called on lists", None),
                     }
                 } else {
-                    Value::Error("TypeError", "contains() missing required argument 'item'", None)
+                    Value::new_error("TypeError", "contains() missing required argument 'item'", None)
                 }
             },
             vec![Parameter::positional("item", "any")],
@@ -2383,12 +2383,12 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                                     return Value::Int(create_int(&(i as i64).to_string()));
                                 }
                             }
-                            Value::Error("ValueError", "Item not found in list", None)
+                            Value::new_error("ValueError", "Item not found in list", None)
                         }
-                        _ => Value::Error("TypeError", "index_of() can only be called on lists", None),
+                        _ => Value::new_error("TypeError", "index_of() can only be called on lists", None),
                     }
                 } else {
-                    Value::Error("TypeError", "index_of() missing required argument 'item'", None)
+                    Value::new_error("TypeError", "index_of() missing required argument 'item'", None)
                 }
             },
             vec![
@@ -2415,7 +2415,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         }
                         Value::List(unduped)
                     }
-                    _ => Value::Error("TypeError", "undup() can only be called on lists", None),
+                    _ => Value::new_error("TypeError", "undup() can only be called on lists", None),
                 }
             },
             vec![],
@@ -2433,7 +2433,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         list.reverse();
                         Value::Null
                     }
-                    _ => Value::Error("TypeError", "reverse() can only be called on lists", None),
+                    _ => Value::new_error("TypeError", "reverse() can only be called on lists", None),
                 }
             },
             vec![],
@@ -2451,7 +2451,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         let reversed_list: Vec<Value> = list.iter().rev().cloned().collect();
                         Value::List(reversed_list)
                     }
-                    _ => Value::Error("TypeError", "reversed() can only be called on lists", None),
+                    _ => Value::new_error("TypeError", "reversed() can only be called on lists", None),
                 }
             },
             vec![],
@@ -2468,10 +2468,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let list = match value {
                         Value::List(list) => list.clone(),
-                        _ => return Value::Error("TypeError", "reduce() can only be called on lists", None),
+                        _ => return Value::new_error("TypeError", "reduce() can only be called on lists", None),
                     };
                     if list.is_empty() {
-                        return Value::Error("ValueError", "Cannot reduce an empty list", None);
+                        return Value::new_error("ValueError", "Cannot reduce an empty list", None);
                     }
                     let mut iter = list.iter();
                     let mut accumulator = match args.get("initial") {
@@ -2491,7 +2491,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     }
                     return accumulator;
                 } else {
-                    return Value::Error("TypeError", "reduce() missing required argument 'f'", None);
+                    return Value::new_error("TypeError", "reduce() missing required argument 'f'", None);
                 }
             },
             vec![
@@ -2553,7 +2553,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let vec = match value {
                     Value::Tuple(v) => v.clone(),
-                    _ => return Value::Error("TypeError", "Expected a tuple", None),
+                    _ => return Value::new_error("TypeError", "Expected a tuple", None),
                 };
                 let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
                     Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
@@ -2616,12 +2616,12 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Value::Generator(generator) = value {
                     if !generator.is_infinite() {
                         let v = generator.to_vec();
-                        if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
-                            return Value::Error(err_type, err_msg, ref_err.clone());
+                        if let Some(Value::Error(e)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                            return Value::Error(e.clone());
                         }
                         return Value::List(v);
                     } else {
-                        return Value::Error("TypeError", "Cannot convert infinite generator to list", None);
+                        return Value::new_error("TypeError", "Cannot convert infinite generator to list", None);
                     }
                 }
                 Value::Null
@@ -2645,20 +2645,20 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 let item_vec = match value {
                     Value::Generator(generator) if !generator.is_infinite() => {
                         let v = generator.to_vec();
-                        if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
-                            return Value::Error(err_type, err_msg, ref_err.clone());
+                        if let Some(Value::Error(e)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                            return Value::Error(e.clone());
                         }
                         v
                     }
-                    Value::Generator(_) => return Value::Error("TypeError", "Cannot convert infinite generator to list", None),
-                    _ => return Value::Error("TypeError", "Expected a generator", None),
+                    Value::Generator(_) => return Value::new_error("TypeError", "Cannot convert infinite generator to list", None),
+                    _ => return Value::new_error("TypeError", "Expected a generator", None),
                 };
 
                 let mut list = Vec::with_capacity(item_vec.len());
                 for item in item_vec {
                     match convert_value_to_type(&type_, &item) {
                         Ok(converted) => list.push(converted),
-                        Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                        Err((err_type, err_msg, _)) => return Value::new_error(err_type, err_msg, None),
                     }
                 }
 
@@ -2679,7 +2679,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     if let Some(next_value) = generator.next() {
                         return next_value;
                     } else {
-                        return Value::Error("StopIteration", "No more items in generator", None);
+                        return Value::new_error("StopIteration", "No more items in generator", None);
                     }
                 }
                 Value::Null
@@ -2715,7 +2715,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     if let Some(peeked_value) = generator.peek() {
                         return peeked_value;
                     } else {
-                        return Value::Error("StopIteration", "No more items in generator", None);
+                        return Value::new_error("StopIteration", "No more items in generator", None);
                     }
                 }
                 Value::Null
@@ -2733,7 +2733,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let generator = match value {
                     Value::Generator(generator) => generator,
-                    _ => return Value::Error("TypeError", "Expected a generator", None),
+                    _ => return Value::new_error("TypeError", "Expected a generator", None),
                 };
                 let enumerate_iter = EnumerateIter::new(generator);
 
@@ -2762,7 +2762,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let generator = match value {
                         Value::Generator(generator) => generator,
-                        _ => return Value::Error("TypeError", "map() can only be called on generators", None),
+                        _ => return Value::new_error("TypeError", "map() can only be called on generators", None),
                     };
                     let map_iter = MapIter::new(&generator, func.clone(), interpreter);
                     let generator = Generator::new_anonymous(
@@ -2774,7 +2774,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     );
                     return Value::Generator(generator);
                 } else {
-                    return Value::Error("TypeError", "map() missing required argument 'f'", None);
+                    return Value::new_error("TypeError", "map() missing required argument 'f'", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -2792,7 +2792,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let generator = match value {
                         Value::Generator(generator) => generator,
-                        _ => return Value::Error("TypeError", "filter() can only be called on generators", None),
+                        _ => return Value::new_error("TypeError", "filter() can only be called on generators", None),
                     };
                     let filter_iter = FilterIter::new(&generator, func.clone(), interpreter);
                     let generator = Generator::new_anonymous(
@@ -2804,7 +2804,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     );
                     return Value::Generator(generator);
                 } else {
-                    return Value::Error("TypeError", "filter() missing required argument 'f'", None);
+                    return Value::new_error("TypeError", "filter() missing required argument 'f'", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -2820,7 +2820,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             move |value, _args| {
                 let generator = match value {
                     Value::Generator(generator) => generator,
-                    _ => return Value::Error("TypeError", "repeating() can only be called on generators", None),
+                    _ => return Value::new_error("TypeError", "repeating() can only be called on generators", None),
                 };
                 let repeating_iter = RepeatingIter::new(generator);
                 let repeating_generator = Generator::new_anonymous(
@@ -2858,7 +2858,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         );
                         return Value::Generator(generator);
                     } else {
-                        return Value::Error("TypeError", "Expected 'n' to be an integer", None);
+                        return Value::new_error("TypeError", "Expected 'n' to be an integer", None);
                     }
                 }
                 Value::Null
@@ -2916,7 +2916,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let map = match value {
                         Value::Map(map) => map,
-                        _ => return Value::Error("TypeError", "Expected a map", None),
+                        _ => return Value::new_error("TypeError", "Expected a map", None),
                     };
                     let new_map: FxHashMap<Value, Value> = map.iter().filter_map(|(key, val)| {
                         let result = interpreter.call_function(
@@ -2933,7 +2933,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     }).collect();
                     return Value::Map(new_map);
                 } else {
-                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -2951,7 +2951,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 if let Some(Value::Function(func)) = args.get("f") {
                     let map = match value {
                         Value::Map(map) => map,
-                        _ => return Value::Error("TypeError", "Expected a map", None),
+                        _ => return Value::new_error("TypeError", "Expected a map", None),
                     };
                     let new_map: FxHashMap<Value, Value> = map.iter().map(|(key, val)| {
                         let new_val = interpreter.call_function(
@@ -2964,7 +2964,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     }).collect();
                     return Value::Map(new_map);
                 } else {
-                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                 }
             },
             vec![Parameter::positional("f", "function")],
@@ -3075,7 +3075,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         return Value::Null;
                     }
                 }
-                Value::Error("TypeError", "Expected a map and both 'key' and 'value' arguments", None)
+                Value::new_error("TypeError", "Expected a map and both 'key' and 'value' arguments", None)
             },
             vec![
                 Parameter::positional("key", "any"),
@@ -3095,7 +3095,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     map.clear();
                     return Value::Null;
                 }
-                Value::Error("TypeError", "Expected a map", None)
+                Value::new_error("TypeError", "Expected a map", None)
             },
             vec![],
             "null",
@@ -3114,7 +3114,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                         return Value::Null;
                     }
                 }
-                Value::Error("TypeError", "Expected a map and 'other' argument to be a map", None)
+                Value::new_error("TypeError", "Expected a map and 'other' argument to be a map", None)
             },
             vec![Parameter::positional("other", "map")],
             "null",
@@ -3147,7 +3147,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     Value::Enum(enm) => {
                         *enm.variant.1.clone()
                     }
-                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                    _ => Value::new_error("TypeError", "Expected enum variant", None),
                 }
             },
             vec![],
@@ -3169,7 +3169,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                             args.get("default").cloned().unwrap_or(Value::Null)
                         }
                     }
-                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                    _ => Value::new_error("TypeError", "Expected enum variant", None),
                 }
             },
             vec![
@@ -3189,7 +3189,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                     Value::Enum(enm) => {
                         Value::Int(Int::from_i64(enm.variant.0 as i64))
                     }
-                    _ => Value::Error("TypeError", "Expected enum variant", None),
+                    _ => Value::new_error("TypeError", "Expected enum variant", None),
                 }
             },
             vec![],

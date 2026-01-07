@@ -338,8 +338,8 @@ impl Checker {
         }
 
         self.errors.push(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: Some(loc),
             ref_err: None,
@@ -398,8 +398,8 @@ impl Checker {
 
         if self.config.type_checker.treat_warnings_as_errors {
             self.errors.push(Error {
-                error_type: warning_type.to_string(),
-                msg: warning_str.to_string(),
+                err_type: warning_type.to_string(),
+                err_msg: warning_str.to_string(),
                 help: None,
                 loc: Some(loc),
                 ref_err: None,
@@ -465,8 +465,8 @@ impl Checker {
         }
 
         self.errors.push(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: Some(help.to_string()),
             loc: Some(loc),
             ref_err: None,
@@ -491,8 +491,8 @@ impl Checker {
         }
 
         self.errors.push(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: Some(loc),
             ref_err: Some(Box::new(ref_err)),

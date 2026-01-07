@@ -492,7 +492,7 @@ pub fn format_value(value: &Value) -> String {
             format!("<pointer to 0x{:X}>", addr)
         }
 
-        Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
+        Value::Error(e) => format!("<{}: {}>", e.err_type, e.err_msg),
     }
 }
 

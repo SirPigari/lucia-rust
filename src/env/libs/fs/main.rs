@@ -26,7 +26,7 @@ fn fix_path_handler(args: &HashMap<String, Value>) -> Value {
         let fixed_path = fix_path(path.to_string());
         Value::String(fixed_path)
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -41,11 +41,11 @@ fn read_from_fd_handler(args: &HashMap<String, Value>) -> Value {
             let mut contents = String::new();
             match file.read_to_string(&mut contents) {
                 Ok(_) => Value::String(contents),
-                Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+                Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
             }
         }
     } else {
-        Value::Error("TypeError", "expected 'fd' as int", None)
+        Value::new_error("TypeError", "expected 'fd' as int", None)
     }
 }
 
@@ -75,14 +75,14 @@ fn temp_dir() -> Result<String, String> {
 fn temp_file_handler(_: &HashMap<String, Value>) -> Value {
     match temp_file() {
         Ok(path) => Value::String(path),
-        Err(e) => Value::Error("IOError", to_static(e), None),
+        Err(e) => Value::new_error("IOError", to_static(e), None),
     }
 }
 
 fn temp_dir_handler(_: &HashMap<String, Value>) -> Value {
     match temp_dir() {
         Ok(path) => Value::String(path),
-        Err(e) => Value::Error("IOError", to_static(e), None),
+        Err(e) => Value::new_error("IOError", to_static(e), None),
     }
 }
 
@@ -93,9 +93,9 @@ fn basename_handler(args: &HashMap<String, Value>) -> Value {
                 return Value::String(name_str.to_string());
             }
         }
-        Value::Error("ValueError", "could not extract basename", None)
+        Value::new_error("ValueError", "could not extract basename", None)
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -106,9 +106,9 @@ fn extension_handler(args: &HashMap<String, Value>) -> Value {
                 return Value::String(ext_str.to_string());
             }
         }
-        Value::Error("ValueError", "could not extract extension", None)
+        Value::new_error("ValueError", "could not extract extension", None)
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -118,10 +118,10 @@ fn write_file_handler(args: &HashMap<String, Value>) -> Value {
     {
         match fs::write(path, content) {
             Ok(_) => Value::Null,
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' and 'content' as strings", None)
+        Value::new_error("TypeError", "expected 'path' and 'content' as strings", None)
     }
 }
 
@@ -129,10 +129,10 @@ fn read_file_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::read_to_string(path) {
             Ok(data) => Value::String(data),
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -140,10 +140,10 @@ fn read_file_to_bytes_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::read(path) {
             Ok(data) => Value::Bytes(data),
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -154,15 +154,15 @@ fn append_file_handler(args: &HashMap<String, Value>) -> Value {
         match OpenOptions::new().append(true).create(true).open(path) {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(content.as_bytes()) {
-                    Value::Error("IOError", to_static(e.to_string()), None)
+                    Value::new_error("IOError", to_static(e.to_string()), None)
                 } else {
                     Value::Null
                 }
             }
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' and 'content' as strings", None)
+        Value::new_error("TypeError", "expected 'path' and 'content' as strings", None)
     }
 }
 
@@ -171,7 +171,7 @@ fn file_exists_handler(args: &HashMap<String, Value>) -> Value {
         let exists = Path::new(path).exists();
         Value::Boolean(exists)
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -180,7 +180,7 @@ fn dir_exists_handler(args: &HashMap<String, Value>) -> Value {
         let exists = Path::new(path).is_dir();
         Value::Boolean(exists)
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -188,10 +188,10 @@ fn delete_file_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::remove_file(path) {
             Ok(_) => Value::Null,
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -199,10 +199,10 @@ fn make_dir_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::create_dir_all(path) {
             Ok(_) => Value::Null,
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -210,10 +210,10 @@ fn remove_dir_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::remove_dir_all(path) {
             Ok(_) => Value::Null,
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -231,10 +231,10 @@ fn read_dir_handler(args: &HashMap<String, Value>) -> Value {
                 }
                 Value::List(entries)
             }
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -242,17 +242,17 @@ fn change_dir_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match std_env::set_current_dir(path) {
             Ok(_) => Value::Null,
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
 fn current_dir_handler(_: &HashMap<String, Value>) -> Value {
     match std_env::current_dir() {
         Ok(path) => Value::String(path.to_string_lossy().to_string()),
-        Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+        Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
     }
 }
 
@@ -260,10 +260,10 @@ fn size_bytes_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::metadata(path) {
             Ok(metadata) => Value::Int((metadata.len() as i64).into()),
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
@@ -271,17 +271,17 @@ fn size_bits_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(path)) = args.get("path") {
         match fs::metadata(path) {
             Ok(metadata) => Value::Int(((metadata.len() * 8) as i64).into()),
-            Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+            Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
         }
     } else {
-        Value::Error("TypeError", "expected 'path' as string", None)
+        Value::new_error("TypeError", "expected 'path' as string", None)
     }
 }
 
 fn cwd_handler(_: &HashMap<String, Value>) -> Value {
     match std_env::current_dir() {
         Ok(path) => Value::String(fix_path(path.display().to_string())),
-        Err(e) => Value::Error("IOError", to_static(e.to_string()), None),
+        Err(e) => Value::new_error("IOError", to_static(e.to_string()), None),
     }
 }
 
@@ -291,18 +291,18 @@ fn size_formatted_handler(args: &HashMap<String, Value>) -> Value {
 
     let path = match path_val {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "expected 'path' as string", None),
+        _ => return Value::new_error("TypeError", "expected 'path' as string", None),
     };
 
     let unit = match unit_val {
         Some(Value::String(s)) => s.to_uppercase(),
         None => "AUTO".to_string(),
-        _ => return Value::Error("TypeError", "'unit' must be string if provided", None),
+        _ => return Value::new_error("TypeError", "'unit' must be string if provided", None),
     };
 
     let size_bytes = match fs::metadata(path) {
         Ok(meta) => meta.len() as f64,
-        Err(e) => return Value::Error("IOError", to_static(e.to_string()), None),
+        Err(e) => return Value::new_error("IOError", to_static(e.to_string()), None),
     };
 
     let units = [
@@ -326,7 +326,7 @@ fn size_formatted_handler(args: &HashMap<String, Value>) -> Value {
     } else {
         match units.iter().find(|(name, _)| *name == unit) {
             Some(&(name, mul)) => (mul, name),
-            None => return Value::Error("ValueError", "unsupported unit", None),
+            None => return Value::new_error("ValueError", "unsupported unit", None),
         }
     };
     

@@ -285,7 +285,7 @@ pub fn handle_error(
             }
         }
 
-        trace.push_str(&format!("\t{} | {}: {}", indent, err.error_type, err.msg));
+        trace.push_str(&format!("\t{} | {}: {}", indent, err.err_type, err.err_msg));
 
         if let Some(help) = &err.help {
             if !help.is_empty() {
@@ -339,8 +339,8 @@ pub fn handle_error(
             "{}[err] {} -> {}: {}{}{}{}",
             hex_to_ansi(&config.color_scheme.exception, use_colors),
             location_str,
-            current.error_type,
-            current.msg,
+            current.err_type,
+            current.err_msg,
             depth_note,
             help_msg,
             hex_to_ansi("reset", use_colors)
@@ -370,8 +370,8 @@ pub fn handle_error(
                     "\n\t{}^-- caused by:\n\t{} | {}: {}",
                     hex_to_ansi(&config.color_scheme.exception, use_colors),
                     indent,
-                    inner.error_type,
-                    inner.msg
+                    (**inner).err_type,
+                    (**inner).err_msg
                 ));
 
                 if let Some(help) = &inner.help {
@@ -2063,6 +2063,10 @@ fn main() {
     
         exit(101);
     }));
+
+    if std_env::var_os("LUCIA_DEBUG_VALUE_SIZE").is_some() {
+        Value::debug_value_size();
+    }
 
     let cwd = std_env::current_dir()
     .and_then(|p| p.canonicalize())

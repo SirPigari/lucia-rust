@@ -53,7 +53,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::libs::load_std_libs_embedded;
 pub use crate::env::runtime::errors::Error;
-use core::ffi::c_char;
+use core::ffi::{c_char, c_void};
 use std::mem::ManuallyDrop;
 use std::ffi::CString;
 use std::ffi::CStr;
@@ -154,9 +154,9 @@ unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
-pub enum LuciaValueTag {
+pub enum LuciaValueType {
     VALUE_INT = 1,
     VALUE_FLOAT = 2,
     VALUE_STRING = 3,
@@ -172,7 +172,7 @@ pub enum LuciaValueTag {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct LuciaValue {
-    pub tag: LuciaValueTag,
+    pub tag: LuciaValueType,
     pub data: ValueData,
     pub length: usize,
 }
@@ -192,13 +192,13 @@ pub union ValueData {
 
 fn value_to_abi(v: &Value) -> LuciaValue {
     match v {
-        Value::Int(i) => LuciaValue { tag: LuciaValueTag::VALUE_INT, data: ValueData { int_v: match i.to_i64() { Ok(val) => val, Err(_) => i64::MAX } }, length: 0 },
-        Value::Float(f) => LuciaValue { tag: LuciaValueTag::VALUE_FLOAT, data: ValueData { float_v: match f.to_f64() { Ok(val) => val, Err(_) => f64::MAX } }, length: 0 },
-        Value::Boolean(b) => LuciaValue { tag: LuciaValueTag::VALUE_BOOLEAN, data: ValueData { bool_v: *b as u8 }, length: 0 },
-        Value::Null => LuciaValue { tag: LuciaValueTag::VALUE_NULL, data: ValueData { int_v: 0 }, length: 0 },
-        Value::String(s) => LuciaValue { tag: LuciaValueTag::VALUE_STRING, data: ValueData { string_v: s.as_ptr() as *const c_char }, length: s.len() },
-        Value::List(l) => LuciaValue { tag: LuciaValueTag::VALUE_LIST, data: ValueData { list_ptr: l.as_ptr() as *const LuciaValue }, length: l.len() },
-        Value::Bytes(b) => LuciaValue { tag: LuciaValueTag::VALUE_BYTES, data: ValueData { bytes_ptr: b.as_ptr() }, length: b.len() },
+        Value::Int(i) => LuciaValue { tag: LuciaValueType::VALUE_INT, data: ValueData { int_v: match i.to_i64() { Ok(val) => val, Err(_) => i64::MAX } }, length: 0 },
+        Value::Float(f) => LuciaValue { tag: LuciaValueType::VALUE_FLOAT, data: ValueData { float_v: match f.to_f64() { Ok(val) => val, Err(_) => f64::MAX } }, length: 0 },
+        Value::Boolean(b) => LuciaValue { tag: LuciaValueType::VALUE_BOOLEAN, data: ValueData { bool_v: *b as u8 }, length: 0 },
+        Value::Null => LuciaValue { tag: LuciaValueType::VALUE_NULL, data: ValueData { int_v: 0 }, length: 0 },
+        Value::String(s) => LuciaValue { tag: LuciaValueType::VALUE_STRING, data: ValueData { string_v: s.as_ptr() as *const c_char }, length: s.len() },
+        Value::List(l) => LuciaValue { tag: LuciaValueType::VALUE_LIST, data: ValueData { list_ptr: l.as_ptr() as *const LuciaValue }, length: l.len() },
+        Value::Bytes(b) => LuciaValue { tag: LuciaValueType::VALUE_BYTES, data: ValueData { bytes_ptr: b.as_ptr() }, length: b.len() },
         Value::Map(m) => {
             let flat_map: Vec<LuciaValue> = m.iter()
                 .flat_map(|(k, v)| vec![value_to_abi(k), value_to_abi(v)])
@@ -210,21 +210,21 @@ fn value_to_abi(v: &Value) -> LuciaValue {
             std::mem::forget(boxed_map);
 
             LuciaValue {
-                tag: LuciaValueTag::VALUE_MAP,
+                tag: LuciaValueType::VALUE_MAP,
                 data: ValueData { map_ptr },
                 length: len,
             }
         }
-        Value::Pointer(p) => LuciaValue { tag: LuciaValueTag::VALUE_POINTER, data: ValueData { pointer: Arc::as_ptr(p) as *mut _ }, length: 0 },
-        _ => LuciaValue { tag: LuciaValueTag::VALUE_UNSUPPORTED, data: ValueData { int_v: 0 }, length: 0 },
+        Value::Pointer(p) => LuciaValue { tag: LuciaValueType::VALUE_POINTER, data: ValueData { pointer: Arc::as_ptr(p) as *mut _ }, length: 0 },
+        _ => LuciaValue { tag: LuciaValueType::VALUE_UNSUPPORTED, data: ValueData { int_v: 0 }, length: 0 },
     }
 }
 
 fn error_to_abi(e: &Error) -> LuciaError {
     let location = e.loc.clone().unwrap_or_default();
     LuciaError {
-        err_type: CString::new(e.error_type.clone()).unwrap().into_raw(),
-        err_msg: CString::new(e.msg.clone()).unwrap().into_raw(),
+        err_type: CString::new(e.err_type.clone()).unwrap().into_raw(),
+        err_msg: CString::new(e.err_msg.clone()).unwrap().into_raw(),
         help_msg: CString::new(e.help.clone().unwrap_or_default()).unwrap().into_raw(),
         line_num: location.line_number as u32,
         line_text: CString::new(location.line_string.clone()).unwrap().into_raw(),
@@ -242,6 +242,188 @@ fn error_to_abi(e: &Error) -> LuciaError {
 #[unsafe(no_mangle)] pub extern "C" fn value_as_list_len(v: LuciaValue) -> usize { v.length }
 #[unsafe(no_mangle)] pub extern "C" fn value_as_map_ptr(v: LuciaValue) -> *const LuciaValue { unsafe { v.data.map_ptr } }
 #[unsafe(no_mangle)] pub extern "C" fn value_as_map_len(v: LuciaValue) -> usize {  v.length }
+#[unsafe(no_mangle)] pub extern "C" fn value_as_pointer(v: LuciaValue) -> *mut c_void { unsafe { v.data.pointer } }
+
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_int(v: LuciaValue, out: *mut i64) -> CBool {
+    if v.tag == LuciaValueType::VALUE_INT {
+        unsafe { *out = v.data.int_v; }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_float(v: LuciaValue, out: *mut f64) -> CBool {
+    if v.tag == LuciaValueType::VALUE_FLOAT {
+        unsafe { *out = v.data.float_v; }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_bool(v: LuciaValue, out: *mut CBool) -> CBool {
+    if v.tag == LuciaValueType::VALUE_BOOLEAN {
+        unsafe { *out = v.data.bool_v; }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_string(v: LuciaValue, out: *mut *const c_char, out_len: *mut usize) -> CBool {
+    if v.tag == LuciaValueType::VALUE_STRING {
+        unsafe {
+            *out = v.data.string_v;
+            *out_len = v.length;
+        }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_bytes(v: LuciaValue, out_ptr: *mut *const u8, out_len: *mut usize) -> CBool {
+    if v.tag == LuciaValueType::VALUE_BYTES {
+        unsafe {
+            *out_ptr = v.data.bytes_ptr;
+            *out_len = v.length;
+        }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_list(v: LuciaValue, out_ptr: *mut *const LuciaValue, out_len: *mut usize) -> CBool {
+    if v.tag == LuciaValueType::VALUE_LIST {
+        unsafe {
+            *out_ptr = v.data.list_ptr;
+            *out_len = v.length;
+        }
+        1
+    } else {
+        0
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_map(v: LuciaValue, out_ptr: *mut *const LuciaValue, out_len: *mut usize) -> CBool {
+    if v.tag == LuciaValueType::VALUE_MAP {
+        unsafe {
+            *out_ptr = v.data.map_ptr;
+            *out_len = v.length;
+        }
+        1
+    } else {
+        0
+    }
+
+}
+#[unsafe(no_mangle)] pub extern "C" fn try_value_as_pointer(v: LuciaValue, out: *mut *mut c_void) -> CBool {
+    if v.tag == LuciaValueType::VALUE_POINTER {
+        unsafe { *out = v.data.pointer; }
+        1
+    } else {
+        0
+    }
+}
+
+#[repr(C)]
+pub struct ValueAsArgs {
+    pub force: CBool,
+    pub cast: CBool,
+}
+
+// #define value_as(v, t, out, ...) lucia__value_as_args(v, t, out, ValueAsArgs { __VA_ARGS__ })
+#[unsafe(no_mangle)] pub extern "C" fn lucia__value_as_args(
+    v: LuciaValue,
+    t: LuciaValueType,
+    out: *mut c_void,
+    args: ValueAsArgs,
+) -> CBool {
+    if out.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        if v.tag == t {
+            match t {
+                LuciaValueType::VALUE_INT => {
+                    *(out as *mut i64) = v.data.int_v;
+                }
+                LuciaValueType::VALUE_FLOAT => {
+                    *(out as *mut f64) = v.data.float_v;
+                }
+                LuciaValueType::VALUE_BOOLEAN => {
+                    *(out as *mut CBool) = v.data.bool_v;
+                }
+                LuciaValueType::VALUE_STRING => {
+                    *(out as *mut *const c_char) = v.data.string_v;
+                }
+                LuciaValueType::VALUE_BYTES => {
+                    *(out as *mut *const u8) = v.data.bytes_ptr;
+                }
+                LuciaValueType::VALUE_LIST => {
+                    *(out as *mut *const LuciaValue) = v.data.list_ptr;
+                }
+                LuciaValueType::VALUE_MAP => {
+                    *(out as *mut *const LuciaValue) = v.data.map_ptr;
+                }
+                LuciaValueType::VALUE_POINTER => {
+                    *(out as *mut *mut c_void) = v.data.pointer;
+                }
+                _ => return 0,
+            }
+            return 1;
+        }
+
+        if args.cast != 0 {
+            match (v.tag, t) {
+                (LuciaValueType::VALUE_INT, LuciaValueType::VALUE_FLOAT) => {
+                    *(out as *mut f64) = v.data.int_v as f64;
+                    return 1;
+                }
+                (LuciaValueType::VALUE_FLOAT, LuciaValueType::VALUE_INT) => {
+                    *(out as *mut i64) = v.data.float_v as i64;
+                    return 1;
+                }
+                (LuciaValueType::VALUE_BOOLEAN, LuciaValueType::VALUE_INT) => {
+                    *(out as *mut i64) = v.data.bool_v as i64;
+                    return 1;
+                }
+                (LuciaValueType::VALUE_INT, LuciaValueType::VALUE_BOOLEAN) => {
+                    *(out as *mut CBool) = (v.data.int_v != 0) as CBool;
+                    return 1;
+                }
+                _ => {}
+            }
+        }
+
+        if args.force != 0 {
+            match t {
+                LuciaValueType::VALUE_INT => {
+                    *(out as *mut i64) = 0;
+                }
+                LuciaValueType::VALUE_FLOAT => {
+                    *(out as *mut f64) = 0.0;
+                }
+                LuciaValueType::VALUE_BOOLEAN => {
+                    *(out as *mut CBool) = 0;
+                }
+                LuciaValueType::VALUE_STRING => {
+                    *(out as *mut *const c_char) = std::ptr::null();
+                }
+                LuciaValueType::VALUE_BYTES => {
+                    *(out as *mut *const u8) = std::ptr::null();
+                }
+                LuciaValueType::VALUE_LIST | LuciaValueType::VALUE_MAP => {
+                    *(out as *mut *const LuciaValue) = std::ptr::null();
+                }
+                LuciaValueType::VALUE_POINTER => {
+                    *(out as *mut *mut c_void) = std::ptr::null_mut();
+                }
+                _ => return 0,
+            }
+            return 1;
+        }
+    }
+
+    0
+}
 
 #[repr(C)]
 pub struct LuciaError {
@@ -296,13 +478,13 @@ pub extern "C" fn lucia_get_build_info() -> BuildInfo {
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_free_value(v: LuciaValue) {
     match v.tag {
-        LuciaValueTag::VALUE_STRING => {
+        LuciaValueType::VALUE_STRING => {
             let s_ptr = unsafe { v.data.string_v as *mut c_char };
             if !s_ptr.is_null() {
                 unsafe { let _ = CString::from_raw(s_ptr); }
             }
         }
-        LuciaValueTag::VALUE_LIST => {
+        LuciaValueType::VALUE_LIST => {
             let list_ptr = unsafe { v.data.list_ptr as *mut LuciaValue };
             let len = v.length;
             if !list_ptr.is_null() {
@@ -313,7 +495,7 @@ pub extern "C" fn lucia_free_value(v: LuciaValue) {
                 unsafe { Vec::from_raw_parts(list_ptr, len, len); }
             }
         }
-        LuciaValueTag::VALUE_BYTES => {
+        LuciaValueType::VALUE_BYTES => {
             let bytes_ptr = unsafe { v.data.bytes_ptr as *mut u8 };
             let len = v.length;
             if !bytes_ptr.is_null() {

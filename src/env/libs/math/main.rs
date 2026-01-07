@@ -27,7 +27,7 @@ const _CATALAN: &str =          "0.915965594177219015054603514932384110774149374
 const SMALL_PRIMES: &[i64] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541, 547, 557, 563, 569, 571, 577, 587, 593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659, 661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751, 757, 761, 769, 773, 787, 797, 809, 811, 821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997];
 
 fn math_error(err_id: i8) -> Value {
-    Value::Error("MathError", get_imagnum_error_message(err_id), None)
+    Value::new_error("MathError", get_imagnum_error_message(err_id), None)
 }
 
 fn create_float_constant(name: &str, value: &str) -> Variable {
@@ -35,7 +35,7 @@ fn create_float_constant(name: &str, value: &str) -> Variable {
         name.to_string(),
         match Float::from_str(value) {
             Ok(num) => Value::Float(num),
-            Err(_) => Value::Error("RuntimeError", "Invalid float format", None),
+            Err(_) => Value::new_error("RuntimeError", "Invalid float format", None),
         },
         "float".to_string(),
         true,
@@ -56,7 +56,7 @@ macro_rules! define_unary {
                     Ok(v) => $return_float(v),
                     Err(e) => math_error(e),
                 },
-                _ => Value::Error("TypeError", "expected int or float", None),
+                _ => Value::new_error("TypeError", "expected int or float", None),
             }
         }
     };
@@ -80,11 +80,11 @@ define_unary!(log10, int_log, Float::log10, Value::Float, Value::Float);
 fn log(args: &HashMap<String, Value>) -> Value {
     let x = match args.get("x") {
         Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let base = match args.get("base") {
         Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let x_float = match x {
         Value::Int(i) => match Int::to_float(i) {
@@ -115,14 +115,14 @@ fn conj(args: &HashMap<String, Value>) -> Value {
             Err(e) => return math_error(e), 
         }),
         Some(Value::Float(f)) => Value::Float(f.conj()),
-        _ => Value::Error("TypeError", "expected int or float", None),
+        _ => Value::new_error("TypeError", "expected int or float", None),
     }
 }
 
 fn round(args: &HashMap<String, Value>) -> Value {
     let x = match args.get("x") {
         Some(v @ Value::Int(_)) | Some(v @ Value::Float(_)) => v,
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
 
     let prec = match args.get("precision") {
@@ -148,13 +148,13 @@ fn pow(args: &HashMap<String, Value>) -> Value {
     let x_float = match x_val {
         Some(Value::Float(f)) => f.clone(),
         Some(Value::Int(i)) => Int::to_float(i).expect("Int to float failed"),
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
 
     let y_float = match y_val {
         Some(Value::Float(f)) => f.clone(),
         Some(Value::Int(i)) => Int::to_float(i).expect("Int to float failed"),
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
 
     match (x_val, y_val) {
@@ -189,14 +189,14 @@ fn sign(args: &HashMap<String, Value>) -> Value {
                 Value::Int(Int::from(-1))
             }
         },
-        _ => Value::Error("TypeError", "expected int or float", None),
+        _ => Value::new_error("TypeError", "expected int or float", None),
     }
 }
 
 fn get_int_arg(args: &HashMap<String, Value>, name: &str) -> Result<Int, Value> {
     match args.get(name) {
         Some(Value::Int(i)) => Ok(i.clone()),
-        _ => Err(Value::Error("TypeError", "expected int", None)),
+        _ => Err(Value::new_error("TypeError", "expected int", None)),
     }
 }
 
@@ -266,7 +266,7 @@ fn divmod_fn(args: &HashMap<String, Value>) -> Value {
     };
 
     if b.is_zero() {
-        return Value::Error("ZeroDivisionError", "division by zero", None);
+        return Value::new_error("ZeroDivisionError", "division by zero", None);
     }
 
     match a._div(&b) {
@@ -293,7 +293,7 @@ fn modpow_fn(args: &HashMap<String, Value>) -> Value {
     };
 
     if modu.is_zero() {
-        return Value::Error("ZeroDivisionError", "modulo by zero", None);
+        return Value::new_error("ZeroDivisionError", "modulo by zero", None);
     }
 
     let mut result = Int::from(1);
@@ -304,7 +304,7 @@ fn modpow_fn(args: &HashMap<String, Value>) -> Value {
     let mut exponent = exp.clone();
 
     if exponent.is_negative() {
-        return Value::Error("ValueError", "negative exponent", None);
+        return Value::new_error("ValueError", "negative exponent", None);
     }
 
     let one = Int::from(1);
@@ -350,7 +350,7 @@ fn factorial_fn(args: &HashMap<String, Value>) -> Value {
     };
 
     if n.is_negative() {
-        return Value::Error("ValueError", "factorial not defined for negative values", None);
+        return Value::new_error("ValueError", "factorial not defined for negative values", None);
     }
 
     let mut result = Int::from(1);
@@ -381,7 +381,7 @@ fn binom_fn(args: &HashMap<String, Value>) -> Value {
     };
 
     if n.is_negative() || k.is_negative() {
-        return Value::Error("ValueError", "binomial coefficients require non-negative integers", None);
+        return Value::new_error("ValueError", "binomial coefficients require non-negative integers", None);
     }
 
     if n < k {
@@ -564,7 +564,7 @@ fn approx(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let b = match args.get("b") {
         Some(Value::Float(f)) => f.clone(),
@@ -572,14 +572,14 @@ fn approx(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let epsilon: f64 = match args.get("epsilon") {
         Some(Value::Float(f)) => match f.clone().to_f64() {
             Ok(v) => v,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     Value::Boolean(a.approx_eq(&b, epsilon))
 }
@@ -591,7 +591,7 @@ fn delta(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let b = match args.get("b") {
         Some(Value::Float(f)) => f.clone(),
@@ -599,7 +599,7 @@ fn delta(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     Value::Boolean(a == b)
 }
@@ -611,7 +611,7 @@ fn max_handler(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let b = match args.get("b") {
         Some(Value::Float(f)) => f.clone(),
@@ -619,7 +619,7 @@ fn max_handler(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     if a > b {
         Value::Float(a)
@@ -635,7 +635,7 @@ fn min_handler(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     let b = match args.get("b") {
         Some(Value::Float(f)) => f.clone(),
@@ -643,7 +643,7 @@ fn min_handler(args: &HashMap<String, Value>) -> Value {
             Ok(f) => f,
             Err(e) => return math_error(e),
         },
-        _ => return Value::Error("TypeError", "expected int or float", None),
+        _ => return Value::new_error("TypeError", "expected int or float", None),
     };
     if a < b {
         Value::Float(a)

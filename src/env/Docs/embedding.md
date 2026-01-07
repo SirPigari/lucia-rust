@@ -6,7 +6,7 @@ Here is a simple example to print `Hello World` from C:
 
 ```c
 #include <stdio.h>
-#include "lucia.h"
+#include <lucia.h>
 
 int main() {
     LuciaConfig config = lucia_default_config();
@@ -17,7 +17,12 @@ int main() {
 
     if (result.tag == LUCIA_RESULT_OK) {
         printf("Script executed successfully.\n");
-        printf("Return value as int: %lld\n", value_as_int(result.data.value));
+        int64_t i;
+        if (!try_value_as_int(result.data.value, &i)) {
+            printf("Return value is not an integer\n");
+        } else {
+            printf("Return value as int: %lld\n", i);
+        }
     } else if (result.tag == LUCIA_RESULT_ERROR) {
         printf("Error: %s\n", result.data.error.err_msg);
     }

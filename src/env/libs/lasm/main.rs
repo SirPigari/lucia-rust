@@ -47,17 +47,17 @@ static LASM_FUNCTION_STRUCT_TYPE: Lazy<Type> = Lazy::new(|| Type::Struct {
 
 fn handle_lasm_error(err: LasmError) -> Value {
     match err {
-        LasmError::Compile { message, location } => Value::Error("LasmError", "Error while compiling LASM program", Some(Error::with_some_location("CompileError", &message.as_str(), location.map(|loc| Location::from_lasm_loc(&loc, "<lasm>"))))),
-        LasmError::Parse { message, location } => Value::Error("LasmParseError", "Error while parsing LASM program", Some(Error::with_some_location("ParseError", &message.as_str(), Some(Location::from_lasm_loc(&location, "<lasm>"))))),
-        LasmError::Runtime(msg) => Value::Error("LasmRuntimeError", to_static(msg), None),
-        e => Value::Error("LasmErrorError", to_static(format!("{:?}", e)), None),
+        LasmError::Compile { message, location } => Value::new_error("LasmError", "Error while compiling LASM program", Some(Error::with_some_location("CompileError", &message.as_str(), location.map(|loc| Location::from_lasm_loc(&loc, "<lasm>"))))),
+        LasmError::Parse { message, location } => Value::new_error("LasmParseError", "Error while parsing LASM program", Some(Error::with_some_location("ParseError", &message.as_str(), Some(Location::from_lasm_loc(&location, "<lasm>"))))),
+        LasmError::Runtime(msg) => Value::new_error("LasmRuntimeError", to_static(msg), None),
+        e => Value::new_error("LasmErrorError", to_static(format!("{:?}", e)), None),
     }
 }
 
 fn expect_lasm_ptr(value: &Value) -> Result<Arc<Mutex<(Value, usize)>>, Value> {
     match value {
         Value::Pointer(p) => Ok(p.clone()),
-        _ => Err(Value::Error(
+        _ => Err(Value::new_error(
             "TypeError",
             "Expected a pointer to LasmFunction",
             None,
@@ -68,7 +68,7 @@ fn expect_lasm_ptr(value: &Value) -> Result<Arc<Mutex<(Value, usize)>>, Value> {
 fn le_compile(args: &HashMap<String, Value>) -> Value {
     let asm = match args.get("asm") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError", "Expected 'asm' to be a string", None),
+        _ => return Value::new_error("TypeError", "Expected 'asm' to be a string", None),
     };
 
     let function = match compile(asm, Target::Native) {
@@ -94,10 +94,10 @@ fn le_compile(args: &HashMap<String, Value>) -> Value {
         (Box::new(Value::Boolean(false)), Type::new_simple("bool")),
     );
 
-    let s = Value::Struct(Struct::new_with_fields(
+    let s = Value::Struct(Box::new(Struct::new_with_fields(
         LASM_FUNCTION_STRUCT_TYPE.clone(),
         fields,
-    ));
+    )));
 
     Value::Pointer(Arc::new(Mutex::new((s, 1))))
 }
@@ -109,17 +109,17 @@ fn le_call(args: &HashMap<String, Value>) -> Value {
             Ok(p) => p,
             Err(e) => return e,
         },
-        None => return Value::Error("TypeError", "Missing 'function'", None),
+        None => return Value::new_error("TypeError", "Missing 'function'", None),
     };
 
     let guard = ptr.lock();
     let func_struct = match &guard.0 {
         Value::Struct(s) => s,
-        _ => return Value::Error("TypeError", "Pointer does not reference a LasmFunction", None),
+        _ => return Value::new_error("TypeError", "Pointer does not reference a LasmFunction", None),
     };
 
     if let Value::Boolean(true) = &*func_struct.get_field("freed").unwrap() {
-        return Value::Error("UseAfterFreeError", "LasmFunction was freed", None);
+        return Value::new_error("UseAfterFreeError", "LasmFunction was freed", None);
     }
 
     let id_value = func_struct.get_field("id").unwrap();
@@ -129,25 +129,25 @@ fn le_call(args: &HashMap<String, Value>) -> Value {
             arr.copy_from_slice(b);
             arr
         }
-        _ => return Value::Error("TypeError", "Invalid LasmFunction id", None),
+        _ => return Value::new_error("TypeError", "Invalid LasmFunction id", None),
     };
 
     let ids = FUNCTION_IDS.lock();
     let function = match ids.get(&id) {
         Some(f) => f,
-        None => return Value::Error("LasmFunctionNotFound", "Function not found", None),
+        None => return Value::new_error("LasmFunctionNotFound", "Function not found", None),
     };
 
     let variables_value = match args.get("vars") {
         Some(Value::Map(m)) => m,
-        _ => return Value::Error("TypeError", "Expected 'vars' to be a map", None),
+        _ => return Value::new_error("TypeError", "Expected 'vars' to be a map", None),
     };
 
     let mut vars = HashMap::new();
     for (k, v) in variables_value.iter() {
         let ks = match k {
             Value::String(s) => s.clone(),
-            _ => return Value::Error("TypeError", "Map keys must be strings", None),
+            _ => return Value::new_error("TypeError", "Map keys must be strings", None),
         };
 
         let lv = match v {
@@ -156,7 +156,7 @@ fn le_call(args: &HashMap<String, Value>) -> Value {
             Value::Boolean(b) => lasm::Value::Int(if *b { 1 } else { 0 }),
             Value::Float(f) => lasm::Value::Float(f.to_f64().unwrap()),
             Value::Null => lasm::Value::Null,
-            _ => return Value::Error("TypeError", "Unsupported LASM variable type", None),
+            _ => return Value::new_error("TypeError", "Unsupported LASM variable type", None),
         };
 
         vars.insert(ks, lv);
@@ -178,13 +178,13 @@ fn le_free(args: &HashMap<String, Value>) -> Value {
             Ok(p) => p,
             Err(e) => return e,
         },
-        None => return Value::Error("TypeError", "Missing 'function'", None),
+        None => return Value::new_error("TypeError", "Missing 'function'", None),
     };
 
     let mut guard = ptr.lock();
     let func_struct = match &mut guard.0 {
         Value::Struct(s) => s,
-        _ => return Value::Error("TypeError", "Pointer does not reference a LasmFunction", None),
+        _ => return Value::new_error("TypeError", "Pointer does not reference a LasmFunction", None),
     };
 
     let id_value = func_struct.get_field("id").unwrap();
@@ -194,7 +194,7 @@ fn le_free(args: &HashMap<String, Value>) -> Value {
             arr.copy_from_slice(b);
             arr
         }
-        _ => return Value::Error("TypeError", "Invalid LasmFunction id", None),
+        _ => return Value::new_error("TypeError", "Invalid LasmFunction id", None),
     };
 
     let mut ids = FUNCTION_IDS.lock();

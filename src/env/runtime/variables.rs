@@ -883,7 +883,7 @@ impl Variable {
                             match &val_clone {
                                 Value::Int(i) => match i.to_float() {
                                     Ok(f) => Value::Float(f),
-                                    Err(_) => Value::Error("TypeError", "Failed to convert Int to Float", None),
+                                    Err(_) => Value::new_error("TypeError", "Failed to convert Int to Float", None),
                                 },
                                 Value::Float(f) => Value::Float(f.clone()),
                                 _ => Value::Float(Float::from_f64(0.0)),
@@ -1046,7 +1046,7 @@ impl Variable {
                             match &val_clone {
                                 Value::Float(f) => match f.to_int() {
                                     Ok(i) => Value::Int(i),
-                                    Err(_) => Value::Error("TypeError", "Failed to convert Float to Int", None),
+                                    Err(_) => Value::new_error("TypeError", "Failed to convert Float to Int", None),
                                 },
                                 Value::Int(i) => Value::Int(i.clone()),
                                 _ => Value::Int(0i64.into()),
@@ -1310,14 +1310,14 @@ impl Variable {
 
                             let item_vec = match &locked.value {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
 
                             let mut list = Vec::with_capacity(item_vec.len());
                             for item in item_vec {
                                 match convert_value_to_type(&type_, &item) {
                                     Ok(converted) => list.push(converted),
-                                    Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                                    Err((err_type, err_msg, _)) => return Value::new_error(err_type, err_msg, None),
                                 }
                             }
 
@@ -1337,7 +1337,7 @@ impl Variable {
                         move |_args| {
                             let vec = match &val_clone {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
                             
                             let vec_iter = VecIter::new(&vec);
@@ -1366,7 +1366,7 @@ impl Variable {
                         move |_args| {
                             let vec = match &val_clone {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
                             
                             let vec_iter = VecIter::new(&vec);
@@ -1402,7 +1402,7 @@ impl Variable {
                         move |_args| {
                             let vec = match &val_clone {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
                             let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
                                 Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
@@ -1452,7 +1452,7 @@ impl Variable {
                                     );
                                     return Value::Generator(generator);
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                                 }
                             }
                             Value::Null
@@ -1490,7 +1490,7 @@ impl Variable {
                                     );
                                     return Value::Generator(generator);
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                                 }
                             }
                             Value::Null
@@ -1517,12 +1517,12 @@ impl Variable {
                                 let function: Option<_> = match args.get("f") {
                                     Some(Value::Function(func)) => Some(func.clone()),
                                     Some(Value::Null) | None => None,
-                                    _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                                    _ => return Value::new_error("RuntimeError", "Expected 'f' to be a function or null", None),
                                 };
 
                                 let items = match &value_clone {
                                     Value::List(list) => list.clone(),
-                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                    _ => return Value::new_error("TypeError", "Expected a list", None),
                                 };
 
                                 let mut keys = Vec::with_capacity(items.len());
@@ -1585,7 +1585,7 @@ impl Variable {
                                 let function = match args.get("f") {
                                     Some(Value::Function(func)) => func.clone(),
                                     _ => {
-                                        return Value::Error(
+                                        return Value::new_error(
                                             "RuntimeError",
                                             "Expected 'f' to be a function",
                                             None,
@@ -1595,7 +1595,7 @@ impl Variable {
 
                                 let items = match &value_clone {
                                     Value::List(list) => list.clone(),
-                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                    _ => return Value::new_error("TypeError", "Expected a list", None),
                                 };
 
                                 let mut indices: Vec<usize> = (0..items.len()).collect();
@@ -1678,7 +1678,7 @@ impl Variable {
                                 let function = match args.get("f") {
                                     Some(Value::Function(func)) => func.clone(),
                                     _ => {
-                                        return Value::Error(
+                                        return Value::new_error(
                                             "RuntimeError",
                                             "Expected 'f' to be a function",
                                             None,
@@ -1688,7 +1688,7 @@ impl Variable {
 
                                 let items: Vec<Value> = match &value_clone {
                                     Value::List(list) => list.clone(),
-                                    _ => return Value::Error("TypeError", "Expected a list", None),
+                                    _ => return Value::new_error("TypeError", "Expected a list", None),
                                 };
 
                                 let mut indices: Vec<usize> = (0..items.len()).collect();
@@ -1783,12 +1783,12 @@ impl Variable {
                             let function: Option<_> = match args.get("f") {
                                 Some(Value::Function(func)) => Some(func.clone()),
                                 Some(Value::Null) | None => None,
-                                _ => return Value::Error("RuntimeError", "Expected 'f' to be a function or null", None),
+                                _ => return Value::new_error("RuntimeError", "Expected 'f' to be a function or null", None),
                             };
 
                             let items = match &val_clone {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
 
                             for item in &items {
@@ -1816,7 +1816,7 @@ impl Variable {
                                             return Value::Boolean(false);
                                         }
                                     }
-                                    _ => return Value::Error("TypeError", "Function must return a boolean", None),
+                                    _ => return Value::new_error("TypeError", "Function must return a boolean", None),
                                 }
                             }
 
@@ -1863,7 +1863,7 @@ impl Variable {
                                             return Value::Int(create_int(&(index as i64).to_string()));
                                         }
                                     }
-                                    return Value::Error("ValueError", "Item not found in list", None);
+                                    return Value::new_error("ValueError", "Item not found in list", None);
                                 }
                             }
                             Value::Null
@@ -1907,7 +1907,7 @@ impl Variable {
                         move |_args| {
                             let items = match &value_clone {
                                 Value::List(list) => list.clone(),
-                                _ => return Value::Error("TypeError", "Expected a list", None),
+                                _ => return Value::new_error("TypeError", "Expected a list", None),
                             };
 
                             let mut reversed_items = items;
@@ -1931,7 +1931,7 @@ impl Variable {
                                 if let Some(Value::Function(func)) = args.get("f") {
                                     let mut interpreter_clone = interpreter_clone.clone();
                                     if list.is_empty() {
-                                        return Value::Error("ValueError", "Cannot reduce an empty list", None);
+                                        return Value::new_error("ValueError", "Cannot reduce an empty list", None);
                                     }
                                     let mut result = match args.get("initial") {
                                         Some(initial) if *initial != Value::Null => initial.clone(),
@@ -1951,7 +1951,7 @@ impl Variable {
                                     }
                                     return result;
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                                 }
                             }
                             Value::Null
@@ -1973,26 +1973,26 @@ impl Variable {
                             let index = if let Some(Value::Int(i)) = args.get("index") {
                                 match i.to_isize() {
                                     Ok(idx) => idx,
-                                    Err(_) => return Value::Error("IndexError", "Index out of bounds", None),
+                                    Err(_) => return Value::new_error("IndexError", "Index out of bounds", None),
                                 }
                             } else {
                                 -1
                             };
                             if let Value::List(list) = &val_clone {
                                 if list.is_empty() {
-                                    return Value::Error("IndexError", "Pop from empty list", None);
+                                    return Value::new_error("IndexError", "Pop from empty list", None);
                                 }
                                 let mut new_list = list.clone();
                                 let item = new_list.remove(if index < 0 {
                                     let idx = new_list.len() as isize + index;
                                     if idx < 0 {
-                                        return Value::Error("IndexError", "Index out of bounds", None);
+                                        return Value::new_error("IndexError", "Index out of bounds", None);
                                     }
                                     idx as usize
                                 } else {
                                     let idx = index as usize;
                                     if idx >= new_list.len() {
-                                        return Value::Error("IndexError", "Index out of bounds", None);
+                                        return Value::new_error("IndexError", "Index out of bounds", None);
                                     }
                                     idx
                                 });
@@ -2048,7 +2048,7 @@ impl Variable {
                                             max_value = item.clone();
                                         }
                                     } else {
-                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                        return Value::new_error("TypeError", "Cannot compare values", None);
                                     }
                                 }
                                 return max_value;
@@ -2077,7 +2077,7 @@ impl Variable {
                                             min_value = item.clone();
                                         }
                                     } else {
-                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                        return Value::new_error("TypeError", "Cannot compare values", None);
                                     }
                                 }
                                 return min_value;
@@ -2105,7 +2105,7 @@ impl Variable {
                                             return Value::Boolean(false);
                                         }
                                     } else {
-                                        return Value::Error("TypeError", "Cannot compare values", None);
+                                        return Value::new_error("TypeError", "Cannot compare values", None);
                                     }
                                 }
                                 return Value::Boolean(true);
@@ -2409,7 +2409,7 @@ impl Variable {
                         move |_args| {
                             let vec = match &val_clone {
                                 Value::Tuple(v) => v.clone(),
-                                _ => return Value::Error("TypeError", "Expected a tuple", None),
+                                _ => return Value::new_error("TypeError", "Expected a tuple", None),
                             };
                             let vec_enumerated = vec.iter().enumerate().map(|(i, v)| {
                                 Value::Tuple(vec![Value::Int(create_int(&(i as i64).to_string())), v.clone()])
@@ -2498,12 +2498,12 @@ impl Variable {
                             if let Value::Generator(generator) = &val_clone {
                                 if !generator.is_infinite() {
                                     let v = generator.to_vec();
-                                    if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
-                                        return Value::Error(err_type, err_msg, ref_err.clone());
+                                    if let Some(Value::Error(e)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                                        return Value::Error(e.clone());
                                     }
                                     return Value::List(v);
                                 } else {
-                                    return Value::Error("TypeError", "Cannot convert infinite generator to list", None);
+                                    return Value::new_error("TypeError", "Cannot convert infinite generator to list", None);
                                 }
                             }
                             Value::Null
@@ -2528,20 +2528,20 @@ impl Variable {
                             let item_vec = match &val_clone {
                                 Value::Generator(generator) if !generator.is_infinite() => {
                                     let v = generator.to_vec();
-                                    if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
-                                        return Value::Error(err_type, err_msg, ref_err.clone());
+                                    if let Some(Value::Error(e)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                                        return Value::Error(e.clone());
                                     }
                                     v
                                 }
-                                Value::Generator(_) => return Value::Error("TypeError", "Cannot convert infinite generator to list", None),
-                                _ => return Value::Error("TypeError", "Expected a generator", None),
+                                Value::Generator(_) => return Value::new_error("TypeError", "Cannot convert infinite generator to list", None),
+                                _ => return Value::new_error("TypeError", "Expected a generator", None),
                             };
 
                             let mut list = Vec::with_capacity(item_vec.len());
                             for item in item_vec {
                                 match convert_value_to_type(&type_, &item) {
                                     Ok(converted) => list.push(converted),
-                                    Err((err_type, err_msg, _)) => return Value::Error(err_type, err_msg, None),
+                                    Err((err_type, err_msg, _)) => return Value::new_error(err_type, err_msg, None),
                                 }
                             }
 
@@ -2563,7 +2563,7 @@ impl Variable {
                                 if let Some(next_value) = generator.next() {
                                     return next_value;
                                 } else {
-                                    return Value::Error("StopIteration", "No more items in generator", None);
+                                    return Value::new_error("StopIteration", "No more items in generator", None);
                                 }
                             }
                             Value::Null
@@ -2601,7 +2601,7 @@ impl Variable {
                                 if let Some(peeked_value) = generator.peek() {
                                     return peeked_value;
                                 } else {
-                                    return Value::Error("StopIteration", "No more items in generator", None);
+                                    return Value::new_error("StopIteration", "No more items in generator", None);
                                 }
                             }
                             Value::Null
@@ -2620,7 +2620,7 @@ impl Variable {
                         move |_args| {
                             let generator = match &val_clone {
                                 Value::Generator(generator) => generator,
-                                _ => return Value::Error("TypeError", "Expected a generator", None),
+                                _ => return Value::new_error("TypeError", "Expected a generator", None),
                             };
                             let enumerate_iter = EnumerateIter::new(generator);
 
@@ -2659,7 +2659,7 @@ impl Variable {
                                     );
                                     return Value::Generator(generator);
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                                 }
                             }
                             Value::Null
@@ -2689,7 +2689,7 @@ impl Variable {
                                     );
                                     return Value::Generator(generator);
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                    return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                                 }
                             }
                             Value::Null
@@ -2720,7 +2720,7 @@ impl Variable {
                                     );
                                     return Value::Generator(generator);
                                 } else {
-                                    return Value::Error("TypeError", "Expected 'n' to be an integer", None);
+                                    return Value::new_error("TypeError", "Expected 'n' to be an integer", None);
                                 }
                             }
                             Value::Null
@@ -2879,10 +2879,10 @@ impl Variable {
 
                                     return Value::Map(new_map);
                                 } else {
-                                    return Value::Error("TypeError", "Expected a map", None);
+                                    return Value::new_error("TypeError", "Expected a map", None);
                                 }
                             } else {
-                                return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                             }
                         },
                         vec![Parameter::positional("f", "function")],
@@ -2913,10 +2913,10 @@ impl Variable {
 
                                     return Value::Map(new_map);
                                 } else {
-                                    return Value::Error("TypeError", "Expected a map", None);
+                                    return Value::new_error("TypeError", "Expected a map", None);
                                 }
                             } else {
-                                return Value::Error("TypeError", "Expected 'f' to be a function", None);
+                                return Value::new_error("TypeError", "Expected 'f' to be a function", None);
                             }
                         },
                         vec![Parameter::positional("f", "function")],
@@ -2965,7 +2965,7 @@ impl Variable {
                             let (keys, values) = if let Value::Map(map) = &val_clone {
                                 (map.keys().cloned().collect::<Vec<_>>(), map.values().cloned().collect::<Vec<_>>())
                             } else {
-                                return Value::Error("TypeError", "Expected a map", None);
+                                return Value::new_error("TypeError", "Expected a map", None);
                             };
                             Value::List(keys.into_iter().zip(values).map(|(k, v)| Value::Tuple(vec![k, v])).collect())
                         },
@@ -3176,7 +3176,7 @@ impl Variable {
                                 Value::Enum(enm) => {
                                     *enm.variant.1.clone()
                                 }
-                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                                _ => Value::new_error("TypeError", "Expected enum variant", None),
                             }
                         },
                         vec![],
@@ -3198,7 +3198,7 @@ impl Variable {
                                         args.get("default").cloned().unwrap_or(Value::Null)
                                     }
                                 }
-                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                                _ => Value::new_error("TypeError", "Expected enum variant", None),
                             }
                         },
                         vec![
@@ -3218,7 +3218,7 @@ impl Variable {
                                 Value::Enum(enm) => {
                                     Value::Int(Int::from_i64(enm.variant.0 as i64))
                                 }
-                                _ => Value::Error("TypeError", "Expected enum variant", None),
+                                _ => Value::new_error("TypeError", "Expected enum variant", None),
                             }
                         },
                         vec![],
@@ -3271,7 +3271,7 @@ impl Variable {
                             if let Value::Type(t) = &val_clone {
                                 return Value::Type(t.base_type());
                             }
-                            Value::Error("TypeError", "Expected a type", None)
+                            Value::new_error("TypeError", "Expected a type", None)
                         },
                         vec![],
                         "type",
@@ -3287,7 +3287,7 @@ impl Variable {
                             if let Value::Type(t) = &val_clone {
                                 return Value::String(t.display_simple());
                             }
-                            Value::Error("TypeError", "Expected a type", None)
+                            Value::new_error("TypeError", "Expected a type", None)
                         },
                         vec![],
                         "str",

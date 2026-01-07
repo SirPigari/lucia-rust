@@ -1185,11 +1185,11 @@ impl Interpreter {
                 return Err(err.clone());
             }
             let value = self.evaluate(&statement);
-            if let Value::Error(err_type, err_msg, referr) = &value {
-                if let Some(referr) = referr {
-                    self.raise_with_ref(err_type, &err_msg, referr.clone());
+            if let Value::Error(e) = &value {
+                if let Some(referr) = &e.ref_err {
+                    self.raise_with_ref(&e.err_type, &e.err_msg, *referr.clone());
                 } else {
-                    self.raise(err_type, &err_msg);
+                    self.raise(&e.err_type, &e.err_msg);
                 }
             }
             if self.is_returning {
@@ -1277,8 +1277,8 @@ impl Interpreter {
         }));
 
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: Some(loc),
             ref_err: None,
@@ -1312,6 +1312,23 @@ impl Interpreter {
     }
 
     #[track_caller]
+    pub fn raise_err(&mut self, mut error: Error) -> Value {
+        let rust_loc = PanicLocation::caller();
+        let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
+            file: self.file_path.clone(),
+            line_string: "".to_owned(),
+            line_number: 0,
+            range: (0, 0),
+            lucia_source_loc: format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()),
+        }));
+
+        error.loc = Some(loc);
+
+        self.err = Some(error);
+        NULL
+    }
+
+    #[track_caller]
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Value {
         let rust_loc = PanicLocation::caller();
         let loc = self.get_location_from_current_statement_caller(*rust_loc).unwrap_or_else(|| self.get_location_from_statement_before().unwrap_or_else(|| Location {
@@ -1323,8 +1340,8 @@ impl Interpreter {
         }));
 
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: Some(help.to_string()),
             loc: Some(loc),
             ref_err: None,
@@ -1345,8 +1362,8 @@ impl Interpreter {
         }));
 
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: Some(loc),
             ref_err: Some(Box::new(ref_err)),
@@ -1474,8 +1491,8 @@ impl Interpreter {
     
         if let Some(err) = self.err.clone() {
             let mut tuple_vec = vec![
-                Value::String(err.error_type),
-                Value::String(err.msg),
+                Value::String(err.err_type),
+                Value::String(err.err_msg),
             ];
 
             if err.help.is_some() {
@@ -1912,11 +1929,11 @@ impl Interpreter {
     }
 
     fn handle_value(&mut self, value: Value) -> Value {
-        if let Value::Error(err_ty, err_msg, ref_err) = &value {
-            if let Some(ref_err) = ref_err {
-                self.raise_with_ref(err_ty, &err_msg, ref_err.clone());
+        if let Value::Error(e) = &value {
+            if let Some(ref_err) = &e.ref_err {
+                self.raise_with_ref(&e.err_type, &e.err_msg, *ref_err.clone());
             } else {
-                self.raise(err_ty, &err_msg);
+                self.raise(&e.err_type, &e.err_msg);
             }
             return NULL;
         }
@@ -2034,7 +2051,7 @@ impl Interpreter {
         };
 
         if is_null {
-            Value::Struct(Struct::new_as_null(struct_ty))
+            Value::Struct(Box::new(Struct::new_as_null(struct_ty)))
         } else {
             let type_fields = if let Type::Struct { fields, .. } = &struct_ty {
                 fields
@@ -2098,7 +2115,7 @@ impl Interpreter {
                 final_fields.insert(field.clone(), (val.clone(), t));
             }
 
-            Value::Struct(Struct::new_with_fields(struct_ty, final_fields))
+            Value::Struct(Box::new(Struct::new_with_fields(struct_ty, final_fields)))
         }
     }
 
@@ -3107,10 +3124,10 @@ impl Interpreter {
                 } else if let Value::Generator(generator) = value {
                     if !generator.is_infinite() {
                         let v = generator.to_vec();
-                        if let Some(Value::Error(err_type, err_msg, ref_err)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
-                            self.err = Some(match ref_err {
-                                Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
-                                None => Error::new(err_type, err_msg, &self.file_path),
+                        if let Some(Value::Error(e)) = v.iter().find(|item| matches!(item, Value::Error(..))) {
+                            self.err = Some(match &e.ref_err {
+                                Some(re) => Error::with_ref(e.err_type.as_str(), e.err_msg.as_str(), *re.clone(), &self.file_path),
+                                None => Error::new(e.err_type.as_str(), e.err_msg.as_str(), &self.file_path),
                             });
                             return NULL;
                         }
@@ -3260,7 +3277,7 @@ impl Interpreter {
                             let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, Some(&mut var))));
                             if self.err.is_some() {
                                 let err = self.err.clone().expect("Error should be present");
-                                return self.raise(to_static(err.error_type), to_static(err.msg));
+                                return self.raise(to_static(err.err_type), to_static(err.err_msg));
                             }
                             return result;
                         } else {
@@ -3277,7 +3294,7 @@ impl Interpreter {
                                                     new_fields.insert(new_key.clone(), (val.0.clone(), val.1.clone()));
                                                 }
                                             }
-                                            return Value::Struct(Struct::new_with_fields(t_ty.clone(), new_fields))
+                                            return Value::Struct(Box::new(Struct::new_with_fields(t_ty.clone(), new_fields)))
                                         }
                                         Err(e) => {
                                             return self.raise_with_help("TypeError", &format!("Cannot convert struct of type '{}' to '{}'", s.get_type().display_simple(), target_type_type.display_simple()), &e);
@@ -4394,8 +4411,8 @@ impl Interpreter {
                 if self.err.is_some() {
                     if prev_err.is_some() {
                         self.raise_with_ref(
-                            &self.err.clone().unwrap().error_type,
-                            &self.err.clone().unwrap().msg,
+                            &self.err.clone().unwrap().err_type,
+                            &self.err.clone().unwrap().err_msg,
                             prev_err.clone().unwrap(),
                         );
                         prev_err = self.err.clone();
@@ -4445,8 +4462,8 @@ impl Interpreter {
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
-                                    &self.err.clone().unwrap().error_type,
-                                    &self.err.clone().unwrap().msg,
+                                    &self.err.clone().unwrap().err_type,
+                                    &self.err.clone().unwrap().err_msg,
                                     prev_err.clone().unwrap(),
                                 );
                                 prev_err = self.err.clone();
@@ -4482,8 +4499,8 @@ impl Interpreter {
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
-                                    &self.err.clone().unwrap().error_type,
-                                    &self.err.clone().unwrap().msg,
+                                    &self.err.clone().unwrap().err_type,
+                                    &self.err.clone().unwrap().err_msg,
                                     prev_err.clone().unwrap(),
                                 );
                                 prev_err = self.err.clone();
@@ -4520,8 +4537,8 @@ impl Interpreter {
                         if self.err.is_some() {
                             if prev_err.is_some() {
                                 self.raise_with_ref(
-                                    &self.err.clone().unwrap().error_type,
-                                    &self.err.clone().unwrap().msg,
+                                    &self.err.clone().unwrap().err_type,
+                                    &self.err.clone().unwrap().err_msg,
                                     prev_err.clone().unwrap(),
                                 );
                                 prev_err = self.err.clone();
@@ -5414,8 +5431,8 @@ impl Interpreter {
                 match exception_vars.len() {
                     1 => {
                         let mut tuple_vals = vec![
-                            Value::String(err.error_type.clone()),
-                            Value::String(err.msg.clone()),
+                            Value::String(err.err_type.clone()),
+                            Value::String(err.err_msg.clone()),
                         ];
                         if let Some(help) = &err.help {
                             tuple_vals.push(Value::String(help.clone()));
@@ -5431,7 +5448,7 @@ impl Interpreter {
                             exception_vars[0].clone(),
                             Variable::new(
                                 exception_vars[0].clone(),
-                                Value::String(err.error_type.clone()),
+                                Value::String(err.err_type.clone()),
                                 "str".to_string(),
                                 false,
                                 true,
@@ -5442,7 +5459,7 @@ impl Interpreter {
                             exception_vars[1].clone(),
                             Variable::new(
                                 exception_vars[1].clone(),
-                                Value::String(err.msg.clone()),
+                                Value::String(err.err_msg.clone()),
                                 "str".to_string(),
                                 false,
                                 true,
@@ -5455,7 +5472,7 @@ impl Interpreter {
                             exception_vars[0].clone(),
                             Variable::new(
                                 exception_vars[0].clone(),
-                                Value::String(err.error_type.clone()),
+                                Value::String(err.err_type.clone()),
                                 "str".to_string(),
                                 false,
                                 true,
@@ -5466,7 +5483,7 @@ impl Interpreter {
                             exception_vars[1].clone(),
                             Variable::new(
                                 exception_vars[1].clone(),
-                                Value::String(err.msg.clone()),
+                                Value::String(err.err_msg.clone()),
                                 "str".to_string(),
                                 false,
                                 true,
@@ -5590,14 +5607,14 @@ impl Interpreter {
                 fn value_to_usize(val: &Value) -> Result<usize, Value> {
                     match val {
                         Value::Int(i) => {
-                            let v = i.to_i64().map_err(|_| Value::Error("TypeError", "Index must be integer", None))?;
-                            if v >= 0 { Ok(v as usize) } else { Err(Value::Error("TypeError", "Index must be non-negative", None)) }
+                            let v = i.to_i64().map_err(|_| Value::new_error("TypeError", "Index must be integer", None))?;
+                            if v >= 0 { Ok(v as usize) } else { Err(Value::new_error("TypeError", "Index must be non-negative", None)) }
                         }
                         Value::Float(f) => {
-                            let v = f.to_f64().map_err(|_| Value::Error("TypeError", "Index must be number", None))?;
-                            if v.fract() == 0.0 && v >= 0.0 { Ok(v as usize) } else { Err(Value::Error("TypeError", "Index must be non-negative whole number", None)) }
+                            let v = f.to_f64().map_err(|_| Value::new_error("TypeError", "Index must be number", None))?;
+                            if v.fract() == 0.0 && v >= 0.0 { Ok(v as usize) } else { Err(Value::new_error("TypeError", "Index must be non-negative whole number", None)) }
                         }
-                        _ => Err(Value::Error("TypeError", "Index must be integer or whole float", None)),
+                        _ => Err(Value::new_error("TypeError", "Index must be integer or whole float", None)),
                     }
                 }
 
@@ -5605,7 +5622,7 @@ impl Interpreter {
                     if let AccessType::Single { index } = access {
                         let val = interpreter.evaluate(index);
                         if let Some(err) = interpreter.err.take() {
-                            return Err((err.error_type.to_owned(), err.msg.to_owned()));
+                            return Err((err.err_type.to_owned(), err.err_msg.to_owned()));
                         }
                         Ok(val)
                     } else {
@@ -5624,12 +5641,12 @@ impl Interpreter {
                     match container {
                         Value::List(l) => {
                             let idx = value_to_usize(current_index)?;
-                            if idx >= l.len() { return Err(Value::Error("IndexError", "List index out of range", None)); }
+                            if idx >= l.len() { return Err(Value::new_error("IndexError", "List index out of range", None)); }
                             assign_nested(&mut l[idx], &indices[1..], right_value)?;
                         }
                         Value::Tuple(t) => {
                             let idx = value_to_usize(current_index)?;
-                            if idx >= t.len() { return Err(Value::Error("IndexError", "Tuple index out of range", None)); }
+                            if idx >= t.len() { return Err(Value::new_error("IndexError", "Tuple index out of range", None)); }
                             assign_nested(&mut t[idx], &indices[1..], right_value)?;
                         }
                         Value::Map(m) => {
@@ -5641,28 +5658,28 @@ impl Interpreter {
                             assign_nested(val, &indices[1..], right_value)?;
                         }
                         Value::String(s) => {
-                            if indices.len() != 1 { return Err(Value::Error("TypeError", "Cannot index deeper into a string", None)); }
+                            if indices.len() != 1 { return Err(Value::new_error("TypeError", "Cannot index deeper into a string", None)); }
                             let idx = value_to_usize(current_index)?;
-                            if idx >= s.len() { return Err(Value::Error("IndexError", "String index out of range", None)); }
+                            if idx >= s.len() { return Err(Value::new_error("IndexError", "String index out of range", None)); }
                             let replacement = right_value.to_string();
-                            if replacement.chars().count() != 1 { return Err(Value::Error("TypeError", "String assignment must be a single character", None)); }
+                            if replacement.chars().count() != 1 { return Err(Value::new_error("TypeError", "String assignment must be a single character", None)); }
                             let mut chars: Vec<char> = s.chars().collect();
                             chars[idx] = replacement.chars().next().unwrap();
                             *s = chars.into_iter().collect();
                         }
                         Value::Bytes(b) => {
-                            if indices.len() != 1 { return Err(Value::Error("TypeError", "Cannot index deeper into bytes", None)); }
+                            if indices.len() != 1 { return Err(Value::new_error("TypeError", "Cannot index deeper into bytes", None)); }
                             let idx = value_to_usize(current_index)?;
-                            if idx >= b.len() { return Err(Value::Error("IndexError", "Bytes index out of range", None)); }
+                            if idx >= b.len() { return Err(Value::new_error("IndexError", "Bytes index out of range", None)); }
                             let byte_val = match right_value {
                                 Value::Int(i) => i.to_i64().unwrap_or(0) as u8,
                                 Value::Float(f) => f.to_f64().unwrap_or(0.0) as u8,
                                 Value::String(s) => s.parse::<u8>().unwrap_or(0),
-                                _ => return Err(Value::Error("TypeError", "Expected numeric value for byte assignment", None)),
+                                _ => return Err(Value::new_error("TypeError", "Expected numeric value for byte assignment", None)),
                             };
                             b[idx] = byte_val;
                         }
-                        _ => return Err(Value::Error("TypeError", "Object not indexable", None)),
+                        _ => return Err(Value::new_error("TypeError", "Object not indexable", None)),
                     }
 
                     Ok(())
@@ -5837,7 +5854,7 @@ impl Interpreter {
                                 if *ty != Statement::Null {
                                     return self.raise("TypeError", &format!("Enum variant '{}' requires associated value", name));
                                 }
-                                return Value::Enum(Enum::new(t.clone(), (i.clone(), NULL)));
+                                return Value::Enum(Box::new(Enum::new(t.clone(), (i.clone(), NULL))));
                             }
                         }
                         return self.raise("AttributeError", &format!("Enum variant not found at index '{}'", index_val));
@@ -6083,7 +6100,7 @@ impl Interpreter {
                     Some(u) => u,
                     None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
                 };
-                return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, Value::Null)));
+                return Value::Enum(Box::new(Enum::new(candidates[0].1.clone(), (idx, Value::Null))));
             } else if candidates.len() > 1 {
                 let variant_list = candidates.iter()
                     .map(|(variant, ty, _)| format!("'{}.{}'", ty.display_simple(), variant))
@@ -6148,10 +6165,10 @@ impl Interpreter {
                 for item in iter_items {
                     if self.check_stop_flag() { return NULL; }
 
-                    if let Value::Error(ref err_type, ref err_msg, ref ref_err) = item {
-                        self.err = Some(match ref_err {
-                            Some(re) => Error::with_ref(err_type, err_msg, re.clone(), &self.file_path),
-                            None => Error::new(err_type, err_msg, &self.file_path),
+                    if let Value::Error(ref e) = item {
+                        self.err = Some(match e.ref_err {
+                            Some(ref re) => Error::with_ref(&e.err_type, &e.err_msg, *re.clone(), &self.file_path),
+                            None => Error::new(&e.err_type, &e.err_msg, &self.file_path),
                         });
                         return NULL;
                     }
@@ -7193,7 +7210,7 @@ impl Interpreter {
                             t.clone(),
                             (idx, variant_val)
                         );
-                        return Value::Enum(v);
+                        return Value::Enum(Box::new(v));
                     }
                     _ => {}
                 }
@@ -7347,10 +7364,10 @@ impl Interpreter {
                             Some(u) => u,
                             None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
                         };
-                        return Value::Enum(Enum::new(
+                        return Value::Enum(Box::new(Enum::new(
                             t.clone(),
                             (idx, NULL)
-                        ));
+                        )));
                     }
                     Type::Struct { .. } => {}
                     _ => {}
@@ -7533,7 +7550,7 @@ impl Interpreter {
                                     Some(u) => u,
                                     None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", candidates[0].0)),
                                 };
-                                return Value::Enum(Enum::new(candidates[0].1.clone(), (idx, variant_value)));
+                                return Value::Enum(Box::new(Enum::new(candidates[0].1.clone(), (idx, variant_value))));
                             } else {
                                 return self.raise("TypeError", &format!("Expected '{}' for '{}.{}' value, but got: {}", eval_type.display_simple(), candidates[0].1.display_simple(), variant_name, variant_value.get_type().display_simple()));
                             }
@@ -8069,7 +8086,7 @@ impl Interpreter {
                     } else if !pos_args.is_empty() {
                         pos_args[0].clone()
                     } else {
-                        Value::Error("ValueError", "Missing 'message' argument in warn", None)
+                        Value::new_error("ValueError", "Missing 'message' argument in warn", None)
                     };
                     if let Value::String(s) = msg {
                         self.warn(&s);
@@ -8235,12 +8252,12 @@ impl Interpreter {
                 self.err = Some(err);
                 return NULL;
             }
-            if let Value::Error(err_type, err_msg, referr) = &result {
-                if let Some(rerr) = referr {
+            if let Value::Error(e) = &result {
+                if let Some(rerr) = &e.ref_err {
                     let err = Error::with_ref(
-                        err_type,
-                        err_msg,
-                        rerr.clone(),
+                        &e.err_type,
+                        &e.err_msg,
+                        *(rerr.clone()),
                         &self.file_path,
                     );
                     self.raise_with_ref(
@@ -8250,8 +8267,8 @@ impl Interpreter {
                     );
                 }
                 let err = Error::new(
-                    err_type,
-                    err_msg,
+                    &e.err_type,
+                    &e.err_msg,
                     &self.file_path,
                 );
                 self.raise_with_ref(
@@ -8327,12 +8344,12 @@ impl Interpreter {
                 return NULL;
             }
 
-            if let Value::Error(err_type, err_msg, referr) = &result {
-                if let Some(rerr) = referr {
+            if let Value::Error(e) = &result {
+                if let Some(rerr) = &e.ref_err {
                     let err = Error::with_ref(
-                        err_type,
-                        err_msg,
-                        rerr.clone(),
+                        &e.err_type,
+                        &e.err_msg,
+                        *(rerr.clone()),
                         &self.file_path,
                     );
                     self.raise_with_ref(
@@ -8342,8 +8359,8 @@ impl Interpreter {
                     );
                 }
                 let err = Error::new(
-                    err_type,
-                    err_msg,
+                    &e.err_type,
+                    &e.err_msg,
                     &self.file_path,
                 );
                 self.raise_with_ref(
@@ -8531,12 +8548,12 @@ impl Interpreter {
                     return NULL;
                 }
                 result = new_interpreter.return_value.clone();
-                if let Value::Error(err_type, err_msg, referr) = &result {
-                    if let Some(rerr) = referr {
+                if let Value::Error(e) = &result {
+                    if let Some(rerr) = &e.ref_err {
                         let err = Error::with_ref(
-                            err_type,
-                            err_msg,
-                            rerr.clone(),
+                            &e.err_type,
+                            &e.err_msg,
+                            *(rerr.clone()),
                             &module_file_path.display().to_string(),
                         );
                         self.raise_with_ref(
@@ -8546,8 +8563,8 @@ impl Interpreter {
                         );
                     }
                     let err = Error::new(
-                        err_type,
-                        err_msg,
+                        &e.err_type,
+                        &e.err_msg,
                         &module_file_path.display().to_string(),
                     );
                     self.raise_with_ref(
@@ -8596,15 +8613,8 @@ impl Interpreter {
         self.debug_log(
             format_args!("<Function '{}' returned {}>", function_name, format_value(&result)),
         );
-        if let Value::Error(err_type, err_msg, referr) = &result {
-            if let Some(err) = referr {
-                return self.raise_with_ref(
-                    err_type,
-                    err_msg,
-                    err.clone(),
-                );
-            }
-            return self.raise(err_type, err_msg);
+        if let Value::Error(e) = &result {
+            return self.raise_err(e.as_ref().clone());
         }
         let (is_valid, err) = self.check_type(&result, &metadata.return_type);
         if !is_valid {
@@ -8951,7 +8961,7 @@ impl Interpreter {
             vec![struct_type.clone()]
         };
 
-        let func = match find_struct_method(&s1, s2_val.as_ref(), func_name, &expected_params, &ret_type) {
+        let func = match find_struct_method(&s1, s2_val.as_ref().map(|v| &**v), func_name, &expected_params, &ret_type) {
             Ok(f) => f,
             Err((err_type, err_msg, err_help)) => {
                 match operator {
@@ -10123,7 +10133,7 @@ impl Interpreter {
         let parsed = match Parser::new(tokens_no_loc).parse_safe() {
             Ok(parsed) => parsed,
             Err(error) => {
-                self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.msg));
+                self.raise("SyntaxError", &format!("Error parsing f-string expression: {}", error.err_msg));
                 return Err(());
             }
         };

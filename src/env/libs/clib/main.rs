@@ -97,9 +97,9 @@ fn ptr_from_value_pointer(v: &Value) -> Result<*mut c_void, Value> {
     match v {
         Value::Pointer(arc_val) => match &*arc_val.lock() {
             (Value::Int(i), _) => Ok(i.to_i64().unwrap() as usize as *mut c_void),
-            _ => Err(Value::Error("TypeError", "Expected inner pointer as Int", None)),
+            _ => Err(Value::new_error("TypeError", "Expected inner pointer as Int", None)),
         },
-        _ => Err(Value::Error("TypeError", "Expected pointer type", None)),
+        _ => Err(Value::new_error("TypeError", "Expected pointer type", None)),
     }
 }
 
@@ -109,7 +109,7 @@ fn value_pointer_from_raw(ptr: *mut c_void) -> Value {
 
 fn printf_fn(args: &HashMap<String, Value>) -> Value {
     if args.get("args").is_some() {
-        return Value::Error("NotImplementedError", "Variadic arguments are not supported in this FFI binding", None);
+        return Value::new_error("NotImplementedError", "Variadic arguments are not supported in this FFI binding", None);
     }
 
     match args.get("format") {
@@ -118,9 +118,9 @@ fn printf_fn(args: &HashMap<String, Value>) -> Value {
                 let written = printf(cstr.as_ptr());
                 Value::Int((written as i64).into())
             },
-            Err(_) => Value::Error("FFIError", "CString conversion failed", None),
+            Err(_) => Value::new_error("FFIError", "CString conversion failed", None),
         },
-        _ => Value::Error("TypeError", "Expected 'text' to be a string", None),
+        _ => Value::new_error("TypeError", "Expected 'text' to be a string", None),
     }
 }
 
@@ -128,22 +128,22 @@ fn malloc_fn(args: &HashMap<String, Value>) -> Value {
     match args.get("size") {
         Some(Value::Int(n)) => {
             let Ok(v) = n.to_i64() else {
-                return Value::Error("TypeError", "Expected integer for 'size'", None);
+                return Value::new_error("TypeError", "Expected integer for 'size'", None);
             };
             if v <= 0 || v as u64 > MAX_ALLOC_SIZE as u64 {
-                return Value::Error("ValueError", "Requested malloc size is invalid or too large", None);
+                return Value::new_error("ValueError", "Requested malloc size is invalid or too large", None);
             }
             let size = v as usize;
             unsafe {
                 let ptr = malloc(size);
                 if ptr.is_null() {
-                    Value::Error("AllocError", "malloc failed", None)
+                    Value::new_error("AllocError", "malloc failed", None)
                 } else {
                     value_pointer_from_raw(ptr)
                 }
             }
         }
-        _ => Value::Error("TypeError", "Expected 'size' to be an integer", None),
+        _ => Value::new_error("TypeError", "Expected 'size' to be an integer", None),
     }
 }
 
@@ -151,24 +151,24 @@ fn calloc_fn(args: &HashMap<String, Value>) -> Value {
     match (args.get("count"), args.get("size")) {
         (Some(Value::Int(count)), Some(Value::Int(size))) => {
             let Ok(c) = count.to_i64() else {
-                return Value::Error("TypeError", "Expected integer for 'count'", None);
+                return Value::new_error("TypeError", "Expected integer for 'count'", None);
             };
             let Ok(s) = size.to_i64() else {
-                return Value::Error("TypeError", "Expected integer for 'size'", None);
+                return Value::new_error("TypeError", "Expected integer for 'size'", None);
             };
             if c <= 0 || s <= 0 || (c as u64).saturating_mul(s as u64) > MAX_ALLOC_SIZE as u64 {
-                return Value::Error("ValueError", "Requested calloc size is too large or invalid", None);
+                return Value::new_error("ValueError", "Requested calloc size is too large or invalid", None);
             }
             unsafe {
                 let ptr = calloc(c as size_t, s as size_t);
                 if ptr.is_null() {
-                    Value::Error("AllocError", "calloc failed", None)
+                    Value::new_error("AllocError", "calloc failed", None)
                 } else {
                     value_pointer_from_raw(ptr)
                 }
             }
         }
-        _ => Value::Error("TypeError", "Expected 'count' and 'size' to be integers", None),
+        _ => Value::new_error("TypeError", "Expected 'count' and 'size' to be integers", None),
     }
 }
 
@@ -176,10 +176,10 @@ fn realloc_fn(args: &HashMap<String, Value>) -> Value {
     match (args.get("ptr"), args.get("new_size")) {
         (Some(ptr_val), Some(Value::Int(new_size))) => {
             let Ok(ns) = new_size.to_i64() else {
-                return Value::Error("TypeError", "Expected integer for 'new_size'", None);
+                return Value::new_error("TypeError", "Expected integer for 'new_size'", None);
             };
             if ns <= 0 || ns as u64 > MAX_ALLOC_SIZE as u64 {
-                return Value::Error("ValueError", "Invalid or too large size for realloc", None);
+                return Value::new_error("ValueError", "Invalid or too large size for realloc", None);
             }
             let raw_ptr = match ptr_from_value_pointer(ptr_val) {
                 Ok(p) => p,
@@ -188,13 +188,13 @@ fn realloc_fn(args: &HashMap<String, Value>) -> Value {
             unsafe {
                 let new_ptr = realloc(raw_ptr, ns as size_t);
                 if new_ptr.is_null() {
-                    Value::Error("AllocError", "realloc failed", None)
+                    Value::new_error("AllocError", "realloc failed", None)
                 } else {
                     value_pointer_from_raw(new_ptr)
                 }
             }
         }
-        _ => Value::Error("TypeError", "Expected 'ptr' (&any) and 'new_size' (int)", None),
+        _ => Value::new_error("TypeError", "Expected 'ptr' (&any) and 'new_size' (int)", None),
     }
 }
 
@@ -207,7 +207,7 @@ fn free_fn(args: &HashMap<String, Value>) -> Value {
             },
             Err(e) => e,
         },
-        _ => Value::Error("TypeError", "Expected 'ptr' to be a pointer", None),
+        _ => Value::new_error("TypeError", "Expected 'ptr' to be a pointer", None),
     }
 }
 
@@ -220,7 +220,7 @@ fn strlen_fn(args: &HashMap<String, Value>) -> Value {
             },
             Err(e) => e,
         },
-        _ => Value::Error("TypeError", "Expected 'ptr' to be a pointer", None),
+        _ => Value::new_error("TypeError", "Expected 'ptr' to be a pointer", None),
     }
 }
 
@@ -240,7 +240,7 @@ fn strcpy_fn(args: &HashMap<String, Value>) -> Value {
                 value_pointer_from_raw(result as *mut c_void)
             }
         }
-        _ => Value::Error("TypeError", "Expected 'dst' and 'src' to be pointers", None),
+        _ => Value::new_error("TypeError", "Expected 'dst' and 'src' to be pointers", None),
     }
 }
 
@@ -260,7 +260,7 @@ fn strcmp_fn(args: &HashMap<String, Value>) -> Value {
                 Value::Int((res as i64).into())
             }
         }
-        _ => Value::Error("TypeError", "Expected 'a' and 'b' to be pointers", None),
+        _ => Value::new_error("TypeError", "Expected 'a' and 'b' to be pointers", None),
     }
 }
 
@@ -268,10 +268,10 @@ fn memcpy_fn(args: &HashMap<String, Value>) -> Value {
     match (args.get("dst"), args.get("src"), args.get("size")) {
         (Some(dst_val), Some(src_val), Some(Value::Int(size))) => {
             let Ok(sz) = size.to_i64() else {
-                return Value::Error("TypeError", "Expected integer for 'size'", None);
+                return Value::new_error("TypeError", "Expected integer for 'size'", None);
             };
             if sz < 0 || sz as u64 > MAX_ALLOC_SIZE as u64 {
-                return Value::Error("ValueError", "memcpy size too large or invalid", None);
+                return Value::new_error("ValueError", "memcpy size too large or invalid", None);
             }
             let dst_ptr = match ptr_from_value_pointer(dst_val) {
                 Ok(p) => p,
@@ -286,7 +286,7 @@ fn memcpy_fn(args: &HashMap<String, Value>) -> Value {
                 value_pointer_from_raw(res)
             }
         }
-        _ => Value::Error("TypeError", "Expected 'dst', 'src' as pointers and 'size' as int", None),
+        _ => Value::new_error("TypeError", "Expected 'dst', 'src' as pointers and 'size' as int", None),
     }
 }
 
@@ -299,17 +299,17 @@ fn alloc_string_fn(args: &HashMap<String, Value>) -> Value {
                     unsafe {
                         let ptr = malloc(bytes.len());
                         if ptr.is_null() {
-                            Value::Error("AllocError", "malloc failed in alloc_string", None)
+                            Value::new_error("AllocError", "malloc failed in alloc_string", None)
                         } else {
                             ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len());
                             value_pointer_from_raw(ptr)
                         }
                     }
                 }
-                Err(_) => Value::Error("FFIError", "CString conversion failed", None),
+                Err(_) => Value::new_error("FFIError", "CString conversion failed", None),
             }
         }
-        _ => Value::Error("TypeError", "Expected 'text' to be string", None),
+        _ => Value::new_error("TypeError", "Expected 'text' to be string", None),
     }
 }
 
@@ -332,14 +332,14 @@ fn getenv_fn(args: &HashMap<String, Value>) -> Value {
                         let c_str = CStr::from_ptr(ptr);
                         match c_str.to_str() {
                             Ok(s) => Value::String(s.to_string()),
-                            Err(_) => Value::Error("FFIError", "Failed to convert getenv result", None),
+                            Err(_) => Value::new_error("FFIError", "Failed to convert getenv result", None),
                         }
                     }
                 },
-                Err(_) => Value::Error("FFIError", "CString conversion failed", None),
+                Err(_) => Value::new_error("FFIError", "CString conversion failed", None),
             }
         }
-        _ => Value::Error("TypeError", "Expected 'key' to be string", None),
+        _ => Value::new_error("TypeError", "Expected 'key' to be string", None),
     }
 }
 

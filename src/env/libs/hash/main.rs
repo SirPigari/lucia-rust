@@ -43,14 +43,14 @@ pub fn register() -> HashMap<String, Variable> {
                             match v {
                                 Value::Int(i) => match i.to_u8() {
                                     Ok(b) => out.push(b),
-                                    Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                                    Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                                 },
-                                _ => return Value::Error("TypeError", "list[int] required", None),
+                                _ => return Value::new_error("TypeError", "list[int] required", None),
                             }
                         }
                         out
                     }
-                    _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+                    _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
                 };
                 let hash = $algo(&b);
                 if is_list_input {
@@ -94,18 +94,18 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         let salt = match args.get("salt") {
             Some(Value::String(s)) => s.as_bytes(),
-            _ => return Value::Error("TypeError", "salt required", None),
+            _ => return Value::new_error("TypeError", "salt required", None),
         };
         let memory = args.get("memory_kib").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(19456);
         let iterations = args.get("iterations").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(2);
@@ -113,7 +113,7 @@ pub fn register() -> HashMap<String, Variable> {
 
         let params = match argon2::Params::new(memory, iterations, parallelism, None) {
             Ok(p) => p,
-            Err(_) => return Value::Error("ValueError", "invalid argon2 params", None),
+            Err(_) => return Value::new_error("ValueError", "invalid argon2 params", None),
         };
 
         let argon = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
@@ -129,7 +129,7 @@ pub fn register() -> HashMap<String, Variable> {
             } else {
                 Value::String(h.to_string())
             },
-            Err(_) => Value::Error("HashError", "argon2 failed", None),
+            Err(_) => Value::new_error("HashError", "argon2 failed", None),
         }
     }, vec![
         Parameter::positional_pt("password", &input_type),
@@ -150,14 +150,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         let cost = args.get("cost").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(12);
         match bcrypt_hash(password, cost) {
@@ -171,7 +171,7 @@ pub fn register() -> HashMap<String, Variable> {
             } else {
                 Value::String(h)
             },
-            Err(_) => Value::Error("HashError", "bcrypt failed", None),
+            Err(_) => Value::new_error("HashError", "bcrypt failed", None),
         }
     }, vec![
         Parameter::positional_pt("password", &input_type),
@@ -189,14 +189,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         let salt = match args.get("salt") {
             Some(Value::String(s)) => s.as_bytes().to_vec(),
@@ -206,14 +206,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "salt required", None),
+            _ => return Value::new_error("TypeError", "salt required", None),
         };
         let iterations = args.get("iterations").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(100_000);
         let out_len = args.get("output_len").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_usize().ok()).unwrap_or(32);
@@ -248,14 +248,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "password required", None),
+            _ => return Value::new_error("TypeError", "password required", None),
         };
         let salt = match args.get("salt") {
             Some(Value::String(s)) => s.as_bytes().to_vec(),
@@ -265,14 +265,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "salt required", None),
+            _ => return Value::new_error("TypeError", "salt required", None),
         };
         let n = args.get("n").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(16384);
         let r = args.get("r").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_u32().ok()).unwrap_or(8);
@@ -283,7 +283,7 @@ pub fn register() -> HashMap<String, Variable> {
         match ScryptParams::new(log_n, r, p, out_len) {
             Ok(params) => {
                 if let Err(_) = scrypt(&password, &salt, &params, &mut out) {
-                    return Value::Error("HashError", "scrypt failed", None);
+                    return Value::new_error("HashError", "scrypt failed", None);
                 }
                 if is_list_input {
                     let mut list_out = Vec::with_capacity(out.len());
@@ -295,7 +295,7 @@ pub fn register() -> HashMap<String, Variable> {
                     Value::String(to_hex(&out))
                 }
             }
-            Err(_) => Value::Error("ValueError", "invalid scrypt params", None),
+            Err(_) => Value::new_error("ValueError", "invalid scrypt params", None),
         }
     }, vec![
         Parameter::positional_pt("password", &input_type),
@@ -315,14 +315,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         Value::Int(Int::from_i64(crc32fast::hash(&b) as i64))
     }, vec![Parameter::positional_pt("input", &input_type)], "int", EffectFlags::PURE);
@@ -336,14 +336,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         let mut h = FnvHasher::default();
         h.write(&b);
@@ -359,14 +359,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "input must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "input must be list[int] or str", None),
         };
         let mut h = FnvHasher::default();
         h.write(&b);
@@ -384,14 +384,14 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "key must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "key must be list[int] or str", None),
         };
         let message = match args.get("message") {
             Some(Value::String(s)) => s.as_bytes().to_vec(),
@@ -402,24 +402,24 @@ pub fn register() -> HashMap<String, Variable> {
                     match v {
                         Value::Int(i) => match i.to_u8() {
                             Ok(b) => out.push(b),
-                            Err(_) => return Value::Error("ValueError", "invalid byte", None),
+                            Err(_) => return Value::new_error("ValueError", "invalid byte", None),
                         },
-                        _ => return Value::Error("TypeError", "list[int] required", None),
+                        _ => return Value::new_error("TypeError", "list[int] required", None),
                     }
                 }
                 out
             }
-            _ => return Value::Error("TypeError", "message must be list[int] or str", None),
+            _ => return Value::new_error("TypeError", "message must be list[int] or str", None),
         };
         let algorithm_fn = match args.get("algorithm") {
             Some(Value::Function(f)) => f,
-            _ => return Value::Error("TypeError", "algorithm must be a function", None),
+            _ => return Value::new_error("TypeError", "algorithm must be a function", None),
         };
 
         let mut algorithm = |input: &Value| {
             let result = interpreter.call_function(&algorithm_fn, vec![input.clone()], HashMap::new(), None);
             if interpreter.err.is_some() {
-                Value::Error("RuntimeError", "error while calling algorithm function", interpreter.err.take())
+                Value::new_error("RuntimeError", "error while calling algorithm function", interpreter.err.take())
             } else {
                 result
             }
@@ -463,7 +463,7 @@ pub fn register() -> HashMap<String, Variable> {
                     key_block[i] = bytes[i];
                 }
             } else {
-                return Value::Error("TypeError", "algorithm returned invalid type", None);
+                return Value::new_error("TypeError", "algorithm returned invalid type", None);
             }
         } else {
             for i in 0..key.len() {
@@ -501,13 +501,13 @@ pub fn register() -> HashMap<String, Variable> {
                 v.extend(s.as_bytes());
                 Value::List(v.iter().map(|b| Value::Int(Int::from_i64(*b as i64))).collect())
             },
-            _ => return Value::Error("TypeError", "algorithm returned invalid type", None),
+            _ => return Value::new_error("TypeError", "algorithm returned invalid type", None),
         };
 
         let hmac_result = match algorithm(&outer_input) {
             Value::List(l) => l.iter().map(|b| if let Value::Int(i) = b { i.to_u8().unwrap_or(0) } else { 0 }).collect::<Vec<u8>>(),
             Value::String(s) => s.as_bytes().to_vec(),
-            _ => return Value::Error("TypeError", "algorithm returned invalid type", None),
+            _ => return Value::new_error("TypeError", "algorithm returned invalid type", None),
         };
 
 

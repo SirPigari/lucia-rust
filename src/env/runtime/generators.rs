@@ -135,7 +135,7 @@ impl Generator {
 
         if inner.is_static {
             if inner.has_iterated {
-                return Box::new(std::iter::once(Value::Error(
+                return Box::new(std::iter::once(Value::new_error(
                     "StaticGeneratorError",
                     "Cannot iterate a static generator more than once",
                     None,
@@ -154,7 +154,7 @@ impl Generator {
         let mut inner = self.inner.lock();
         if inner.is_static {
             if inner.has_iterated {
-                return Some(Value::Error(
+                return Some(Value::new_error(
                     "StaticGeneratorError",
                     "Cannot iterate a static generator more than once",
                     None,
@@ -173,7 +173,7 @@ impl Generator {
         let inner = self.inner.lock();
         if inner.is_static {
             if inner.has_iterated {
-                return Some(Value::Error(
+                return Some(Value::new_error(
                     "StaticGeneratorError",
                     "Cannot iterate a static generator more than once",
                     None,
@@ -193,7 +193,7 @@ impl Generator {
 
         if inner.is_static {
             if inner.has_iterated {
-                return vec![Value::Error(
+                return vec![Value::new_error(
                     "StaticGeneratorError",
                     "Cannot iterate a static generator more than once",
                     None,
@@ -234,7 +234,7 @@ impl Generator {
 
         if inner.is_static {
             if inner.has_iterated {
-                return vec![Value::Error(
+                return vec![Value::new_error(
                     "StaticGeneratorError",
                     "Cannot iterate a static generator more than once",
                     None,
@@ -459,11 +459,7 @@ impl Iterator for CustomGenerator {
                         if self.interpreter.err.is_some() {
                             self.done = true;
                             let err = self.interpreter.err.take().unwrap();
-                            return Some(Value::Error(
-                                to_static(err.error_type),
-                                to_static(err.msg),
-                                err.ref_err.map(|boxed| *boxed),
-                            ));
+                            return Some(Value::Error(Arc::new(err)));
                         }
 
                         match self.interpreter.state {
@@ -547,11 +543,7 @@ impl Iterator for CustomGenerator {
                         if self.interpreter.err.is_some() {
                             self.done = true;
                             let err = self.interpreter.err.take().unwrap();
-                            return Some(Value::Error(
-                                to_static(err.error_type),
-                                to_static(err.msg),
-                                err.ref_err.map(|boxed| *boxed),
-                            ));
+                            return Some(Value::Error(Arc::new(err)));
                         }
 
                         match self.interpreter.state {
@@ -587,11 +579,7 @@ impl Iterator for CustomGenerator {
                             if self.interpreter.err.is_some() {
                                 self.done = true;
                                 let err = self.interpreter.err.take().unwrap();
-                                return Some(Value::Error(
-                                    to_static(err.error_type),
-                                    to_static(err.msg),
-                                    err.ref_err.map(|boxed| *boxed),
-                                ));
+                                return Some(Value::Error(Arc::new(err)));
                             }
                             frame.while_pc = 1;
                         }
@@ -607,11 +595,7 @@ impl Iterator for CustomGenerator {
                             if self.interpreter.err.is_some() {
                                 self.done = true;
                                 let err = self.interpreter.err.take().unwrap();
-                                return Some(Value::Error(
-                                    to_static(err.error_type),
-                                    to_static(err.msg),
-                                    err.ref_err.map(|boxed| *boxed),
-                                ));
+                                return Some(Value::Error(Arc::new(err)));
                             }
                             *body_pc = 0;
                             continue;
@@ -623,11 +607,7 @@ impl Iterator for CustomGenerator {
                         if self.interpreter.err.is_some() {
                             self.done = true;
                             let err = self.interpreter.err.take().unwrap();
-                            return Some(Value::Error(
-                                to_static(err.error_type),
-                                to_static(err.msg),
-                                err.ref_err.map(|boxed| *boxed),
-                            ));
+                            return Some(Value::Error(Arc::new(err)));
                         }
 
                         match self.interpreter.state {
@@ -678,11 +658,7 @@ impl Iterator for CustomGenerator {
                             if self.interpreter.err.is_some() {
                                 self.done = true;
                                 let err = self.interpreter.err.take().unwrap();
-                                return Some(Value::Error(
-                                    to_static(err.error_type),
-                                    to_static(err.msg),
-                                    err.ref_err.map(|boxed| *boxed),
-                                ));
+                                return Some(Value::Error(Arc::new(err)));
                             }
 
                             if !iterable_val.is_iterable() {
@@ -725,11 +701,7 @@ impl Iterator for CustomGenerator {
                     if self.interpreter.err.is_some() {
                         self.done = true;
                         let err = self.interpreter.err.take().unwrap();
-                        return Some(Value::Error(
-                            to_static(err.error_type),
-                            to_static(err.msg),
-                            err.ref_err.map(|boxed| *boxed),
-                        ));
+                        return Some(Value::Error(Arc::new(err)));
                     }
 
                     self.index += 1;
@@ -1027,7 +999,7 @@ impl Iterator for FilterIter {
 
             if interpreter.err.is_some() {
                 self.done = true;
-                return Some(Value::Error(
+                return Some(Value::new_error(
                     "FilterError",
                     "Error during filter function evaluation",
                     interpreter.err.take()
@@ -1064,7 +1036,7 @@ impl Iterator for MapIter {
 
             if interpreter.err.is_some() {
                 self.done = true;
-                return Some(Value::Error(
+                return Some(Value::new_error(
                     "MapError",
                     "Error during map function evaluation",
                     interpreter.err.take()

@@ -88,7 +88,7 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
         make_native_static_fn_pt!("new", move |_args: &HashMap<String, Value>| -> Value {
             let id = VEC_DEQUE_IDS.lock().len() as usize + 1;
             VEC_DEQUE_IDS.lock().insert(id, VecDeque::new());
-            Value::Struct(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))])))
+            Value::Struct(Box::new(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))]))))
         }, vec![], &vec_deque_type, EffectFlags::PURE)
     );
 
@@ -106,7 +106,7 @@ fn add_vecdeque_type(map: &mut HashMap<String, Variable>) {
                 deque.push_back(item.clone());
             }
             VEC_DEQUE_IDS.lock().insert(id, deque);
-            Value::Struct(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))])))
+            Value::Struct(Box::new(Struct::new_with_fields(vec_deque_type_clone.clone(), HashMap::from([("id".to_string(), (Box::new(Value::Int(Int::from(id))), Type::new_simple("int")))]))))
         }, vec![Parameter::positional("l", "list")], &vec_deque_type, EffectFlags::PURE)
     );
 

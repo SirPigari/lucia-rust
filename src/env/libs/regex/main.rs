@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use parking_lot::Mutex;
 use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::utils::to_static;
 use crate::env::runtime::variables::Variable;
 use super::regex_engine::{RegexEngine, normal, fancy};
 use crate::env::runtime::internal_structs::EffectFlags;
@@ -53,12 +52,12 @@ fn get_cached_regex(pattern: &str) -> Result<RegexEngine, String> {
 fn regex_match(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -66,24 +65,24 @@ fn regex_match(args: &HashMap<String, Value>) -> Value {
             Some(mat) => Value::String(mat.as_str().to_string()),
             None => Value::Null,
         },
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_replace(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     let replacement = match args.get("replacement") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError".into(), "expected a string for 'replacement'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'replacement'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -91,19 +90,19 @@ fn regex_replace(args: &HashMap<String, Value>) -> Value {
             let replaced = re.replace_all(value, replacement);
             Value::String(replaced.to_owned())
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_is_match(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
 
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -115,11 +114,11 @@ fn regex_is_match(args: &HashMap<String, Value>) -> Value {
 fn regex_find_all(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -130,18 +129,18 @@ fn regex_find_all(args: &HashMap<String, Value>) -> Value {
                 .collect();
             Value::List(matches)
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_split(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -152,18 +151,18 @@ fn regex_split(args: &HashMap<String, Value>) -> Value {
                 .collect();
             Value::List(parts)
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_count(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -175,11 +174,11 @@ fn regex_count(args: &HashMap<String, Value>) -> Value {
 fn regex_capture(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -204,18 +203,18 @@ fn regex_capture(args: &HashMap<String, Value>) -> Value {
                 None => Value::Null,
             }
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_match_all(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -232,18 +231,18 @@ fn regex_match_all(args: &HashMap<String, Value>) -> Value {
                 .collect();
             Value::List(matches)
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_named_groups(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     match get_cached_regex(pattern) {
@@ -268,14 +267,14 @@ fn regex_named_groups(args: &HashMap<String, Value>) -> Value {
                 None => Value::Null,
             }
         }
-        Err(e) => Value::Error("RegexError".into(), to_static(e), None),
+        Err(e) => Value::new_error("RegexError", e, None),
     }
 }
 
 fn regex_escape(args: &HashMap<String, Value>) -> Value {
     let value = match args.get("value") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'value'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'value'", None),
     };
 
     Value::String(regex::escape(value))
@@ -284,7 +283,7 @@ fn regex_escape(args: &HashMap<String, Value>) -> Value {
 fn regex_is_fancy(args: &HashMap<String, Value>) -> Value {
     let pattern = match args.get("pattern") {
         Some(Value::String(s)) => s,
-        _ => return Value::Error("TypeError".into(), "expected a string for 'pattern'".into(), None),
+        _ => return Value::new_error("TypeError", "expected a string for 'pattern'", None),
     };
 
     Value::Boolean(is_fancy_pattern(pattern))

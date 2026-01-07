@@ -150,7 +150,7 @@ pub fn add_deprecated_functions(map: &mut HashMap<String, Variable>) {
             if let Some(Value::String(input)) = args.get("input") {
                 Value::String(sha256_hash(input))
             } else {
-                Value::Error("TypeError", "expected a string", None)
+                Value::new_error("TypeError", "expected a string", None)
             }
         },
         vec![Parameter::positional("input", "str")],
@@ -198,7 +198,7 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
     if let (Some(Value::String(s1)), Some(Value::String(s2))) = (args.get("s1"), args.get("s2")) {
         Value::Int(Int::from_i64(levenshtein_distance(s1, s2) as i64))
     } else {
-        Value::Error("TypeError", "expected two strings", None)
+        Value::new_error("TypeError", "expected two strings", None)
     }
 }
 
@@ -206,7 +206,7 @@ fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
         Value::String(hex_to_ansi(hex, true))
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -281,10 +281,10 @@ fn format_string_handler(args: &HashMap<String, Value>) -> Value {
 
             Value::String(result)
         } else {
-            Value::Error("TypeError", "expected a list of arguments", None)
+            Value::new_error("TypeError", "expected a list of arguments", None)
         }
     } else {
-        Value::Error("TypeError", "expected a format string", None)
+        Value::new_error("TypeError", "expected a format string", None)
     }
 }
 
@@ -303,15 +303,15 @@ fn print_to_handler(args: &HashMap<String, Value>) -> Value {
                     Value::Null
                 }
                 Ok(3) => {
-                    Value::Error("ValueError", "cannot write to stdin", None)
+                    Value::new_error("ValueError", "cannot write to stdin", None)
                 }
-                _ => Value::Error("ValueError", "invalid stream", None),
+                _ => Value::new_error("ValueError", "invalid stream", None),
             }
         } else {
-            Value::Error("TypeError", "expected an integer stream", None)
+            Value::new_error("TypeError", "expected an integer stream", None)
         }
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -323,13 +323,13 @@ fn read_line_handler(args: &HashMap<String, Value>) -> Value {
                 if io::stdin().read_line(&mut input).is_ok() {
                     Value::String(input.trim_end().to_string())
                 } else {
-                    Value::Error("IOError", "failed to read from stdin", None)
+                    Value::new_error("IOError", "failed to read from stdin", None)
                 }
             }
-            _ => Value::Error("ValueError", "invalid input stream", None),
+            _ => Value::new_error("ValueError", "invalid input stream", None),
         }
     } else {
-        Value::Error("TypeError", "expected an integer input stream", None)
+        Value::new_error("TypeError", "expected an integer input stream", None)
     }
 }
 
@@ -337,7 +337,7 @@ fn format_value_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("value") {
         Value::String(format_value(value))
     } else {
-        Value::Error("TypeError", "expected a value", None)
+        Value::new_error("TypeError", "expected a value", None)
     }
 }
 
@@ -345,10 +345,10 @@ fn unescape_string_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         match unescape_string(s) {
             Ok(unescaped) => Value::String(unescaped),
-            Err(e) => Value::Error("UnescapeError".into(), to_static(e), None),
+            Err(e) => Value::new_error("UnescapeError", e, None),
         }
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -356,7 +356,7 @@ fn capitalize_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         Value::String(capitalize(s))
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -364,7 +364,7 @@ fn get_type_default_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(typ)) = args.get("type") {
         get_type_default(typ)
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -375,7 +375,7 @@ fn replace_accented_handler(args: &HashMap<String, Value>) -> Value {
             .collect();
         Value::String(replaced)
     } else {
-        Value::Error("TypeError".into(), "expected a string".into(), None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -384,19 +384,19 @@ fn range_handler(args: &HashMap<String, Value>) -> Value {
         let end = if let Some(Value::Int(i)) = args.get("a") {
             i.to_i64().unwrap_or(0)
         } else {
-            return Value::Error("TypeError", "expected an integer for 'a'", None);
+            return Value::new_error("TypeError", "expected an integer for 'a'", None);
         };
         (0, end)
     } else {
         let start = if let Some(Value::Int(i)) = args.get("a") {
             i.to_i64().unwrap_or(0)
         } else {
-            return Value::Error("TypeError", "expected an integer for 'a'", None);
+            return Value::new_error("TypeError", "expected an integer for 'a'", None);
         };
         let end = if let Some(Value::Int(i)) = args.get("b") {
             i.to_i64().unwrap_or(0)
         } else {
-            return Value::Error("TypeError", "expected an integer for 'b'", None);
+            return Value::new_error("TypeError", "expected an integer for 'b'", None);
         };
         (start, end)
     };
@@ -408,7 +408,7 @@ fn range_handler(args: &HashMap<String, Value>) -> Value {
     };
 
     if step == 0 {
-        return Value::Error("ValueError", "step cannot be zero", None);
+        return Value::new_error("ValueError", "step cannot be zero", None);
     }
 
     let range: Vec<Value> = (a..b)
@@ -422,7 +422,7 @@ fn sanitize_alias_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         Value::String(sanitize_alias(s))
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -430,9 +430,9 @@ fn str_to_json(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         match serde_json::from_str::<serde_json::Value>(s) {
             Ok(json_value) => convert_json_value_to_lucia_value(&json_value),
-            Err(e) => Value::Error("JSONError", to_static(format!("failed to parse JSON: {}", e)), None),
+            Err(e) => Value::new_error("JSONError", to_static(format!("failed to parse JSON: {}", e)), None),
         }
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }

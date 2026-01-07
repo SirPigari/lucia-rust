@@ -50,7 +50,7 @@ where
 {
     move |_| match func() {
         Ok(s) => Value::String(s),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        Err(e) => Value::new_error("OSError", e.to_string(), None),
     }
 }
 
@@ -61,7 +61,7 @@ where
 {
     move |_| match func() {
         Ok(v) => Value::Int(Int::from_i64(v as i64)),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        Err(e) => Value::new_error("OSError", e.to_string(), None),
     }
 }
 
@@ -72,7 +72,7 @@ where
 {
     move |_| match func() {
         Ok(v) => Value::Int(Int::from_i64(v as i64)),
-        Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+        Err(e) => Value::new_error("OSError", e.to_string(), None),
     }
 }
 
@@ -90,7 +90,7 @@ fn get_logged_user(_: &HashMap<String, Value>) -> Value {
 
 fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
-        return Value::Error(
+        return Value::new_error(
             "TypeError",
             "This function is unsafe. Enable allow_unsafe to use it.",
             None,
@@ -98,7 +98,7 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 
     if ptr < 0x1000 || ptr > MAX_PTR {
-        return Value::Error("ValueError", "Pointer value is out of valid range", None);
+        return Value::new_error("ValueError", "Pointer value is out of valid range", None);
     }
 
     unsafe {
@@ -112,7 +112,7 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
 
 fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     if !allow_unsafe {
-        return Value::Error(
+        return Value::new_error(
             "TypeError",
             "This function is unsafe. Enable allow_unsafe to use it.",
             None,
@@ -120,7 +120,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
     }
 
     if ptr < 0x1000 || ptr > MAX_PTR {
-        return Value::Error("ValueError", "Pointer value is out of valid range", None);
+        return Value::new_error("ValueError", "Pointer value is out of valid range", None);
     }
 
     unsafe {
@@ -141,7 +141,7 @@ fn panic_handler(args: &HashMap<String, Value>) -> Value {
         marked_message.push_str(message);
         panic!("{}", marked_message);
     }
-    Value::Error("PanicError", "Panic called".into(), None)
+    Value::new_error("PanicError", "Panic called", None)
 }
 
 #[cfg(unix)]
@@ -173,23 +173,23 @@ fn create_signal_map() -> HashMap<String, Variable> {
         let signum = match args.get("sig") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'sig' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'sig' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'sig' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'sig' to be an integer", None),
         };
         let pid = match args.get("pid") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'pid' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'pid' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'pid' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'pid' to be an integer", None),
         };
 
         let res = unsafe { libc::kill(pid as libc::pid_t, signum as libc::c_int) };
         if res == 0 {
             Value::Boolean(true)
         } else {
-            Value::Error("OSError", to_static(format!("Failed to send signal {} to pid {}", signum, pid)), None)
+            Value::new_error("OSError", to_static(format!("Failed to send signal {} to pid {}", signum, pid)), None)
         }
     }, vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], "bool", EffectFlags::IO);
     map
@@ -212,17 +212,17 @@ fn create_signal_map() -> HashMap<String, Variable> {
         let signum = match args.get("sig") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'sig' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'sig' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'sig' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'sig' to be an integer", None),
         };
 
         let pid = match args.get("pid") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'pid' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'pid' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'pid' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'pid' to be an integer", None),
         };
 
         let current_pid = process::id() as i64;
@@ -232,11 +232,11 @@ fn create_signal_map() -> HashMap<String, Variable> {
             if res == 0 {
                 Value::Boolean(true)
             } else {
-                Value::Error("OSError", to_static(format!("Failed to raise signal {} on self", signum)), None)
+                Value::new_error("OSError", to_static(format!("Failed to raise signal {} on self", signum)), None)
             }
         } else {
             if signum != 15 {
-                return Value::Error("OSError", "Only SIGTERM (15) can be sent to other processes", None);
+                return Value::new_error("OSError", "Only SIGTERM (15) can be sent to other processes", None);
             }
 
             match process::Command::new("taskkill")
@@ -274,7 +274,7 @@ fn create_signal_map() -> HashMap<String, Variable> {
     insert_native_var!(map, "SIGTERM", Value::Int(Int::from_i64(15)), "int");
 
     insert_native_fn!(map, "send", |_args: &HashMap<String, Value>| -> Value {
-        Value::Error("OSError", "Signal handling is not supported in WebAssembly environment", None)
+        Value::new_error("OSError", "Signal handling is not supported in WebAssembly environment", None)
     }, 
     vec![Parameter::positional("pid", "int"), Parameter::positional("sig", "int")], 
     "bool", EffectFlags::IO);
@@ -306,7 +306,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return val.clone();
                 }
             }
-            Value::Error("AttributeError", "Failed to get exitcode", None)
+            Value::new_error("AttributeError", "Failed to get exitcode", None)
         }, vec![Parameter::instance("self", &process_output_struct, vec![])], &Type::new_simple("int"), EffectFlags::PURE)
     );
 
@@ -318,7 +318,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     _ => {}
                 }
             }
-            Value::Error("AttributeError", "Failed to get runned status", None)
+            Value::new_error("AttributeError", "Failed to get runned status", None)
         }, vec![Parameter::instance("self", &process_output_struct, vec![])], &Type::new_simple("bool"), EffectFlags::PURE)
     );
 
@@ -337,7 +337,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     "".to_string()
                 }
             }).collect::<Vec<String>>(),
-            _ => return Value::Error("TypeError", "Expected 'args' to be a list of strings", None),
+            _ => return Value::new_error("TypeError", "Expected 'args' to be a list of strings", None),
         };
 
         let shell = match args.get("shell") {
@@ -406,10 +406,10 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 output_map.insert("stderr".to_string(), (Box::new(Value::String(stderr)), Type::new_simple("str")));
                 output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(returncode as i64))), Type::new_simple("int")));
                 output_map.insert("shellerr".to_string(), (Box::new(Value::String("".to_string())), Type::new_simple("str")));
-                Value::Struct(Struct::new_with_fields(
+                Value::Struct(Box::new(Struct::new_with_fields(
                     closure_struct.clone(),
                     output_map,
-                ))
+                )))
             }
             Err(e) => {
                 let mut output_map: HashMap<String, (Box<Value>, Type)> = HashMap::new();
@@ -418,10 +418,10 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 output_map.insert("stderr".to_string(), (Box::new(Value::String("".to_string())), Type::new_simple("str")));
                 output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(-1))), Type::new_simple("int")));
                 output_map.insert("shellerr".to_string(), (Box::new(Value::String(e.to_string())), Type::new_simple("str")));
-                Value::Struct(Struct::new_with_fields(
+                Value::Struct(Box::new(Struct::new_with_fields(
                     closure_struct.clone(),
                     output_map,
-                ))
+                )))
             }
         }
     }, vec![
@@ -434,7 +434,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
     insert_native_fn!(map, "run", |args: &HashMap<String, Value>| -> Value {
         let command = match args.get("command") {
             Some(Value::String(s)) => s,
-            _ => return Value::Error("TypeError", "Expected 'command' to be a string", None),
+            _ => return Value::new_error("TypeError", "Expected 'command' to be a string", None),
         };
 
         let (shell, flag) = if cfg!(target_os = "windows") {
@@ -452,7 +452,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 let code = status.code().unwrap_or(-1);
                 Value::Int(code.into())
             }
-            Err(e) => Value::Error(
+            Err(e) => Value::new_error(
                 "RuntimeError",
                 to_static(format!("Failed to execute command: {}", e)),
                 None,
@@ -490,18 +490,18 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
     let run_inside = move |args: &HashMap<String, Value>| -> Value {
         let self_struct = match args.get("self") {
             Some(Value::Struct(s)) => s,
-            _ => return Value::Error("TypeError", "Expected 'self' to be a struct", None),
+            _ => return Value::new_error("TypeError", "Expected 'self' to be a struct", None),
         };
 
         let args_val = match self_struct.get_field("args") {
             Some(Value::List(list)) => list.iter().filter_map(|v| {
                 if let Value::String(s) = v { Some(s.clone()) } else { None }
             }).collect::<Vec<String>>(),
-            _ => return Value::Error("TypeError", "Expected 'args' to be a list", None),
+            _ => return Value::new_error("TypeError", "Expected 'args' to be a list", None),
         };
 
         if args_val.is_empty() {
-            return Value::Error("ValueError", "Command args list is empty", None);
+            return Value::new_error("ValueError", "Command args list is empty", None);
         }
 
         let stdin_val = self_struct.get_field("stdin");
@@ -572,7 +572,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(returncode as i64))), Type::new_simple("int")));
                 output_map.insert("shellerr".to_string(), (Box::new(Value::String(shellerr)), Type::new_simple("str")));
 
-                Value::Struct(Struct::new_with_fields(process_output_struct_clone.clone(), output_map))
+                Value::Struct(Box::new(Struct::new_with_fields(process_output_struct_clone.clone(), output_map)))
             }
             Err(e) => {
                 output_map.insert("pid".to_string(), (Box::new(Value::Int(Int::from_i64(-1))), Type::new_simple("int")));
@@ -581,7 +581,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 output_map.insert("returncode".to_string(), (Box::new(Value::Int(Int::from_i64(-1))), Type::new_simple("int")));
                 output_map.insert("shellerr".to_string(), (Box::new(Value::String(format!("Failed to spawn command: {}\n{}", e, shellerr))), Type::new_simple("str")));
 
-                Value::Struct(Struct::new_with_fields(process_output_struct_clone.clone(), output_map))
+                Value::Struct(Box::new(Struct::new_with_fields(process_output_struct_clone.clone(), output_map)))
             }
         }
     };
@@ -612,7 +612,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return Value::Struct(s);
                 }
             }
-            Value::Error("TypeError", "Failed to set stdout", None)
+            Value::new_error("TypeError", "Failed to set stdout", None)
         }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
     );
 
@@ -633,7 +633,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return Value::Struct(s);
                 }
             }
-            Value::Error("TypeError", "Failed to set stdin", None)
+            Value::new_error("TypeError", "Failed to set stdin", None)
         }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
     );
 
@@ -654,7 +654,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return Value::Struct(s);
                 }
             }
-            Value::Error("TypeError", "Failed to set stderr", None)
+            Value::new_error("TypeError", "Failed to set stderr", None)
         }, vec![Parameter::instance("self", &cmd_struct, vec![]), Parameter::positional_pt("value", &redirect_enum)], &cmd_struct, EffectFlags::PURE)
     );
 
@@ -667,7 +667,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return Value::Struct(s);
                 }
             }
-            Value::Error("TypeError", "Failed to set args", None)
+            Value::new_error("TypeError", "Failed to set args", None)
         }, vec![
             Parameter::instance("self", &cmd_struct, vec![]),
             Parameter::positional_pt("value", &Type::Indexed {
@@ -691,7 +691,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                     return Value::Struct(s);
                 }
             }
-            Value::Error("TypeError", "Failed to append arg", None)
+            Value::new_error("TypeError", "Failed to append arg", None)
         }, vec![
             Parameter::instance("self", &cmd_struct, vec![]),
             Parameter::positional("value", "str")
@@ -704,12 +704,12 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
             if let Some(Value::Struct(s)) = args.get("self") {
                 let mut s = s.clone();
                 s.set("args".to_string(), Value::List(vec![]));
-                s.set("stdin".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
-                s.set("stdout".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
-                s.set("stderr".to_string(), Value::Enum(Enum::new(redirect_enum_clone.clone(), (1, Value::Null))));
+                s.set("stdin".to_string(), Value::Enum(Box::new(Enum::new(redirect_enum_clone.clone(), (1, Value::Null)))));
+                s.set("stdout".to_string(), Value::Enum(Box::new(Enum::new(redirect_enum_clone.clone(), (1, Value::Null)))));
+                s.set("stderr".to_string(), Value::Enum(Box::new(Enum::new(redirect_enum_clone.clone(), (1, Value::Null)))));
                 return Value::Struct(s);
             }
-            Value::Error("TypeError", "Failed to clear args", None)
+            Value::new_error("TypeError", "Failed to clear args", None)
         }, vec![Parameter::instance("self", &cmd_struct, vec![])], &cmd_struct, EffectFlags::PURE)
     );
 
@@ -720,7 +720,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
                 s.set("args".to_string(), Value::List(vec![]));
                 return Value::Struct(s);
             }
-            Value::Error("TypeError", "Failed to clear args", None)
+            Value::new_error("TypeError", "Failed to clear args", None)
         }, vec![Parameter::instance("self", &cmd_struct, vec![])], &cmd_struct, EffectFlags::PURE)
     );
 
@@ -743,9 +743,9 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         cmd_struct.clone(),
         HashMap::from_iter(vec![
             ("args".to_string(), (Box::new(Value::List(vec![])), Type::new_simple("list"))),
-            ("stdin".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
-            ("stdout".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
-            ("stderr".to_string(), (Box::new(Value::Enum(Enum::new(redirect_enum.clone(), (1, Value::Null)))), redirect_enum.clone())),
+            ("stdin".to_string(), (Box::new(Value::Enum(Box::new(Enum::new(redirect_enum.clone(), (1, Value::Null))))), redirect_enum.clone())),
+            ("stdout".to_string(), (Box::new(Value::Enum(Box::new(Enum::new(redirect_enum.clone(), (1, Value::Null))))), redirect_enum.clone())),
+            ("stderr".to_string(), (Box::new(Value::Enum(Box::new(Enum::new(redirect_enum.clone(), (1, Value::Null))))), redirect_enum.clone())),
         ])
     ));
     
@@ -754,7 +754,7 @@ fn create_subprocess_map() -> HashMap<String, Variable> {
         Box::new({
             let default_cmd_instance = Arc::clone(&default_cmd_instance);
             move |_| -> Value {
-                Value::Struct((*default_cmd_instance).clone())
+                Value::Struct(Box::new((*default_cmd_instance).clone()))
             }
         });
         
@@ -781,9 +781,9 @@ fn create_terminal_map() -> HashMap<String, Variable> {
         let fd = match args.get("fd") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'fd' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'fd' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'fd' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'fd' to be an integer", None),
         };
 
         let res = unsafe { libc::isatty(fd as libc::c_int) };
@@ -801,7 +801,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                     Value::Int(Int::from_i64(rows as i64)),
                 ])
             }
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "tuple", EffectFlags::IO);
     insert_native_fn!(map, "clear_screen", |_: &HashMap<String, Value>| -> Value {
@@ -810,7 +810,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "bool", EffectFlags::IO);
 
@@ -821,7 +821,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::cursor::MoveTo(0,0)
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "beep", |_: &HashMap<String, Value>| -> Value {
@@ -831,7 +831,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 let _ = out.flush();
                 Value::Boolean(true)
             },
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "hide_cursor", |_: &HashMap<String, Value>| -> Value {
@@ -840,7 +840,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::cursor::Hide
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "show_cursor", |_: &HashMap<String, Value>| -> Value {
@@ -849,14 +849,14 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::cursor::Show
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+            Err(e) => Value::new_error("OSError", e.to_string(), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "flush", |args: &HashMap<String, Value>| -> Value {
         let fd = match args.get("fd") {
             Some(Value::Int(i)) => match i.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid fd integer", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid fd integer", None),
             },
             _ => 1,
         };
@@ -864,13 +864,13 @@ fn create_terminal_map() -> HashMap<String, Variable> {
         match fd {
             1 => match std::io::stdout().flush() {
                 Ok(_) => Value::Boolean(true),
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+                Err(e) => Value::new_error("OSError", e.to_string(), None),
             },
             2 => match std::io::stderr().flush() {
                 Ok(_) => Value::Boolean(true),
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+                Err(e) => Value::new_error("OSError", e.to_string(), None),
             },
-            _ => Value::Error("OSError", Box::leak(Box::new("Only fd 0, 1, 2 are supported".to_string())), None),
+            _ => Value::new_error("OSError", "Only fd 0, 1, 2 are supported", None),
         }
     }, vec![Parameter::positional_optional("fd", "int", Value::Int(Int::from(1)))], "bool", EffectFlags::IO);
     
@@ -916,7 +916,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
     let key_enum_clone = key_enum.clone();
     insert_native_fn_pt!(map, "read_key", move |args: &HashMap<String, Value>| -> Value {
         let timeout_ms = match args.get("timeout") {
-            Some(Value::Int(int)) => match int.to_i64() { Ok(v) => v, Err(_) => return Value::Error("TypeError", "Invalid 'timeout' integer value", None) },
+            Some(Value::Int(int)) => match int.to_i64() { Ok(v) => v, Err(_) => return Value::new_error("TypeError", "Invalid 'timeout' integer value", None) },
             _ => 0,
         };
         let blocking = match args.get("blocking") {
@@ -940,7 +940,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             let mut last = LAST_KEY_TIME_AND_CODE.lock();
             if let Some(last_code) = last.1 {
                 if last_code == key_event.code && now.duration_since(last.0) < Duration::from_millis(timeout_ms as u64) {
-                    return Value::Enum(Enum::new(key_enum_clone.clone(), (27, Value::Null)));
+                    return Value::Enum(Box::new(Enum::new(key_enum_clone.clone(), (27, Value::Null))));
                 }
             }
             *last = (now, Some(key_event.code));
@@ -965,10 +965,10 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 KeyCode::F(n) if (1..=12).contains(&n) => Enum::new(key_enum_clone.clone(), (15 + n as usize, Value::Null)),
                 _ => Enum::new(key_enum_clone.clone(), (29, Value::String(format!("{:?}", key_event.code)))),
             };
-            return Value::Enum(key_enum);
+            return Value::Enum(Box::new(key_enum));
         }
 
-        Value::Enum(Enum::new(key_enum_clone.clone(), (27, Value::Null)))
+        Value::Enum(Box::new(Enum::new(key_enum_clone.clone(), (27, Value::Null))))
     }, vec![
         Parameter::positional_optional("timeout", "int", Value::Int(Int::from(0))),
         Parameter::positional_optional("blocking", "bool", Value::Boolean(true))
@@ -977,16 +977,16 @@ fn create_terminal_map() -> HashMap<String, Variable> {
         let x = match args.get("x") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v as u16,
-                Err(_) => return Value::Error("TypeError", "Invalid 'x' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'x' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'x' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'x' to be an integer", None),
         };
         let y = match args.get("y") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v as u16,
-                Err(_) => return Value::Error("TypeError", "Invalid 'y' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'y' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'y' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'y' to be an integer", None),
         };
 
         match crossterm::execute!(
@@ -994,7 +994,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::cursor::MoveTo(x, y)
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![
         Parameter::positional("x", "int"),
@@ -1008,19 +1008,19 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                     Value::Int(Int::from_i64(y as i64)),
                 ])
             }
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![], "tuple", EffectFlags::IO);
     insert_native_fn!(map, "enable_raw_mode", |_: &HashMap<String, Value>| -> Value {
         match crossterm::terminal::enable_raw_mode() {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "disable_raw_mode", |_: &HashMap<String, Value>| -> Value {
         match crossterm::terminal::disable_raw_mode() {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "clear_line", |_: &HashMap<String, Value>| -> Value {
@@ -1029,7 +1029,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
         ) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "flush_input_buffer", |_: &HashMap<String, Value>| -> Value {
@@ -1040,16 +1040,16 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 }
                 Value::Boolean(true)
             }
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![], "bool", EffectFlags::IO);
     insert_native_fn!(map, "scroll", |args: &HashMap<String, Value>| -> Value {
         let lines = match args.get("lines") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v as i16,
-                Err(_) => return Value::Error("TypeError", "Invalid 'lines' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'lines' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'lines' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'lines' to be an integer", None),
         };
 
         if lines > 0 {
@@ -1058,7 +1058,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 crossterm::terminal::ScrollDown(lines as u16)
             ) {
                 Ok(_) => Value::Boolean(true),
-                Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
             }
         } else {
             match crossterm::execute!(
@@ -1066,7 +1066,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 crossterm::terminal::ScrollUp(lines.abs() as u16)
             ) {
                 Ok(_) => Value::Boolean(true),
-                Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
             }
         }
     }, vec![
@@ -1075,7 +1075,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
     insert_native_fn!(map, "set_title", |args: &HashMap<String, Value>| -> Value {
         let title = match args.get("title") {
             Some(Value::String(s)) => s,
-            _ => return Value::Error("TypeError", "Expected 'title' to be a string", None),
+            _ => return Value::new_error("TypeError", "Expected 'title' to be a string", None),
         };
         
         use crossterm::ExecutableCommand;
@@ -1083,7 +1083,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
         let mut out = std::io::stdout();
         match out.execute(crossterm::terminal::SetTitle(title)) {
             Ok(_) => Value::Boolean(true),
-            Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+            Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
         }
     }, vec![
         Parameter::positional("title", "str")
@@ -1092,13 +1092,13 @@ fn create_terminal_map() -> HashMap<String, Variable> {
         let fd = match args.get("fd") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v,
-                Err(_) => return Value::Error("TypeError", "Invalid 'fd' integer value", None),
+                Err(_) => return Value::new_error("TypeError", "Invalid 'fd' integer value", None),
             },
-            _ => return Value::Error("TypeError", "Expected 'fd' to be an integer", None),
+            _ => return Value::new_error("TypeError", "Expected 'fd' to be an integer", None),
         };
         let message = match args.get("message") {
             Some(Value::String(s)) => s,
-            _ => return Value::Error("TypeError", "Expected 'message' to be a string", None),
+            _ => return Value::new_error("TypeError", "Expected 'message' to be a string", None),
         };
 
         #[cfg(unix)]
@@ -1110,7 +1110,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
                 let mut file = std::fs::File::from_raw_fd(fd as libc::c_int);
                 match file.write_all(message.as_bytes()) {
                     Ok(_) => Value::Boolean(true),
-                    Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                    Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
                 }
             }
         }
@@ -1122,7 +1122,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             unsafe {
                 let handle = fd as std::os::windows::io::RawHandle;
                 if handle.is_null() {
-                    return Value::Error("OSError", to_static("Invalid file descriptor"), None);
+                    return Value::new_error("OSError", to_static("Invalid file descriptor"), None);
                 }
 
                 let mut file = std::fs::File::from_raw_handle(handle);
@@ -1131,7 +1131,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
 
                 match result {
                     Ok(_) => Value::Boolean(true),
-                    Err(e) => Value::Error("OSError", to_static(format!("{}", e)), None),
+                    Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
                 }
             }
         }
@@ -1184,7 +1184,7 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
                     inner_map.insert(Value::String("fifteen".to_string()), Value::Float(l.fifteen.into()));
                     Value::Map(inner_map)
                 }
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+                Err(e) => Value::new_error("OSError", e.to_string(), None),
             }
         }, vec![], "map", EffectFlags::IO);
 
@@ -1196,7 +1196,7 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
                     inner_map.insert(Value::String("free".to_string()), Value::Int(Int::from_i64(d.free as i64)));
                     Value::Map(inner_map)
                 }
-                Err(e) => Value::Error("OSError", Box::leak(Box::new(format!("{}", e))), None),
+                Err(e) => Value::new_error("OSError", e.to_string(), None),
             }
         }, vec![], "map", EffectFlags::IO);
     }
@@ -1238,10 +1238,10 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
             if let Ok(ptr) = int.to_i64() {
                 from_ptr(ptr as usize, allow_unsafe)
             } else {
-                Value::Error("TypeError", "Invalid 'ptr' integer value", None)
+                Value::new_error("TypeError", "Invalid 'ptr' integer value", None)
             }
         } else {
-            Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+            Value::new_error("TypeError", "Expected 'ptr' to be an integer", None)
         }
     }, vec![Parameter::positional("ptr", "int")], "any", EffectFlags::UNSAFE);
 
@@ -1250,10 +1250,10 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
             if let Ok(ptr) = int.to_i64() {
                 to_ptr(ptr as usize, allow_unsafe)
             } else {
-                Value::Error("TypeError", "Invalid 'ptr' integer value", None)
+                Value::new_error("TypeError", "Invalid 'ptr' integer value", None)
             }
         } else {
-            Value::Error("TypeError", "Expected 'ptr' to be an integer", None)
+            Value::new_error("TypeError", "Expected 'ptr' to be an integer", None)
         }
     }, vec![Parameter::positional("ptr", "int")], "any", EffectFlags::UNSAFE);
 

@@ -44,8 +44,8 @@ impl Parser {
     pub fn raise(&mut self, error_type: &str, msg: &str) -> Statement {
         let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: self.get_loc_caller(*rust_loc),
             ref_err: None,
@@ -58,8 +58,8 @@ impl Parser {
     pub fn raise_with_help(&mut self, error_type: &str, msg: &str, help: &str) -> Statement {
         let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: Some(help.to_string()),
             loc: self.get_loc_caller(*rust_loc),
             ref_err: None,
@@ -72,8 +72,8 @@ impl Parser {
     pub fn raise_with_loc(&mut self, error_type: &str, msg: &str, loc: Location) -> Statement {
         let rust_loc = std::panic::Location::caller();
         self.err = Some(Error {
-            error_type: error_type.to_string(),
-            msg: msg.to_string(),
+            err_type: error_type.to_string(),
+            err_msg: msg.to_string(),
             help: None,
             loc: Some(loc.set_lucia_source_loc(format!("{}:{}:{}", rust_loc.file(), rust_loc.line(), rust_loc.column()))),
             ref_err: None,

@@ -43,7 +43,7 @@ fn random_int_handler(args: &HashMap<String, Value>) -> Value {
     };
 
     if max < min {
-        return Value::Error("ValueError".into(), "max must be >= min".into(), None);
+        return Value::new_error("ValueError".into(), "max must be >= min".into(), None);
     }
 
     Value::Int(Int::from_i64(wasm_rand_i64(min, max)))
@@ -75,7 +75,7 @@ fn random_float_handler(args: &HashMap<String, Value>) -> Value {
     };
 
     if max < min {
-        return Value::Error("ValueError".into(), "max must be >= min".into(), None);
+        return Value::new_error("ValueError".into(), "max must be >= min".into(), None);
     }
 
     let val = min + (max - min) * wasm_rand_f64();
@@ -103,8 +103,8 @@ fn random_choice_handler(args: &HashMap<String, Value>) -> Value {
             let idx = wasm_rand_i64(0, (list.len() - 1) as i64) as usize;
             list[idx].clone()
         }
-        Some(Value::List(_)) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
-        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
+        Some(Value::List(_)) => Value::new_error("ValueError".into(), "list must not be empty".into(), None),
+        _ => Value::new_error("TypeError".into(), "expected a list".into(), None),
     }
 }
 
@@ -128,8 +128,8 @@ fn random_choice_handler(args: &HashMap<String, Value>) -> Value {
             let mut rng = SmallRng::from_seed(seed);
             list.choose(&mut rng).unwrap().clone()
         }
-        Some(Value::List(_)) => Value::Error("ValueError".into(), "list must not be empty".into(), None),
-        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
+        Some(Value::List(_)) => Value::new_error("ValueError", "list must not be empty", None),
+        _ => Value::new_error("TypeError", "expected a list", None),
     }
 }
 
@@ -145,7 +145,7 @@ fn shuffle_handler(args: &HashMap<String, Value>) -> Value {
             }
             Value::List(cloned)
         }
-        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
+        _ => Value::new_error("TypeError".into(), "expected a list".into(), None),
     }
 }
 
@@ -171,7 +171,7 @@ fn shuffle_handler(args: &HashMap<String, Value>) -> Value {
             cloned.shuffle(&mut rng);
             Value::List(cloned)
         }
-        _ => Value::Error("TypeError".into(), "expected a list".into(), None),
+        _ => Value::new_error("TypeError", "expected a list", None),
     }
 }
 

@@ -6,7 +6,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::types::Int;
-use crate::env::runtime::utils::to_static;
 use std::default::Default;
 use std::collections::HashMap;
 use crate::env::runtime::internal_structs::{LibInfo, CacheFormat};
@@ -386,9 +385,9 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
                 ],
             ))
         }
-        _ => Value::Error(
+        _ => Value::new_error(
             "KeyError",
-            to_static(format!("Key '{}' not found in config", key)),
+            format!("Key '{}' not found in config", key),
             None,
         ),
     }

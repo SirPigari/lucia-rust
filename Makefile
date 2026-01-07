@@ -216,6 +216,8 @@ else
 	fi
 endif
 
+bench: benchmark
+
 benchmark-save:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@$(MKDIR)

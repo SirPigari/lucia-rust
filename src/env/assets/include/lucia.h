@@ -15,6 +15,13 @@
 // alias for u8 as boolean
 typedef uint8_t CBool;
 
+#ifndef true
+    #define true 1
+#endif
+#ifndef false
+    #define false 0
+#endif
+
 typedef struct LuciaColorScheme {
     const char* exception;
     const char* warning;
@@ -43,7 +50,7 @@ typedef struct LuciaConfig {
     LuciaColorScheme color_scheme;
 } LuciaConfig;
 
-typedef enum LuciaValueTag {
+typedef enum LuciaValueType {
     VALUE_INT = 1,
     VALUE_FLOAT = 2,
     VALUE_STRING = 3,
@@ -54,7 +61,7 @@ typedef enum LuciaValueTag {
     VALUE_BYTES = 8,
     VALUE_POINTER = 9,
     VALUE_UNSUPPORTED = 255,
-} LuciaValueTag;
+} LuciaValueType;
 
 typedef struct LuciaValue LuciaValue;
 
@@ -70,7 +77,7 @@ typedef union ValueData {
 } ValueData;
 
 struct LuciaValue {
-    LuciaValueTag tag;
+    LuciaValueType tag;
     ValueData data;
     size_t length; // used for lists, bytes, maps
 };
@@ -86,6 +93,28 @@ const LuciaValue* value_as_list_ptr(LuciaValue v);
 size_t value_as_list_len(LuciaValue v);
 const LuciaValue* value_as_map_ptr(LuciaValue v);
 size_t value_as_map_len(LuciaValue v);
+void* value_as_pointer(LuciaValue v);
+
+CBool try_value_as_int(LuciaValue v, int64_t* out);
+CBool try_value_as_float(LuciaValue v, double* out);
+CBool try_value_as_bool(LuciaValue v, CBool* out);
+CBool try_value_as_string(LuciaValue v, const char** out, size_t* out_len);
+CBool try_value_as_bytes(LuciaValue v, const uint8_t** out_ptr, size_t* out_len);
+CBool try_value_as_list(LuciaValue v, const LuciaValue** out_ptr, size_t* out_len);
+CBool try_value_as_map(LuciaValue v, const LuciaValue** out_ptr, size_t* out_len);
+CBool try_value_as_pointer(LuciaValue v, void** out);
+
+typedef struct ValueAsArgs {
+    CBool force;
+    CBool cast;
+} ValueAsArgs;
+
+// internal function for value_as with args
+CBool lucia__value_as_args(LuciaValue v, LuciaValueType t, void* out, ValueAsArgs args);
+
+// value_as(LuciaValue v, LuciaValueType t, void* out, CBool .force = false, CBool .cast = false)
+#define value_as(v, t, out, ...) \
+    lucia__value_as_args(v, t, out, (ValueAsArgs){ __VA_ARGS__ })
 
 typedef struct LuciaError {
     const char* err_type;

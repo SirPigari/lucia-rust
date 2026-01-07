@@ -37,8 +37,52 @@ use crate::insert_native_var;
 
 static STRINGS: OnceCell<Mutex<Vec<CString>>> = OnceCell::new();
 
+#[inline(always)]
 fn libload_error(msg: &str) -> Value {
-    Value::Error("LibloadError", to_static(msg.to_owned()), None)
+    Value::new_error("LibloadError", to_static(msg.to_owned()), None)
+}
+
+/// Unified type parser - converts string type names to ValueType
+#[inline]
+fn parse_type(s: &str) -> Option<ValueType> {
+    match s {
+        "char" => Some(ValueType::Char),
+        "short" => Some(ValueType::Short),
+        "int" => Some(ValueType::Int),
+        "long" => Some(ValueType::Long),
+        "longlong" | "long_long" | "long long" => Some(ValueType::LongLong),
+
+        "uchar" | "unsigned_char" | "unsigned char" => Some(ValueType::UChar),
+        "ushort" | "unsigned_short" | "unsigned short" => Some(ValueType::UShort),
+        "uint" | "unsigned_int" | "unsigned int" => Some(ValueType::UInt),
+        "ulong" | "unsigned_long" | "unsigned long" => Some(ValueType::ULong),
+        "ulonglong" | "unsigned_long_long" | "unsigned long long" => Some(ValueType::ULongLong),
+        
+        "float" | "float32" => Some(ValueType::Float),
+        "double" | "float64" => Some(ValueType::Double),
+        
+        "bool" | "boolean" => Some(ValueType::Bool),
+        "void" => Some(ValueType::Void),
+        
+        "any" | "str" | "ptr" | "array" | "" => Some(ValueType::Ptr),
+        
+        "byte" => Some(ValueType::UChar),
+        
+        _ => None,
+    }
+}
+
+#[inline(always)]
+const fn type_size(ty: ValueType) -> usize {
+    match ty {
+        ValueType::Char | ValueType::UChar | ValueType::Bool => 1,
+        ValueType::Short | ValueType::UShort => 2,
+        ValueType::Int | ValueType::UInt | ValueType::Float => 4,
+        ValueType::Long | ValueType::LongLong | 
+        ValueType::ULong | ValueType::ULongLong | 
+        ValueType::Double | ValueType::Ptr => 8,
+        ValueType::Void => 0,
+    }
 }
 
 pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
@@ -70,8 +114,9 @@ pub fn create_str_ptr(args: &HashMap<String, Value>) -> Value {
     Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 1))))
 }
 
+#[inline]
 fn manual_escape_string(s: &str) -> String {
-    let mut escaped = String::new();
+    let mut escaped = String::with_capacity(s.len() + 16);
     for c in s.chars() {
         match c {
             '\0' => escaped.push_str("\\0"),
@@ -81,7 +126,10 @@ fn manual_escape_string(s: &str) -> String {
             '\\' => escaped.push_str("\\\\"),
             '"'  => escaped.push_str("\\\""),
             '\'' => escaped.push_str("\\\'"),
-            c if (c as u32) < 0x20 => escaped.push_str(&format!("\\u{:04X}", c as u32)),
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write;
+                let _ = write!(escaped, "\\u{:04X}", c as u32);
+            }
             _ => escaped.push(c),
         }
     }
@@ -89,27 +137,26 @@ fn manual_escape_string(s: &str) -> String {
 }
 
 pub fn parse_str_ptr(args: &HashMap<String, Value>) -> Value {
-    let ptr_val = args.get("ptr");
-    let ptr = match ptr_val {
+    let ptr = match args.get("ptr") {
         Some(Value::Pointer(arc)) => {
             if let (Value::Int(i), _) = &*arc.lock() {
                 i.to_i64().unwrap_or(0) as *const i8
             } else {
-                return Value::Error("TypeError", "Pointer must wrap Int", None);
+                return Value::new_error("TypeError", "Pointer must wrap Int", None);
             }
         }
-        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+        _ => return Value::new_error("TypeError", "Expected pointer argument", None),
     };
 
     if ptr.is_null() {
-        return Value::Error("ValueError", "Null pointer provided", None);
+        return Value::new_error("ValueError", "Null pointer provided", None);
     }
 
     unsafe {
         let cstr = CStr::from_ptr(ptr);
         let mut bytes: Vec<u8> = cstr.to_bytes().to_vec();
 
-        bytes.retain(|&b| ![b'\r'].contains(&b));
+        bytes.retain(|&b| b != b'\r');
 
         if bytes.is_empty() {
             return Value::String(String::new());
@@ -126,42 +173,37 @@ pub fn parse_str_ptr(args: &HashMap<String, Value>) -> Value {
     }
 }
 
-
 pub fn parse_array_ptr(args: &HashMap<String, Value>) -> Value {
-    let ptr_val = args.get("ptr");
-    let len_val = args.get("len");
-
-    let ptr = match ptr_val {
+    let ptr = match args.get("ptr") {
         Some(Value::Pointer(arc)) => {
             let guard = arc.lock();
             if let (Value::Int(i), _) = &*guard {
                 i.to_i64().unwrap_or(0) as *const i64
             } else {
-                return Value::Error("TypeError", "Pointer must wrap Int", None);
+                return Value::new_error("TypeError", "Pointer must wrap Int", None);
             }
         }
-        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+        _ => return Value::new_error("TypeError", "Expected pointer argument", None),
     };
 
-    let length = match len_val {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected length int argument", None),
+    let length = match args.get("len") {
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected length int argument", None),
     };
 
     if ptr.is_null() {
-        return Value::Error("ValueError", "Null pointer provided", None);
+        return Value::new_error("ValueError", "Null pointer provided", None);
     }
 
-    let binding = (unsafe { std::slice::from_raw_parts(ptr as *const *const c_void, length) }).into_iter().map(|&p| p as usize as i64).collect::<Vec<i64>>();
-    let array: &[i64] = binding.as_slice();
-
-    dbg!(array);
-
+    let array = unsafe { std::slice::from_raw_parts(ptr as *const *const c_void, length) };
+    
     let pointers: Vec<Value> = array
         .iter()
-        .map(|&i| {
-            let arc = Arc::new(Mutex::new((Value::Int(i.into()), 0)));
-            Value::Pointer(arc)
+        .map(|&p| {
+            Value::Pointer(Arc::new(Mutex::new((
+                Value::Int((p as usize as i64).into()),
+                0,
+            ))))
         })
         .collect();
 
@@ -169,143 +211,145 @@ pub fn parse_array_ptr(args: &HashMap<String, Value>) -> Value {
 }
 
 pub fn parse_ptr_as(args: &HashMap<String, Value>) -> Value {
-    let ptr_val = args.get("ptr");
-    let as_type_val = args.get("as_type");
-
-    let ptr = match ptr_val {
+    let ptr = match args.get("ptr") {
         Some(Value::Pointer(arc)) => {
             let guard = arc.lock();
             if let (Value::Int(i), _) = &*guard {
-                i.to_i64().unwrap_or(0) as *const c_void
+                i.to_u64().unwrap_or(0) as *const c_void
             } else {
-                return Value::Error("TypeError", "Pointer must wrap Int", None);
+                return Value::new_error("TypeError", "Pointer must wrap Int", None);
             }
         }
-        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+        _ => return Value::new_error("TypeError", "Expected pointer argument", None),
     };
 
-    let as_type = match as_type_val {
+    let as_type = match args.get("as_type") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError", "Expected as_type: str argument", None),
+        _ => return Value::new_error("TypeError", "Expected as_type: str argument", None),
     };
 
     if ptr.is_null() {
-        return Value::Error("ValueError", "Null pointer provided", None);
+        return Value::new_error("ValueError", "Null pointer provided", None);
     }
 
-    let t = match as_type {
-        "int" => ValueType::Int,
-        "double" | "float64" => ValueType::Float64,
-        "float" | "float32" => ValueType::Float32,
-        "bool" => ValueType::Boolean,
-        "void" => ValueType::Void,
-        "byte" => ValueType::Byte,
-        "" => ValueType::Ptr,
-        _ => return Value::Error("TypeError", "Unsupported as_type", None),
+    let t = match parse_type(as_type) {
+        Some(t) => t,
+        None => return Value::new_error("TypeError", "Unsupported as_type", None),
     };
-
-    dbg!(&ptr);
 
     unsafe {
         match t {
-            ValueType::Int => Value::Int((*(ptr as *const i64)).into()),
-            ValueType::Float64 => Value::Float((*(ptr as *const f64)).into()),
-            ValueType::Float32 => Value::Float((*(ptr as *const f32)).into()),
-            ValueType::Boolean => Value::Boolean(*(ptr as *const bool)),
-            ValueType::Byte => Value::Int((*(ptr as *const u8)).into()),
+            ValueType::Char => Value::Int((*(ptr as *const i8) as i64).into()),
+            ValueType::Short => Value::Int((*(ptr as *const i16) as i64).into()),
+            ValueType::Int => Value::Int((*(ptr as *const i32) as i64).into()),
+            ValueType::Long | ValueType::LongLong => Value::Int((*(ptr as *const i64)).into()),
+            ValueType::UChar => Value::Int((*(ptr as *const u8) as i64).into()),
+            ValueType::UShort => Value::Int((*(ptr as *const u16) as i64).into()),
+            ValueType::UInt => Value::Int((*(ptr as *const u32) as i64).into()),
+            ValueType::ULong | ValueType::ULongLong => Value::Int((*(ptr as *const u64) as i64).into()),
+            ValueType::Float => Value::Float((*(ptr as *const f32) as f64).into()),
+            ValueType::Double => Value::Float((*(ptr as *const f64)).into()),
+            ValueType::Bool => Value::Boolean(*(ptr as *const u8) != 0),
             ValueType::Void => Value::Null,
-            ValueType::Ptr => Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 0)))),
+            ValueType::Ptr => Value::Pointer(Arc::new(Mutex::new((
+                Value::Int((ptr as usize as i64).into()),
+                0,
+            )))),
         }
     }
 }
 
 fn get_list_native(args: &HashMap<String, Value>) -> Value {
-    let ptr_val = args.get("ptr");
-    let type_val = args.get("type");
-    let len_val = args.get("len");
-    let ptr = match ptr_val {
+    let ptr = match args.get("ptr") {
         Some(Value::Pointer(arc)) => {
             if let (Value::Int(i), _) = &*arc.lock() {
-                let raw = i.to_i64().unwrap_or(0) as usize;
-                raw as *const std::ffi::c_void
+                i.to_u64().unwrap_or(0) as *const c_void
             } else {
-                return Value::Error("TypeError", "Pointer must wrap Int", None);
+                return Value::new_error("TypeError", "Pointer must wrap Int", None);
             }
         }
-        _ => return Value::Error("TypeError", "Expected pointer argument", None),
+        _ => return Value::new_error("TypeError", "Expected pointer argument", None),
     };
-    let len = match len_val {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected length int argument", None),
+
+    let len = match args.get("len") {
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected length int argument", None),
     };
-    match type_val {
+
+    match args.get("type") {
         Some(Value::String(s)) => {
-            let elem_type = match s.as_str() {
-                "int" => ValueType::Int,
-                "float64" => ValueType::Float64,
-                "float" | "float32" => ValueType::Float32,
-                "bool" => ValueType::Boolean,
-                "byte" => ValueType::Byte,
-                "ptr" => ValueType::Ptr,
-                "void" => ValueType::Void,
-                _ => return Value::Error("TypeError", "Unknown type string", None),
+            let elem_type = match parse_type(s.as_str()) {
+                Some(t) => t,
+                None => return Value::new_error("TypeError", "Unknown type string", None),
             };
             unsafe { get_list(ptr, elem_type, len) }
         }
         Some(Value::Type(t)) => {
             match t {
-                Type::Struct { name: _, fields, .. } => {
-                    let mut result = Vec::new();
+                Type::Struct { fields, .. } => {
                     use crate::env::runtime::utils::get_type_from_statement;
-                    let struct_size: usize = fields.iter().map(|(_, field_type, _)| {
-                        let type_name = get_type_from_statement(field_type).unwrap_or_else(|| "any".to_string());
-                        match type_name.as_str() {
-                            "int" => std::mem::size_of::<i64>(),
-                            "float" => std::mem::size_of::<f64>(),
-                            "bool" => std::mem::size_of::<u8>(),
-                            "ptr" => std::mem::size_of::<*const std::ffi::c_void>(),
-                            _ => 0,
-                        }
-                    }).sum();
+                    
+                    let struct_size: usize = fields
+                        .iter()
+                        .map(|(_, field_type, _)| {
+                            let type_name = get_type_from_statement(field_type)
+                                .unwrap_or_else(|| "any".to_string());
+                            parse_type(&type_name)
+                                .map(type_size)
+                                .unwrap_or(0)
+                        })
+                        .sum();
+
+                    let mut result = Vec::with_capacity(len);
+
                     for i in 0..len {
                         let struct_ptr = (ptr as usize + i * struct_size) as *const u8;
                         let mut field_map = FxHashMap::default();
                         let mut offset = 0;
+
                         for (field_name, field_type, _) in fields {
-                            let type_name = get_type_from_statement(field_type).unwrap_or_else(|| "any".to_string());
-                            let val = match type_name.as_str() {
-                                "int" => {
-                                    let p = unsafe { struct_ptr.add(offset) as *const i64 };
-                                    offset += std::mem::size_of::<i64>();
-                                    Value::Int(unsafe { (*p).into() })
+                            let type_name = get_type_from_statement(field_type)
+                                .unwrap_or_else(|| "any".to_string());
+                            
+                            let val = if let Some(vt) = parse_type(&type_name) {
+                                unsafe {
+                                    let field_ptr = struct_ptr.add(offset);
+                                    let size = type_size(vt);
+                                    offset += size;
+
+                                    match vt {
+                                        ValueType::Char => Value::Int((*(field_ptr as *const i8) as i64).into()),
+                                        ValueType::Short => Value::Int((*(field_ptr as *const i16) as i64).into()),
+                                        ValueType::Int => Value::Int((*(field_ptr as *const i32) as i64).into()),
+                                        ValueType::Long | ValueType::LongLong => Value::Int((*(field_ptr as *const i64)).into()),
+                                        ValueType::UChar => Value::Int((*(field_ptr as *const u8) as i64).into()),
+                                        ValueType::UShort => Value::Int((*(field_ptr as *const u16) as i64).into()),
+                                        ValueType::UInt => Value::Int((*(field_ptr as *const u32) as i64).into()),
+                                        ValueType::ULong | ValueType::ULongLong => Value::Int((*(field_ptr as *const u64) as i64).into()),
+                                        ValueType::Float => Value::Float((*(field_ptr as *const f32) as f64).into()),
+                                        ValueType::Double => Value::Float((*(field_ptr as *const f64)).into()),
+                                        ValueType::Bool => Value::Boolean(*(field_ptr as *const u8) != 0),
+                                        ValueType::Ptr => Value::Pointer(Arc::new(Mutex::new((
+                                            Value::Int((*(field_ptr as *const usize) as i64).into()),
+                                            1,
+                                        )))),
+                                        ValueType::Void => Value::Null,
+                                    }
                                 }
-                                "float" => {
-                                    let p = unsafe { struct_ptr.add(offset) as *const f64 };
-                                    offset += std::mem::size_of::<f64>();
-                                    Value::Float(unsafe { (*p).into() })
-                                }
-                                "bool" => {
-                                    let p = unsafe { struct_ptr.add(offset) as *const u8 };
-                                    offset += std::mem::size_of::<u8>();
-                                    Value::Boolean(unsafe { *p != 0 })
-                                }
-                                "ptr" => {
-                                    let p = unsafe { struct_ptr.add(offset) as *const *const std::ffi::c_void };
-                                    offset += std::mem::size_of::<*const std::ffi::c_void>();
-                                    Value::Pointer(Arc::new(Mutex::new((Value::Int(unsafe { *p as usize as i64 }.into()), 1))))
-                                }
-                                _ => Value::Null,
+                            } else {
+                                Value::Null
                             };
+
                             field_map.insert(Value::String(field_name.clone()), val);
                         }
                         result.push(Value::Map(field_map));
                     }
                     Value::List(result)
                 }
-                _ => Value::Error("TypeError", "Type must be struct for C struct list", None),
+                _ => Value::new_error("TypeError", "Type must be struct for C struct list", None),
             }
         }
-        _ => Value::Error("TypeError", "Expected type string or struct type", None),
+        _ => Value::new_error("TypeError", "Expected type string or struct type", None),
     }
 }
 
@@ -347,7 +391,7 @@ static CALLBACKS: Mutex<Vec<&'static CallbackData>> = Mutex::new(Vec::new());
 fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) -> Value {
     let func = match args.get("f") {
         Some(Value::Function(f)) => f.clone(),
-        _ => return Value::Error("TypeError", "Expected function argument", None),
+        _ => return Value::new_error("TypeError", "Expected function argument", None),
     };
 
     let cb: &'static CallbackData = Box::leak(Box::new(CallbackData {
@@ -373,7 +417,7 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
             }
 
             for stmt in cb.body.iter() {
-                let _res = interp.evaluate(&stmt);
+                let _res = interp.evaluate(stmt);
                 if interp.err.is_some() {
                     return;
                 }
@@ -385,17 +429,17 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
     Value::Pointer(Arc::new(Mutex::new((Value::Int(func_ptr_int), 1))))
 }
 
-
 fn cast(args: &HashMap<String, Value>) -> Value {
     let val = match args.get("value") {
         Some(v) => v.clone(),
-        None => return Value::Error("TypeError", "Expected value argument", None),
+        None => return Value::new_error("TypeError", "Expected value argument", None),
     };
 
     let ptr_arc = match args.get("to") {
         Some(Value::Pointer(p)) => p.clone(),
-        _ => return Value::Error("TypeError", "Expected a pointer", None),
+        _ => return Value::new_error("TypeError", "Expected a pointer", None),
     };
+
     {
         let mut inner = ptr_arc.lock();
         std::mem::drop(std::mem::replace(&mut *inner, (val, 1)));
@@ -406,82 +450,83 @@ fn cast(args: &HashMap<String, Value>) -> Value {
 
 fn create_array_ptr(args: &HashMap<String, Value>) -> Value {
     let size = match args.get("size") {
-        Some(Value::Int(i)) => match i.to_i64() {
-            Ok(v) if v >= 0 => v as usize,
-            Ok(_) | Err(_) => return libload_error("Invalid Int value for size"),
-        },
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
         _ => return libload_error("Expected size: Int"),
     };
 
     let elem_type = match args.get("type") {
-        Some(Value::String(s)) => match s.as_str() {
-            "int" => ValueType::Int,
-            "float64" => ValueType::Float64,
-            "float" | "float32" => ValueType::Float32,
-            "bool" => ValueType::Boolean,
-            "byte" => ValueType::Byte,
-            "ptr" => ValueType::Ptr,
-            "void" => ValueType::Void,
-            _ => return libload_error("Unknown type string"),
+        Some(Value::String(s)) => match parse_type(s.as_str()) {
+            Some(t) => t,
+            None => return libload_error("Unknown type string"),
         },
         _ => return libload_error("Expected type: str"),
     };
 
     let elements_lucia = match args.get("elements") {
-        Some(Value::List(l)) => l.clone(),
+        Some(Value::List(l)) => l,
         _ => return libload_error("Expected elements: list"),
     };
 
-    let mut bytes_vec: Vec<u8> = Vec::with_capacity(size * 8);
+    let elem_size = type_size(elem_type);
+    let mut bytes_vec: Vec<u8> = Vec::with_capacity(size * elem_size);
 
     for val in elements_lucia.iter().take(size) {
         match elem_type {
-            ValueType::Byte => match val {
-                Value::Int(i) => match i.to_i64() {
-                    Ok(v) if v >= 0 && v <= 255 => bytes_vec.push(v as u8),
-                    _ => return libload_error("Invalid Int for Byte"),
-                },
-                _ => return libload_error("Expected Int for Byte array"),
+            ValueType::Char => match val {
+                Value::Int(i) => bytes_vec.push(i.to_i64().unwrap_or(0) as i8 as u8),
+                _ => return libload_error("Expected Int for Char array"),
             },
-            ValueType::Boolean => match val {
-                Value::Boolean(b) => bytes_vec.push(if *b { 1 } else { 0 }),
-                _ => return libload_error("Expected Boolean for Boolean array"),
+            ValueType::UChar => match val {
+                Value::Int(i) => bytes_vec.push(i.to_u64().unwrap_or(0) as u8),
+                _ => return libload_error("Expected Int for UChar array"),
+            },
+            ValueType::Short => match val {
+                Value::Int(i) => bytes_vec.extend(&(i.to_i64().unwrap_or(0) as i16).to_le_bytes()),
+                _ => return libload_error("Expected Int for Short array"),
+            },
+            ValueType::UShort => match val {
+                Value::Int(i) => bytes_vec.extend(&(i.to_u64().unwrap_or(0) as u16).to_le_bytes()),
+                _ => return libload_error("Expected Int for UShort array"),
             },
             ValueType::Int => match val {
-                Value::Int(i) => match i.to_i32() {
-                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
-                    Err(_) => return libload_error("Invalid Int value"),
-                },
+                Value::Int(i) => bytes_vec.extend(&i.to_i32().unwrap_or(0).to_le_bytes()),
                 _ => return libload_error("Expected Int for Int array"),
             },
-            ValueType::Float64 => match val {
-                Value::Float(f) => match f.to_f64() {
-                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
-                    Err(_) => return libload_error("Invalid Float value"),
-                },
-                _ => return libload_error("Expected Float for Float64 array"),
+            ValueType::UInt => match val {
+                Value::Int(i) => bytes_vec.extend(&i.to_u32().unwrap_or(0).to_le_bytes()),
+                _ => return libload_error("Expected Int for UInt array"),
             },
-            ValueType::Float32 => match val {
-                Value::Float(f) => match f.to_f32() {
-                    Ok(v) => bytes_vec.extend(&v.to_le_bytes()),
-                    Err(_) => return libload_error("Invalid Float value"),
-                },
-                _ => return libload_error("Expected Float for Float32 array"),
+            ValueType::Long | ValueType::LongLong => match val {
+                Value::Int(i) => bytes_vec.extend(&i.to_i64().unwrap_or(0).to_le_bytes()),
+                _ => return libload_error("Expected Int for Long array"),
+            },
+            ValueType::ULong | ValueType::ULongLong => match val {
+                Value::Int(i) => bytes_vec.extend(&i.to_u64().unwrap_or(0).to_le_bytes()),
+                _ => return libload_error("Expected Int for ULong array"),
+            },
+            ValueType::Bool => match val {
+                Value::Boolean(b) => bytes_vec.push(*b as u8),
+                _ => return libload_error("Expected Boolean for Bool array"),
+            },
+            ValueType::Float => match val {
+                Value::Float(f) => bytes_vec.extend(&f.to_f32().unwrap_or(0.0).to_le_bytes()),
+                _ => return libload_error("Expected Float for Float array"),
+            },
+            ValueType::Double => match val {
+                Value::Float(f) => bytes_vec.extend(&f.to_f64().unwrap_or(0.0).to_le_bytes()),
+                _ => return libload_error("Expected Float for Double array"),
             },
             ValueType::Ptr => match val {
                 Value::Pointer(p) => {
                     let addr = match &*p.lock() {
-                        (Value::Int(i), _) => match i.to_i64() {
-                            Ok(v) => v as usize,
-                            Err(_) => return libload_error("Invalid Int inside Pointer"),
-                        },
+                        (Value::Int(i), _) => i.to_u64().unwrap_or(0) as usize,
                         _ => return libload_error("Expected Int inside Pointer"),
                     };
                     bytes_vec.extend(&addr.to_le_bytes());
                 }
                 _ => return libload_error("Expected Pointer for Ptr array"),
             },
-            _ => return libload_error("Unsupported type for array allocation"),
+            ValueType::Void => {}
         }
     }
 
@@ -490,22 +535,20 @@ fn create_array_ptr(args: &HashMap<String, Value>) -> Value {
 
     std::mem::forget(boxed_slice);
 
-    let arc_ptr = Arc::new(Mutex::new((Value::Int(ptr_val), 0)));
-    Value::Pointer(arc_ptr)
+    Value::Pointer(Arc::new(Mutex::new((Value::Int(ptr_val), 0))))
 }
 
 fn load_lib(args: &HashMap<String, Value>) -> Value {
     let flags: Option<i32> = match args.get("flags") {
-        Some(Value::Int(i)) => match i.to_i32() {
-            Ok(f) => Some(f),
-            Err(_) => return libload_error("Invalid flags value"),
-        },
+        Some(Value::Int(i)) => Some(i.to_i32().unwrap_or(0)),
         _ => None,
     };
+
     #[cfg(not(unix))]
     if flags.is_some() {
         return libload_error("RTLD flags are only supported on Unix systems");
     }
+
     match args.get("path") {
         Some(Value::String(path)) => {
             let lib = {
@@ -535,10 +578,8 @@ fn load_lib(args: &HashMap<String, Value>) -> Value {
 }
 
 fn get_fn(args: &HashMap<String, Value>) -> Value {
-    let lib_val = args.get("lib");
-    let name_val = args.get("name");
-    let args_val = args.get("args");
-    let ret_val = args.get("ret");
+    let (lib_val, name_val, args_val, ret_val) = 
+        (args.get("lib"), args.get("name"), args.get("args"), args.get("ret"));
 
     match (lib_val, name_val, args_val, ret_val) {
         (
@@ -548,47 +589,31 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
             Some(Value::String(ret_ty)),
         ) => {
             let raw_ptr = if let (Value::Int(ptr_int), _) = &*lib_ptr_arc.lock() {
-                match ptr_int.to_i64() {
-                    Ok(i) => i as usize as *mut LuciaLib,
-                    Err(_) => return libload_error("Invalid library pointer conversion"),
-                }
+                ptr_int.to_u64().unwrap_or(0) as *mut LuciaLib
             } else {
                 return libload_error("Invalid library pointer type");
             };
 
             let lib = unsafe { &*raw_ptr };
 
-            let parse_ty = |s: &str| match s {
-                "int" => Some(ValueType::Int),
-                "double" | "float64" => Some(ValueType::Float64),
-                "float" | "float32" => Some(ValueType::Float32),
-                "bool" => Some(ValueType::Boolean),
-                "void" => Some(ValueType::Void),
-                "byte" => Some(ValueType::Byte),
-                "any" | "str" | "ptr" => Some(ValueType::Ptr),
-                "array" => Some(ValueType::Ptr),
-                "" => Some(ValueType::Ptr),
-                _ => None,
-            };
-
             let arg_types: Option<Vec<_>> = arg_tys
                 .iter()
                 .map(|v| {
                     if let Value::String(s) = v {
-                        parse_ty(s)
+                        parse_type(s)
                     } else if let Value::Type(t) = v {
-                        parse_ty(&t.display_simple())
+                        parse_type(&t.display_simple())
                     } else {
                         None
                     }
                 })
                 .collect();
 
-            let ret_ty = parse_ty(ret_ty.as_str());
+            let ret_ty_parsed = parse_type(ret_ty.as_str());
 
-            match (arg_types, ret_ty) {
+            match (arg_types, ret_ty_parsed) {
                 (Some(arg_types), Some(ret_ty)) => {
-                    match unsafe { lib.get_function(name, arg_types, ret_ty.clone()) } {
+                    match unsafe { lib.get_function(name, arg_types, ret_ty) } {
                         Ok(f) => {
                             let fn_ptr = Box::into_raw(Box::new(f)) as usize as i64;
                             Value::Pointer(Arc::new(Mutex::new((Value::Int(fn_ptr.into()), 1))))
@@ -604,36 +629,31 @@ fn get_fn(args: &HashMap<String, Value>) -> Value {
 }
 
 pub fn get_fn_std(args: &HashMap<String, Value>) -> Value {
-    let name_val = args.get("name");
-    let args_val = args.get("args");
-    let ret_val = args.get("ret");
+    let (name_val, args_val, ret_val) = (args.get("name"), args.get("args"), args.get("ret"));
 
     match (name_val, args_val, ret_val) {
         (Some(Value::String(name)), Some(Value::List(arg_tys)), Some(Value::String(ret_ty))) => {
-            let parse_basic_ty = |s: &str| match s {
-                "int" => Some(ValueType::Int),
-                "float64" => Some(ValueType::Float64),
-                "float" | "float32" => Some(ValueType::Float32),
-                "bool" => Some(ValueType::Boolean),
-                "void" => Some(ValueType::Void),
-                "any" | "str" | "ptr" => Some(ValueType::Ptr),
-                "" => Some(ValueType::Ptr),
-                _ => None,
-            };
-
-            let parse_ty = |s: &str| {
+            let parse_ty_with_variadic = |s: &str| {
                 if let Some(stripped) = s.strip_prefix('*') {
-                    Some((parse_basic_ty(stripped)?, true))
+                    parse_type(stripped).map(|t| (t, true))
                 } else {
-                    Some((parse_basic_ty(s)?, false))
+                    parse_type(s).map(|t| (t, false))
                 }
             };
 
-            let arg_types: Option<Vec<_>> = arg_tys.iter()
-                .map(|v| if let Value::String(s) = v { parse_ty(s) } else { None })
-                .collect();
+            let arg_types: Option<Vec<_>> = arg_tys
+                .iter()
+                .filter_map(|v| {
+                    if let Value::String(s) = v {
+                        parse_ty_with_variadic(s)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into();
 
-            let ret_type = parse_basic_ty(ret_ty);
+            let ret_type = parse_type(ret_ty);
 
             match (arg_types, ret_type) {
                 (Some(arg_types), Some(_)) => {
@@ -677,10 +697,7 @@ fn call_fn(args: &HashMap<String, Value>) -> Value {
     match (args.get("fn"), args.get("args"), args.get("stdcall")) {
         (Some(Value::Pointer(fn_ptr_arc)), Some(Value::List(call_args)), Some(Value::Boolean(stdcall))) => {
             let fn_ptr = if let (Value::Int(ptr_int), _) = &*fn_ptr_arc.lock() {
-                match ptr_int.to_i64() {
-                    Ok(i) => i as usize as *mut LuciaFfiFn,
-                    Err(_) => return libload_error("Invalid function pointer (failed to convert to i64)"),
-                }
+                ptr_int.to_u64().unwrap_or(0) as *mut LuciaFfiFn
             } else {
                 return libload_error("Invalid function pointer type");
             };
@@ -699,19 +716,27 @@ fn call_fn(args: &HashMap<String, Value>) -> Value {
 fn create_struct(args: &HashMap<String, Value>) -> Value {
     let values: Vec<&Value> = match args.get("fields") {
         Some(Value::List(l)) => l.iter().collect(),
-        _ => return Value::Error("TypeError", "Expected fields: list", None),
+        _ => return Value::new_error("TypeError", "Expected fields: list", None),
     };
 
-    let types: Vec<&str> = match args.get("types") {
-        Some(Value::List(l)) => l.iter().filter_map(|v| {
-            if let Value::String(s) = v { Some(s.as_str()) } else { None }
-        }).collect(),
-        None => vec!["int"; values.len()],
-        _ => return Value::Error("TypeError", "Expected types: list of str", None),
+    let types: Vec<ValueType> = match args.get("types") {
+        Some(Value::List(l)) => {
+            l.iter()
+                .filter_map(|v| {
+                    if let Value::String(s) = v {
+                        parse_type(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+        None => vec![ValueType::Int; values.len()],
+        _ => return Value::new_error("TypeError", "Expected types: list of str", None),
     };
 
     if types.len() != values.len() {
-        return Value::Error("ValueError", "Types length must match values length", None);
+        return Value::new_error("ValueError", "Types length must match values length", None);
     }
 
     let is_ptr = match args.get("is_ptr") {
@@ -722,30 +747,74 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
     let mut bytes_vec: Vec<u8> = Vec::new();
 
     for (val, ty) in values.iter().zip(types.iter()) {
-        match *ty {
-            "byte" => if let Value::Int(i) = val {
-                bytes_vec.push(i.to_i64().unwrap_or(0) as u8);
-            },
-            "bool" => if let Value::Boolean(b) = val {
-                bytes_vec.push(if *b { 1 } else { 0 });
-            },
-            "int" => if let Value::Int(i) = val {
-                bytes_vec.extend(&i.to_i64().unwrap_or(0).to_le_bytes());
-            },
-            "float" => if let Value::Float(f) = val {
-                bytes_vec.extend(&f.to_f64().unwrap_or(0.0).to_le_bytes());
-            },
-            "ptr" => if let Value::Pointer(p) = val {
-                let addr = match &*p.lock() {
-                    (Value::Int(i), _) => i.to_i64().unwrap_or(0) as usize,
-                    _ => 0usize,
-                };
-                bytes_vec.extend(&addr.to_le_bytes());
-            },
-            "str" => if let Value::String(s) = val {
-                bytes_vec.extend(&(s.as_ptr() as usize).to_le_bytes());
-            },
-            _ => {},
+        match ty {
+            ValueType::Char => {
+                if let Value::Int(i) = val {
+                    bytes_vec.push(i.to_i64().unwrap_or(0) as i8 as u8);
+                }
+            }
+            ValueType::UChar => {
+                if let Value::Int(i) = val {
+                    bytes_vec.push(i.to_u64().unwrap_or(0) as u8);
+                }
+            }
+            ValueType::Short => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&(i.to_i64().unwrap_or(0) as i16).to_le_bytes());
+                }
+            }
+            ValueType::UShort => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&(i.to_u64().unwrap_or(0) as u16).to_le_bytes());
+                }
+            }
+            ValueType::Int => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&i.to_i32().unwrap_or(0).to_le_bytes());
+                }
+            }
+            ValueType::UInt => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&i.to_u32().unwrap_or(0).to_le_bytes());
+                }
+            }
+            ValueType::Long | ValueType::LongLong => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&i.to_i64().unwrap_or(0).to_le_bytes());
+                }
+            }
+            ValueType::ULong | ValueType::ULongLong => {
+                if let Value::Int(i) = val {
+                    bytes_vec.extend(&i.to_u64().unwrap_or(0).to_le_bytes());
+                }
+            }
+            ValueType::Bool => {
+                if let Value::Boolean(b) = val {
+                    bytes_vec.push(*b as u8);
+                }
+            }
+            ValueType::Float => {
+                if let Value::Float(f) = val {
+                    bytes_vec.extend(&f.to_f32().unwrap_or(0.0).to_le_bytes());
+                }
+            }
+            ValueType::Double => {
+                if let Value::Float(f) = val {
+                    bytes_vec.extend(&f.to_f64().unwrap_or(0.0).to_le_bytes());
+                }
+            }
+            ValueType::Ptr => {
+                if let Value::Pointer(p) = val {
+                    let addr = match &*p.lock() {
+                        (Value::Int(i), _) => i.to_u64().unwrap_or(0) as usize,
+                        _ => 0usize,
+                    };
+                    bytes_vec.extend(&addr.to_le_bytes());
+                } else if let Value::String(s) = val {
+                    bytes_vec.extend(&(s.as_ptr() as usize).to_le_bytes());
+                }
+            }
+            ValueType::Void => {}
         }
     }
 
@@ -759,21 +828,28 @@ fn create_struct(args: &HashMap<String, Value>) -> Value {
 
     match Int::from_hex(&hex_string) {
         Ok(num) => Value::Int(num),
-        Err(_) => Value::Error("ValueError", "Failed to convert hex to Int", None),
+        Err(_) => Value::new_error("ValueError", "Failed to convert hex to Int", None),
     }
 }
 
 fn parse_struct(args: &HashMap<String, Value>) -> Value {
     let struct_val = match args.get("struct") {
         Some(v) => v,
-        None => return Value::Error("TypeError", "Expected struct", None),
+        None => return Value::new_error("TypeError", "Expected struct", None),
     };
 
-    let types: Vec<&str> = match args.get("types_of_the_fields") {
-        Some(Value::List(l)) => l.iter().filter_map(|v| {
-            if let Value::String(s) = v { Some(s.as_str()) } else { None }
-        }).collect(),
-        _ => return Value::Error("TypeError", "Expected types_of_the_fields: list of str", None),
+    let types: Vec<ValueType> = match args.get("types_of_the_fields") {
+        Some(Value::List(l)) => l
+            .iter()
+            .filter_map(|v| {
+                if let Value::String(s) = v {
+                    parse_type(s.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        _ => return Value::new_error("TypeError", "Expected types_of_the_fields: list of str", None),
     };
 
     let is_ptr = match args.get("is_ptr") {
@@ -789,89 +865,113 @@ fn parse_struct(args: &HashMap<String, Value>) -> Value {
     let bytes: Vec<u8> = if is_ptr {
         if let Value::Pointer(p) = struct_val {
             let addr = match &*p.lock() {
-                (Value::Int(i), _) => i.to_i64().unwrap_or(0) as *const u8,
-                _ => return Value::Error("TypeError", "Expected pointer to struct bytes", None),
+                (Value::Int(i), _) => i.to_u64().unwrap_or(0) as *const u8,
+                _ => return Value::new_error("TypeError", "Expected pointer to struct bytes", None),
             };
-            let total_len: usize = types.iter().map(|ty| match *ty {
-                "byte" | "bool" => 1,
-                "int" => std::mem::size_of::<i64>(),
-                "float" => std::mem::size_of::<f64>(),
-                "ptr" | "str" => std::mem::size_of::<usize>(),
-                _ => 0,
-            }).sum();
+            let total_len: usize = types.iter().map(|ty| type_size(*ty)).sum();
 
             unsafe { std::slice::from_raw_parts(addr, total_len).to_vec() }
         } else {
-            return Value::Error("TypeError", "Expected struct as pointer", None);
+            return Value::new_error("TypeError", "Expected struct as pointer", None);
         }
     } else if let Value::Int(i) = struct_val {
         let hex = match i.to_str_radix(16) {
             Ok(s) => {
-                if s.len() % 2 == 0 { s } else { format!("0{}", s) }
+                if s.len() % 2 == 0 {
+                    s
+                } else {
+                    format!("0{}", s)
+                }
             }
-            Err(_) => return Value::Error("ValueError", "Failed to convert Int to hex string", None),
+            Err(_) => return Value::new_error("ValueError", "Failed to convert Int to hex string", None),
         };
 
         (0..hex.len())
             .step_by(2)
-            .filter_map(|j| u8::from_str_radix(&hex[j..j+2], 16).ok())
+            .filter_map(|j| u8::from_str_radix(&hex[j..j + 2], 16).ok())
             .rev()
             .collect()
     } else {
-        return Value::Error("TypeError", "Expected struct as int or ptr", None);
+        return Value::new_error("TypeError", "Expected struct as int or ptr", None);
     };
 
     let mut offset = 0;
-    let mut fields: Vec<Value> = Vec::new();
+    let mut fields: Vec<Value> = Vec::with_capacity(types.len());
 
     for ty in types {
-        let (size, align) = match ty {
-            "byte" | "bool" => (1, 1),
-            "int" => (8, 8),
-            "float" => (8, 8),
-            "ptr" | "str" => (std::mem::size_of::<usize>(), std::mem::size_of::<usize>()),
-            _ => (0, 1),
-        };
+        let size = type_size(ty);
+        let align = size.min(8);
 
         if !packed && align > 1 {
             let padding = (align - (offset % align)) % align;
             offset += padding;
         }
 
-        match ty {
-            "byte" => {
-                fields.push(Value::Int(Int::from(bytes[offset] as i64)));
+        let val = match ty {
+            ValueType::Char => {
+                Value::Int((bytes[offset] as i8 as i64).into())
             }
-            "bool" => {
-                fields.push(Value::Boolean(bytes[offset] != 0));
+            ValueType::UChar => {
+                Value::Int((bytes[offset] as i64).into())
             }
-            "int" => {
+            ValueType::Short => {
+                let mut buf = [0u8; 2];
+                buf.copy_from_slice(&bytes[offset..offset + 2]);
+                Value::Int((i16::from_le_bytes(buf) as i64).into())
+            }
+            ValueType::UShort => {
+                let mut buf = [0u8; 2];
+                buf.copy_from_slice(&bytes[offset..offset + 2]);
+                Value::Int((u16::from_le_bytes(buf) as i64).into())
+            }
+            ValueType::Int => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&bytes[offset..offset + 4]);
+                Value::Int((i32::from_le_bytes(buf) as i64).into())
+            }
+            ValueType::UInt => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&bytes[offset..offset + 4]);
+                Value::Int((u32::from_le_bytes(buf) as i64).into())
+            }
+            ValueType::Long | ValueType::LongLong => {
                 let mut buf = [0u8; 8];
-                buf.copy_from_slice(&bytes[offset..offset+8]);
-                fields.push(Value::Int(Int::from(i64::from_le_bytes(buf))));
+                buf.copy_from_slice(&bytes[offset..offset + 8]);
+                Value::Int(Int::from(i64::from_le_bytes(buf)))
             }
-            "float" => {
+            ValueType::ULong | ValueType::ULongLong => {
                 let mut buf = [0u8; 8];
-                buf.copy_from_slice(&bytes[offset..offset+8]);
-                fields.push(Value::Float(Float::from(f64::from_le_bytes(buf))));
+                buf.copy_from_slice(&bytes[offset..offset + 8]);
+                Value::Int(Int::from(u64::from_le_bytes(buf) as i64))
             }
-            "ptr" | "str" => {
+            ValueType::Bool => Value::Boolean(bytes[offset] != 0),
+            ValueType::Float => {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&bytes[offset..offset + 4]);
+                Value::Float(Float::from(f32::from_le_bytes(buf) as f64))
+            }
+            ValueType::Double => {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[offset..offset + 8]);
+                Value::Float(Float::from(f64::from_le_bytes(buf)))
+            }
+            ValueType::Ptr => {
                 let mut buf = [0u8; std::mem::size_of::<usize>()];
-                buf.copy_from_slice(&bytes[offset..offset+std::mem::size_of::<usize>()]);
-                fields.push(Value::Pointer(
-                    Arc::new(Mutex::new((Value::Int(Int::from(usize::from_le_bytes(buf))), 1)))
-                ));
+                buf.copy_from_slice(&bytes[offset..offset + std::mem::size_of::<usize>()]);
+                Value::Pointer(Arc::new(Mutex::new((
+                    Value::Int(Int::from(usize::from_le_bytes(buf))),
+                    1,
+                ))))
             }
-            _ => {}
-        }
+            ValueType::Void => Value::Null,
+        };
 
+        fields.push(val);
         offset += size;
     }
 
     Value::List(fields)
 }
-
-// libload.parse_struct(libload.create_struct([240, 240, 240, 255], ["byte", "byte", "byte", "byte"]), ["byte", "byte", "byte", "byte"])
 
 pub fn init_libload(config: Arc<Config>, file_path: String) -> Result<(), Error> {
     if !get_from_config(&config, "allow_unsafe").is_truthy() {
@@ -885,36 +985,42 @@ pub fn init_libload(config: Arc<Config>, file_path: String) -> Result<(), Error>
     Ok(())
 }
 
+#[inline]
 fn malloc_fn(args: &HashMap<String, Value>) -> Value {
     let size = match args.get("size") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected 'size': Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected 'size': Int", None),
     };
 
     let ptr = unsafe { libc::malloc(size) as *mut u8 };
     if ptr.is_null() {
-        return Value::Error("MemoryError", "Failed to allocate memory", None);
+        return Value::new_error("MemoryError", "Failed to allocate memory", None);
     }
 
     Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 1))))
 }
 
+#[inline]
 fn write_byte_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
-            if let (Value::Int(i), _) = &*p.lock() { i.to_i64().unwrap_or(0) as *mut u8 } else { return Value::Int(0.into()); }
+            if let (Value::Int(i), _) = &*p.lock() {
+                i.to_u64().unwrap_or(0) as *mut u8
+            } else {
+                return Value::Int(0.into());
+            }
         }
-        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+        _ => return Value::new_error("TypeError", "Expected 'base': Pointer", None),
     };
 
     let offset = match args.get("offset") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected 'offset': Int", None),
     };
 
     let value = match args.get("value") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as u8,
-        _ => return Value::Error("TypeError", "Expected 'value': Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as u8,
+        _ => return Value::new_error("TypeError", "Expected 'value': Int", None),
     };
 
     unsafe { base.add(offset).write(value) };
@@ -922,22 +1028,27 @@ fn write_byte_fn(args: &HashMap<String, Value>) -> Value {
     Value::Int(0.into())
 }
 
+#[inline]
 fn write_i64_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
-            if let (Value::Int(i), _) = &*p.lock() { i.to_i64().unwrap_or(0) as *mut i64 } else { return Value::Int(0.into()); }
+            if let (Value::Int(i), _) = &*p.lock() {
+                i.to_u64().unwrap_or(0) as *mut i64
+            } else {
+                return Value::Int(0.into());
+            }
         }
-        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+        _ => return Value::new_error("TypeError", "Expected 'base': Pointer", None),
     };
 
     let offset = match args.get("offset") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected 'offset': Int", None),
     };
 
     let value = match args.get("value") {
         Some(Value::Int(i)) => i.to_i64().unwrap_or(0),
-        _ => return Value::Error("TypeError", "Expected 'value': Int", None),
+        _ => return Value::new_error("TypeError", "Expected 'value': Int", None),
     };
 
     unsafe { (base as *mut u8).add(offset).cast::<i64>().write(value) };
@@ -945,24 +1056,27 @@ fn write_i64_fn(args: &HashMap<String, Value>) -> Value {
     Value::Int(0.into())
 }
 
+#[inline]
 fn write_f64_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => {
             if let (Value::Int(i), _) = &*p.lock() {
-                i.to_i64().unwrap_or(0) as *mut f64
-            } else { return Value::Int(0.into()); }
+                i.to_u64().unwrap_or(0) as *mut f64
+            } else {
+                return Value::Int(0.into());
+            }
         }
-        _ => return Value::Error("TypeError", "Expected 'base': Pointer", None),
+        _ => return Value::new_error("TypeError", "Expected 'base': Pointer", None),
     };
 
     let offset = match args.get("offset") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected 'offset': Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected 'offset': Int", None),
     };
 
     let value = match args.get("value") {
         Some(Value::Float(f)) => f.to_f64().unwrap_or(0.0),
-        _ => return Value::Error("TypeError", "Expected 'value': Float", None),
+        _ => return Value::new_error("TypeError", "Expected 'value': Float", None),
     };
 
     unsafe { (base as *mut u8).add(offset).cast::<f64>().write(value) };
@@ -970,23 +1084,24 @@ fn write_f64_fn(args: &HashMap<String, Value>) -> Value {
     Value::Int(0.into())
 }
 
+#[inline]
 pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
     let base = match args.get("base") {
         Some(Value::Pointer(p)) => match &p.lock().0 {
-            Value::Int(addr) => addr.to_i64().unwrap_or(0) as *mut u8,
-            _ => return Value::Error("TypeError", "'base' Pointer must contain Int", None),
+            Value::Int(addr) => addr.to_u64().unwrap_or(0) as *mut u8,
+            _ => return Value::new_error("TypeError", "'base' Pointer must contain Int", None),
         },
-        _ => return Value::Error("TypeError", "Expected 'base' as Pointer", None),
+        _ => return Value::new_error("TypeError", "Expected 'base' as Pointer", None),
     };
 
     let offset = match args.get("offset") {
-        Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Error("TypeError", "Expected 'offset' as Int", None),
+        Some(Value::Int(i)) => i.to_u64().unwrap_or(0) as usize,
+        _ => return Value::new_error("TypeError", "Expected 'offset' as Int", None),
     };
 
     let value = match args.get("ptr") {
         Some(Value::Pointer(p)) => match &p.lock().0 {
-            Value::Int(addr) => addr.to_i64().unwrap_or(0) as *const c_void,
+            Value::Int(addr) => addr.to_u64().unwrap_or(0) as *const c_void,
             _ => std::ptr::null(),
         },
         _ => std::ptr::null(),
@@ -998,15 +1113,10 @@ pub fn write_ptr_fn(args: &HashMap<String, Value>) -> Value {
 }
 
 pub fn unload_lib(args: &HashMap<String, Value>) -> Value {
-    let lib_val = args.get("lib");
-
-    match lib_val {
+    match args.get("lib") {
         Some(Value::Pointer(lib_ptr_arc)) => {
             let raw_ptr = if let Value::Int(ptr_int) = &lib_ptr_arc.lock().0 {
-                match ptr_int.to_i64() {
-                    Ok(i) => i as usize as *mut LuciaLib,
-                    Err(_) => return libload_error("Invalid library pointer conversion"),
-                }
+                ptr_int.to_u64().unwrap_or(0) as *mut LuciaLib
             } else {
                 return libload_error("Invalid library pointer type");
             };
@@ -1040,7 +1150,10 @@ pub fn register() -> HashMap<String, Variable> {
         map,
         "load_lib",
         load_lib,
-        vec![Parameter::positional("path", "str"), Parameter::positional_optional("flags", "int", Value::Null)],
+        vec![
+            Parameter::positional("path", "str"),
+            Parameter::positional_optional("flags", "int", Value::Null)
+        ],
         "any",
         EffectFlags::UNSAFE
     );
@@ -1114,7 +1227,7 @@ pub fn register() -> HashMap<String, Variable> {
         "list",
         EffectFlags::UNSAFE
     );
-    
+
     insert_native_fn!(
         map,
         "parse_ptr_as",
@@ -1139,6 +1252,7 @@ pub fn register() -> HashMap<String, Variable> {
         "list",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "cast",
@@ -1150,6 +1264,7 @@ pub fn register() -> HashMap<String, Variable> {
         "any",
         EffectFlags::UNSAFE
     );
+
     insert_native_shared_fn!(
         map,
         "create_callback",
@@ -1158,6 +1273,7 @@ pub fn register() -> HashMap<String, Variable> {
         "any",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "create_struct",
@@ -1171,6 +1287,7 @@ pub fn register() -> HashMap<String, Variable> {
         "any",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "parse_struct",
@@ -1193,6 +1310,7 @@ pub fn register() -> HashMap<String, Variable> {
         "any",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "write_byte",
@@ -1205,6 +1323,7 @@ pub fn register() -> HashMap<String, Variable> {
         "int",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "write_i64",
@@ -1217,6 +1336,7 @@ pub fn register() -> HashMap<String, Variable> {
         "int",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "write_f64",
@@ -1229,6 +1349,7 @@ pub fn register() -> HashMap<String, Variable> {
         "int",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "write_ptr",
@@ -1241,6 +1362,7 @@ pub fn register() -> HashMap<String, Variable> {
         "int",
         EffectFlags::UNSAFE
     );
+
     insert_native_fn!(
         map,
         "unload_lib",

@@ -35,10 +35,10 @@ pub enum Value {
     Function(Function),
     Generator(Generator),
     Module(Module),
-    Enum(Enum),
-    Struct(Struct),
+    Enum(Box<Enum>),
+    Struct(Box<Struct>),
     Pointer(Arc<Mutex<(Value, usize)>>),
-    Error(&'static str, &'static str, Option<Error>),
+    Error(Arc<Error>),
 }
 
 impl PartialEq for Value {
@@ -65,7 +65,7 @@ impl PartialEq for Value {
                 let b_lock = b.lock();
                 *a_lock == *b_lock
             }
-            (Error(ac, am, _), Error(bc, bm, _)) => ac == bc && am == bm,
+            (Error(a), Error(b)) => *a == *b,
             _ => false,
         }
     }
@@ -109,7 +109,7 @@ impl fmt::Debug for Value {
                 let addr = raw_ptr as usize;
                 write!(f, "Pointer(0x{:X}, {})", addr, arc.lock().1.to_string())
             },
-            Value::Error(kind, msg, _) => write!(f, "Error({}, {})", kind, msg),
+            Value::Error(err) => write!(f, "Error({}, {})", err.err_type, err.err_msg),
             Value::Struct(v) => write!(f, "{}", v.display()),
             Value::Enum(v) => write!(f, "{}", v.display()),
             _ => write!(f, "{:?}", self.to_string()),
@@ -173,10 +173,10 @@ impl Serialize for Value {
             Value::Struct(_) => {
                 serializer.serialize_str("Struct(opaque)")
             }
-            Value::Error(kind, msg, _) => {
+            Value::Error(err) => {
                 let mut s = serializer.serialize_struct("Error", 2)?;
-                s.serialize_field("kind", kind)?;
-                s.serialize_field("message", msg)?;
+                s.serialize_field("kind", &err.err_type)?;
+                s.serialize_field("message", &err.err_msg)?;
                 s.end()
             }
             Value::Pointer(arc) => {
@@ -316,7 +316,7 @@ impl Encode for Value {
                 9u8.encode(encoder)?;
                 t.encode(encoder)
             }
-            Module(_) | Error(_, _, _) | Generator(_) => {
+            Module(_) | Error(_) | Generator(_) => {
                 4u8.encode(encoder) // fallback to Null
             }
             Function(func) => {
@@ -367,8 +367,8 @@ impl<C> Decode<C> for Value {
             7 => Ok(Value::List(Vec::<Value>::decode(decoder)?)),
             8 => Ok(Value::Bytes(Vec::<u8>::decode(decoder)?)),
             9 => Ok(Value::Type(Type::decode(decoder)?)),
-            10 => Ok(Value::Enum(Enum::decode(decoder)?)),
-            11 => Ok(Value::Struct(Struct::decode(decoder)?)),
+            10 => Ok(Value::Enum(Box::<Enum>::decode(decoder)?)),
+            11 => Ok(Value::Struct(Box::<Struct>::decode(decoder)?)),
             12 => {
                 let ptr_usize = usize::decode(decoder)?;
                 if ptr_usize < 0x1000 || ptr_usize > MAX_PTR {
@@ -476,13 +476,8 @@ impl Hash for Value {
                 }
             }
 
-            Value::Error(err_type, err_msg, referr) => {
-                err_type.hash(state);
-                err_msg.hash(state);
-                if let Some(err) = referr {
-                    err.error_type().hash(state);
-                    err.msg().hash(state);
-                }
+            Value::Error(e) => {
+                (*e).hash(state);
             }
             Value::Tuple(tuple) => {
                 3u8.hash(state);
@@ -636,7 +631,7 @@ impl Value {
             Value::Enum(enm) => enm.get_size(),
             Value::Struct(strct) => strct.get_size(),
             Value::Pointer(p) => Arc::strong_count(p),
-            Value::Error(_, _, _) => std::mem::size_of::<Error>(),
+            Value::Error(err) => std::mem::size_of_val(&*err),
         }
     }
     pub fn is_truthy(&self) -> bool {
@@ -655,7 +650,7 @@ impl Value {
             Value::Module(..) => true,
             Value::Enum(e) => e.is_truthy(),
             Value::Struct(s) => s.is_truthy(),
-            Value::Error(_, _, _) => true,
+            Value::Error(_) => true,
             Value::Pointer(p) => {
                 Arc::strong_count(p) > 0 && {
                     let inner = p.lock();
@@ -725,7 +720,7 @@ impl Value {
                 let addr = strct.ptr() as *const () as usize;
                 format!("<struct '{}' at 0x{:X}>", strct.get_type().display_simple(), addr)
             }
-            Value::Error(err_type, err_msg, _) => format!("<{}: {}>", err_type, err_msg),
+            Value::Error(err) => format!("<{}: {}>", err.err_type, err.err_msg),
         }
     }    
     pub fn to_bytes(&self) -> Option<Vec<u8>> {
@@ -744,7 +739,7 @@ impl Value {
             Value::Null => Some(vec![0x00]),
     
             // opaque types
-            Value::Map(_) | Value::Type(_) | Value::Function(_) | Value::Generator(_) | Value::Module(_) | Value::Pointer(_) | Value::Error(_, _, _) | Value::Enum(_) | Value::Struct(_) | Value::List(_) | Value::Tuple(_) => {
+            Value::Map(_) | Value::Type(_) | Value::Function(_) | Value::Generator(_) | Value::Module(_) | Value::Pointer(_) | Value::Error(_) | Value::Enum(_) | Value::Struct(_) | Value::List(_) | Value::Tuple(_) => {
                 let cfg = bincode::config::standard();
                 match bincode::encode_to_vec(&self, cfg) {
                     Ok(vec) => Some(vec),
@@ -838,6 +833,32 @@ impl Value {
                 s
             }
         }
+    }
+
+    pub fn new_error(kind: impl Into<String>, msg: impl Into<String>, referr: Option<Error>) -> Self {
+        Value::Error(Arc::new(Error::new_anonymous_ref(kind.into(), msg.into(), referr)))
+    }
+
+    pub fn debug_value_size() {
+        use std::mem::size_of;
+        println!("Size of Value enum: {} bytes", size_of::<Value>());
+        println!("Size of Int: {} bytes", size_of::<Int>());
+        println!("Size of Float: {} bytes", size_of::<Float>());
+        println!("Size of String: {} bytes", size_of::<String>());
+        println!("Size of Boolean: {} bytes", size_of::<bool>());
+        println!("Size of Null: {} bytes", size_of::<()>());
+        println!("Size of Map: {} bytes", size_of::<FxHashMap<Value, Value>>());
+        println!("Size of List: {} bytes", size_of::<Vec<Value>>());
+        println!("Size of Tuple: {} bytes", size_of::<Vec<Value>>());
+        println!("Size of Bytes: {} bytes", size_of::<Vec<u8>>());
+        println!("Size of Type: {} bytes", size_of::<Type>());
+        println!("Size of Function: {} bytes", size_of::<Function>());
+        println!("Size of Generator: {} bytes", size_of::<Generator>());
+        println!("Size of Module: {} bytes", size_of::<Module>());
+        println!("Size of Enum: {} bytes", size_of::<Arc<Enum>>());
+        println!("Size of Struct: {} bytes", size_of::<Arc<Struct>>());
+        println!("Size of Pointer: {} bytes", size_of::<Arc<Mutex<(Value, usize)>>>());
+        println!("Size of Error: {} bytes", size_of::<Arc<Error>>());
     }
 }
 

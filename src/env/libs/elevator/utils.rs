@@ -3,7 +3,6 @@ use crate::env::runtime::functions::{Function, Parameter};
 use crate::env::runtime::types::{Int, Float};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::utils::{
-    to_static,
     parse_type,
     levenshtein_distance,
     hex_to_ansi,
@@ -160,7 +159,7 @@ fn nth_prime_big(n: &Int) -> Int {
 fn nth_prime(args: &HashMap<String, Value>) -> Value {
     let n = match args.get("n") {
         Some(Value::Int(i)) => i.clone(),
-        _ => return Value::Error("TypeError", "n must be an integer.", None),
+        _ => return Value::new_error("TypeError", "n must be an integer.", None),
     };
     if let Ok(n_u64) = n.clone().to_u64() {
         if n_u64 <= 1_000_000 {
@@ -175,7 +174,7 @@ fn nth_prime(args: &HashMap<String, Value>) -> Value {
 fn decode_rle(args: &HashMap<String, Value>) -> Value {
     let rle = match args.get("rle") {
         Some(v) => v,
-        _ => return Value::Error("TypeError", "rle must be a string.", None),
+        _ => return Value::new_error("TypeError", "rle must be a string.", None),
     };
 
     match rle {
@@ -209,23 +208,23 @@ fn decode_rle(args: &HashMap<String, Value>) -> Value {
                     },
                     Value::List(inner_lst) => {
                         if inner_lst.len() != 2 {
-                            return Value::Error("ValueError", "Each RLE pair must have exactly two elements.", None);
+                            return Value::new_error("ValueError", "Each RLE pair must have exactly two elements.", None);
                         }
                         let count = match &inner_lst[0] {
                             Value::Int(c) => c.to_usize().unwrap_or(0),
-                            _ => return Value::Error("TypeError", "RLE count must be an integer.", None),
+                            _ => return Value::new_error("TypeError", "RLE count must be an integer.", None),
                         };
                         let value = inner_lst[1].clone();
                         for _ in 0..count {
                             decoded.push(value.clone());
                         }
                     },
-                    _ => return Value::Error("TypeError", "All items in rle list must be int.", None),
+                    _ => return Value::new_error("TypeError", "All items in rle list must be int.", None),
                 }
             }         
             Value::List(decoded)
         }
-        _ => Value::Error("TypeError", "rle must be a string or list.", None),
+        _ => Value::new_error("TypeError", "rle must be a string or list.", None),
     }
 }
 
@@ -233,7 +232,7 @@ fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {
     if let (Some(Value::String(s1)), Some(Value::String(s2))) = (args.get("s1"), args.get("s2")) {
         Value::Int(Int::from_i64(levenshtein_distance(s1, s2) as i64))
     } else {
-        Value::Error("TypeError", "expected two strings", None)
+        Value::new_error("TypeError", "expected two strings", None)
     }
 }
 
@@ -241,7 +240,7 @@ fn hex_to_ansi_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(hex)) = args.get("hex") {
         Value::String(hex_to_ansi(hex, true))
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -249,7 +248,7 @@ fn format_value_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(value) = args.get("value") {
         Value::String(format_value(value))
     } else {
-        Value::Error("TypeError", "expected a value", None)
+        Value::new_error("TypeError", "expected a value", None)
     }
 }
 
@@ -257,10 +256,10 @@ fn unescape_string_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         match unescape_string(s) {
             Ok(unescaped) => Value::String(unescaped),
-            Err(e) => Value::Error("UnescapeError".into(), to_static(e), None),
+            Err(e) => Value::new_error("UnescapeError", e, None),
         }
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -271,7 +270,7 @@ fn replace_accented_handler(args: &HashMap<String, Value>) -> Value {
             .collect();
         Value::String(replaced)
     } else {
-        Value::Error("TypeError".into(), "expected a string".into(), None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }
 
@@ -279,6 +278,6 @@ fn sanitize_alias_handler(args: &HashMap<String, Value>) -> Value {
     if let Some(Value::String(s)) = args.get("s") {
         Value::String(sanitize_alias(s))
     } else {
-        Value::Error("TypeError", "expected a string", None)
+        Value::new_error("TypeError", "expected a string", None)
     }
 }

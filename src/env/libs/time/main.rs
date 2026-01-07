@@ -48,26 +48,26 @@ fn now_apollo_time(_args: &HashMap<String, Value>) -> Value {
     ))), Type::new_simple("int")));
     map.insert("tz".to_string(), (Box::new(Value::String(Local::now().offset().to_string())), Type::new_simple("str")));
 
-    Value::Struct(Struct {
+    Value::Struct(Box::new(Struct {
         ty: APOLLO_TIME_STRUCT.clone(),
         fields: map,
-    })
+    }))
 }
 
 fn new_apollo_time(args: &HashMap<String, Value>) -> Value {
     let nanos = match args.get("nanos") {
         Some(Value::Int(i)) => match i.to_i128() {
             Ok(v) => v,
-            Err(_) => return Value::Error("ConversionError", "failed to convert Int to i128", None),
+            Err(_) => return Value::new_error("ConversionError", "failed to convert Int to i128", None),
         },
-        _ => return Value::Error("TypeError", "expected int argument 'nanos'", None),
+        _ => return Value::new_error("TypeError", "expected int argument 'nanos'", None),
     };
     let tz = match args.get("tz") {
         Some(Value::String(s)) => {
             if check_offset(s) {
                 s.clone()
             } else {
-                return Value::Error("ValueError", "invalid timezone offset format (expected +HH:MM or -HH:MM)", None);
+                return Value::new_error("ValueError", "invalid timezone offset format (expected +HH:MM or -HH:MM)", None);
             }
         }
         _ => Local::now().offset().to_string(),
@@ -79,10 +79,10 @@ fn new_apollo_time(args: &HashMap<String, Value>) -> Value {
     ))), Type::new_simple("int")));
     map.insert("tz".to_string(), (Box::new(Value::String(tz)), Type::new_simple("str")));
 
-    Value::Struct(Struct {
+    Value::Struct(Box::new(Struct {
         ty: APOLLO_TIME_STRUCT.clone(),
         fields: map,
-    })
+    }))
 }
 
 fn nanos_since_apollo(time: SystemTime) -> i128 {
@@ -160,20 +160,20 @@ macro_rules! make_comparison_fn {
                 |args: &HashMap<String, Value>| -> Value {
                     let self_struct = match args.get("self") {
                         Some(Value::Struct(s)) => s,
-                        _ => return Value::Error("TypeError", "Expected self to be ApolloTime struct", None),
+                        _ => return Value::new_error("TypeError", "Expected self to be ApolloTime struct", None),
                     };
                     let other_struct = match args.get("other") {
                         Some(Value::Struct(s)) => s,
-                        _ => return Value::Error("TypeError", "Expected other to be ApolloTime struct", None),
+                        _ => return Value::new_error("TypeError", "Expected other to be ApolloTime struct", None),
                     };
 
                     let self_nanos = match self_struct.fields.get("nanos") {
-                        Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::Error("ValueError", "self.nanos is not Int", None) },
-                        None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                        Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::new_error("ValueError", "self.nanos is not Int", None) },
+                        None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                     };
                     let other_nanos = match other_struct.fields.get("nanos") {
-                        Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::Error("ValueError", "other.nanos is not Int", None) },
-                        None => return Value::Error("ValueError", "Missing nanos field in other", None),
+                        Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::new_error("ValueError", "other.nanos is not Int", None) },
+                        None => return Value::new_error("ValueError", "Missing nanos field in other", None),
                     };
                     
                     let self_tz_str = self_struct.fields.get("tz")
@@ -372,23 +372,23 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected self to be ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected self to be ApolloTime struct", None),
                 };
 
                 let fmt_str = match args.get("format") {
                     Some(Value::String(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected format to be a string", None),
+                    _ => return Value::new_error("TypeError", "Expected format to be a string", None),
                 };
 
                 let nanos_i128 = match s.fields.get("nanos") {
                     Some((boxed_val, _)) => match &**boxed_val {
                         Value::Int(n) => match n.to_i128() {
                             Ok(v) => v,
-                            Err(e) => return Value::Error("ValueError", to_static(format!("Failed to convert nanos: {}", e)), None),
+                            Err(e) => return Value::new_error("ValueError", to_static(format!("Failed to convert nanos: {}", e)), None),
                         },
-                        _ => return Value::Error("ValueError", "nanos field is not an Int", None),
+                        _ => return Value::new_error("ValueError", "nanos field is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field", None),
                 };
 
                 let tz_str = s.fields.get("tz")
@@ -412,14 +412,14 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
 
                 let system_time = match ts {
                     Some(t) => t,
-                    None => return Value::Error("ValueError", "Timestamp overflowed", None),
+                    None => return Value::new_error("ValueError", "Timestamp overflowed", None),
                 };
 
                 let dt_utc: DateTime<Utc> = system_time.into();
                 let dt_local = dt_utc.with_timezone(&offset);
 
                 if let Err(e) = validate_chrono_format(&fmt_str) {
-                    return Value::Error("ValueError", e, None);
+                    return Value::new_error("ValueError", e, None);
                 }
 
                 let fmt_str = process_custom_formats(&fmt_str, &dt_local);
@@ -444,27 +444,27 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let self_struct = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected self to be ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected self to be ApolloTime struct", None),
                 };
 
                 let other_struct = match args.get("other") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected other to be ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected other to be ApolloTime struct", None),
                 };
 
                 let self_nanos = match self_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => n.to_i128().unwrap_or(0),
-                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "self.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                 };
                 let other_nanos = match other_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => n.to_i128().unwrap_or(0),
-                        _ => return Value::Error("ValueError", "other.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "other.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in other", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in other", None),
                 };
 
                 let self_tz_str = self_struct.fields.get("tz")
@@ -486,16 +486,16 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
 
                 let new_nanos = match result_nanos {
                     Some(n) => n,
-                    None => return Value::Error("OverflowError", "addition overflowed", None),
+                    None => return Value::new_error("OverflowError", "addition overflowed", None),
                 };
 
                 let mut new_fields = self_struct.fields.clone();
                 new_fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(new_nanos))), Type::new_simple("int")));
 
-                Value::Struct(Struct {
+                Value::Struct(Box::new(Struct {
                     ty: APOLLO_TIME_STRUCT.clone(),
                     fields: new_fields,
-                })
+                }))
             },
             vec![
                 Parameter::instance("self", &ty, vec![]),
@@ -512,27 +512,27 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let self_struct = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected self to be ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected self to be ApolloTime struct", None),
                 };
 
                 let other_struct = match args.get("other") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected other to be ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected other to be ApolloTime struct", None),
                 };
 
                 let self_nanos = match self_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => n.to_i128().unwrap_or(0),
-                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "self.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                 };
                 let other_nanos = match other_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => n.to_i128().unwrap_or(0),
-                        _ => return Value::Error("ValueError", "other.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "other.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in other", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in other", None),
                 };
 
                 let self_tz_str = self_struct.fields.get("tz")
@@ -554,16 +554,16 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
 
                 let new_nanos = match result_nanos {
                     Some(n) => n,
-                    None => return Value::Error("OverflowError", "subtraction overflowed", None),
+                    None => return Value::new_error("OverflowError", "subtraction overflowed", None),
                 };
 
                 let mut new_fields = self_struct.fields.clone();
                 new_fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(new_nanos))), Type::new_simple("int")));
 
-                Value::Struct(Struct {
+                Value::Struct(Box::new(Struct {
                     ty: APOLLO_TIME_STRUCT.clone(),
                     fields: new_fields,
-                })
+                }))
             },
             vec![
                 Parameter::instance("self", &ty, vec![]),
@@ -583,16 +583,16 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let iso_str = match args.get("s") {
                     Some(Value::String(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected string argument", None),
+                    _ => return Value::new_error("TypeError", "Expected string argument", None),
                 };
                 match parse_iso_to_nanos(&iso_str) {
                     Ok((nanos, tz_str)) => {
                         let mut fields = HashMap::new();
                         fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(nanos))), Type::new_simple("int")));
                         fields.insert("tz".to_string(), (Box::new(Value::String(tz_str)), Type::new_simple("str")));
-                        Value::Struct(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields })
+                        Value::Struct(Box::new(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields }))
                     }
-                    Err(e) => Value::Error("ValueError", to_static(e), None),
+                    Err(e) => Value::new_error("ValueError", to_static(e), None),
                 }
             },
             vec![Parameter::positional("s", "str")],
@@ -606,14 +606,14 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime struct", None),
                 };
                 let nanos_i128 = match s.fields.get("nanos") {
                     Some((v, _)) => match &**v { 
                         Value::Int(n) => n.to_i128().unwrap_or(0), 
-                        _ => return Value::Error("ValueError", "nanos not Int", None) 
+                        _ => return Value::new_error("ValueError", "nanos not Int", None) 
                     },
-                    None => return Value::Error("ValueError", "Missing nanos", None),
+                    None => return Value::new_error("ValueError", "Missing nanos", None),
                 };
                 let tz_str = s.fields.get("tz")
                     .and_then(|(v, _)| if let Value::String(s) = &**v { Some(s.clone()) } else { None })
@@ -642,9 +642,9 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                 let ts_secs = match args.get("ts") {
                     Some(Value::Int(i)) => match i.to_i128() {
                         Ok(v) => v,
-                        Err(_) => return Value::Error("ConversionError", "failed to convert Int to i128", None),
+                        Err(_) => return Value::new_error("ConversionError", "failed to convert Int to i128", None),
                     },
-                    _ => return Value::Error("TypeError", "expected int argument 'ts'", None),
+                    _ => return Value::new_error("TypeError", "expected int argument 'ts'", None),
                 };
 
                 let unix_time = std::time::UNIX_EPOCH
@@ -666,10 +666,10 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     Type::new_simple("str")
                 ));
 
-                Value::Struct(Struct {
+                Value::Struct(Box::new(Struct {
                     ty: APOLLO_TIME_STRUCT.clone(),
                     fields: map,
-                })
+                }))
             },
             vec![Parameter::positional("ts", "int")],
             &ty,
@@ -683,15 +683,15 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
                 };
 
                 let nanos_i128 = match s.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => n.to_i128().unwrap_or(0),
-                        _ => return Value::Error("ValueError", "nanos not Int", None),
+                        _ => return Value::new_error("ValueError", "nanos not Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos", None),
+                    None => return Value::new_error("ValueError", "Missing nanos", None),
                 };
 
                 let apollo_time = if nanos_i128 >= 0 {
@@ -728,10 +728,10 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                 map.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(0))), Type::new_simple("int")));
                 map.insert("tz".to_string(), (Box::new(Value::String("Z".to_string())), Type::new_simple("str")));
 
-                Value::Struct(Struct {
+                Value::Struct(Box::new(Struct {
                     ty: APOLLO_TIME_STRUCT.clone(),
                     fields: map,
-                })
+                }))
             },
             vec![],
             &ty,
@@ -745,12 +745,12 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
         make_native_fn_pt!(
             "to_timezone",
             |args: &HashMap<String, Value>| -> Value {
-                let self_struct = match args.get("self") { Some(Value::Struct(s)) => s, _ => return Value::Error("TypeError", "Expected ApolloTime struct", None) };
-                let new_tz_str = match args.get("tz") { Some(Value::String(s)) => s, _ => return Value::Error("TypeError", "Expected tz string", None) };
+                let self_struct = match args.get("self") { Some(Value::Struct(s)) => s, _ => return Value::new_error("TypeError", "Expected ApolloTime struct", None) };
+                let new_tz_str = match args.get("tz") { Some(Value::String(s)) => s, _ => return Value::new_error("TypeError", "Expected tz string", None) };
 
                 let nanos_i128 = match self_struct.fields.get("nanos") {
-                    Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::Error("ValueError", "nanos not Int", None) },
-                    None => return Value::Error("ValueError", "Missing nanos", None),
+                    Some((v, _)) => match &**v { Value::Int(n) => n.to_i128().unwrap_or(0), _ => return Value::new_error("ValueError", "nanos not Int", None) },
+                    None => return Value::new_error("ValueError", "Missing nanos", None),
                 };
                 let old_tz_str = self_struct.fields.get("tz").and_then(|(v, _)| if let Value::String(s) = &**v { Some(s.clone()) } else { None }).unwrap_or_else(|| "Z".to_string());
 
@@ -764,7 +764,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                 fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(new_nanos))), Type::new_simple("int")));
                 fields.insert("tz".to_string(), (Box::new(Value::String(new_tz_str.to_string())), Type::new_simple("str")));
 
-                Value::Struct(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields })
+                Value::Struct(Box::new(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields }))
             },
             vec![Parameter::instance("self", &ty, vec![]), Parameter::positional("tz", "str")],
             &ty,
@@ -779,16 +779,16 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let datetime_str = match args.get("datetime") {
                     Some(Value::String(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected string argument 'datetime'", None),
+                    _ => return Value::new_error("TypeError", "Expected string argument 'datetime'", None),
                 };
                 let format_str = match args.get("format") {
                     Some(Value::String(s)) => s.as_str(),
                     Some(Value::Null) | None => "%Y-%m-%dT%H:%M:%S%.f",
-                    _ => return Value::Error("TypeError", "Expected string or null for 'format'", None),
+                    _ => return Value::new_error("TypeError", "Expected string or null for 'format'", None),
                 };
                 let tz_str = match args.get("tz") {
                     Some(Value::String(s)) => s.as_str(),
-                    _ => return Value::Error("TypeError", "Expected string or null for 'tz'", None),
+                    _ => return Value::new_error("TypeError", "Expected string or null for 'tz'", None),
                 };
 
                 let offset = parse_offset(tz_str);
@@ -796,8 +796,8 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     Ok(naive_dt) => {
                         let dt_fixed = match offset.from_local_datetime(&naive_dt) {
                             LocalResult::Single(dt) => dt,
-                            LocalResult::Ambiguous(..) => return Value::Error("ValueError", "The specified local time is ambiguous in the given timezone", None),
-                            LocalResult::None => return Value::Error("ValueError", "The specified local time does not exist in the given timezone", None),
+                            LocalResult::Ambiguous(..) => return Value::new_error("ValueError", "The specified local time is ambiguous in the given timezone", None),
+                            LocalResult::None => return Value::new_error("ValueError", "The specified local time does not exist in the given timezone", None),
                         };
 
                         let dt_utc: DateTime<Utc> = dt_fixed.with_timezone(&Utc);
@@ -805,16 +805,16 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                         let duration = dt_utc.signed_duration_since(epoch_utc);
                         let nanos = match duration.num_nanoseconds() {
                             Some(n) => n as i128,
-                            None => return Value::Error("OverflowError", "Duration overflowed", None),
+                            None => return Value::new_error("OverflowError", "Duration overflowed", None),
                         };
 
                         let mut fields: HashMap<String, (Box<Value>, Type)> = HashMap::new();
                         fields.insert("nanos".to_string(), (Box::new(Value::Int(Int::from_i128(nanos))), Type::new_simple("int")));
                         fields.insert("tz".to_string(), (Box::new(Value::String(tz_str.to_string())), Type::new_simple("str")));
 
-                        Value::Struct(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields })
+                        Value::Struct(Box::new(Struct { ty: APOLLO_TIME_STRUCT.clone(), fields }))
                     }
-                    Err(e) => Value::Error("ParseError", to_static(format!("Failed to parse datetime: {}", e)), None),
+                    Err(e) => Value::new_error("ParseError", to_static(format!("Failed to parse datetime: {}", e)), None),
                 }
             },
             vec![
@@ -834,7 +834,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
         |args: &HashMap<String, Value>| {
             let s = match args.get("self") {
                 Some(Value::Struct(s)) => s,
-                _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
             };
             match s.fields.get("nanos") {
                 Some((v, _)) => (**v).clone(),
@@ -851,7 +851,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
         |args: &HashMap<String, Value>| {
             let s = match args.get("self") {
                 Some(Value::Struct(s)) => s,
-                _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
             };
             match s.fields.get("tz") {
                 Some((v, _)) => (**v).clone(),
@@ -868,7 +868,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
         |args: &HashMap<String, Value>| {
             let s = match args.get("self") {
                 Some(Value::Struct(s)) => s,
-                _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
             };
             let tz_str = s.fields.get("tz")
                 .and_then(|(v, _)| if let Value::String(s) = &**v { Some(s.clone()) } else { None })
@@ -890,18 +890,18 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let self_struct = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime struct", None),
                 };
 
                 let self_nanos = match self_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => match n.to_i128() {
                             Ok(val) => val,
-                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                            Err(_) => return Value::new_error("ValueError", "self.nanos too large to convert", None),
                         },
-                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "self.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                 };
 
                 let self_tz = match self_struct.fields.get("tz") {
@@ -918,13 +918,13 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     let duration = now.signed_duration_since(epoch_utc);
                     match duration.num_nanoseconds() {
                         Some(n) => n as i128,
-                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                        None => return Value::new_error("OverflowError", "Current time too far from Apollo epoch", None),
                     }
                 };
 
                 let elapsed_nanos = match now_nanos.checked_sub(self_nanos) {
                     Some(n) => n,
-                    None => return Value::Error("OverflowError", "Elapsed time calculation overflowed", None),
+                    None => return Value::new_error("OverflowError", "Elapsed time calculation overflowed", None),
                 };
 
                 let mut fields = HashMap::new();
@@ -938,10 +938,10 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     (Box::new(Value::String(self_tz)), Type::new_simple("str"))
                 );
 
-                Value::Struct(Struct {
+                Value::Struct(Box::new(Struct {
                     ty: APOLLO_TIME_STRUCT.clone(),
                     fields
-                })
+                }))
             },
             vec![Parameter::instance("self", &ty, vec![])],
             &ty,
@@ -967,7 +967,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
                 };
                 match s.fields.get("nanos") {
                     Some((v, _)) => (**v).clone(),
@@ -986,17 +986,17 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
                 };
                 match s.fields.get("nanos") {
                     Some((v, _)) => {
                         if let Value::Int(nanos_int) = &**v {
                             match nanos_int.to_i128() {
                                 Ok(nanos_i128) => Value::Int(Int::from_i128(nanos_i128 / 1_000_000)),
-                                Err(_) => Value::Error("ConversionError", "failed to convert Int to i128", None),
+                                Err(_) => Value::new_error("ConversionError", "failed to convert Int to i128", None),
                             }
                         } else {
-                            Value::Error("TypeError", "nanos is not an Int", None)
+                            Value::new_error("TypeError", "nanos is not an Int", None)
                         }
                     }
                     None => Value::Int(Int::from_i128(0)),
@@ -1014,17 +1014,17 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let s = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime", None),
                 };
                 match s.fields.get("nanos") {
                     Some((v, _)) => {
                         if let Value::Int(nanos_int) = &**v {
                             match nanos_int.to_i128() {
                                 Ok(nanos_i128) => Value::Int(Int::from_i128(nanos_i128 / 1_000_000_000)),
-                                Err(_) => Value::Error("ConversionError", "failed to convert Int to i128", None),
+                                Err(_) => Value::new_error("ConversionError", "failed to convert Int to i128", None),
                             }
                         } else {
-                            Value::Error("TypeError", "nanos is not an Int", None)
+                            Value::new_error("TypeError", "nanos is not an Int", None)
                         }
                     }
                     None => Value::Int(Int::from_i128(0)),
@@ -1046,18 +1046,18 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let self_struct = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime struct", None),
                 };
 
                 let self_nanos = match self_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => match n.to_i128() {
                             Ok(val) => val,
-                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                            Err(_) => return Value::new_error("ValueError", "self.nanos too large to convert", None),
                         },
-                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "self.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                 };
 
                 let now_nanos = {
@@ -1066,7 +1066,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     let duration = now.signed_duration_since(epoch_utc);
                     match duration.num_nanoseconds() {
                         Some(n) => n as i128,
-                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                        None => return Value::new_error("OverflowError", "Current time too far from Apollo epoch", None),
                     }
                 };
 
@@ -1084,18 +1084,18 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
             |args: &HashMap<String, Value>| -> Value {
                 let self_struct = match args.get("self") {
                     Some(Value::Struct(s)) => s,
-                    _ => return Value::Error("TypeError", "Expected ApolloTime struct", None),
+                    _ => return Value::new_error("TypeError", "Expected ApolloTime struct", None),
                 };
 
                 let self_nanos = match self_struct.fields.get("nanos") {
                     Some((v, _)) => match &**v {
                         Value::Int(n) => match n.to_i128() {
                             Ok(val) => val,
-                            Err(_) => return Value::Error("ValueError", "self.nanos too large to convert", None),
+                            Err(_) => return Value::new_error("ValueError", "self.nanos too large to convert", None),
                         },
-                        _ => return Value::Error("ValueError", "self.nanos is not an Int", None),
+                        _ => return Value::new_error("ValueError", "self.nanos is not an Int", None),
                     },
-                    None => return Value::Error("ValueError", "Missing nanos field in self", None),
+                    None => return Value::new_error("ValueError", "Missing nanos field in self", None),
                 };
 
                 let now_nanos = {
@@ -1104,7 +1104,7 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
                     let duration = now.signed_duration_since(epoch_utc);
                     match duration.num_nanoseconds() {
                         Some(n) => n as i128,
-                        None => return Value::Error("OverflowError", "Current time too far from Apollo epoch", None),
+                        None => return Value::new_error("OverflowError", "Current time too far from Apollo epoch", None),
                     }
                 };
 
@@ -1129,12 +1129,12 @@ static APOLLO_TIME_STRUCT: Lazy<Type> = Lazy::new(|| {
 fn parse_time(args: &HashMap<String, Value>) -> Value {
     let format = match args.get("format") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError", "Expected a string for 'format'", None),
+        _ => return Value::new_error("TypeError", "Expected a string for 'format'", None),
     };
 
     let time_str = match args.get("time") {
         Some(Value::String(s)) => s.as_str(),
-        _ => return Value::Error("TypeError", "Expected a string for 'time'", None),
+        _ => return Value::new_error("TypeError", "Expected a string for 'time'", None),
     };
 
     match NaiveDateTime::parse_from_str(time_str, format) {
@@ -1148,7 +1148,7 @@ fn parse_time(args: &HashMap<String, Value>) -> Value {
             map.insert(Value::String("second".to_string()), Value::Int(Int::from_i64(dt.second().into())));
             Value::Map(map)
         }
-        Err(e) => Value::Error("ParseError", to_static(format!("{}", e)), None),
+        Err(e) => Value::new_error("ParseError", to_static(format!("{}", e)), None),
     }
 }
 
@@ -1204,7 +1204,7 @@ fn format_datetime(args: &HashMap<String, Value>) -> Value {
                 s => Value::String(s),
             }
         }
-        _ => Value::Error("TypeError", "expected str argument 'format'", None),
+        _ => Value::new_error("TypeError", "expected str argument 'format'", None),
     }
 }
 
@@ -1215,7 +1215,7 @@ fn sleep(args: &HashMap<String, Value>) -> Value {
                 match int_val.to_i64() {
                     Ok(duration_ms) => {
                         if duration_ms < 0 {
-                            return Value::Error(
+                            return Value::new_error(
                                 "InvalidArgument",
                                 "duration must be non-negative",
                                 None,
@@ -1232,21 +1232,21 @@ fn sleep(args: &HashMap<String, Value>) -> Value {
                         }
                         Value::Null
                     }
-                    Err(_) => Value::Error(
+                    Err(_) => Value::new_error(
                         "ConversionError",
                         "failed to convert Int to i64",
                         None,
                     ),
                 }
             }
-            _ => Value::Error(
+            _ => Value::new_error(
                 "InvalidArgument",
                 "duration must be an integer",
                 None,
             ),
         }
     } else {
-        Value::Error(
+        Value::new_error(
             "MissingArgument",
             "duration argument missing",
             None,

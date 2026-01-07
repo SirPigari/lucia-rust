@@ -33,7 +33,7 @@ fn hello(_args: &HashMap<String, Value>) -> Value {
 fn goto(args: &HashMap<String, Value>) -> Value {
     let level = match args.get("level") {
         Some(Value::Int(i)) => i.to_i64().unwrap_or(0) as i32,
-        _ => return Value::Error("TypeError", "level must be an integer.", None),
+        _ => return Value::new_error("TypeError", "level must be an integer.", None),
     };
 
     let current_level = LEVEL.get_or_init(|| 0);
