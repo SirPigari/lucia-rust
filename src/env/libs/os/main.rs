@@ -246,15 +246,15 @@ fn create_signal_map() -> HashMap<String, Variable> {
                 Ok(output) if output.status.success() => Value::Boolean(true),
                 Ok(output) => {
                     let err_msg = String::from_utf8_lossy(&output.stderr).trim().trim_start_matches("ERROR: ").to_string();
-                    Value::Error(
+                    Value::new_error(
                         "OSError",
-                        to_static(format!("Failed to terminate process {}: {}", pid, err_msg)),
+                        format!("Failed to terminate process {}: {}", pid, err_msg),
                         None,
                     )
                 }
-                Err(e) => Value::Error(
+                Err(e) => Value::new_error(
                     "OSError",
-                    to_static(format!("Failed to run taskkill for {}: {}", pid, e)),
+                    format!("Failed to run taskkill for {}: {}", pid, e),
                     None,
                 ),
             }
@@ -1122,7 +1122,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
             unsafe {
                 let handle = fd as std::os::windows::io::RawHandle;
                 if handle.is_null() {
-                    return Value::new_error("OSError", to_static("Invalid file descriptor"), None);
+                    return Value::new_error("OSError", "Invalid file descriptor", None);
                 }
 
                 let mut file = std::fs::File::from_raw_handle(handle);
@@ -1131,7 +1131,7 @@ fn create_terminal_map() -> HashMap<String, Variable> {
 
                 match result {
                     Ok(_) => Value::Boolean(true),
-                    Err(e) => Value::new_error("OSError", to_static(format!("{}", e)), None),
+                    Err(e) => Value::new_error("OSError", format!("{}", e), None),
                 }
             }
         }

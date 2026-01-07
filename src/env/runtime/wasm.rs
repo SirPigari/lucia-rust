@@ -358,7 +358,7 @@ pub fn handle_error(
 
         trace.push_str(&format!(
             "{TAB}{} | {}: {}",
-            indent, err.error_type, err.msg
+            indent, err.err_type, err.err_msg
         ));
 
         if let Some(help) = &err.help {
@@ -413,8 +413,8 @@ pub fn handle_error(
             "{}[err] {} -> {}: {}{}{}{}",
             hex_to_ansi(&config.color_scheme.exception, use_colors),
             location_str,
-            current.error_type,
-            current.msg,
+            current.err_type,
+            current.err_msg,
             depth_note,
             help_msg,
             hex_to_ansi("reset", use_colors)
@@ -442,8 +442,8 @@ pub fn handle_error(
                     "\n{TAB}{}^-- caused by:\n{TAB}{} | {}: {}",
                     hex_to_ansi(&config.color_scheme.exception, use_colors),
                     indent,
-                    inner.error_type,
-                    inner.msg
+                    inner.err_type,
+                    inner.err_msg
                 ));
 
                 if let Some(help) = &inner.help {
