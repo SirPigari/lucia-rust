@@ -1,8 +1,8 @@
 ;;; lucia-mode.el --- Major mode for Lucia programming language -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026 Markofwitch
+;; Copyright (C) 2025
 
-;; Author: Markofwitch
+;; Author: Generated
 ;; Version: 1.0.0
 ;; Keywords: languages
 ;; Package-Requires: ((emacs "24.3"))
@@ -105,9 +105,9 @@
 (defun lucia-indent-line ()
   "Indent current line as Lucia code."
   (interactive)
-  (let ((indent-col 0)
-        (cur-indent (current-indentation))
-        (point-offset (- (current-column) cur-indent)))
+  (let* ((cur-indent (current-indentation))
+         (point-offset (- (current-column) cur-indent))
+         (indent-col 0))
     (save-excursion
       (beginning-of-line)
       (if (bobp)
