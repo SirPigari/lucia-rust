@@ -82,6 +82,12 @@
     - [Type Checking Operators](#type-checking-operators)
     - [Pipeline Operator](#pipeline-operator)
     - [Increment / Decrement Operators](#increment--decrement-operators)
+    - [Block Syntax](#block-syntax)
+    - [Example of a Block](#example-of-a-block)
+    - [Why Use Blocks?](#why-use-blocks)
+  - [Indentation](#indentation)
+    - [Example](#example)
+    - [Summary](#summary)
   - [If Statements](#if-statements)
     - [1. Basic `if`](#1-basic-if)
     - [2. `if` with `else`](#2-if-with-else)
@@ -110,9 +116,14 @@
   - [Try and catch](#try-and-catch)
     - [Basic `try` / `catch`](#basic-try--catch)
     - [Catching specific elements](#catching-specific-elements)
-    - [Suppressing errors with `?`](#suppressing-errors-with-)
-    - [Throwing with multiple elements](#throwing-with-multiple-elements)
     - [Optional `try` without catch](#optional-try-without-catch)
+    - [Suppressing errors with `?`](#suppressing-errors-with-)
+  - [Throw](#throw)
+    - [Throwing a tuple](#throwing-a-tuple)
+  - [Comments](#comments)
+    - [Single-line Comment](#single-line-comment)
+    - [Multi-line Comment](#multi-line-comment)
+    - [In-line Comment](#in-line-comment)
   - [Lambda Functions](#lambda-functions)
     - [Examples](#examples)
   - [Where and then](#where-and-then)
@@ -1393,6 +1404,61 @@ assert_eq!(++pp, 10)
 | `--i`    | Prefix decrement  | `--i`   | `i-1`          |
 | `i--`    | Postfix decrement | `i--`   | `i` then `i-1` |
 
+### Block Syntax
+
+Blocks in Lucia start with a statement that is followed by a `:`, and the body of the block is indented (optional, but recommended for readability). The block is terminated using the `end` keyword.
+
+### Example of a Block
+
+Here’s an example of a block used with an `if` statement:
+
+```lucia
+age: int = 18
+
+if (age >= 18):
+    println("You are an adult.")
+end
+```
+
+The code within the block (in this case, the `println()` function) is indented, and the block is terminated with `end`.
+
+### Why Use Blocks?
+
+Blocks help organize code into logical groups. By using the `end` keyword, Lucia ensures that the boundaries of each block are clearly defined, which reduces errors and improves readability.
+
+## Indentation
+
+Unlike Python, Lucia does not rely on indentation to define blocks. Blocks are explicitly marked using the `:` after a statement and are terminated with the `end` keyword. While indentation is not required, it is recommended for better readability.
+
+### Example
+
+Both of the following examples are valid in Lucia:
+
+```lucia
+age: int = 18
+
+if (age >= 18):
+    print("You are an adult.")  
+end
+```
+
+```lucia
+age: int = 18
+
+if (age >= 18): 
+print("You are an adult.")  
+end
+```
+
+Since blocks in Lucia are clearly defined by `:` and `end`, indentation does not affect how the code runs. However, using consistent indentation is recommended to improve readability.
+
+### Summary
+
+- A block in Lucia is created by using a statement followed by a colon (`:`) and indented code.
+- Blocks are terminated with the `end` keyword.
+- Indentation is important in Lucia, and the code inside a block must be consistently indented.
+- Blocks improve code organization and readability, ensuring that related code is grouped together.
+
 ## If Statements
 
 The `if` statement in Lucia allows conditional execution of code blocks. It can be simple, chained with `else if`, or have a final `else` block.
@@ -1778,14 +1844,13 @@ The `try` statement **catches runtime errors**, allowing you to handle exception
 
 ```lucia
 try:
-    throw "This should throw an error" from "ExpectedError"
+    1 / 0
 catch (e):
-    println(e)  // prints: ("ExpectedError", "This should throw an error")
+    println(e)  // prints: ("ZeroDivisionError", "Division by zero.")
 end
 ```
 
-- `throw` can include a type, message, and optional help string.
-- Catch blocks receive the error as a tuple.
+Catch blocks receive the error as a tuple.
 
 ### Catching specific elements
 
@@ -1801,11 +1866,19 @@ end
 - You can destructure errors into type, message, and help:
   `(err_type, err_msg, err_help)`
 
+### Optional `try` without catch
+
+```lucia
+try:
+    1 / 0
+end
+```
+
 ### Suppressing errors with `?`
 
 ```lucia
 fun may_fail()? -> int:
-    throw "lol failed"
+    1/0
 end
 
 assert!(may_fail()? is void)       // no crash, returns null
@@ -1816,21 +1889,51 @@ assert_eq!(may_fail()? or 42, 42)  // provide default value
 - `?` **suppresses errors** and returns `null` instead.
 - You can chain `?` operators, and provide default values with `or` or `??`.
 
-### Throwing with multiple elements
+## Throw
+
+```lucia
+throw "msg" from "err_type"
+throw "msg"
+```
+
+Throws an error.
+If `err_type` is ommited throws as `"LuciaError"`.
+
+### Throwing a tuple
 
 ```lucia
 throw ("CustomError", "Something went wrong", "Helpful text")
 ```
 
-- Error can include 1–3 elements: type, message, help.
-- Default type is `"LuciaError"` if omitted.
+Error can include 1–3 elements: type, message, help.
+Default type is `"LuciaError"` if omitted.
 
-### Optional `try` without catch
+## Comments
+
+Lucia supports single-line and multi-line comments:
+
+### Single-line Comment
 
 ```lucia
-try:
-    1 / 0
-end
+// This is a single-line comment
+```
+
+### Multi-line Comment
+
+```lucia
+/*
+This is a multi-line comment
+spanning multiple lines.
+*/
+```
+
+### In-line Comment
+
+The in-line comment is used to add comments inside the code.
+It's started by `<#` and closed by `#>`:
+
+```lucia
+println("Hello" <# This is an in-line comment #>, "world")
 ```
 
 ## Lambda Functions

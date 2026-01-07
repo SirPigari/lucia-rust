@@ -1468,7 +1468,6 @@ fn repl(
     interpreter.set_plugin_runtime(plugin_runtime);
 
     if config.cache_format.is_enabled() {
-        let cache_dir = home_dir_path.join(".cache");
         if let Ok(Some(cache)) = load_interpreter_cache(&cache_dir, config.cache_format) {
             interpreter.set_cache(cache);
         }
@@ -1542,7 +1541,47 @@ fn repl(
 
     let mut history: Vec<String> = Vec::new();
     let mut completions: Vec<String>;
-    let history_path = cache_dir.join("repl.history");
+    #[cfg(not(feature = "single_executable"))]
+    let history_path = {
+        let primary = cache_dir.join("repl.history");
+
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&primary)
+        {
+            Ok(_) => primary,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => primary,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                #[cfg(windows)]
+                {
+                    let appdata = std::env::var("APPDATA")
+                        .expect("APPDATA not set");
+
+                    let fallback = PathBuf::from(appdata)
+                        .join("Lucia")
+                        .join("repl.history");
+
+                    std::fs::create_dir_all(fallback.parent().unwrap())
+                        .expect("failed to create Lucia dir");
+
+                    fallback
+                }
+
+                #[cfg(not(windows))]
+                {
+                    let fallback = PathBuf::from("/tmp").join("lucia_repl.history");
+                    fallback
+                }
+            }
+            Err(e) => {
+                eprintln!("{}Warning: Failed to open REPL history file: {}{}", hex_to_ansi(&config.color_scheme.warning, config.supports_color), e, hex_to_ansi("reset", config.supports_color));
+                PathBuf::from("/dev/null")
+            }
+        }
+    };
+    #[cfg(feature = "single_executable")]
+    let history_path = std::env::temp_dir().join("lucia_repl.history");
     
     loop {
         line_number += 1;
