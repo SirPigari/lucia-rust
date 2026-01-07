@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2025
 
-;; Author: Generated
+;; Author: Markofwitch
 ;; Version: 1.0.0
 ;; Keywords: languages
 ;; Package-Requires: ((emacs "24.3"))
@@ -156,6 +156,10 @@
   ;; Indentation
   (setq-local indent-line-function 'lucia-indent-line)
   (setq-local tab-width 4)
+  (setq-local indent-tabs-mode nil)
+  
+  ;; Backspace deletes full indentation level
+  (setq-local backward-delete-char-untabify-method 'hungry)
   
   ;; Electric indentation
   (setq-local electric-indent-chars
