@@ -2299,22 +2299,20 @@ pub fn generate_name_variants(name: &str) -> Vec<String> {
     variants
 }
 
-#[allow(dead_code)]
 pub fn is_type_ident_available(value: &Value) -> bool {
     match value {
         Value::Int(_) | Value::Float(_) | Value::String(_) | Value::Boolean(_) | Value::Null |
         Value::Map { .. } | Value::Tuple(_) | Value::List(_) | Value::Bytes(_) |
-        Value::Function(_) | Value::Generator(_) | Value::Module(_) |
+        Value::Function(_) | Value::Generator(_) |
         Value::Enum(_) | Value::Pointer(_) | Value::Error(..) => true,
         Value::Type(t) => match t {
-            Type::Enum { .. } => false,
+            Type::Enum { .. } | Type::Struct { .. } => false,
             _ => true,
         }
         _ => false,
     }
 }
 
-#[allow(dead_code)]
 pub fn check_type_ident(value: &Value, ident: &str) -> bool {
     if ident == "any" {
         return true;
@@ -2337,6 +2335,28 @@ pub fn check_type_ident(value: &Value, ident: &str) -> bool {
         Value::Pointer(_) => ident == "&any",
         Value::Error(..) => ident == "error",
         _ => false,
+    }
+}
+
+pub fn get_object_type_ident(value: &Value) -> String {
+    match value {
+        Value::Int(_) => "int".to_string(),
+        Value::Float(_) => "float".to_string(),
+        Value::String(_) => "str".to_string(),
+        Value::Boolean(_) => "bool".to_string(),
+        Value::Null => "void".to_string(),
+        Value::Map { .. } => "map".to_string(),
+        Value::Tuple(_) => "tuple".to_string(),
+        Value::List(_) => "list".to_string(),
+        Value::Bytes(_) => "bytes".to_string(),
+        Value::Type(_ ) => "type".to_string(),
+        Value::Function(_) => "function".to_string(),
+        Value::Generator(_) => "generator".to_string(),
+        Value::Module(_) => "module".to_string(),
+        Value::Enum(_) => "enum".to_string(),
+        Value::Pointer(_) => "&any".to_string(),
+        Value::Error(..) => "error".to_string(),
+        Value::Struct(_) => "struct".to_string(),
     }
 }
 

@@ -32,6 +32,8 @@ use crate::env::runtime::utils::{
     diff_fields,
     is_valid_alias,
     get_pointer_depth_and_base_value,
+    is_type_ident_available,
+    get_object_type_ident,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -48,8 +50,8 @@ use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
 use crate::env::runtime::statements::{Statement, Node, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, alloc_loc, get_loc, TypeNode, TypeDeclNode, PtrNode, ParamAST, ForLoopNode};
 use crate::env::runtime::modules::Module;
-use crate::env::runtime::native;
-use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction};
+use crate::env::runtime::native::{self, get_default_type_method, get_type_method_names};
+use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction, Callable};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::{STD_LIBS, get_lib_names};
 use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement};
@@ -3255,7 +3257,7 @@ impl Interpreter {
                     if method.is_static() {
                         return self.raise("TypeError", "Cannot call static method 'op_as' on struct instance");
                     }
-                    let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, Some(&mut var))));
+                    let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, None, Some(&mut var))));
                     if self.err.is_some() {
                         return NULL;
                     }
@@ -3274,7 +3276,7 @@ impl Interpreter {
                             if method.is_static() {
                                 return self.raise("TypeError", "Cannot call static method 'op_as' on struct instance");
                             }
-                            let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, Some(&mut var))));
+                            let result = self.call_function(&method, vec![Value::Type(target_type_type.clone())], HashMap::new(), Some((None, None, Some(&mut var))));
                             if self.err.is_some() {
                                 let err = self.err.clone().expect("Error should be present");
                                 return self.raise(to_static(err.err_type), to_static(err.err_msg));
@@ -6033,7 +6035,7 @@ impl Interpreter {
                     }
                 }
 
-                let call_result = self.call_function(&func, vec![val.clone()], HashMap::new(), Some((None, Some(&mut object_variable))));
+                let call_result = self.call_function(&func, vec![val.clone()], HashMap::new(), Some((None, None, Some(&mut object_variable))));
                 if self.err.is_some() {
                     return NULL;
                 }
@@ -6891,415 +6893,195 @@ impl Interpreter {
         }
     }
 
-    // fn handle_method_call(&mut self, object_stmt: Statement, method_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
-    //     let object_value = self.evaluate(&object_stmt);
-    //     if self.err.is_some() {
-    //         return NULL;
-    //     }
+    fn handle_method_call(
+        &mut self,
+        object_stmt: Statement,
+        method_name: &str,
+        pos_args_stmt: Vec<Statement>,
+        named_args_stmt: HashMap<String, Statement>,
+    ) -> Value {
+        let var_name_opt = match &object_stmt.node {
+            Node::Variable { name } => Some(name.clone()),
+            _ => None,
+        };
 
-    //     let func = match is_type_ident_available(&object_value) {
-    //         true => {
-    //             let tf = get_default_type_method(method_name);
-    //             if let Some((it, f)) = tf && check_type_ident(&object_value, &it) {
-    //                 f
-    //             } else {
-    //                 let type_methods = get_type_method_names(&object_value);
-    //                 let closest_match = find_closest_match(method_name, &type_methods);
-    //                 if let Some(m) = closest_match {
-    //                     return self.raise_with_help(
-    //                         "NameError",
-    //                         &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
-    //                         &format!("Did you mean '{}'?", m)
-    //                     );
-    //                 } else {
-    //                     return self.raise(
-    //                         "NameError",
-    //                         &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
-    //                     );
-    //                 }
-    //             }
-    //         }
-    //         false => {
-    //             let object_type = object_value.type_name();
+        let mut object_value = match &object_stmt.node {
+            Node::Variable { name } => {
+                match self.variables.get(name) {
+                    Some(v) => v.get_value().clone(),
+                    None => return self.raise("NameError", &format!("Variable '{}' not found", name)),
+                }
+            }
+            _ => {
+                let value = self.evaluate(&object_stmt);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                value
+            }
+        };
 
-    //             let mut object_variable = Variable::new(
-    //                 "_".to_string(),
-    //                 object_value.clone(),
-    //                 object_type.clone(),
-    //                 false,
-    //                 true,
-    //                 true,
-    //             );
-    //             let mut variable_name: Option<String> = if let Node::Variable { name, ..} = &object_stmt.node {
-    //                 Some(name.clone())
-    //             } else {
-    //                 None
-    //             };
+        if let Value::Type(t) = &object_value {
+            if let Type::Enum { name, variants, generics, .. } = t {
+                let variant_name = method_name;
+                let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
+                    Some(v) => v,
+                    None => {
+                        return self.raise_with_help(
+                            "TypeError",
+                            &format!("Variant '{}' not found in enum '{}'", variant_name, name),
+                            &format!(
+                                "Available variants are: {}",
+                                {
+                                    let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect();
+                                    if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }
+                                }
+                            ),
+                        )
+                    }
+                };
 
-    //             let pos_args: Vec<Value> = pos_args_stmt.into_iter().map(|s| self.evaluate(&s)).collect();
-    //             if self.err.is_some() {
-    //                 return NULL;
-    //             }
-    //             let named_args: HashMap<String, Value> = named_args_stmt.into_iter().map(|(k, v)| (k, self.evaluate(&v))).collect();
-    //             if self.err.is_some() {
-    //                 return NULL;
-    //             }
+                if !named_args_stmt.is_empty() {
+                    return self.raise(
+                        "SyntaxError",
+                        &format!("Unexpected named arguments in enum variant '{}.{}'", name, variant_name),
+                    );
+                }
 
-    //             match object_value {
-    //                 Value::Type(ref t) => {
-    //                     match t {
-    //                         Type::Enum { name, variants, generics, .. } => {
-    //                             let variant_name = method_name;
-    //                             let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
-    //                                 Some(variant) => variant,
-    //                                 None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
-    //                             };
-    //                             if self.err.is_some() {
-    //                                 return NULL;
-    //                             }
-    //                             if !named_args.is_empty() {
-    //                                 return self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", name, variant_name));
-    //                             }
-    //                             let (variant_name, variant_ty, _) = variant;
-    //                             if *variant_ty == Statement::Null {
-    //                                 if pos_args.is_empty() {
-    //                                     return self.raise_with_help(
-    //                                         "TypeError",
-    //                                         &format!("Unexpected '()' for '{}.{}'", name, variant_name),
-    //                                         &format!("Remove '()' from '{}.{}()'", name, variant_name),
-    //                                     );
-    //                                 } else {
-    //                                     return self.raise_with_help(
-    //                                         "TypeError",
-    //                                         &format!("Variant '{}.{}' doesn't accept any arguments", name, variant_name),
-    //                                         &format!("Did you mean to use '{}.{}'", name, variant_name),
-    //                                     );
-    //                                 }
-    //                             }
-    //                             if self.err.is_some() {
-    //                                 return NULL;
-    //                             }
-    //                             let saved_variables = self.variables.clone();
-    //                             self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
-    //                             let eval_type = match self.evaluate(&variant_ty) {
-    //                                 Value::Type(t) => t,
-    //                                 e => {
-    //                                     self.variables = saved_variables;
-    //                                     if self.err.is_some() {
-    //                                         return NULL;
-    //                                     }
-    //                                     return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string()))
-    //                                 },
-    //                             };
-    //                             self.variables = saved_variables;
-    //                             if self.err.is_some() {
-    //                                 return NULL;
-    //                             }
-    //                             let variant_val = if pos_args.is_empty() {
-    //                                 NULL
-    //                             } else if pos_args.len() == 1 {
-    //                                 pos_args[0].clone()
-    //                             } else {
-    //                                 Value::Tuple(pos_args)
-    //                             };
-    //                             if self.check_type(&NULL, &eval_type).0 {
-    //                                 return self.raise_with_help(
-    //                                     "TypeError",
-    //                                     &format!("Expected a value of type '{}' for '{}.{}', but got none", eval_type.display_simple(), name, variant_name),
-    //                                     &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
-    //                                 );
-    //                             }
-    //                             if self.err.is_some() {
-    //                                 return NULL;
-    //                             }
-    //                             let idx = match get_enum_idx(&t, &variant_name) {
-    //                                 Some(u) => u,
-    //                                 None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
-    //                             };
-    //                             let v = Enum::new(
-    //                                 t.clone(),
-    //                                 (idx, variant_val)
-    //                             );
-    //                             return Value::Enum(v);
-    //                         }
-    //                         _ => {}
-    //                     }
-    //                 }
-    //                 _ => {}
-    //             }
+                let (variant_name, variant_ty, _) = variant;
 
-    //             if let Some((var_name, props)) = self.get_properties(&object_value, false) {
-    //                 object_variable.properties = props;
-    //                 object_variable.set_name(var_name.clone());
-    //             }
+                if *variant_ty == Statement::Null {
+                    return self.raise(
+                        "TypeError",
+                        &format!("Variant '{}.{}' takes no arguments", name, variant_name),
+                    );
+                }
 
-    //             if self.err.is_some() {
-    //                 return NULL;
-    //             }
+                let saved_variables = std::mem::take(&mut self.variables);
+                self.variables.extend(generics.iter().map(|g| {
+                    (
+                        g.clone(),
+                        Variable::new(
+                            g.clone(),
+                            Value::Type(Type::new_simple("any")),
+                            "type".to_string(),
+                            false,
+                            true,
+                            true,
+                        ),
+                    )
+                }));
+                self.variables = saved_variables;
 
-    //             let func = match object_variable.properties.get(&method_name.to_string()) {
-    //                 Some(v) => match v.get_value() {
-    //                     Value::Function(f) => f.clone(),
-    //                     other => return self.raise_with_help(
-    //                         "TypeError",
-    //                         &format!("'{}' is not callable", method_name),
-    //                         &format!("Expected a function, but got: {}", other.to_string()),
-    //                     ),
-    //                 },
-    //                 None => {
-    //                     if let Value::Struct(s) =  object_variable.get_value() {
-    //                         match s.get_field(&method_name) {
-    //                             Some(Value::Function(f)) => f.clone(),
-    //                             Some(field_val) => {
-    //                                 if !pos_args.is_empty() || !named_args.is_empty() {
-    //                                     return self.raise_with_help(
-    //                                         "TypeError",
-    //                                         &format!("Field '{}' is not callable", method_name),
-    //                                         &format!("Did you mean to access the field without '()'?"),
-    //                                     );
-    //                                 }
-    //                                 return field_val.clone();
-    //                             }
-    //                             None => {            
-    //                                 let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
-    //                                 if let Some(closest) = find_closest_match(method_name, &available_names) {
-    //                                     return self.raise_with_help(
-    //                                         "NameError",
-    //                                         &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
-    //                                         &format!("Did you mean '{}{}{}'?",
-    //                                             check_ansi("\x1b[4m", &self.config.supports_color),
-    //                                             closest,
-    //                                             check_ansi("\x1b[24m", &self.config.supports_color),
-    //                                         ),
-    //                                     );
-    //                                 } else {
-    //                                     return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
-    //                                 }
-    //                             }
-    //                         }
-    //                     } else {
-    //                         let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
-    //                         if let Some(closest) = find_closest_match(method_name, &available_names) {
-    //                             return self.raise_with_help(
-    //                                 "NameError",
-    //                                 &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
-    //                                 &format!("Did you mean '{}{}{}'?",
-    //                                     check_ansi("\x1b[4m", &self.config.supports_color),
-    //                                     closest,
-    //                                     check_ansi("\x1b[24m", &self.config.supports_color),
-    //                                 ),
-    //                             );
-    //                         } else {
-    //                             return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
-    //                         }
-    //                     }
-    //                 }
-    //             };
-    //         }
-    //     };
+                let mut pos_args = Vec::with_capacity(pos_args_stmt.len());
+                for s in pos_args_stmt {
+                    pos_args.push(self.evaluate(&s));
+                    if self.err.is_some() { return NULL; }
+                }
 
+                let variant_val = match pos_args.len() {
+                    0 => NULL,
+                    1 => pos_args.pop().unwrap(),
+                    _ => Value::Tuple(pos_args),
+                };
 
-    //     let result = self.call_function(
-    //         &func,
-    //         pos_args,
-    //         named_args,
-    //         Some((None, Some(&mut object_variable))),
-    //     );
-    //     return result;
-    // }
+                let idx = match get_enum_idx(t, variant_name) {
+                    Some(u) => u,
+                    None => return self.raise("NameError", &format!("Enum variant '{}' not defined.", variant_name)),
+                };
 
-    fn handle_method_call(&mut self, object_stmt: Statement, method_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
-        let object_value = self.evaluate(&object_stmt);
-        let object_type = object_value.type_name();
+                return Value::Enum(Box::new(Enum::new(t.clone(), (idx, variant_val))));
+            }
+        }
 
-        let mut object_variable = Variable::new(
-            "_".to_string(),
+        let pos_args: Vec<Value> = pos_args_stmt.iter().map(|s| self.evaluate(s)).collect();
+        if self.err.is_some() { return NULL; }
+
+        let named_args: HashMap<String, Value> =
+            named_args_stmt.iter().map(|(k, v)| (k.clone(), self.evaluate(v))).collect();
+        if self.err.is_some() { return NULL; }
+
+        let is_object = !is_type_ident_available(&object_value);
+
+        let func: Function = if !is_object {
+            let it = get_object_type_ident(&object_value);
+            let tf = get_default_type_method(method_name, &it);
+            if let Some(f) = tf {
+                f.clone()
+            } else {
+                let type_methods = get_type_method_names(&object_value);
+                if let Some(m) = find_closest_match(method_name, &type_methods) {
+                    return self.raise_with_help(
+                        "NameError",
+                        &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
+                        &format!("Did you mean '{}'?", m),
+                    );
+                } else {
+                    return self.raise(
+                        "NameError",
+                        &format!("No method '{}' for type '{}'", method_name, object_value.get_type().display_simple()),
+                    );
+                }
+            }
+        } else {
+            let mut temp_var = Variable::new(
+                var_name_opt.clone().unwrap_or_else(|| "_".to_string()),
+                object_value.clone(),
+                object_value.type_name(),
+                false,
+                true,
+                true,
+            );
+
+            if let Some((var_name, props)) = self.get_properties(temp_var.get_value(), false) {
+                temp_var.properties = props;
+                temp_var.set_name(var_name);
+            }
+
+            match temp_var.properties.get(method_name) {
+                Some(v) => match v.get_value() {
+                    Value::Function(f) => f.clone(),
+                    other => return self.raise("TypeError", &format!("Expected function, got {}", other)),
+                },
+                None => return self.raise(
+                    "NameError",
+                    &format!("No method '{}' in '{}'", method_name, temp_var.get_name()),
+                ),
+            }
+        };
+
+        let mut object_var = Variable::new(
+            var_name_opt.clone().unwrap_or_else(|| "_".to_string()),
             object_value.clone(),
-            object_type.clone(),
+            object_value.type_name(),
             false,
             true,
             true,
         );
-        let mut variable_name: Option<String> = if let Node::Variable { name, ..} = &object_stmt.node {
-            Some(name.clone())
-        } else {
-            None
-        };
-
-        let pos_args: Vec<Value> = pos_args_stmt.into_iter().map(|s| self.evaluate(&s)).collect();
-        if self.err.is_some() {
-            return NULL;
-        }
-        let named_args: HashMap<String, Value> = named_args_stmt.into_iter().map(|(k, v)| (k, self.evaluate(&v))).collect();
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        match object_value {
-            Value::Type(ref t) => {
-                match t {
-                    Type::Enum { name, variants, generics, .. } => {
-                        let variant_name = method_name;
-                        let variant = match variants.iter().find(|(s, _, _)| s == variant_name) {
-                            Some(variant) => variant,
-                            None => return self.raise_with_help("TypeError", &format!("Variant '{}' not found in enum '{}'", variant_name, name), &format!("Available variants are: {}", { let v: Vec<_> = variants.iter().map(|(n, _, _)| n.clone()).collect(); if v.len() > 7 { format!("{}...", v[..5].join(", ")) } else { v.join(", ") }})),
-                        };
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        if !named_args.is_empty() {
-                            return self.raise("SyntaxError", &format!("Unexpected named arguments in enum variant '{}.{}'", name, variant_name));
-                        }
-                        let (variant_name, variant_ty, _) = variant;
-                        if *variant_ty == Statement::Null {
-                            if pos_args.is_empty() {
-                                return self.raise_with_help(
-                                    "TypeError",
-                                    &format!("Unexpected '()' for '{}.{}'", name, variant_name),
-                                    &format!("Remove '()' from '{}.{}()'", name, variant_name),
-                                );
-                            } else {
-                                return self.raise_with_help(
-                                    "TypeError",
-                                    &format!("Variant '{}.{}' doesn't accept any arguments", name, variant_name),
-                                    &format!("Did you mean to use '{}.{}'", name, variant_name),
-                                );
-                            }
-                        }
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        let saved_variables = self.variables.clone();
-                        self.variables.extend(generics.into_iter().map(|g| (g.clone(), Variable::new(g.clone(), Value::Type(Type::new_simple("any")), "type".to_string(), false, true, true))));
-                        let eval_type = match self.evaluate(&variant_ty) {
-                            Value::Type(t) => t,
-                            e => {
-                                self.variables = saved_variables;
-                                if self.err.is_some() {
-                                    return NULL;
-                                }
-                                return self.raise("TypeError", &format!("Expected a type for '{}', but got: {}", variant_name, e.to_string()))
-                            },
-                        };
-                        self.variables = saved_variables;
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        let variant_val = if pos_args.is_empty() {
-                            NULL
-                        } else if pos_args.len() == 1 {
-                            pos_args[0].clone()
-                        } else {
-                            Value::Tuple(pos_args)
-                        };
-                        if self.check_type(&NULL, &eval_type).0 && !self.config.disable_runtime_type_checking {
-                            return self.raise_with_help(
-                                "TypeError",
-                                &format!("Expected a value of type '{}' for '{}.{}', but got none", eval_type.display_simple(), name, variant_name),
-                                &format!("Did you mean to use '{}.{}({})'", name, variant_name, eval_type.display()),
-                            );
-                        }
-                        if self.err.is_some() {
-                            return NULL;
-                        }
-                        let idx = match get_enum_idx(&t, &variant_name) {
-                            Some(u) => u,
-                            None => return self.raise("NameError", &format!("Enum variant '{}' is not defined.", variant_name)),
-                        };
-                        let v = Enum::new(
-                            t.clone(),
-                            (idx, variant_val)
-                        );
-                        return Value::Enum(Box::new(v));
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-
-        if let Some((var_name, props)) = self.get_properties(&object_value, false) {
-            object_variable.properties = props;
-            object_variable.set_name(var_name.clone());
-        } else if !object_variable.is_init() {
-            object_variable.init_properties(self);
-            variable_name = None;
-            object_variable.set_name(object_value.get_type().display_simple());
-        }
-
-        if self.err.is_some() {
-            return NULL;
-        }
-
-        let func = match object_variable.properties.get(&method_name.to_string()) {
-            Some(v) => match v.get_value() {
-                Value::Function(f) => f.clone(),
-                other => return self.raise_with_help(
-                    "TypeError",
-                    &format!("'{}' is not callable", method_name),
-                    &format!("Expected a function, but got: {}", other.to_string()),
-                ),
-            },
-            None => {
-                if let Value::Struct(s) =  object_variable.get_value() {
-                    match s.get_field(&method_name) {
-                        Some(Value::Function(f)) => f.clone(),
-                        Some(field_val) => {
-                            if !pos_args.is_empty() || !named_args.is_empty() {
-                                return self.raise_with_help(
-                                    "TypeError",
-                                    &format!("Field '{}' is not callable", method_name),
-                                    &format!("Did you mean to access the field without '()'?"),
-                                );
-                            }
-                            return field_val.clone();
-                        }
-                        None => {            
-                            let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
-                            if let Some(closest) = find_closest_match(method_name, &available_names) {
-                                return self.raise_with_help(
-                                    "NameError",
-                                    &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
-                                    &format!("Did you mean '{}{}{}'?",
-                                        check_ansi("\x1b[4m", &self.config.supports_color),
-                                        closest,
-                                        check_ansi("\x1b[24m", &self.config.supports_color),
-                                    ),
-                                );
-                            } else {
-                                return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
-                            }
-                        }
-                    }
-                } else {
-                    let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
-                    if let Some(closest) = find_closest_match(method_name, &available_names) {
-                        return self.raise_with_help(
-                            "NameError",
-                            &format!("No method '{}' in '{}'", method_name, object_variable.get_name()),
-                            &format!("Did you mean '{}{}{}'?",
-                                check_ansi("\x1b[4m", &self.config.supports_color),
-                                closest,
-                                check_ansi("\x1b[24m", &self.config.supports_color),
-                            ),
-                        );
-                    } else {
-                        return self.raise("NameError", &format!("No method '{}' in '{}'", method_name, object_variable.get_name()));
-                    }
-                }
-            }
-        };
 
         let result = self.call_function(
             &func,
             pos_args,
             named_args,
-            Some((None, Some(&mut object_variable))),
+            Some((Some(&mut object_value), None, Some(&mut object_var))),
         );
-        if let Some(name) = variable_name {
-            self.variables.insert(name, object_variable);
+
+        if self.err.is_some() {
+            return NULL;
         }
-        return result;
+
+        // i hate my language
+        if let Some(var_name) = var_name_opt {
+            if let Some(original_var) = self.variables.get_mut(&var_name) {
+                if is_object {
+                    *original_var = object_var;
+                } else {
+                    original_var.set_value(object_value);
+                }
+            }
+        }
+
+        result
     }
 
     fn handle_property_access(&mut self, object: Statement, property_name: &str) -> Value {
@@ -7580,7 +7362,7 @@ impl Interpreter {
             }
         };
 
-        self.call_function(&func, pos_args, named_args, if is_special_function { Some((Some(function_name.to_string()), None)) } else { None })
+        self.call_function(&func, pos_args, named_args, if is_special_function { Some((None, Some(function_name.to_string()), None)) } else { None })
     }
 
     pub fn call_function(
@@ -7588,30 +7370,35 @@ impl Interpreter {
         func: &Function,
         pos_args: Vec<Value>,
         named_args: HashMap<String, Value>,
-        special: Option<(Option<String>, Option<&mut Variable>)>,
+        mut special: Option<(Option<&mut Value>, Option<String>, Option<&mut Variable>)>,
     ) -> Value {
-        let is_special_function = if let Some((Some(_), _)) = &special {
-            true
-        } else {
-            false
+        let (special_value_opt, special_name_opt, mut object_variable) = special.take()
+            .unwrap_or((None, None, None));
+
+        let (special_value, is_special_value): (&mut Value, bool) = match special_value_opt {
+            Some(v) => (v, true),
+            None => (&mut Value::Null, false),
         };
+
+        let is_special_function = special_name_opt.is_some();
 
         let metadata = if !is_special_function {
             func.metadata().clone()
         } else {
-            special_function_meta().get(special.as_ref().unwrap().0.as_ref().unwrap().as_str()).unwrap().clone()
+            let special_name = special_name_opt
+                .expect("special function name missing");
+            special_function_meta()
+                .get(special_name.as_str())
+                .expect("special function metadata missing")
+                .clone()
         };
+
         let function_name = metadata.name.as_str();
-        let mut object_variable: Option<&mut Variable> = if let Some((_, obj_var)) = special {
-            obj_var
-        } else {
-            None
-        };
-        let is_module: bool = if let Some(obj_var) = &object_variable {
-            matches!(obj_var.get_value(), Value::Module(_))
-        } else {
-            false
-        };
+
+        let is_module = object_variable
+            .as_ref()
+            .map(|obj_var| matches!(obj_var.get_value(), Value::Module(_)))
+            .unwrap_or(false);
 
         if let Some(state) = metadata.state.as_ref() {
                 if state == "deprecated" {
@@ -8394,6 +8181,42 @@ impl Interpreter {
                     None => {}
                 }
             }
+        } else if let Function::NativeMethod(func) = func {
+            if let Some(ref obj_var) = object_variable {
+                self.debug_log(
+                    format_args!(
+                        "<Call: {}.{}({})>",
+                        obj_var.get_name(),
+                        function_name,
+                        final_args_no_mods
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )
+                );
+            } else {
+                self.debug_log(
+                    format_args!(
+                        "<Call: {}({})>",
+                        function_name,
+                        final_args_no_mods
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )
+                );
+            }
+
+            result = func.call_method(
+                special_value,
+                &final_args_no_mods,
+            );
+
+            if change_in_function {
+                self.internal_storage.in_function = false;
+            }
         } else if !is_module {
             self.stack.push((function_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
             if !func.is_native() {
@@ -8463,8 +8286,8 @@ impl Interpreter {
                 result = new_interpreter.return_value.clone();
                 for var in instance_variables {
                     if let Some(v) = new_interpreter.variables.get_mut(&var) {
-                        if let Some(ref mut object_variable) = object_variable {
-                            object_variable.set_value(v.get_value().clone());
+                        if let Some(ref mut o) = object_variable {
+                            o.set_value(v.get_value().clone());
                         }
                     }
                 }
@@ -8473,7 +8296,14 @@ impl Interpreter {
                 if func.is_natively_callable() {
                     result = func.call(&final_args_no_mods);
                 } else {
-                    result = func.call_shared(&final_args_no_mods, self);
+                    let mut new_args_no_mods = final_args_no_mods;
+                    if is_special_value {
+                        new_args_no_mods.insert(
+                            "self".to_string(),
+                            special_value.clone(),
+                        );
+                    }
+                    result = func.call_shared(&new_args_no_mods, self);
                 }
                 if change_in_function {
                     self.internal_storage.in_function = false;
@@ -8602,7 +8432,14 @@ impl Interpreter {
                 if func.is_natively_callable() {
                     result = func.call(&final_args_no_mods);
                 } else {
-                    result = func.call_shared(&final_args_no_mods, self);
+                    let mut new_args_no_mods = final_args_no_mods;
+                    if is_special_value {
+                        new_args_no_mods.insert(
+                            "self".to_string(),
+                            special_value.clone(),
+                        );
+                    }
+                    result = func.call_shared(&new_args_no_mods, self);
                 }
                 if change_in_function {
                     self.internal_storage.in_function = false;
@@ -8987,14 +8824,14 @@ impl Interpreter {
                 &func,
                 if let Some(s2) = s2_val { vec![Value::Struct(s1), Value::Struct(s2)] } else { vec![Value::Struct(s1)] },
                 HashMap::new(),
-                Some((None, Some(&mut object_variable))),
+                Some((None, None, Some(&mut object_variable))),
             )
         } else {
             self.call_function(
                 &func,
                 if let Some(s2) = s2_val { vec![Value::Struct(s2)] } else { vec![] },
                 HashMap::new(),
-                Some((None, Some(&mut object_variable))),
+                Some((None, None, Some(&mut object_variable))),
             )
         }
     }

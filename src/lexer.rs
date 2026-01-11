@@ -342,9 +342,15 @@ impl<'a> Lexer<'a> {
                     '0'..='9' => { has_digits = true; true }
                     '_' => true,
                     '.' => {
-                        if dot_seen || in_exponent { false } else if let Some((_, next_ch)) = chars.clone().nth(1) {
-                            if next_ch == '.' { false } else { dot_seen = true; true }
-                        } else { dot_seen = true; true }
+                        if dot_seen || in_exponent { false } 
+                        else if let Some((_, next_ch)) = chars.clone().nth(1) {
+                            if next_ch.is_ascii_digit() || next_ch == '_' || (!has_digits && (next_ch == 'e' || next_ch == 'E')) || (!has_digits && (next_ch == '+' || next_ch == '-')) || next_ch == '(' {
+                                dot_seen = true;
+                                true
+                            } else {
+                                false
+                            }
+                        } else { false }
                     }
                     'e' | 'E' => { if has_digits && !in_exponent { in_exponent = true; true } else { false } }
                     '+' | '-' => matches!(last_char, Some('e') | Some('E')),

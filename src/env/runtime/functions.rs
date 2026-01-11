@@ -603,6 +603,17 @@ impl Function {
         self.metadata().is_final
     }
 
+    pub fn ftype(&self) -> &'static str {
+        match self {
+            Function::Native(_) => "NativeFunction",
+            Function::Custom(_) => "UserFunction",
+            Function::Lambda(_, _) => "LambdaFunction",
+            Function::NativeMethod(_) => "NativeMethod",
+            Function::CustomMethod(_) => "UserFunctionMethod",
+            Function::SharedNative(_) => "SharedNativeFunction",
+        }
+    }
+
     pub fn help_string(&self) -> String {
         format!("Function: {}\nParameters: {}\nReturn Type: {}\nPublic: {}\nStatic: {}\nFinal: {}\nNative: {}\nState: {}\nEffects: {:?}",
             self.get_name(),

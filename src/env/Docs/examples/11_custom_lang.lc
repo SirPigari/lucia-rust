@@ -60,35 +60,35 @@ fun tokenize(input: str) -> list[Token]:
         match input[i]:
             ' ' | '\t' | '\n': i++,
             '(':
-                tokens = tokens.append(ParenOpen)
+                tokens.push(ParenOpen)
                 i++
             end
             ')':
-                tokens = tokens.append(ParenClose)
+                tokens.push(ParenClose)
                 i++
             end
             '[':
-                tokens = tokens.append(BracketOpen)
+                tokens.push(BracketOpen)
                 i++
             end
             ']':
-                tokens = tokens.append(BracketClose)
+                tokens.push(BracketClose)
                 i++
             end
             '{':
-                tokens = tokens.append(BraceOpen)
+                tokens.push(BraceOpen)
                 i++
             end
             '}':
-                tokens = tokens.append(BraceClose)
+                tokens.push(BraceClose)
                 i++
             end
             ',':
-                tokens = tokens.append(Comma)
+                tokens.push(Comma)
                 i++
             end
             ';':
-                tokens = tokens.append(Semicolon)
+                tokens.push(Semicolon)
                 i++
             end
             '/' if i + 1 < len(input) && input[i + 1] == '/' ->
@@ -98,10 +98,10 @@ fun tokenize(input: str) -> list[Token]:
             end
             '+' | '-' | '*' | '/' | '%' | '=' | '!' | '<' | '>' | '&' | '|' ->
                 if i + 1 < len(input) && (input[i + 1] == '=' || (input[i] == '&' && input[i + 1] == '&') || (input[i] == '|' && input[i + 1] == '|') || (input[i] == '<' && input[i + 1] == '<') || (input[i] == '>' && input[i + 1] == '>')):
-                    tokens = tokens.append(BinaryOp(input[i..i + 2]))
+                    tokens.push(BinaryOp(input[i..i + 2]))
                     i += 2
                 else:
-                    tokens = tokens.append(BinaryOp(input[i]))
+                    tokens.push(BinaryOp(input[i]))
                     i++
                 end
             end
@@ -114,7 +114,7 @@ fun tokenize(input: str) -> list[Token]:
                 if i >= len(input):
                     throw "Unterminated string literal" from "SyntaxError",
                 end
-                tokens = tokens.append(Token.String(input[start..i]))
+                tokens.push(Token.String(input[start..i]))
                 i += 1
             end
             _ if input[i].isalpha() ->
@@ -122,14 +122,14 @@ fun tokenize(input: str) -> list[Token]:
                 while i < len(input) && input[i].isalnum():
                     i += 1
                 end
-                tokens = tokens.append(Ident(input[start..i]))
+                tokens.push(Ident(input[start..i]))
             end
             _ if input[i].isdigit() ->
                 start := i
                 while i < len(input) && input[i].isdigit():
                     i += 1
                 end
-                tokens = tokens.append(Token.Number(input[start..i]))
+                tokens.push(Token.Number(input[start..i]))
             end
             _ -> throw f"Unexpected character: {input[i]}" from "SyntaxError",
         end
@@ -233,13 +233,13 @@ fun parse(tokens: list[Token]) -> list[ASTNode]:
                             _ -> throw "Expected number for array repeat count" from "SyntaxError",
                         end
                         for _ in [0..*repeat_count]:
-                            elements = elements.append(first_expr)
+                            elements.push(first_expr)
                         end
                     else:
-                        elements = elements.append(first_expr)
+                        elements.push(first_expr)
                         while (*pos < len(tokens)) && (tokens[*pos] == Token.Comma):
                             (*pos) += 1
-                            elements = elements.append(parse_expression())
+                            elements.push(parse_expression())
                         end
                     end
                 end
@@ -330,7 +330,7 @@ fun parse(tokens: list[Token]) -> list[ASTNode]:
     fun parse_block() -> ASTNode:
         stmts: list[ASTNode] = []
         while ((*pos < len(tokens)) && (tokens[*pos] != BraceClose)):
-            stmts = stmts.append(parse_expression())
+            stmts.push(parse_expression())
         end
         if (*pos >= len(tokens)) || (tokens[*pos] != BraceClose):
             throw "Expected '}' at end of block" from "SyntaxError"
@@ -357,7 +357,7 @@ fun parse(tokens: list[Token]) -> list[ASTNode]:
 
     out: list[ASTNode] = []
     while *pos < len(tokens):
-        out = out.append(parse_expression())
+        out.push(parse_expression())
     end
     return out
 end
@@ -425,7 +425,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                     "    sub rsp, 32\n" +
                     f"    lea rcx, [rel {fmt}]\n" +
                     "    mov rdx, rax\n" +
-                    "    call printlnf\n" +
+                    "    call printf\n" +
                     "    add rsp, 32\n"
             end
             ASTNode.BinOp(left, op, right) ->
@@ -588,7 +588,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                 asm += "    sub rsp, 32\n"
                 asm += "    lea rcx, [rel fmt_str]\n"
                 asm += "    lea rdx, [rel oob_str]\n"
-                asm += "    call printlnf\n"
+                asm += "    call printf\n"
                 asm += "    add rsp, 32\n"
                 asm += "    mov rcx, 1\n"
                 asm += "    call exit\n"
@@ -645,7 +645,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                 asm += "    sub rsp, 32\n"
                 asm += "    lea rcx, [rel fmt_str]\n"
                 asm += "    lea rdx, [rel oob_str]\n"
-                asm += "    call printlnf\n"
+                asm += "    call printf\n"
                 asm += "    add rsp, 32\n"
                 asm += "    mov rcx, 1\n"
                 asm += "    call exit\n"
@@ -679,7 +679,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                     "fmt_int db \"%lld\", 10, 0\n" + 
                     "oob_str db \"Index out of bounds\", 0\n"
 
-    externs := "extern printlnf\nextern malloc\nextern exit\n"
+    externs := "extern printf\nextern malloc\nextern exit\n"
 
     for ((i, s) in (*strings).enumerate()):
         asm_repr := ""
@@ -736,7 +736,7 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                 end
             end
         end
-        (*strings) = (*strings).append(s)
+        (*strings).push(s)
         return f"str_{id}"
     end
 

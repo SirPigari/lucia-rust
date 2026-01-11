@@ -209,7 +209,7 @@ fn len(args: &HashMap<String, Value>, interpreter: &mut Interpreter) -> Value {
                 if method.is_static() {
                     return Value::new_error("TypeError", "Cannot call static method 'op_len' on struct instance", None);
                 }
-                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, Some(&mut var))));
+                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, None, Some(&mut var))));
                 if interpreter.err.is_some() {
                     let err = interpreter.err.clone().expect("Error should be present");
                     return Value::Error(Arc::new(err));
@@ -585,7 +585,7 @@ pub fn format_value(value: &Value, interpreter: &mut Interpreter) -> String {
                 if method.is_static() {
                     return format_value_dbg(value);
                 }
-                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, Some(&mut var))));
+                let result = interpreter.call_function(&method, vec![], HashMap::new(), Some((None, None, Some(&mut var))));
                 if interpreter.err.is_some() {
                     return format_value_dbg(value);
                 }
@@ -861,10 +861,8 @@ pub fn placeholder_fn() -> Function {
     )))
 }
 
-#[allow(dead_code)]
-// TODO: Implement this in interpreter
-fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)> {
-    let mut methods: FxHashMap<String, (String, Function)> = FxHashMap::with_capacity_and_hasher(16, Default::default());
+fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function> {
+    let mut methods: FxHashMap<(String, String), Function> = FxHashMap::with_capacity_and_hasher(64, Default::default());
 
     let to_string = {
         make_native_method(
@@ -940,11 +938,11 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("to_string".to_owned(), ("any".to_owned(), to_string)),
-        ("clone".to_owned(), ("any".to_owned(), clone)),
-        ("is_null".to_owned(), ("any".to_owned(), is_null)),
-        ("is_truthy".to_owned(), ("any".to_owned(), is_truthy)),
-        ("is_some".to_owned(), ("any".to_owned(), is_some)),
+        (("to_string".to_owned(), "any".to_owned()), to_string),
+        (("clone".to_owned(), "any".to_owned()), clone),
+        (("is_null".to_owned(), "any".to_owned()), is_null),
+        (("is_truthy".to_owned(), "any".to_owned()), is_truthy),
+        (("is_some".to_owned(), "any".to_owned()), is_some),
     ]);
 
     // STRING METHODS
@@ -994,12 +992,15 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             "startswith",
             move |value, args| {
                 if let Some(prefix_value) = args.get("prefix") {
-                    match (value, prefix_value) {
+                    dbg!(&prefix_value, &value);
+                    let res = match (value, prefix_value) {
                         (Value::String(s), Value::String(prefix)) => {
                             Value::Boolean(s.starts_with(&*prefix))
                         }
                         _ => Value::new_error("TypeError", "startswith() expects a string prefix", None),
-                    }
+                    };
+                    dbg!(&res);
+                    res
                 } else {
                     Value::new_error("TypeError", "startswith() missing required argument 'prefix'", None)
                 }
@@ -1411,26 +1412,70 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         )
     };
 
+    let to_int = {
+        make_native_method(
+            "to_int",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        match Int::from_str(s) {
+                            Ok(i) => Value::Int(i),
+                            Err(_) => Value::new_error("ValueError", "Failed to convert string to int", None),
+                        }
+                    }
+                    _ => Value::new_error("TypeError", "to_int() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
+
+    let to_float = {
+        make_native_method(
+            "to_float",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        match Float::from_str(s) {
+                            Ok(f) => Value::Float(f),
+                            Err(_) => Value::new_error("ValueError", "Failed to convert string to float", None),
+                        }
+                    }
+                    _ => Value::new_error("TypeError", "to_float() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "float",
+            true, false, true,
+            None,
+        )
+    };
+
     methods.extend([
-        ("to_bytes".to_owned(), ("str".to_owned(), to_bytes)),
-        ("endswith".to_owned(), ("str".to_owned(), endswith)),
-        ("startswith".to_owned(), ("str".to_owned(), startswith)),
-        ("split".to_owned(), ("str".to_owned(), split)),
-        ("split_lines".to_owned(), ("str".to_owned(), split_lines)),
-        ("join".to_owned(), ("str".to_owned(), join)),
-        ("trim".to_owned(), ("str".to_owned(), trim)),
-        ("chars".to_owned(), ("str".to_owned(), chars)),
-        ("isalpha".to_owned(), ("str".to_owned(), isalpha)),
-        ("isdigit".to_owned(), ("str".to_owned(), isdigit)),
-        ("islower".to_owned(), ("str".to_owned(), islower)),
-        ("isupper".to_owned(), ("str".to_owned(), isupper)),
-        ("isalnum".to_owned(), ("str".to_owned(), isalnum)),
-        ("isspace".to_owned(), ("str".to_owned(), isspace)),
-        ("isnumeric".to_owned(), ("str".to_owned(), isnumeric)),
-        ("replace".to_owned(), ("str".to_owned(), replace)),
-        ("to_upper".to_owned(), ("str".to_owned(), to_upper)),
-        ("to_lower".to_owned(), ("str".to_owned(), to_lower)),
-        ("ord".to_owned(), ("str".to_owned(), ord)),
+        (("to_bytes".to_owned(), "str".to_owned()), to_bytes),
+        (("endswith".to_owned(), "str".to_owned()), endswith),
+        (("startswith".to_owned(), "str".to_owned()), startswith),
+        (("split".to_owned(), "str".to_owned()), split),
+        (("split_lines".to_owned(), "str".to_owned()), split_lines),
+        (("join".to_owned(), "str".to_owned()), join),
+        (("trim".to_owned(), "str".to_owned()), trim),
+        (("chars".to_owned(), "str".to_owned()), chars),
+        (("isalpha".to_owned(), "str".to_owned()), isalpha),
+        (("isdigit".to_owned(), "str".to_owned()), isdigit),
+        (("islower".to_owned(), "str".to_owned()), islower),
+        (("isupper".to_owned(), "str".to_owned()), isupper),
+        (("isalnum".to_owned(), "str".to_owned()), isalnum),
+        (("isspace".to_owned(), "str".to_owned()), isspace),
+        (("isnumeric".to_owned(), "str".to_owned()), isnumeric),
+        (("replace".to_owned(), "str".to_owned()), replace),
+        (("to_upper".to_owned(), "str".to_owned()), to_upper),
+        (("to_lower".to_owned(), "str".to_owned()), to_lower),
+        (("ord".to_owned(), "str".to_owned()), ord),
+        (("to_int".to_owned(), "str".to_owned()), to_int),
+        (("to_float".to_owned(), "str".to_owned()), to_float),
     ]);
 
     // INT METHODS
@@ -1614,11 +1659,11 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("to_float".to_owned(), ("int".to_owned(), to_float)),
-        ("format".to_owned(), ("int".to_owned(), format)),
-        ("display".to_owned(), ("int".to_owned(), display)),
-        ("is_even".to_owned(), ("int".to_owned(), is_even)),
-        ("is_odd".to_owned(), ("int".to_owned(), is_odd)),
+        (("to_float".to_owned(), "int".to_owned()), to_float),
+        (("format".to_owned(), "int".to_owned()), format),
+        (("display".to_owned(), "int".to_owned()), display),
+        (("is_even".to_owned(), "int".to_owned()), is_even),
+        (("is_odd".to_owned(), "int".to_owned()), is_odd),
     ]);
 
     // FLOAT METHODS
@@ -1809,10 +1854,10 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("to_int".to_owned(), ("float".to_owned(), to_int)),
-        ("format".to_owned(), ("float".to_owned(), format)),
-        ("display".to_owned(), ("float".to_owned(), display)),
-        ("round".to_owned(), ("float".to_owned(), round)),
+        (("to_int".to_owned(), "float".to_owned()), to_int),
+        (("format".to_owned(), "float".to_owned()), format),
+        (("display".to_owned(), "float".to_owned()), display),
+        (("round".to_owned(), "float".to_owned()), round),
     ]);
 
     // LIST METHODS
@@ -1858,7 +1903,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 }
             },
             vec![Parameter::positional("item", "any")],
-            "list",
+            "void",
             true, false, true,
             None,
         )
@@ -1903,7 +1948,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 }
             },
             vec![Parameter::positional("item", "list")],
-            "list",
+            "void",
             true, false, true,
             None,
         )
@@ -2003,7 +2048,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
         )
     };
 
-    let enumarate_list = {
+    let enumerate_list = {
         make_native_method(
             "enumerate",
             move |value, _args| {
@@ -2335,7 +2380,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 }
             },
             vec![],
-            "null",
+            "void",
             true, false, true,
             None,
         )
@@ -2503,30 +2548,54 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
             None,
         )
     };
+    let is_sorted = {
+        make_native_method(
+            "is_sorted",
+            |value, _args| {
+                match value {
+                    Value::List(list) => {
+                        for i in 1..list.len() {
+                            if list[i - 1] > list[i] {
+                                return Value::Boolean(false);
+                            }
+                        }
+                        Value::Boolean(true)
+                    }
+                    _ => Value::new_error("TypeError", "is_sorted() can only be called on lists", None),
+                }
+            },
+            vec![],
+            "bool",
+            true, false, true,
+            None,
+        )
+    };
 
     methods.extend([
-        ("append".to_owned(), ("list".to_owned(), append)),
-        ("push".to_owned(), ("list".to_owned(), push)),
-        ("pop".to_owned(), ("list".to_owned(), pop)),
-        ("extend".to_owned(), ("list".to_owned(), extend_list)),
-        ("into".to_owned(), ("list".to_owned(), into_list)),
-        ("into_gen".to_owned(), ("list".to_owned(), into_gen.clone())),
-        ("iter".to_owned(), ("list".to_owned(), into_gen)),
-        ("into_repeating_gen".to_owned(), ("list".to_owned(), into_repeating_gen.clone())),
-        ("repeating_iter".to_owned(), ("list".to_owned(), into_repeating_gen)),
-        ("enumerate".to_owned(), ("list".to_owned(), enumarate_list)),
-        ("map".to_owned(), ("list".to_owned(), map_list)),
-        ("filter".to_owned(), ("list".to_owned(), filter_list)),
-        ("sort".to_owned(), ("list".to_owned(), sort)),
-        ("sort_by".to_owned(), ("list".to_owned(), sort_by)),
-        ("all".to_owned(), ("list".to_owned(), all)),
-        ("clear".to_owned(), ("list".to_owned(), clear)),
-        ("contains".to_owned(), ("list".to_owned(), contains)),
-        ("index_of".to_owned(), ("list".to_owned(), index_of)),
-        ("undup".to_owned(), ("list".to_owned(), undup)),
-        ("reverse".to_owned(), ("list".to_owned(), reverse)),
-        ("reversed".to_owned(), ("list".to_owned(), reversed)),
-        ("reduce".to_owned(), ("list".to_owned(), reduce)),
+        (("append".to_owned(), "list".to_owned()), append),
+        (("push".to_owned(), "list".to_owned()), push),
+        (("pop".to_owned(), "list".to_owned()), pop),
+        (("extend".to_owned(), "list".to_owned()), extend_list),
+        (("into".to_owned(), "list".to_owned()), into_list),
+        (("into_gen".to_owned(), "list".to_owned()), into_gen.clone()),
+        (("iter".to_owned(), "list".to_owned()), into_gen),
+        (("into_repeating_gen".to_owned(), "list".to_owned()), into_repeating_gen.clone()),
+        (("repeating_iter".to_owned(), "list".to_owned()), into_repeating_gen),
+        (("enumerate".to_owned(), "list".to_owned()), enumerate_list),
+        (("map".to_owned(), "list".to_owned()), map_list),
+        (("filter".to_owned(), "list".to_owned()), filter_list),
+        (("sort".to_owned(), "list".to_owned()), sort),
+        (("sort_by".to_owned(), "list".to_owned()), sort_by),
+        (("all".to_owned(), "list".to_owned()), all),
+        (("clear".to_owned(), "list".to_owned()), clear),
+        (("contains".to_owned(), "list".to_owned()), contains),
+        (("index_of".to_owned(), "list".to_owned()), index_of),
+        (("undup".to_owned(), "list".to_owned()), undup.clone()),
+        (("dedup".to_owned(), "list".to_owned()), undup),
+        (("reverse".to_owned(), "list".to_owned()), reverse),
+        (("reversed".to_owned(), "list".to_owned()), reversed),
+        (("reduce".to_owned(), "list".to_owned()), reduce),
+        (("is_sorted".to_owned(), "list".to_owned()), is_sorted),
     ]);
 
     // TUPLE METHODS
@@ -2578,8 +2647,8 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("to_list".to_owned(), ("tuple".to_owned(), to_list)),
-        ("enumerate".to_owned(), ("tuple".to_owned(), enumerate_tuple)),
+        (("to_list".to_owned(), "tuple".to_owned()), to_list),
+        (("enumerate".to_owned(), "tuple".to_owned()), enumerate_tuple),
     ]);
 
     // POINTER METHODS
@@ -2604,7 +2673,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("extract_ptr".to_owned(), ("&any".to_owned(), extract_ptr)),
+        (("extract_ptr".to_owned(), "&any".to_owned()), extract_ptr),
     ]);
 
     // GENERATOR METHODS
@@ -2871,16 +2940,16 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("collect".to_owned(), ("generator".to_owned(), collect)),
-        ("collect_into".to_owned(), ("generator".to_owned(), collect_into)),
-        ("next".to_owned(), ("generator".to_owned(), next)),
-        ("is_done".to_owned(), ("generator".to_owned(), is_done)),
-        ("peek".to_owned(), ("generator".to_owned(), peek)),
-        ("enumerate".to_owned(), ("generator".to_owned(), enumerate_gen)),
-        ("map".to_owned(), ("generator".to_owned(), map_gen)),
-        ("filter".to_owned(), ("generator".to_owned(), filter_gen)),
-        ("repeating".to_owned(), ("generator".to_owned(), repeating)),
-        ("take".to_owned(), ("generator".to_owned(), take)),
+        (("collect".to_owned(), "generator".to_owned()), collect),
+        (("collect_into".to_owned(), "generator".to_owned()), collect_into),
+        (("next".to_owned(), "generator".to_owned()), next),
+        (("is_done".to_owned(), "generator".to_owned()), is_done),
+        (("peek".to_owned(), "generator".to_owned()), peek),
+        (("enumerate".to_owned(), "generator".to_owned()), enumerate_gen),
+        (("map".to_owned(), "generator".to_owned()), map_gen),
+        (("filter".to_owned(), "generator".to_owned()), filter_gen),
+        (("repeating".to_owned(), "generator".to_owned()), repeating),
+        (("take".to_owned(), "generator".to_owned()), take),
     ]);
 
     // MAP METHODS
@@ -3081,7 +3150,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 Parameter::positional("key", "any"),
                 Parameter::positional("value", "any"),
             ],
-            "null",
+            "void",
             true, false, true,
             None,
         )
@@ -3098,7 +3167,7 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 Value::new_error("TypeError", "Expected a map", None)
             },
             vec![],
-            "null",
+            "void",
             true, false, true,
             None,
         )
@@ -3117,24 +3186,24 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
                 Value::new_error("TypeError", "Expected a map and 'other' argument to be a map", None)
             },
             vec![Parameter::positional("other", "map")],
-            "null",
+            "void",
             true, false, true,
             None,
         )
     };
 
     methods.extend([
-        ("get".to_owned(), ("map".to_owned(), get)),
-        ("filter".to_owned(), ("map".to_owned(), filter_map)),
-        ("map".to_owned(), ("map".to_owned(), map_map)),
-        ("keys".to_owned(), ("map".to_owned(), keys)),
-        ("values".to_owned(), ("map".to_owned(), values)),
-        ("zip".to_owned(), ("map".to_owned(), zip)),
-        ("contains_key".to_owned(), ("map".to_owned(), contains_key)),
-        ("contains_value".to_owned(), ("map".to_owned(), contains_value)),
-        ("insert".to_owned(), ("map".to_owned(), insert)),
-        ("clear".to_owned(), ("map".to_owned(), clear)),
-        ("extend".to_owned(), ("map".to_owned(), extend_map)),
+        (("get".to_owned(), "map".to_owned()), get),
+        (("filter".to_owned(), "map".to_owned()), filter_map),
+        (("map".to_owned(), "map".to_owned()), map_map),
+        (("keys".to_owned(), "map".to_owned()), keys),
+        (("values".to_owned(), "map".to_owned()), values),
+        (("zip".to_owned(), "map".to_owned()), zip),
+        (("contains_key".to_owned(), "map".to_owned()), contains_key),
+        (("contains_value".to_owned(), "map".to_owned()), contains_value),
+        (("insert".to_owned(), "map".to_owned()), insert),
+        (("clear".to_owned(), "map".to_owned()), clear),
+        (("extend".to_owned(), "map".to_owned()), extend_map),
     ]);
 
     // ENUM METHODS
@@ -3200,28 +3269,27 @@ fn generate_methods_for_default_types() -> FxHashMap<String, (String, Function)>
     };
 
     methods.extend([
-        ("unwrap".to_owned(), ("enum".to_owned(), unwrap)),
-        ("unwrap_or".to_owned(), ("enum".to_owned(), unwrap_or)),
-        ("discriminant".to_owned(), ("enum".to_owned(), discriminant)),
+        (("unwrap".to_owned(), "enum".to_owned()), unwrap),
+        (("unwrap_or".to_owned(), "enum".to_owned()), unwrap_or),
+        (("discriminant".to_owned(), "enum".to_owned()), discriminant),
     ]);
     
     methods
 }
 
-#[allow(dead_code)]
-pub static DEFAULT_TYPE_METHODS: Lazy<FxHashMap<String, (String, Function)>> = Lazy::new(|| {
+pub static DEFAULT_TYPE_METHODS: Lazy<FxHashMap<(String, String), Function>> = Lazy::new(|| {
     generate_methods_for_default_types()
 });
 
-#[allow(dead_code)]
-pub fn get_default_type_method(name: &str) -> Option<&(String, Function)> {
-    DEFAULT_TYPE_METHODS.get(name)
+pub fn get_default_type_method(name: &str, ty: &str) -> Option<&'static Function> {
+    DEFAULT_TYPE_METHODS
+        .get(&(name.to_owned(), ty.to_owned()))
+        .or_else(|| DEFAULT_TYPE_METHODS.get(&(name.to_owned(), "any".to_string())))
 }
 
-#[allow(dead_code)]
 pub fn get_type_method_names(val: &Value) -> Vec<String> {
     DEFAULT_TYPE_METHODS.iter()
-        .filter_map(|(method_name, (ty_name, _))| {
+        .filter_map(|((method_name, ty_name), _)| {
             if check_type_ident(val, ty_name) {
                 Some(method_name.clone())
             } else {

@@ -13,14 +13,15 @@ for Lazy:
         return Lazy {
             value = null,
             initialized = false,
-            initializer = initializer,
+            initializer,
         }
     end
 
     // op_get is called when the value is accessed
     public fun op_get(self) -> any:
         if (!self.initialized):
-            self.value = self.initializer()
+            f := self.initializer
+            self.value = f()
             self.initialized = true
         end
         return self.value

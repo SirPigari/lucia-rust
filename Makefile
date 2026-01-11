@@ -89,7 +89,7 @@ build-wasm:
 ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	@cd $(LUCIA_DIR) && if exist build.rs rename build.rs _build.rs
 	@cd $(LUCIA_DIR) && if exist src\env\runtime\wasm.rs copy src\env\runtime\wasm.rs src\main_wasm.rs
-	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config 'build.rustflags=["--cfg","getrandom_backend=\"wasm_js\""]' || echo Build failed
+	@cd $(LUCIA_DIR) && $(CARGO_ENV) build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config "build.rustflags=[\"--cfg\",\"getrandom_backend=\\\"wasm_js\\\"\"]" || echo Build failed
 	@cd $(LUCIA_DIR) && if exist _build.rs rename _build.rs build.rs
 	@cd $(LUCIA_DIR) && if exist src\main_wasm.rs del src\main_wasm.rs
 else
