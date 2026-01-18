@@ -1,5 +1,5 @@
 use crate::env::runtime::tokens::{Token, Location, TK_BOOLEAN, TK_EOF, TK_IDENTIFIER, TK_INVALID, TK_NUMBER, TK_OPERATOR, TK_RAW_STRING, TK_SEPARATOR, TK_STRING};
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
 use crate::env::runtime::tokens::{ConcreteToken, CTK_COMMENT, CTK_WS};
 use std::borrow::Cow;
 
@@ -73,7 +73,7 @@ impl<'a> Lexer<'a> {
         )
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(dead_code)]
     pub fn tokenize_concrete(&self) -> Vec<ConcreteToken<'a>> {
         let mut pos = 0;
         let len = self.code.len();

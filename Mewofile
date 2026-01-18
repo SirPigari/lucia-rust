@@ -34,8 +34,10 @@ BENCH_DEST = "./tests/run_benchmarks${EXTENSION}"
 #windows MKDIR = "powershell.exe -NoProfile -Command \"if (-not (Test-Path '${TARGET_DIR}')) { New-Item -ItemType Directory -Path '${TARGET_DIR}' | Out-Null }\""
 #unix MKDIR = "mkdir -p ${TARGET_DIR}"
 
-#windows MOVE = "move /Y"
+#windows MOVE = "powershell.exe -NoProfile -Command \"Move-Item -Force "
 #unix MOVE = "mv -f"
+#windows MOVE_END = "\""
+#unix MOVE_END = ""
 
 #windows:
     TARGET_LIB_STATIC  = "lucia.lib"
@@ -53,12 +55,12 @@ call run
 build:
     cargo build --bin lucia
     ${MKDIR}
-    ${MOVE} ${DEBUG_TARGET} ${TARGET}
+    ${MOVE} ${DEBUG_TARGET} ${TARGET} ${MOVE_END}
 
 build-single:
     cargo build --bin lucia --features single_executable
     ${MKDIR}
-    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE} ${MOVE_END}
 
 #windows build-wasm:
     #exists(build.rs) rename build.rs _build.rs
@@ -77,8 +79,8 @@ build-single:
 build-lib:
     cargo build --lib
     ${MKDIR}
-    ${MOVE} ${TARGET_LIB_STATIC} ${TARGET_DIR}/${TARGET_LIB_STATIC}
-    ${MOVE} ${TARGET_LIB_DYNAMIC} ${TARGET_DIR}/${TARGET_LIB_DYNAMIC}
+    ${MOVE} "./target/debug/${TARGET_LIB_STATIC}" "${TARGET_DIR}/${TARGET_LIB_STATIC}" ${MOVE_END}
+    ${MOVE} "./target/debug/${TARGET_LIB_DYNAMIC}" "${TARGET_DIR}/${TARGET_LIB_DYNAMIC}" ${MOVE_END}
 
 wasm: build-wasm
 standalone: build-single
@@ -87,18 +89,18 @@ lib: build-lib
 release:
     cargo build --bin lucia --release
     ${MKDIR}
-    ${MOVE} ${RELEASE_TARGET} ${TARGET}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET} ${MOVE_END}
 
 release-single:
     cargo build --bin lucia --release --features single_executable
     ${MKDIR}
-    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE} ${MOVE_END}
 
 release-lib:
     cargo build --lib --release
     ${MKDIR}
-    ${MOVE} ${TARGET_LIB_STATIC} ${TARGET_DIR}/${TARGET_LIB_STATIC}
-    ${MOVE} ${TARGET_LIB_DYNAMIC} ${TARGET_DIR}/${TARGET_LIB_DYNAMIC}
+    ${MOVE} ./target/release/${TARGET_LIB_STATIC} ${TARGET_DIR}/${TARGET_LIB_STATIC} ${MOVE_END}
+    ${MOVE} ./target/release/${TARGET_LIB_DYNAMIC} ${TARGET_DIR}/${TARGET_LIB_DYNAMIC} ${MOVE_END}
 
 run:
     ${TARGET} ${argv}
@@ -130,8 +132,8 @@ bench:
 build-tests:
     cargo build --release --bin run_tests && cargo build --release --bin run_benchmarks
     #exists("./tests") mkdir ./tests
-    ${MOVE} ${TESTS_TARGET} ${TESTS_DEST}
-    ${MOVE} ${BENCH_TARGET} ${BENCH_DEST}
+    ${MOVE} ${TESTS_TARGET} ${TESTS_DEST} ${MOVE_END}
+    ${MOVE} ${BENCH_TARGET} ${BENCH_DEST} ${MOVE_END}
 
 clean:
     cargo clean

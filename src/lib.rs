@@ -48,7 +48,7 @@ mod lexer;
 mod parser;
 mod interpreter;
 
-use crate::env::runtime::config::{Config, ColorScheme};
+use crate::env::runtime::config::Config;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::libs::load_std_libs_embedded;
@@ -94,18 +94,6 @@ pub struct BuildInfo {
 pub type CBool = u8;
 
 #[repr(C)]
-pub struct LuciaColorScheme {
-    pub exception: *const c_char,
-    pub warning: *const c_char,
-    pub help: *const c_char,
-    pub debug: *const c_char,
-    pub input_arrows: *const c_char,
-    pub note: *const c_char,
-    pub output_text: *const c_char,
-    pub info: *const c_char,
-}
-
-#[repr(C)]
 pub struct LuciaConfig {
     pub moded: CBool,
     pub debug: CBool,
@@ -120,7 +108,6 @@ pub struct LuciaConfig {
     pub home_dir: *const c_char,
     pub stack_size: usize,
     pub version: *const c_char,
-    pub color_scheme: LuciaColorScheme,
 }
 
 unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
@@ -138,16 +125,7 @@ unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
         home_dir: if cfg.home_dir.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.home_dir).to_string_lossy().into_owned() } },
         stack_size: cfg.stack_size,
         version: if cfg.version.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.version).to_string_lossy().into_owned() } },
-        color_scheme: ColorScheme {
-            exception: if cfg.color_scheme.exception.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.exception).to_string_lossy().into_owned() } },
-            warning: if cfg.color_scheme.warning.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.warning).to_string_lossy().into_owned() } },
-            help: if cfg.color_scheme.help.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.help).to_string_lossy().into_owned() } },
-            debug: if cfg.color_scheme.debug.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.debug).to_string_lossy().into_owned() } },
-            input_arrows: if cfg.color_scheme.input_arrows.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.input_arrows).to_string_lossy().into_owned() } },
-            note: if cfg.color_scheme.note.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.note).to_string_lossy().into_owned() } },
-            output_text: if cfg.color_scheme.output_text.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.output_text).to_string_lossy().into_owned() } },
-            info: if cfg.color_scheme.info.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.color_scheme.info).to_string_lossy().into_owned() } },
-        },
+        color_scheme: Default::default(),
         cache_format: Default::default(),
         type_checker: Default::default(),
     }
@@ -540,41 +518,6 @@ pub extern "C" fn lucia_free_config(cfg: LuciaConfig) {
     if !version_ptr.is_null() {
         unsafe { let _ = CString::from_raw(version_ptr); }
     }
-
-    let color_scheme = cfg.color_scheme;
-
-    let exception_ptr = color_scheme.exception as *mut c_char;
-    if !exception_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(exception_ptr); }
-    }
-    let warning_ptr = color_scheme.warning as *mut c_char;
-    if !warning_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(warning_ptr); }
-    }
-    let help_ptr = color_scheme.help as *mut c_char;
-    if !help_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(help_ptr); }
-    }
-    let debug_ptr = color_scheme.debug as *mut c_char;
-    if !debug_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(debug_ptr); }
-    }
-    let input_arrows_ptr = color_scheme.input_arrows as *mut c_char;
-    if !input_arrows_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(input_arrows_ptr); }
-    }
-    let note_ptr = color_scheme.note as *mut c_char;
-    if !note_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(note_ptr); }
-    }
-    let output_text_ptr = color_scheme.output_text as *mut c_char;
-    if !output_text_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(output_text_ptr); }
-    }
-    let info_ptr = color_scheme.info as *mut c_char;
-    if !info_ptr.is_null() {
-        unsafe { let _ = CString::from_raw(info_ptr); }
-    }
 }
 
 #[unsafe(no_mangle)]
@@ -618,7 +561,6 @@ pub extern "C" fn lucia_free_build_info(info: BuildInfo) {
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_default_config() -> LuciaConfig {
     let default_cfg = Config::default();
-    let color_scheme = &default_cfg.color_scheme;
 
     LuciaConfig {
         moded: default_cfg.moded as CBool,
@@ -633,17 +575,7 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
         disable_runtime_type_checking: default_cfg.disable_runtime_type_checking as CBool,
         home_dir: CString::new(default_cfg.home_dir).unwrap().into_raw(),
         stack_size: default_cfg.stack_size,
-        version: CString::new(default_cfg.version).unwrap().into_raw(),
-        color_scheme: LuciaColorScheme {
-            exception: CString::new(color_scheme.exception.clone()).unwrap().into_raw(),
-            warning: CString::new(color_scheme.warning.clone()).unwrap().into_raw(),
-            help: CString::new(color_scheme.help.clone()).unwrap().into_raw(),
-            debug: CString::new(color_scheme.debug.clone()).unwrap().into_raw(),
-            input_arrows: CString::new(color_scheme.input_arrows.clone()).unwrap().into_raw(),
-            note: CString::new(color_scheme.note.clone()).unwrap().into_raw(),
-            output_text: CString::new(color_scheme.output_text.clone()).unwrap().into_raw(),
-            info: CString::new(color_scheme.info.clone()).unwrap().into_raw(),
-        },
+        version: CString::new(default_cfg.version).unwrap().into_raw()
     }
 }
 

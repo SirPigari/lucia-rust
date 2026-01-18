@@ -22,32 +22,20 @@ typedef uint8_t CBool;
     #define false 0
 #endif
 
-typedef struct LuciaColorScheme {
-    const char* exception;
-    const char* warning;
-    const char* help;
-    const char* debug;
-    const char* input_arrows;
-    const char* note;
-    const char* output_text;
-    const char* info;
-} LuciaColorScheme;
-
 typedef struct LuciaConfig {
-    CBool moded;
-    CBool debug;
-    const char* debug_mode;
-    CBool supports_color;
-    CBool use_lucia_traceback;
-    CBool warnings;
-    CBool allow_fetch;
-    CBool allow_unsafe;
-    CBool allow_inline_config;
-    CBool disable_runtime_type_checking;
-    const char* home_dir;
-    size_t stack_size;
-    const char* version;
-    LuciaColorScheme color_scheme;
+    CBool moded;                             // whether to run in moded mode (aka allows modified stdlib or version)
+    CBool debug;                             // if true, prints debug info to stdout
+    const char* debug_mode;                  // debug mode level: "minimal", "normal", "full"
+    CBool supports_color;                    // whether terminal supports color output
+    CBool use_lucia_traceback;               // whether to use lucia traceback formatting
+    CBool warnings;                          // whether to show warnings
+    CBool allow_fetch;                       // whether to allow fetch API
+    CBool allow_unsafe;                      // whether to allow unsafe operations
+    CBool allow_inline_config;               // whether to allow inline config in code
+    CBool disable_runtime_type_checking;     // whether to disable runtime type checking
+    const char* home_dir;                    // path to home directory, or NULL for default
+    size_t stack_size;                       // stack size in bytes
+    const char* version;                     // lucia version string
 } LuciaConfig;
 
 typedef enum LuciaValueType {
@@ -60,7 +48,7 @@ typedef enum LuciaValueType {
     VALUE_MAP = 7,
     VALUE_BYTES = 8,
     VALUE_POINTER = 9,
-    VALUE_UNSUPPORTED = 255,
+    VALUE_UNSUPPORTED = 255,  // for types like module or function
 } LuciaValueType;
 
 typedef struct LuciaValue LuciaValue;
@@ -72,7 +60,7 @@ typedef union ValueData {
     const char* string_v;
     const uint8_t* bytes_ptr;
     const LuciaValue* list_ptr;
-    const LuciaValue* map_ptr; // flattened key,value,key,value
+    const LuciaValue* map_ptr; // flattened key,value,key,value...
     void* pointer;
 } ValueData;
 
@@ -95,6 +83,7 @@ const LuciaValue* value_as_map_ptr(LuciaValue v);
 size_t value_as_map_len(LuciaValue v);
 void* value_as_pointer(LuciaValue v);
 
+// try_value_as_* functions return true on success, false on failure
 CBool try_value_as_int(LuciaValue v, int64_t* out);
 CBool try_value_as_float(LuciaValue v, double* out);
 CBool try_value_as_bool(LuciaValue v, CBool* out);

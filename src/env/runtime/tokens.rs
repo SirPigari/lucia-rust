@@ -19,9 +19,9 @@ pub const TK_SEPARATOR: &str = "SEPARATOR";
 pub const TK_INVALID: &str = "INVALID";
 
 // Static token type constants for concrete tokens
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub const CTK_COMMENT: &str = "COMMENT";
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 pub const CTK_WS: &str = "WHITESPACE";
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
@@ -78,7 +78,7 @@ impl Default for Location {
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct Token(pub Cow<'static, str>, pub Cow<'static, str>, pub Option<Location>);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct ConcreteToken<'a>(pub Cow<'a, str>, pub Cow<'a, str>);
 
@@ -94,7 +94,7 @@ impl Token {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 impl<'a> ConcreteToken<'a> {
     #[inline]
     pub fn new_static(kind: &'static str, value: &'a str) -> Self {

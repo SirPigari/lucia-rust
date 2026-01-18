@@ -8,6 +8,10 @@ Be free to fix them or add new ones.
 _Total TODOs found: 8_
 ---
 
+### [`src/env/Docs/examples/11_quine.lc:3:1`](../../../examples/11_quine.lc#L3) _(added by **SirPigari** on **2026-01-18**)_
+- fix the escaping
+- https://wikipedia.org/wiki/Quine_(computing)
+
 ### [`src/env/runtime/plugins.rs:189:1`](../../../src/env/runtime/plugins.rs#L189) _(added by **SirPigari** on **2025-12-31**)_
 - Add use cases
 
@@ -28,10 +32,6 @@ _Total TODOs found: 8_
 
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
-
-### [`src/env/Docs/examples/11_quine.lc:3:1`](../../../examples/11_quine.lc#L3) **(TODO not committed yet)**
-- fix the escaping
-- https://wikipedia.org/wiki/Quine_(computing)
 
 ---
 *Report generated automatically.*
