@@ -43,5 +43,8 @@ jobs:
       - name: Install WASM target
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
       - name: Build WASM binaries
         run: make build-wasm

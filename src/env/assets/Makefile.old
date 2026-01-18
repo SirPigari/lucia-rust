@@ -16,8 +16,6 @@ ifeq ($(IS_WINDOWS_CMD),cmd.exe)
 	RUN_FULL := $(subst /,\,$(TARGET_DIR))\$(TARGET_EXE)
 	SHELL := cmd
 	.SHELLFLAGS := /C
-	TEST_LOOP := for %%f in (src\env\Docs\examples\tests\*.lc) do (
-	TEST_FILE := %%f
 else
 	CARGO_ENV := cargo
 	MKDIR := mkdir -p $(TARGET_DIR)
@@ -25,8 +23,6 @@ else
 	RM := - rm -f
 	RUN := ./$(TARGET_EXE)
 	RUN_FULL := $(TARGET_DIR)/$(TARGET_EXE)
-	TEST_LOOP := for f in src/env/Docs/examples/tests/*.lc; do
-	TEST_FILE := $$f
 endif
 
 ifeq ($(OS),Windows_NT)

@@ -1,4 +1,6 @@
-use crate::env::runtime::tokens::{Location, Token, TK_IDENTIFIER, TK_STRING, TK_RAW_STRING, TK_NUMBER, TK_BOOLEAN, TK_OPERATOR, TK_SEPARATOR, TK_INVALID, TK_EOF};
+use crate::env::runtime::tokens::{Token, Location, TK_BOOLEAN, TK_EOF, TK_IDENTIFIER, TK_INVALID, TK_NUMBER, TK_OPERATOR, TK_RAW_STRING, TK_SEPARATOR, TK_STRING};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::env::runtime::tokens::{ConcreteToken, CTK_COMMENT, CTK_WS};
 use std::borrow::Cow;
 
 const SYMBOL_OPERATORS: [&str; 45] = [
@@ -69,6 +71,382 @@ impl<'a> Lexer<'a> {
             | 0x200D            // zero width joiner
             | 0xFE0F            // variation selector-16
         )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn tokenize_concrete(&self) -> Vec<ConcreteToken<'a>> {
+        let mut pos = 0;
+        let len = self.code.len();
+        let mut tokens = Vec::with_capacity(len / 3);
+
+        'outer: while pos < len {
+            let slice = &self.code[pos..];
+            let mut chars = slice.char_indices();
+
+            if let Some((_, ch)) = chars.next() {
+                if ch.is_whitespace() {
+                    let start = pos;
+                    let mut end = pos + ch.len_utf8();
+
+                    while end < len {
+                        let c = self.code[end..].chars().next().unwrap();
+                        if !c.is_whitespace() { break; }
+                        end += c.len_utf8();
+                    }
+
+                    tokens.push(ConcreteToken::new_static(
+                        CTK_WS,
+                        &self.code[start..end],
+                    ));
+                    pos = end;
+                    continue;
+                }
+            }
+
+            // INLINE COMMENT <# ... #>
+            if slice.starts_with("<#") {
+                let start = pos;
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("#>") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                if end < len {
+                    end += 2;
+                }
+
+                tokens.push(ConcreteToken::new_static(
+                    CTK_COMMENT,
+                    &self.code[start..end],
+                ));
+                pos = end;
+                continue;
+            }
+
+            // SINGLE-LINE COMMENT //
+            if slice.starts_with("//") {
+                let start = pos;
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("\n") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+
+                tokens.push(ConcreteToken::new_static(
+                    CTK_COMMENT,
+                    &self.code[start..end],
+                ));
+                pos = end;
+                continue;
+            }
+
+            // MULTI-LINE COMMENT /* ... */
+            if slice.starts_with("/*") {
+                let start = pos;
+                let mut end = pos + 2;
+                while end < len && !self.code[end..].starts_with("*/") {
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                if end < len {
+                    end += 2;
+                }
+
+                tokens.push(ConcreteToken::new_static(
+                    CTK_COMMENT,
+                    &self.code[start..end],
+                ));
+                pos = end;
+                continue;
+            }
+
+            // STRINGS
+            {
+                let mut end = pos;
+                let mut quote = '\0';
+                let mut raw = false;
+                let mut is_f = false;
+
+                let mut iter = slice.char_indices();
+                let (_, first) = iter.next().unwrap();
+
+                if first == 'r' || first == 'f' || first == 'b' {
+                    if first == 'r' { raw = true; }
+                    if first == 'f' { is_f = true; }
+
+                    if let Some((i2, c2)) = iter.next() {
+                        if c2 == '"' || c2 == '\'' {
+                            quote = c2;
+                            end += i2 + c2.len_utf8();
+                        }
+                    }
+                } else if first == '"' || first == '\'' {
+                    quote = first;
+                    end += first.len_utf8();
+                }
+
+                if quote != '\0' {
+                    let mut local_end = end;
+                    let mut brace_depth = 0;
+
+                    while local_end < len {
+                        let c = self.code[local_end..].chars().next().unwrap();
+                        local_end += c.len_utf8();
+
+                        if is_f {
+                            if c == '{' {
+                                brace_depth += 1;
+                                continue;
+                            }
+                            if c == '}' && brace_depth > 0 {
+                                brace_depth -= 1;
+                                continue;
+                            }
+                        }
+
+                        if c == quote && brace_depth == 0 {
+                            break;
+                        }
+
+                        if c == '\\' && !raw && local_end < len {
+                            local_end += self.code[local_end..]
+                                .chars()
+                                .next()
+                                .unwrap()
+                                .len_utf8();
+                        }
+                    }
+
+                    let kind = if raw {
+                        TK_RAW_STRING
+                    } else {
+                        TK_STRING
+                    };
+
+                    tokens.push(ConcreteToken::new_static(
+                        kind,
+                        &self.code[pos..local_end],
+                    ));
+                    pos = local_end;
+                    continue 'outer;
+                }
+            }
+
+            // NUMBERS
+            let start = pos;
+            let s = &self.code[start..];
+            let mut chars = s.char_indices().peekable();
+            let mut rel_end = 0;
+
+            let prev_is_digit = start > 0
+                && self.code[..start].chars().last().is_some_and(|c| c.is_ascii_digit());
+
+            if let Some(&(i, c)) = chars.peek() {
+                if (c == '-' || c == '+') && !prev_is_digit {
+                    rel_end = i + c.len_utf8();
+                    chars.next();
+                }
+            }
+
+            fn consume_while<F>(chars: &mut std::iter::Peekable<std::str::CharIndices>, rel_end: &mut usize, mut pred: F)
+            where F: FnMut(char) -> bool {
+                while let Some(&(i, c)) = chars.peek() {
+                    if pred(c) {
+                        *rel_end = i + c.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            {
+                let mut tmp = chars.clone();
+                let mut tmp_rel_end = rel_end;
+                let mut matched = false;
+
+                if let Some(&(_, c)) = tmp.peek() {
+                    if c.is_ascii_digit() {
+                        consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_digit());
+                        if let Some(&(i2, '#')) = tmp.peek() {
+                            tmp.next();
+                            tmp_rel_end = i2 + 1;
+                            consume_while(&mut tmp, &mut tmp_rel_end, |ch| ch.is_ascii_alphanumeric() || ch == '_');
+                            matched = true;
+                        }
+                    }
+                }
+
+                if matched {
+                    rel_end = tmp_rel_end;
+                    let end = start + rel_end;
+                    tokens.push(ConcreteToken::new_static(
+                        TK_NUMBER,
+                        &self.code[start..end],
+                    ));
+                    pos = end;
+                    continue;
+                }
+            }
+
+            if let Some(&(_, '0')) = chars.peek() {
+                let mut tmp = chars.clone();
+                tmp.next();
+                if let Some(&(i2, base)) = tmp.peek() {
+                    let digits = match base {
+                        'b' | 'B' => "01_",
+                        'o' | 'O' => "01234567_",
+                        'x' | 'X' => "0123456789abcdefABCDEF_",
+                        _ => "",
+                    };
+                    if !digits.is_empty() {
+                        tmp.next();
+                        let mut tmp_rel_end = i2 + base.len_utf8();
+                        consume_while(&mut tmp, &mut tmp_rel_end, |ch| digits.contains(ch));
+                        rel_end = tmp_rel_end;
+                        let end = start + rel_end;
+                        tokens.push(ConcreteToken::new_static(
+                            TK_NUMBER,
+                            &self.code[start..end],
+                        ));
+                        pos = end;
+                        continue;
+                    }
+                }
+            }
+
+            let mut has_digits = false;
+            let mut dot_seen = false;
+            let mut in_exponent = false;
+            let mut last_char: Option<char> = None;
+
+            while let Some(&(i, c)) = chars.peek() {
+                let accept = match c {
+                    '0'..='9' => { has_digits = true; true }
+                    '_' => true,
+                    '.' => {
+                        if dot_seen || in_exponent { 
+                            false 
+                        } else if let Some((_, next_ch)) = chars.clone().nth(1) {
+                            if next_ch == '.' { 
+                                false 
+                            } else { 
+                                dot_seen = true; 
+                                true 
+                            }
+                        } else { 
+                            dot_seen = true; 
+                            true 
+                        }
+                    }
+                    'e' | 'E' => { 
+                        if has_digits && !in_exponent { 
+                            in_exponent = true; 
+                            true 
+                        } else { 
+                            false 
+                        } 
+                    }
+                    '+' | '-' => matches!(last_char, Some('e') | Some('E')),
+                    _ => false,
+                };
+                if !accept { break; }
+                rel_end = i + c.len_utf8();
+                last_char = Some(c);
+                chars.next();
+            }
+
+            if has_digits {
+                let mut tmp = chars.clone();
+
+                if let Some(&(i2, 'i')) = tmp.peek() {
+                    tmp.next();
+                    rel_end = i2 + 1;
+                }
+
+                let end = start + rel_end;
+                tokens.push(ConcreteToken::new_static(
+                    TK_NUMBER,
+                    &self.code[start..end],
+                ));
+                pos = end;
+                continue;
+            }
+
+            // BOOLEAN
+            for &b in &["true", "false", "null"] {
+                if slice.starts_with(b) {
+                    let end = pos + b.len();
+                    let ok = match self.code.as_bytes().get(end) {
+                        None => true,
+                        Some(c) => !matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'),
+                    };
+
+                    if ok {
+                        tokens.push(ConcreteToken::new_static(
+                            TK_BOOLEAN,
+                            &self.code[pos..end],
+                        ));
+                        pos = end;
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // IDENTIFIER
+            if let Some(c) = slice.chars().next() {
+                if Self::is_identifier_start(c) {
+                    let start = pos;
+                    let mut end = pos + c.len_utf8();
+
+                    for ch in self.code[end..].chars() {
+                        if Self::is_identifier_continue(ch) {
+                            end += ch.len_utf8();
+                        } else { break; }
+                    }
+
+                    tokens.push(ConcreteToken::new_static(
+                        TK_IDENTIFIER,
+                        &self.code[start..end],
+                    ));
+                    pos = end;
+                    continue;
+                }
+            }
+
+            // SYMBOL OPERATORS
+            for &op in &SYMBOL_OPERATORS {
+                if slice.starts_with(op) {
+                    tokens.push(ConcreteToken::new_static(
+                        TK_OPERATOR,
+                        &self.code[pos..pos + op.len()],
+                    ));
+                    pos += op.len();
+                    continue 'outer;
+                }
+            }
+
+            // SEPARATORS
+            for &sep in &SEPARATORS {
+                if slice.starts_with(sep) {
+                    tokens.push(ConcreteToken::new_static(
+                        TK_SEPARATOR,
+                        &self.code[pos..pos + sep.len()],
+                    ));
+                    pos += sep.len();
+                    continue 'outer;
+                }
+            }
+
+            // INVALID (single char)
+            let c = slice.chars().next().unwrap();
+            let end = pos + c.len_utf8();
+            tokens.push(ConcreteToken::new_static(
+                TK_INVALID,
+                &self.code[pos..end],
+            ));
+            pos = end;
+        }
+
+        tokens.push(ConcreteToken::new_static(TK_EOF, "\0"));
+        tokens
     }
 
     // 23ms to 147.1µs

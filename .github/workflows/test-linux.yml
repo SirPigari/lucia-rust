@@ -45,6 +45,9 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y make
 
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
       - name: Build project (debug)
         run: make build
 
@@ -74,6 +77,9 @@ jobs:
         run: rustup default ${{ matrix.rust }}
 
       - uses: actions/checkout@v4
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
 
       - name: Build project (debug)
         run: make build

@@ -44,6 +44,9 @@ jobs:
       - name: Install system dependencies
         run: choco install make --no-progress
 
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
       - name: Build project (debug)
         run: make build
 

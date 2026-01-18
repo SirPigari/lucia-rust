@@ -18,6 +18,12 @@ pub const TK_OPERATOR: &str = "OPERATOR";
 pub const TK_SEPARATOR: &str = "SEPARATOR";
 pub const TK_INVALID: &str = "INVALID";
 
+// Static token type constants for concrete tokens
+#[cfg(not(target_arch = "wasm32"))]
+pub const CTK_COMMENT: &str = "COMMENT";
+#[cfg(not(target_arch = "wasm32"))]
+pub const CTK_WS: &str = "WHITESPACE";
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
 pub struct Location {
     pub file: String,
@@ -72,8 +78,11 @@ impl Default for Location {
 #[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct Token(pub Cow<'static, str>, pub Cow<'static, str>, pub Option<Location>);
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, PartialOrd, Ord)]
+pub struct ConcreteToken<'a>(pub Cow<'a, str>, pub Cow<'a, str>);
+
 impl Token {
-    // Helper to create tokens with static kinds
     #[inline]
     pub fn new_static(kind: &'static str, value: impl Into<Cow<'static, str>>, loc: Option<Location>) -> Self {
         Token(Cow::Borrowed(kind), value.into(), loc)
@@ -85,13 +94,27 @@ impl Token {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl<'a> ConcreteToken<'a> {
+    #[inline]
+    pub fn new_static(kind: &'static str, value: &'a str) -> Self {
+        ConcreteToken(Cow::Borrowed(kind), Cow::Borrowed(value))
+    }
+}
+
 impl Default for Token {
     fn default() -> Self {
         Token(Cow::Borrowed(""), Cow::Borrowed(""), None)
     }
 }
 
-// Custom Serialize/Deserialize for Cow
+#[cfg(not(target_arch = "wasm32"))]
+impl<'a> Default for ConcreteToken<'a> {
+    fn default() -> Self {
+        ConcreteToken(Cow::Borrowed(""), Cow::Borrowed(""))
+    }
+}
+
 impl Serialize for Token {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -137,7 +160,6 @@ impl<'de> Deserialize<'de> for Token {
     }
 }
 
-// Custom Encode/Decode for Cow
 impl Encode for Token {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
         self.0.as_ref().encode(encoder)?;

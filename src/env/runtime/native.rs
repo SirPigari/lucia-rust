@@ -1268,10 +1268,10 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
 
                             let result = if case_sensitive {
                                 if from_right {
-                                    let parts = s.rsplitn(count + 1, old).collect::<Vec<_>>();
+                                    let parts = s.rsplitn(count.saturating_add(1), old).collect::<Vec<_>>();
                                     parts.join(new)
                                 } else if from_left {
-                                    let parts = s.splitn(count + 1, old).collect::<Vec<_>>();
+                                    let parts = s.splitn(count.saturating_add(1), old).collect::<Vec<_>>();
                                     parts.join(new)
                                 } else {
                                     s.replacen(old, new, count)
@@ -2570,6 +2570,43 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
             None,
         )
     };
+    let get = {
+        make_native_method(
+            "get",
+            move |value, args| {
+                let index = if let Some(Value::Int(i)) = args.get("index") {
+                    i.to_isize().unwrap_or(0)
+                } else {
+                    return Value::new_error("TypeError", "get() missing required argument 'index'", None);
+                };
+        
+                let default = args.get("default").cloned().unwrap_or(Value::Null);
+        
+                match value {
+                    Value::List(list) => {
+                        let idx = if index < 0 {
+                            list.len() as isize + index
+                        } else {
+                            index
+                        };
+                        if idx >= 0 && (idx as usize) < list.len() {
+                            list[idx as usize].clone()
+                        } else {
+                            default
+                        }
+                    }
+                    _ => Value::new_error("TypeError", "get() can only be called on lists", None),
+                }
+            },
+            vec![
+                Parameter::positional("index", "int"),
+                Parameter::positional_optional("default", "any", Value::Null),
+            ],
+            "any",
+            true, false, true,
+            None,
+        )
+    };
 
     methods.extend([
         (("append".to_owned(), "list".to_owned()), append),
@@ -2596,6 +2633,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         (("reversed".to_owned(), "list".to_owned()), reversed),
         (("reduce".to_owned(), "list".to_owned()), reduce),
         (("is_sorted".to_owned(), "list".to_owned()), is_sorted),
+        (("get".to_owned(), "list".to_owned()), get),
     ]);
 
     // TUPLE METHODS

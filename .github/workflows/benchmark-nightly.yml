@@ -38,6 +38,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: choco install make --no-progress
 
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
       - name: Build project (release)
         run: make release
 
@@ -74,6 +77,9 @@ jobs:
         run: rustup default nightly
 
       - uses: actions/checkout@v4
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
 
       - name: Build project (release)
         run: make release

@@ -1,0 +1,172 @@
+; Mewofile for building and managing the Lucia project
+; https://github.com/SirPigari/mewo
+; To run: mewo <target>
+; Default target is 'build run'
+
+; Why Mewofile?
+; i didnt like that i used Make the way that it was not supposed to be used
+; and that there was bajilion ifeq statements
+
+TARGET_DIR = "./src/env/bin"
+#windows EXTENSION = ".exe"
+#unix EXTENSION = ""
+TARGET_EXE = "lucia${EXTENSION}"
+TARGET     = "${TARGET_DIR}/${TARGET_EXE}"
+TARGET_STANDALONE = "${TARGET_DIR}/lucia_standalone${EXTENSION}"
+
+#windows TARGET = "${#replace(TARGET, "/", "\\\\")}"
+#windows TARGET_STANDALONE = "${#replace(TARGET_STANDALONE, "/", "\\\\")}"
+
+DEBUG_TARGET = "./target/debug/${TARGET_EXE}"
+#windows DEBUG_TARGET = "${#replace(DEBUG_TARGET, "/", "\\\\")}"
+RELEASE_TARGET = "./target/release/${TARGET_EXE}"
+#windows RELEASE_TARGET = "${#replace(RELEASE_TARGET, "/", "\\\\")}"
+
+TESTS_TARGET = "./target/release/run_tests${EXTENSION}"
+#windows TESTS_TARGET = "${#replace(TESTS_TARGET, "/", "\\\\")}"
+BENCH_TARGET = "./target/release/run_benchmarks${EXTENSION}"
+#windows BENCH_TARGET = "${#replace(BENCH_TARGET, "/", "\\\\")}"
+TESTS_DEST = "./tests/run_tests${EXTENSION}"
+#windows TESTS_DEST = "${#replace(TESTS_DEST, "/", "\\\\")}"
+BENCH_DEST = "./tests/run_benchmarks${EXTENSION}"
+#windows BENCH_DEST = "${#replace(BENCH_DEST, "/", "\\\\")}"
+
+#windows MKDIR = "powershell.exe -NoProfile -Command \"if (-not (Test-Path '${TARGET_DIR}')) { New-Item -ItemType Directory -Path '${TARGET_DIR}' | Out-Null }\""
+#unix MKDIR = "mkdir -p ${TARGET_DIR}"
+
+#windows MOVE = "move /Y"
+#unix MOVE = "mv -f"
+
+#windows:
+    TARGET_LIB_STATIC  = "lucia.lib"
+    TARGET_LIB_DYNAMIC = "lucia.dll"
+#macos:
+    TARGET_LIB_STATIC  = "liblucia.a"
+    TARGET_LIB_DYNAMIC = "liblucia.dylib"
+#linux:
+    TARGET_LIB_STATIC  = "liblucia.a"
+    TARGET_LIB_DYNAMIC = "liblucia.so"
+
+call build
+call run
+
+build:
+    cargo build --bin lucia
+    ${MKDIR}
+    ${MOVE} ${DEBUG_TARGET} ${TARGET}
+
+build-single:
+    cargo build --bin lucia --features single_executable
+    ${MKDIR}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE}
+
+#windows build-wasm:
+    #exists(build.rs) rename build.rs _build.rs
+    #exists(src\env\runtime\wasm.rs) copy src\env\runtime\wasm.rs src\main_wasm.rs
+    #ignorefail cargo build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config "build.rustflags=[\"--cfg\",\"getrandom_backend=\\\"wasm_js\\\"\"]"
+    #exists(_build.rs) rename _build.rs build.rs
+    #exists(src\main_wasm.rs) del src\main_wasm.rs
+
+#unix build-wasm:
+    #exists(build.rs) mv build.rs _build.rs
+    #exists(src/env/runtime/wasm.rs) cp src/env/runtime/wasm.rs src/main_wasm.rs
+    #ignorefail cargo build --target wasm32-unknown-unknown --bin lucia_wasm --release --features preprocessor_include_std --config "build.rustflags=[\"--cfg\",\"getrandom_backend=\\\"wasm_js\\\"\"]"
+    #exists(_build.rs) mv _build.rs build.rs
+    #exists(src/main_wasm.rs) rm src/main_wasm.rs
+
+build-lib:
+    cargo build --lib
+    ${MKDIR}
+    ${MOVE} ${TARGET_LIB_STATIC} ${TARGET_DIR}/${TARGET_LIB_STATIC}
+    ${MOVE} ${TARGET_LIB_DYNAMIC} ${TARGET_DIR}/${TARGET_LIB_DYNAMIC}
+
+wasm: build-wasm
+standalone: build-single
+lib: build-lib
+
+release:
+    cargo build --bin lucia --release
+    ${MKDIR}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET}
+
+release-single:
+    cargo build --bin lucia --release --features single_executable
+    ${MKDIR}
+    ${MOVE} ${RELEASE_TARGET} ${TARGET_STANDALONE}
+
+release-lib:
+    cargo build --lib --release
+    ${MKDIR}
+    ${MOVE} ${TARGET_LIB_STATIC} ${TARGET_DIR}/${TARGET_LIB_STATIC}
+    ${MOVE} ${TARGET_LIB_DYNAMIC} ${TARGET_DIR}/${TARGET_LIB_DYNAMIC}
+
+run:
+    ${TARGET} ${argv}
+
+activate:
+    ${MKDIR}
+    cd ${TARGET_DIR} && ./${TARGET_EXE} --activate -e
+
+test:
+    ${MKDIR}
+    #windows .\tests\run_tests.exe ${argv}
+    #unix ./tests/run_tests ${argv}
+
+bench:
+    ${MKDIR}
+    #windows .\tests\run_benchmarks.exe ${argv}
+    #unix ./tests/run_benchmarks ${argv}
+
+#windows installer-dbg:
+    ${MKDIR}
+    del .\src\env\assets\installer\LuciaInstaller.exe
+    cd .\src\env\assets\installer && "C:\Program Files (x86)\NSIS\makensis.exe" LuciaInstaller.nsi
+
+#windows installer:
+    ${MKDIR}
+    del .\src\env\assets\installer\LuciaInstaller.exe
+    cd .\src\env\assets\installer && makensis "-DRELEASE_BUILD" LuciaInstaller.nsi
+
+build-tests:
+    cargo build --release --bin run_tests && cargo build --release --bin run_benchmarks
+    #exists("./tests") mkdir ./tests
+    ${MOVE} ${TESTS_TARGET} ${TESTS_DEST}
+    ${MOVE} ${BENCH_TARGET} ${BENCH_DEST}
+
+clean:
+    cargo clean
+    #exists(${TARGET}) del ${TARGET}
+    #exists(${TARGET_STANDALONE}) del ${TARGET_STANDALONE}
+    #exists(${TARGET_DIR}/${TARGET_LIB_STATIC}) del ${TARGET_DIR}/${TARGET_LIB_STATIC}
+    #exists(${TARGET_DIR}/${TARGET_LIB_DYNAMIC}) del ${TARGET_DIR}/${TARGET_LIB_DYNAMIC}
+    #exists(${TESTS_DEST}) del ${TESTS_DEST}
+    #exists(${BENCH_DEST}) del ${BENCH_DEST}
+
+check:
+    cargo check --bin lucia
+
+install:
+    cargo install --path . --bin lucia --force
+    echo Lucia installed system-wide. You can now run 'lucia' from anywhere.
+
+full: release release-single release-lib wasm installer
+
+help:
+    echo Available targets:
+    echo   build             - Build debug version
+    echo   build-single      - Build standalone release version
+    echo   build-lib         - Build release library versions
+    echo   release           - Build release version
+    echo   release-single    - Build standalone release version
+    echo   release-lib       - Build release library versions
+    echo   wasm              - Build WebAssembly version
+    echo   run               - Run the built executable
+    echo   activate          - Activate the lucia environment
+    echo   test              - Run tests
+    echo   bench             - Run benchmarks
+    echo   install           - Install Lucia system-wide
+    echo   clean             - Clean build artifacts
+    echo   check             - Check code for errors without building
+    echo   installer         - Build Windows installer
+    echo   build-tests       - Build test and benchmark executables
+    echo   help              - Show this help message

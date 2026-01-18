@@ -130,7 +130,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::statements::{Statement, Node, get_loc};
 use crate::env::runtime::internal_structs::{BuildInfo, CacheFormat};
-use crate::env::runtime::tokens::{Token, Location};
+use crate::env::runtime::tokens::{Token, ConcreteToken, Location};
 use crate::env::runtime::libs::{check_project_deps};
 use crate::env::runtime::static_checker::Checker;
 use crate::env::runtime::fmt;
@@ -412,10 +412,10 @@ fn debug_log(message: &str, config: &Config) {
     }
 }
 
-fn dump_pp(tokens: Vec<&Token>, dump_dir: &str, filename: &str, config: &Config) {
+fn dump_pp<'a>(tokens: Vec<&Token>, ctks: Vec<ConcreteToken<'a>>, dump_dir: &str, filename: &str, config: &Config) {
     let use_colors = config.supports_color;
 
-    let pp_buffer = fmt::format_tokens(&tokens);
+    let pp_buffer = fmt::format_tokens(&ctks);
     
     let i_buffer = tokens.iter()
         .take_while(|t| t.0 != "EOF")
@@ -970,7 +970,8 @@ fn execute_file(
         }
 
         let lexering_time = Instant::now();
-        let raw_tokens = Lexer::new(&file_content, to_static(file_path.clone())).tokenize();
+        let lexer = Lexer::new(&file_content, to_static(file_path.clone()));
+        let raw_tokens = lexer.tokenize();
         if timer_flag {
             println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
         }
@@ -1062,8 +1063,10 @@ fn execute_file(
             } else {
                 Path::new(&file_path).parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("").to_string()
             };
+            let concrete_tokens = lexer.tokenize_concrete();
             dump_pp(
                 processed_tokens.iter().collect(),
+                concrete_tokens,
                 &p,
                 &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
@@ -1163,7 +1166,11 @@ fn execute_file(
 
         if create_lcx && !is_lcx {
             let token_refs: Vec<&Token> = processed_tokens.iter().collect();
-            let pp_buffer = fmt::format_tokens(&token_refs);
+            let pp_buffer = token_refs
+                .iter()
+                .map(|t| t.1.as_ref())
+                .collect::<Vec<&str>>()
+                .join(" ");
             let header = "// -*- lcx: true -*-\n\n";
             let out_content = format!("{}{}", header, pp_buffer.trim_end());
             let out_path = path.with_extension("lcx");
@@ -1297,7 +1304,8 @@ fn execute_code_string(
     let file_content = full_code.clone();
     
     let lexering_time = Instant::now();
-    let raw_tokens = Lexer::new(&full_code, "<-c>").tokenize();
+    let lexer = Lexer::new(&full_code, "<-c>");
+    let raw_tokens = lexer.tokenize();
     if timer_flag {
         println!("{}", format!("{}Lexing time: {:?}{}", hex_to_ansi(&config.color_scheme.debug, config.supports_color), lexering_time.elapsed(), hex_to_ansi("reset", config.supports_color)));
     }
@@ -1345,8 +1353,10 @@ fn execute_code_string(
         } else {
             ".".to_string()
         };
+        let concrete_tokens = lexer.tokenize_concrete();
         dump_pp(
             processed_tokens.iter().collect(),
+            concrete_tokens,
             &p,
             "<-c>",
             &config,
@@ -1773,8 +1783,10 @@ fn repl(
             } else {
                 file_path.parent().unwrap_or_else(|| Path::new(".")).to_str().unwrap_or("")
             };
+            let concrete_tokens = lexer.tokenize_concrete();
             dump_pp(
                 processed_tokens.iter().collect(),
+                concrete_tokens,
                 &path,
                 &Path::new(&file_path).file_name().unwrap_or_default().to_str().unwrap_or(""),
                 &config,
@@ -2115,6 +2127,7 @@ fn main() {
         ("--version, -v", "Show version information"),
         ("--build-info", "Show build information"),
         ("--disable-preprocessor, -dp", "Disable preprocessor"),
+        ("--fmt <path>", "Format source code file"),
         ("--config <path>", "Specify a custom config file path"),
         ("--dump-pp", "Dump source code after preprocessing"),
         ("--dump-ast", "Dump AST after parsing"),
@@ -2148,6 +2161,7 @@ fn main() {
     let mut help_flag = false;
     let mut version_flag = false;
     let mut disable_preprocessor = false;
+    let mut fmt_files: Vec<String> = Vec::new();
     let mut config_arg: Option<String> = None;
     let mut dump_pp_flag = false;
     let mut dump_ast_flag = false;
@@ -2388,6 +2402,19 @@ fn main() {
             "--allow-unsafe" => { allow_unsafe = true; }
             "--timer" | "-t" => { timer_flag = true; }
             "-x" => { create_lcx = true; }
+            "--fmt" => {
+                if i + 1 < args.len() {
+                    let mut files = Vec::new();
+                    while i + 1 < left_args.len() && !left_args[i + 1].starts_with('-') {
+                        files.push(left_args[i + 1].clone());
+                        i += 1;
+                    }
+                    fmt_files.extend(files);
+                } else {
+                    eprintln!("Error: --fmt requires a path.");
+                    exit(1);
+                }
+            }
             "--clean-cache" | "-cc" | "--clear-cache" | "--cls-cache" => { cls_cache_flag = true; }
             "--no-project-env" => { _no_project_env_flag = true; }
             "--stack-size" => {
@@ -2542,6 +2569,29 @@ fn main() {
             eprintln!("Only one source file is allowed. Found extra file argument: {}", dfile);
             exit(1);
         }
+    }
+
+    if !fmt_files.is_empty() {
+        eprintln!("{}", "Warning: Formatting feature is experimental and may not cover all edge cases.".yellow());
+        for fmt_path in &fmt_files {
+            let path = PathBuf::from(&fmt_path);
+            if !path.exists() {
+                eprintln!("File to format does not exist: {}", fmt_path);
+                exit(1);
+            }
+            if path.is_dir() {
+                eprintln!("Expected a file path for formatting, but found a directory: {}", fmt_path);
+                exit(1);
+            }
+            if let Err(e) = fmt::format_file(&path, None) {
+                eprintln!("Failed to format file '{}': {}", fmt_path, e);
+                exit(1);
+            }
+        }
+        for fmt_path in &fmt_files {
+            println!("Formatted file: {}", fmt_path);
+        }
+        exit(0);
     }
 
     let mut argv = if !right_argv.is_empty() {

@@ -2365,6 +2365,9 @@ impl Interpreter {
                 let base_type = match self.evaluate(&bs_ty) {
                     Value::Type(t) => t,
                     _ => {
+                        if self.err.is_some() {
+                            return self.raise_with_ref("TypeError", "Expected base type to be a type", self.err.clone().unwrap());
+                        }
                         self.raise("TypeError", "Expected base type to be a type");
                         return NULL;
                     }
@@ -8182,33 +8185,6 @@ impl Interpreter {
                 }
             }
         } else if let Function::NativeMethod(func) = func {
-            if let Some(ref obj_var) = object_variable {
-                self.debug_log(
-                    format_args!(
-                        "<Call: {}.{}({})>",
-                        obj_var.get_name(),
-                        function_name,
-                        final_args_no_mods
-                            .iter()
-                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    )
-                );
-            } else {
-                self.debug_log(
-                    format_args!(
-                        "<Call: {}({})>",
-                        function_name,
-                        final_args_no_mods
-                            .iter()
-                            .map(|(k, v)| format!("{}: {}", k, format_value(v)))
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    )
-                );
-            }
-
             result = func.call_method(
                 special_value,
                 &final_args_no_mods,

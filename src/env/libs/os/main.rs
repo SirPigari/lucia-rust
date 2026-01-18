@@ -1269,6 +1269,19 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
         Value::Int(Int::from_i64(MAX_PTR as i64))
     }, vec![], "int", EffectFlags::PURE);
 
+    insert_native_fn!(map, "exit", |args: &HashMap<String, Value>| -> Value {
+        let code = match args.get("code") {
+            Some(Value::Int(int)) => match int.to_i64() {
+                Ok(v) => v as i32,
+                Err(_) => return Value::new_error("TypeError", "Invalid 'code' integer value", None),
+            },
+            _ => 0,
+        };
+        std::process::exit(code);
+        #[allow(unreachable_code)]
+        Value::Null
+    }, vec![Parameter::positional_optional("code", "int", Value::Int(Int::from_i64(0)))], "void", EffectFlags::PURE);
+
     // signals
     let signal_module = Module {
         name: "signal".to_string(),
