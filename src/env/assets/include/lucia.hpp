@@ -7,4 +7,10 @@ extern "C" {
     #include "lucia.h"
 }
 
+#ifdef LUCIA_CHECK_SIZES
+extern "C" {
+    #include "lucia_size_check.h"
+}
+#endif
+
 #endif // LUCIA_HPP

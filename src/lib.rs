@@ -53,6 +53,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::libs::load_std_libs_embedded;
 pub use crate::env::runtime::errors::Error;
+use parking_lot::Mutex;
 use core::ffi::{c_char, c_void};
 use std::mem::ManuallyDrop;
 use std::ffi::CString;
@@ -64,17 +65,8 @@ use interpreter::Interpreter;
 use parser::Parser;
 use lexer::Lexer;
 
-const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("VERSION");
-const UUID: &str = env!("BUILD_UUID");
-const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
-const RUSTC_CHANNEL: &str = env!("RUSTC_CHANNEL");
-const TARGET: &str = env!("TARGET_TRIPLE");
-const REPOSITORY: &str = env!("REPO");
-const GIT_HASH: &str = env!("GIT_HASH");
-const FILE_HASH: &str = env!("FILE_HASH");
-const PROFILE: &str = env!("PROFILE");
-const BUILD_DATE: &str = env!("BUILD_DATE");
+const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
 #[repr(C)]
 pub struct BuildInfo {
@@ -90,6 +82,9 @@ pub struct BuildInfo {
     profile:       *const c_char,
     build_date:    *const c_char,
 }
+
+unsafe impl Send for BuildInfo {}
+unsafe impl Sync for BuildInfo {}
 
 pub type CBool = u8;
 
@@ -131,19 +126,19 @@ unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
     }
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum LuciaValueType {
+    VALUE_NULL = 0,
     VALUE_INT = 1,
     VALUE_FLOAT = 2,
     VALUE_STRING = 3,
     VALUE_BOOLEAN = 4,
-    VALUE_NULL = 5,
-    VALUE_LIST = 6,
-    VALUE_MAP = 7,
-    VALUE_BYTES = 8,
-    VALUE_POINTER = 9,
+    VALUE_LIST = 5,
+    VALUE_MAP = 6,
+    VALUE_BYTES = 7,
+    VALUE_POINTER = 8,
     VALUE_UNSUPPORTED = 255,
 }
 
@@ -174,9 +169,50 @@ fn value_to_abi(v: &Value) -> LuciaValue {
         Value::Float(f) => LuciaValue { tag: LuciaValueType::VALUE_FLOAT, data: ValueData { float_v: match f.to_f64() { Ok(val) => val, Err(_) => f64::MAX } }, length: 0 },
         Value::Boolean(b) => LuciaValue { tag: LuciaValueType::VALUE_BOOLEAN, data: ValueData { bool_v: *b as u8 }, length: 0 },
         Value::Null => LuciaValue { tag: LuciaValueType::VALUE_NULL, data: ValueData { int_v: 0 }, length: 0 },
-        Value::String(s) => LuciaValue { tag: LuciaValueType::VALUE_STRING, data: ValueData { string_v: s.as_ptr() as *const c_char }, length: s.len() },
-        Value::List(l) => LuciaValue { tag: LuciaValueType::VALUE_LIST, data: ValueData { list_ptr: l.as_ptr() as *const LuciaValue }, length: l.len() },
-        Value::Bytes(b) => LuciaValue { tag: LuciaValueType::VALUE_BYTES, data: ValueData { bytes_ptr: b.as_ptr() }, length: b.len() },
+        Value::String(s) => {
+            match CString::new(s.as_str()) {
+                Ok(cstr) => {
+                    let ptr = cstr.into_raw();
+                    LuciaValue {
+                        tag: LuciaValueType::VALUE_STRING,
+                        data: ValueData { string_v: ptr },
+                        length: s.len(),
+                    }
+                }
+                Err(_) => LuciaValue {
+                    tag: LuciaValueType::VALUE_STRING,
+                    data: ValueData { string_v: std::ptr::null() },
+                    length: 0,
+                },
+            }
+        },
+        Value::List(l) => {
+            let abi_list: Vec<LuciaValue> =
+                l.iter().map(value_to_abi).collect();
+
+            let boxed = abi_list.into_boxed_slice();
+            let ptr = boxed.as_ptr();
+            let len = boxed.len();
+            std::mem::forget(boxed);
+
+            LuciaValue {
+                tag: LuciaValueType::VALUE_LIST,
+                data: ValueData { list_ptr: ptr },
+                length: len,
+            }
+        },
+        Value::Bytes(b) => {
+            let boxed = b.clone().into_boxed_slice();
+            let ptr = boxed.as_ptr();
+            let len = boxed.len();
+            std::mem::forget(boxed);
+
+            LuciaValue {
+                tag: LuciaValueType::VALUE_BYTES,
+                data: ValueData { bytes_ptr: ptr },
+                length: len,
+            }
+        },
         Value::Map(m) => {
             let flat_map: Vec<LuciaValue> = m.iter()
                 .flat_map(|(k, v)| vec![value_to_abi(k), value_to_abi(v)])
@@ -192,8 +228,17 @@ fn value_to_abi(v: &Value) -> LuciaValue {
                 data: ValueData { map_ptr },
                 length: len,
             }
-        }
-        Value::Pointer(p) => LuciaValue { tag: LuciaValueType::VALUE_POINTER, data: ValueData { pointer: Arc::as_ptr(p) as *mut _ }, length: 0 },
+        },
+        Value::Pointer(p) => {
+            let arc_ptr = Arc::into_raw(Arc::clone(p)) as *mut std::ffi::c_void;
+            LuciaValue {
+                tag: LuciaValueType::VALUE_POINTER,
+                data: ValueData {
+                    pointer: arc_ptr as *mut std::ffi::c_void,
+                },
+                length: 0,
+            }
+        },
         _ => LuciaValue { tag: LuciaValueType::VALUE_UNSUPPORTED, data: ValueData { int_v: 0 }, length: 0 },
     }
 }
@@ -413,7 +458,7 @@ pub struct LuciaError {
     pub column: usize,
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[derive(Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum LuciaResultTag {
@@ -431,56 +476,161 @@ pub struct LuciaResult {
 
 #[repr(C)]
 pub union LuciaResultData {
-    pub value: ManuallyDrop<LuciaValue>,        // LUCIA_RESULT_OK
-    pub error: ManuallyDrop<LuciaError>,        // LUCIA_RESULT_ERROR
-    pub panic_msg: *const c_char, // LUCIA_RESULT_PANIC
+    pub value: LuciaValue,
+    pub error: ManuallyDrop<LuciaError>,
+    pub panic_msg: *const c_char,
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_get_build_info() -> BuildInfo {
-    BuildInfo {
-        name:          NAME.as_ptr() as *const c_char,
-        version:       VERSION.as_ptr() as *const c_char,
-        uuid:          UUID.as_ptr() as *const c_char,
-        rustc_version: RUSTC_VERSION.as_ptr() as *const c_char,
-        rustc_channel: RUSTC_CHANNEL.as_ptr() as *const c_char,
-        target:        TARGET.as_ptr() as *const c_char,
-        repository:    REPOSITORY.as_ptr() as *const c_char,
-        git_hash:      GIT_HASH.as_ptr() as *const c_char,
-        file_hash:     FILE_HASH.as_ptr() as *const c_char,
-        profile:       PROFILE.as_ptr() as *const c_char,
-        build_date:    BUILD_DATE.as_ptr() as *const c_char,
+pub extern "C" fn lucia_result_is_ok(res: *const LuciaResult) -> CBool {
+    if res.is_null() {
+        return 0;
+    }
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_OK => 1,
+            _ => 0,
+        }
     }
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lucia_result_is_error(res: *const LuciaResult) -> CBool {
+    if res.is_null() {
+        return 0;
+    }
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_ERROR => 1,
+            _ => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_result_value(res: *const LuciaResult) -> *const LuciaValue {
+    if res.is_null() {
+        return std::ptr::null();
+    }
+
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_OK => {
+                &(*res).data.value as *const LuciaValue
+            }
+            _ => std::ptr::null(),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_result_error(res: *const LuciaResult) -> *const LuciaError {
+    if res.is_null() {
+        return std::ptr::null();
+    }
+
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_ERROR => {
+                &(*res).data.error as *const ManuallyDrop<LuciaError> as *const LuciaError
+            }
+            _ => std::ptr::null(),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_result_try_as_value(res: *const LuciaResult, value: *mut *const LuciaValue) -> CBool {
+    if res.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_OK => {
+                *value = &(*res).data.value as *const LuciaValue;
+                1
+            }
+            _ => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_result_try_as_error(res: *const LuciaResult, error: *mut *const LuciaError) -> CBool {
+    if res.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        match (*res).tag {
+            LuciaResultTag::LUCIA_RESULT_ERROR => {
+                *error = &(*res).data.error as *const ManuallyDrop<LuciaError> as *const LuciaError;
+                1
+            }
+            _ => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub static BUILD_INFO: BuildInfo = BuildInfo {
+    name:          concat!(env!("CARGO_PKG_NAME"), "\0").as_ptr() as *const c_char,
+    version:       concat!(env!("VERSION"), "\0").as_ptr() as *const c_char,
+    uuid:          concat!(env!("BUILD_UUID"), "\0").as_ptr() as *const c_char,
+    rustc_version: concat!(env!("RUSTC_VERSION"), "\0").as_ptr() as *const c_char,
+    rustc_channel: concat!(env!("RUSTC_CHANNEL"), "\0").as_ptr() as *const c_char,
+    target:        concat!(env!("TARGET_TRIPLE"), "\0").as_ptr() as *const c_char,
+    repository:    concat!(env!("REPO"), "\0").as_ptr() as *const c_char,
+    git_hash:      concat!(env!("GIT_HASH"), "\0").as_ptr() as *const c_char,
+    file_hash:     concat!(env!("FILE_HASH"), "\0").as_ptr() as *const c_char,
+    profile:       concat!(env!("PROFILE"), "\0").as_ptr() as *const c_char,
+    build_date:    concat!(env!("BUILD_DATE_ISO"), "\0").as_ptr() as *const c_char,
+};
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_get_build_info() -> *const BuildInfo {
+    &BUILD_INFO
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn lucia_free_value(v: LuciaValue) {
-    match v.tag {
-        LuciaValueType::VALUE_STRING => {
-            let s_ptr = unsafe { v.data.string_v as *mut c_char };
-            if !s_ptr.is_null() {
-                unsafe { let _ = CString::from_raw(s_ptr); }
-            }
-        }
-        LuciaValueType::VALUE_LIST => {
-            let list_ptr = unsafe { v.data.list_ptr as *mut LuciaValue };
-            let len = v.length;
-            if !list_ptr.is_null() {
-                let list_slice = unsafe { std::slice::from_raw_parts_mut(list_ptr, len) };
-                for item in list_slice.iter_mut() {
-                    lucia_free_value(*item);
+    unsafe {
+        match v.tag {
+            LuciaValueType::VALUE_STRING => {
+                if !v.data.string_v.is_null() {
+                    let _ = CString::from_raw(v.data.string_v as *mut c_char);
                 }
-                unsafe { Vec::from_raw_parts(list_ptr, len, len); }
             }
-        }
-        LuciaValueType::VALUE_BYTES => {
-            let bytes_ptr = unsafe { v.data.bytes_ptr as *mut u8 };
-            let len = v.length;
-            if !bytes_ptr.is_null() {
-                unsafe { Vec::from_raw_parts(bytes_ptr, len, len); }
+
+            LuciaValueType::VALUE_LIST | LuciaValueType::VALUE_MAP => {
+                let ptr = v.data.list_ptr as *mut LuciaValue;
+                let len = v.length;
+                if !ptr.is_null() {
+                    let slice = std::slice::from_raw_parts_mut(ptr, len);
+                    for item in slice {
+                        lucia_free_value(*item);
+                    }
+                    Vec::from_raw_parts(ptr, len, len);
+                }
             }
+
+            LuciaValueType::VALUE_BYTES => {
+                let ptr = v.data.bytes_ptr as *mut u8;
+                let len = v.length;
+                if !ptr.is_null() {
+                    Vec::from_raw_parts(ptr, len, len);
+                }
+            }
+
+            LuciaValueType::VALUE_POINTER => {
+                if !v.data.pointer.is_null() {
+                    let _ = Arc::from_raw(v.data.pointer as *const Mutex<(Value, usize)>);
+                }
+            }
+
+            _ => {}
         }
-        _ => {}
     }
 }
 
@@ -521,14 +671,14 @@ pub extern "C" fn lucia_free_config(cfg: LuciaConfig) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_free_result(res: LuciaResult) {
+pub extern "C" fn lucia_free_result(mut res: LuciaResult) {
     match res.tag {
         LuciaResultTag::LUCIA_RESULT_OK => {
-            let value = unsafe { ManuallyDrop::into_inner(res.data.value) };
+            let value = unsafe { res.data.value };
             lucia_free_value(value);
         }
         LuciaResultTag::LUCIA_RESULT_ERROR => {
-            let error = unsafe { ManuallyDrop::into_inner(res.data.error) };
+            let error = unsafe { ManuallyDrop::take(&mut res.data.error) };
             lucia_free_error(error);
         }
         LuciaResultTag::LUCIA_RESULT_PANIC => {
@@ -541,21 +691,121 @@ pub extern "C" fn lucia_free_result(res: LuciaResult) {
     }
 }
 
+// very useful
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_free_build_info(info: BuildInfo) {
-    unsafe {
-        if !info.name.is_null() { let _ = CString::from_raw(info.name as *mut c_char); }
-        if !info.version.is_null() { let _ = CString::from_raw(info.version as *mut c_char); }
-        if !info.uuid.is_null() { let _ = CString::from_raw(info.uuid as *mut c_char); }
-        if !info.rustc_version.is_null() { let _ = CString::from_raw(info.rustc_version as *mut c_char); }
-        if !info.rustc_channel.is_null() { let _ = CString::from_raw(info.rustc_channel as *mut c_char); }
-        if !info.target.is_null() { let _ = CString::from_raw(info.target as *mut c_char); }
-        if !info.repository.is_null() { let _ = CString::from_raw(info.repository as *mut c_char); }
-        if !info.git_hash.is_null() { let _ = CString::from_raw(info.git_hash as *mut c_char); }
-        if !info.file_hash.is_null() { let _ = CString::from_raw(info.file_hash as *mut c_char); }
-        if !info.profile.is_null() { let _ = CString::from_raw(info.profile as *mut c_char); }
-        if !info.build_date.is_null() { let _ = CString::from_raw(info.build_date as *mut c_char); }
+pub extern "C" fn lucia_print_size_checks() {
+    use std::mem::{size_of, align_of};
+
+    macro_rules! static_assert_type {
+        ($t:ty) => {
+            if stringify!($t) == "usize" || stringify!($t).starts_with("*") {
+                println!("#if UINTPTR_MAX == 0xffffffffffffffff"); // 64-bit
+                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == 8, \"{t} expected to be 8 bytes on 64-bit\");", t=stringify!($t));
+                println!("LUCIA_STATIC_ASSERT(alignof({t}) == 8, \"{t} alignment expected to be 8 on 64-bit\");", t=stringify!($t));
+                println!("#else"); // 32-bit
+                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == 4, \"{t} expected to be 4 bytes on 32-bit\");", t=stringify!($t));
+                println!("LUCIA_STATIC_ASSERT(alignof({t}) == 4, \"{t} alignment expected to be 4 on 32-bit\");", t=stringify!($t));
+                println!("#endif");
+            } else {
+                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == {s}, \"Size of {t} was expected to be {s}\");", t=stringify!($t), s=size_of::<$t>());
+                println!("LUCIA_STATIC_ASSERT(alignof({t}) == {a}, \"Alignment of {t} was expected to be {a}\");", t=stringify!($t), a=align_of::<$t>());
+            }
+        };
     }
+
+    macro_rules! static_assert_field {
+        ($struct:ty, $field:ident, $ty:ty) => {
+            if stringify!($ty) == "usize" || stringify!($ty).starts_with("*") {
+                println!("#if UINTPTR_MAX == 0xffffffffffffffff");
+                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 8, \"{s}.{f} expected to be 8 bytes on 64-bit\");", s=stringify!($struct), f=stringify!($field));
+                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 8, \"{s}.{f} alignment expected to be 8 on 64-bit\");", s=stringify!($struct), f=stringify!($field));
+                println!("#else");
+                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 4, \"{s}.{f} expected to be 4 bytes on 32-bit\");", s=stringify!($struct), f=stringify!($field));
+                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 4, \"{s}.{f} alignment expected to be 4 on 32-bit\");", s=stringify!($struct), f=stringify!($field));
+                println!("#endif");
+            } else {
+                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == {sz}, \"{s}.{f} was expected to be {sz}\");", s=stringify!($struct), f=stringify!($field), sz=size_of::<$ty>());
+                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == {a}, \"{s}.{f} alignment was expected to be {a}\");", s=stringify!($struct), f=stringify!($field), a=align_of::<$ty>());
+            }
+        };
+    }
+
+    // top-level types
+    static_assert_type!(CBool);
+    static_assert_type!(LuciaValueType);
+    static_assert_type!(LuciaResultTag);
+    static_assert_type!(ValueData);
+    static_assert_type!(LuciaResultData);
+    static_assert_type!(BuildInfo);
+    static_assert_type!(LuciaConfig);
+    static_assert_type!(LuciaValue);
+    static_assert_type!(LuciaError);
+    static_assert_type!(LuciaResult);
+    static_assert_type!(ValueAsArgs);
+
+    // ValueData fields
+    static_assert_field!(ValueData, int_v, i64);
+    static_assert_field!(ValueData, float_v, f64);
+    static_assert_field!(ValueData, bool_v, CBool);
+    static_assert_field!(ValueData, string_v, *const c_char);
+    static_assert_field!(ValueData, bytes_ptr, *const u8);
+    static_assert_field!(ValueData, list_ptr, *const LuciaValue);
+    static_assert_field!(ValueData, map_ptr, *const LuciaValue);
+    static_assert_field!(ValueData, pointer, *mut c_void);
+
+    // LuciaResultData fields
+    static_assert_field!(LuciaResultData, value, LuciaValue);
+    static_assert_field!(LuciaResultData, error, ManuallyDrop<LuciaError>);
+    static_assert_field!(LuciaResultData, panic_msg, *const c_char);
+
+    // BuildInfo fields
+    static_assert_field!(BuildInfo, name, *const c_char);
+    static_assert_field!(BuildInfo, version, *const c_char);
+    static_assert_field!(BuildInfo, uuid, *const c_char);
+    static_assert_field!(BuildInfo, rustc_version, *const c_char);
+    static_assert_field!(BuildInfo, rustc_channel, *const c_char);
+    static_assert_field!(BuildInfo, target, *const c_char);
+    static_assert_field!(BuildInfo, repository, *const c_char);
+    static_assert_field!(BuildInfo, git_hash, *const c_char);
+    static_assert_field!(BuildInfo, file_hash, *const c_char);
+    static_assert_field!(BuildInfo, profile, *const c_char);
+    static_assert_field!(BuildInfo, build_date, *const c_char);
+
+    // LuciaConfig fields
+    static_assert_field!(LuciaConfig, moded, CBool);
+    static_assert_field!(LuciaConfig, debug, CBool);
+    static_assert_field!(LuciaConfig, debug_mode, *const c_char);
+    static_assert_field!(LuciaConfig, supports_color, CBool);
+    static_assert_field!(LuciaConfig, use_lucia_traceback, CBool);
+    static_assert_field!(LuciaConfig, warnings, CBool);
+    static_assert_field!(LuciaConfig, allow_fetch, CBool);
+    static_assert_field!(LuciaConfig, allow_unsafe, CBool);
+    static_assert_field!(LuciaConfig, allow_inline_config, CBool);
+    static_assert_field!(LuciaConfig, disable_runtime_type_checking, CBool);
+    static_assert_field!(LuciaConfig, home_dir, *const c_char);
+    static_assert_field!(LuciaConfig, stack_size, usize);
+    static_assert_field!(LuciaConfig, version, *const c_char);
+
+    // LuciaValue fields
+    static_assert_field!(LuciaValue, tag, LuciaValueType);
+    static_assert_field!(LuciaValue, data, ValueData);
+    static_assert_field!(LuciaValue, length, usize);
+
+    // LuciaError fields
+    static_assert_field!(LuciaError, err_type, *const c_char);
+    static_assert_field!(LuciaError, err_msg, *const c_char);
+    static_assert_field!(LuciaError, help_msg, *const c_char);
+    static_assert_field!(LuciaError, line_num, u32);
+    static_assert_field!(LuciaError, line_text, *const c_char);
+    static_assert_field!(LuciaError, column, usize);
+
+    // LuciaResult fields
+    static_assert_field!(LuciaResult, tag, LuciaResultTag);
+    static_assert_field!(LuciaResult, data, LuciaResultData);
+
+    // ValueAsArgs fields
+    static_assert_field!(ValueAsArgs, force, CBool);
+    static_assert_field!(ValueAsArgs, cast, CBool);
 }
 
 #[unsafe(no_mangle)]
@@ -644,7 +894,7 @@ pub extern "C" fn lucia_interpret_with_argv(
                 let val_abi = value_to_abi(&val);
                 LuciaResult {
                     tag: LuciaResultTag::LUCIA_RESULT_OK,
-                    data: LuciaResultData { value: ManuallyDrop::new(val_abi) },
+                    data: LuciaResultData { value: val_abi },
                 }
             }
             Err(e) => {
@@ -667,7 +917,14 @@ pub extern "C" fn lucia_interpret_with_argv(
             } else {
                 "unknown panic".into()
             };
-            let c_msg = CString::new(msg).unwrap_or_else(|_| CString::new("panic").unwrap());
+
+            let display_msg: String = if msg.as_bytes().first() == Some(&CUSTOM_PANIC_MARKER) {
+                msg[1..].to_string()
+            } else {
+                msg
+            };
+
+            let c_msg = CString::new(display_msg).unwrap_or_else(|_| CString::new("panic").unwrap());
 
             LuciaResult {
                 tag: LuciaResultTag::LUCIA_RESULT_PANIC,

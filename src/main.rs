@@ -147,6 +147,7 @@ use crate::env::runtime::libs::load_std_libs_embedded;
 use crate::env::runtime::libs::load_std_libs;
 
 const VERSION: &str = env!("VERSION");
+const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
 pub fn get_build_info() -> BuildInfo {
     BuildInfo {
@@ -2023,8 +2024,6 @@ fn main() {
     let vec_args: Vec<String> = std_env::args().filter(|s| s != "lucia").collect();
 
     panic::set_hook(Box::new(|panic_info| {
-        const CUSTOM_PANIC_MARKER: u8 = 0x1B;
-    
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             *s
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {

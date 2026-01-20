@@ -10,7 +10,7 @@ use crate::env::runtime::utils::{MAX_PTR};
 use crate::env::runtime::modules::Module;
 #[cfg(not(target_arch = "wasm32"))]
 use rustc_hash::FxHashMap;
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn, insert_native_var, CUSTOM_PANIC_MARKER};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 #[cfg(not(target_arch = "wasm32"))]
@@ -133,8 +133,6 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
 }
 
 fn panic_handler(args: &HashMap<String, Value>) -> Value {
-    const CUSTOM_PANIC_MARKER: u8 = 0x1B;
-
     if let Some(Value::String(message)) = args.get("message") {
         let mut marked_message = String::new();
         marked_message.push(CUSTOM_PANIC_MARKER as char);

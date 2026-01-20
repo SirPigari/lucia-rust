@@ -5,22 +5,36 @@
     Lucia Programming Language
         - by Markofwitch
 
-    C Header File
+    C Header File for C99 and later
+    GPL-3.0 License - Copyright (c) 2025 Markofwitch
 */
 
+
+// Lucia API is thread-safe
+// All memory allocated by the API must be freed by the user using the provided free functions
+// NEVER use free() on API-allocated memory - there is no guarantee it will work.
+//
+// Ownership rules:
+//  - Owned (must free using lucia_free_*): LuciaValue, LuciaError, LuciaConfig, LuciaResult
+//  - Borrowed (do NOT free): VALUE_POINTER inside LuciaValue (managed by Arc), all fields in BuildInfo
+//  - Stack-safe / static: BuildInfo itself can be returned by value or live on stack, strings inside are static
+//
+// IMPORTANT: VALUE_POINTER values ARE automatically freed by lucia_free_value() - the Arc reference count is decremented.
+//            Do NOT manually free the pointer inside VALUE_POINTER values.
 
 #include <stdint.h>
 #include <stddef.h>
 
-// alias for u8 as boolean
+// just to be sure its uint8_t
 typedef uint8_t CBool;
 
-#ifndef true
+#ifndef __bool_true_false_are_defined 
+    #define false 0
     #define true 1
 #endif
-#ifndef false
-    #define false 0
-#endif
+
+// LuciaValue NULL constant
+#define LUCIA_NULL (LuciaValue){0}
 
 typedef struct LuciaConfig {
     CBool moded;                             // whether to run in moded mode (aka allows modified stdlib or version)
@@ -38,30 +52,31 @@ typedef struct LuciaConfig {
     const char* version;                     // lucia version string
 } LuciaConfig;
 
-typedef enum LuciaValueType {
+typedef uint8_t LuciaValueType;
+enum LuciaValueType {
+    VALUE_NULL = 0,
     VALUE_INT = 1,
     VALUE_FLOAT = 2,
     VALUE_STRING = 3,
     VALUE_BOOLEAN = 4,
-    VALUE_NULL = 5,
-    VALUE_LIST = 6,
-    VALUE_MAP = 7,
-    VALUE_BYTES = 8,
-    VALUE_POINTER = 9,
-    VALUE_UNSUPPORTED = 255,  // for types like module or function
-} LuciaValueType;
+    VALUE_LIST = 5,
+    VALUE_MAP = 6,
+    VALUE_BYTES = 7,
+    VALUE_POINTER = 8,
+    VALUE_UNSUPPORTED = 255,
+};
 
 typedef struct LuciaValue LuciaValue;
 
 typedef union ValueData {
-    int64_t int_v;
-    double float_v;
-    CBool bool_v;
-    const char* string_v;
-    const uint8_t* bytes_ptr;
-    const LuciaValue* list_ptr;
-    const LuciaValue* map_ptr; // flattened key,value,key,value...
-    void* pointer;
+    int64_t int_v;              // integer value, if bigger than i64, return i64::MAX
+    double float_v;             // float value, if bigger than f64, return f64::MAX
+    CBool bool_v;               // boolean value
+    const char* string_v;       // pointer to string data (UTF-8), null-terminated
+    const uint8_t* bytes_ptr;   // pointer to bytes data
+    const LuciaValue* list_ptr; // pointer to list data
+    const LuciaValue* map_ptr;  // flattened array: [key0, value0, key1, value1, ...]
+    void* pointer;              // (advanced use) pointer to rusts Arc<Mutex<(Value, usize)>> where the Value is the rusts Value and usize is the depth
 } ValueData;
 
 struct LuciaValue {
@@ -93,17 +108,18 @@ CBool try_value_as_list(LuciaValue v, const LuciaValue** out_ptr, size_t* out_le
 CBool try_value_as_map(LuciaValue v, const LuciaValue** out_ptr, size_t* out_len);
 CBool try_value_as_pointer(LuciaValue v, void** out);
 
-typedef struct ValueAsArgs {
+// internal arguments struct for value_as with args
+typedef struct lucia__ValueAsArgs {
     CBool force;
     CBool cast;
-} ValueAsArgs;
+} lucia__ValueAsArgs;
 
 // internal function for value_as with args
-CBool lucia__value_as_args(LuciaValue v, LuciaValueType t, void* out, ValueAsArgs args);
+CBool lucia__value_as_args(LuciaValue v, LuciaValueType t, void* out, lucia__ValueAsArgs args);
 
 // value_as(LuciaValue v, LuciaValueType t, void* out, CBool .force = false, CBool .cast = false)
 #define value_as(v, t, out, ...) \
-    lucia__value_as_args(v, t, out, (ValueAsArgs){ __VA_ARGS__ })
+    lucia__value_as_args(v, t, out, (lucia__ValueAsArgs){ __VA_ARGS__ })
 
 typedef struct LuciaError {
     const char* err_type;
@@ -114,18 +130,13 @@ typedef struct LuciaError {
     size_t column;
 } LuciaError;
 
-
-// Result type
-// RESULT_OK: contains LuciaValue
-// RESULT_ERROR: contains LuciaError
-// RESULT_CONFIG_ERR: means config or code was invalid, empty
-// RESULT_PANIC: contains panic message
-typedef enum LuciaResultTag {
-    LUCIA_RESULT_OK = 1,
-    LUCIA_RESULT_ERROR = 2,
-    LUCIA_RESULT_CONFIG_ERR = 3,
-    LUCIA_RESULT_PANIC = 4,
-} LuciaResultTag;
+typedef uint8_t LuciaResultTag;
+enum LuciaResultTag {
+    LUCIA_RESULT_OK = 1,         // contains LuciaValue
+    LUCIA_RESULT_ERROR = 2,      // contains LuciaError
+    LUCIA_RESULT_CONFIG_ERR = 3, // means config or code was invalid, empty
+    LUCIA_RESULT_PANIC = 4,      // contains panic message
+};
 
 typedef union LuciaResultData {
     LuciaValue value;
@@ -138,31 +149,38 @@ typedef struct LuciaResult {
     LuciaResultData data;
 } LuciaResult;
 
+CBool lucia_result_is_ok(const LuciaResult* res);
+CBool lucia_result_is_error(const LuciaResult* res);
+const LuciaValue* lucia_result_value(const LuciaResult* res);  // returns NULL if not value
+const LuciaError* lucia_result_error(const LuciaResult* res);  // returns NULL if not error
+CBool lucia_result_try_as_value(const LuciaResult* res, const LuciaValue** out); // returns true on value, false on error
+CBool lucia_result_try_as_error(const LuciaResult* res, const LuciaError** out); // returns true on error, false on value
+
+// BuildInfo is static, doesnt need freeing
 typedef struct BuildInfo {
-    const char* name;
-    const char* version;
-    const char* uuid;
-    const char* rustc_version;
-    const char* rustc_channel;
-    const char* target;
-    const char* repository;
-    const char* git_hash;
-    const char* file_hash;
-    const char* profile;
-    const char* build_date;
+    const char* name;           // "lucia"
+    const char* version;        // "2.x.y" (semver)
+    const char* uuid;           // unique build uuid
+    const char* rustc_version;  // rustc version string
+    const char* rustc_channel;  // "stable", "beta", "nightly"
+    const char* target;         // compilation target triple
+    const char* repository;     // repository URL ("https://github.com/SirPigari/lucia-rust")
+    const char* git_hash;       // git commit hash
+    const char* file_hash;      // source file hash
+    const char* profile;        // build profile ("debug" or "release")
+    const char* build_date;     // build date in ISO 8601 (RFC 3339) format
 } BuildInfo;
 
 // functions to free allocated memory
-void lucia_free_value(LuciaValue v);
+void lucia_free_value(LuciaValue v);  // recursively frees LuciaValue
 void lucia_free_error(LuciaError err);
-void lucia_free_config(LuciaConfig cfg);
 void lucia_free_result(LuciaResult res);
-void lucia_free_build_info(BuildInfo info);
+void lucia_free_config(LuciaConfig cfg);
 
 // Gets build info embedded in the binary
-// Same as 'lucia -i' command
-// User has to free the returned BuildInfo struct after use
-BuildInfo lucia_get_build_info(void);
+// Same as 'lucia --build-info' command
+// Returns pointer to static data
+const BuildInfo* lucia_get_build_info(void);
 
 // Gets the default configuration
 // User has to free the returned LuciaConfig struct after use

@@ -590,6 +590,7 @@ fn main() {
     println!("cargo:rustc-env=DEPS={deps}");
     println!("cargo:rustc-env=REPO=https://github.com/SirPigari/lucia-rust");
     println!("cargo:rustc-env=BUILD_DATE={}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    println!("cargo:rustc-env=BUILD_DATE_ISO={}", chrono::Utc::now().to_rfc3339());
     println!("cargo:rustc-env=RUST_EDITION={edition}");
 
     let path = Path::new(&manifest_dir);

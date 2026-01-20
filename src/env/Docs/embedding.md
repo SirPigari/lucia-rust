@@ -45,14 +45,41 @@ There is a static and a dynamic version of `liblucia` located in the [bin](../bi
 - [lucia.so](../bin/lucia.so)
 - [lucia.a](../bin/lucia.a)
 
-> NOTE:  
+> [!NOTE]  
 > For the static library you must link with math library using `-lm`
 
-Example compiling with GCC on MSVC Windows:
+Example compiling with GCC:
 
 ```console
 gcc main.c -o main -llucia
 ```
+
+The stupid command that took me 2 hours to figure on windows MSVC:
+
+```vc
+cl main.c /MD /I .\src\env\assets\include /Fe:main.exe /link /LIBPATH:.\src\env\bin ^
+lucia.lib ws2_32.lib user32.lib kernel32.lib ntdll.lib msvcrt.lib legacy_stdio_definitions.lib ^
+userenv.lib pathcch.lib powrprof.lib gdi32.lib shell32.lib bcrypt.lib advapi32.lib
+```
+
+It has to link with a billion stupid libs because microslop cannot decide what is where.
+
+If you want to be sure all the ABI is correct, include [lucia_size_check.h](../assets/include/lucia_size_check.h).
+
+```c
+#include <lucia.h>
+#include <lucia_size_check.h>
+
+int main() {
+    // ...
+    return 0
+}
+```
+
+It uses static assert for the checks so if any fails you will not be able to compile.
+
+> [!NOTE]
+> `lucia_size_check.h` is currently experimental because im not sure how much it works on 32bit machines or on MSVC (fuck you microslop)
 
 I don't know what else to say its really self documented.
 
