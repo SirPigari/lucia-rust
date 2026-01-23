@@ -1,5 +1,6 @@
 import (*) from os.terminal
 import (sleep) from time
+import (exit) from os
 
 // Conway's game of life in Lucia
 // made by Markofwitch 2025, the developer of Lucia

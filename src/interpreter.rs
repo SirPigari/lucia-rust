@@ -236,8 +236,7 @@ impl Interpreter {
         insert_builtin("styledstr", Value::Function(native::styledstr_fn()));
         insert_builtin("array", Value::Function(native::array_fn()));
         insert_builtin("complex", Value::Function(native::complex_fn()));
-        // added for u/Truite_Morte
-        insert_builtin("range", Value::Function(native::range_fn()));
+        insert_builtin("range", Value::Function(native::range_fn())); // added for u/Truite_Morte
         this.variables.insert(
             "00__placeholder__".to_owned(),
             Variable::new("__placeholder__".to_owned(), Value::Function(native::placeholder_fn()), "function".to_owned(), true, false, true),
@@ -347,32 +346,6 @@ impl Interpreter {
         }
     }
 
-    pub fn exit(&mut self, code: Value) {
-        self.state = State::Defer;
-        if !self.defer_stack.is_empty() {
-            let defer_statements = self.defer_stack.concat();
-            for stmt in defer_statements {
-                self.current_statement = Some(stmt);
-                self.evaluate(&self.current_statement.clone().unwrap());
-            }
-        }
-        self.state = State::Exit;
-        self.is_returning = true;
-        self.stack.clear();
-        self.return_value = match code {
-            Value::Int(i) => Value::Int(i),
-            Value::Float(f) => Value::Float(f),
-            Value::String(s) => Value::String(s),
-            _ => {
-                self.raise("TypeError", "Exit code must be an int, float or string");
-                NULL
-            }
-        };
-        self.debug_log(
-            format_args!("<Exit with code: {}>", format_value(&self.return_value))
-        );
-    }
-
     pub fn get_traceback(&self) -> BTreeMap<String, String> {
         let mut traceback = BTreeMap::new();
         for (file, loc, _) in self.stack.iter() {
@@ -380,6 +353,144 @@ impl Interpreter {
             traceback.insert(file.clone(), location);
         }
         traceback
+    }
+
+    pub fn eval(&mut self, code: &str) -> Value {
+        self.debug_log(
+            format_args!("<Eval script: '{}'>", code)
+        );
+        let lexer = Lexer::new(code, to_static(self.file_path.clone()));
+        let tokens = lexer.tokenize();
+
+        let mut parser = Parser::new(
+            tokens,
+        );
+        let statements = parser.parse();
+        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements, false);
+        if let Some(err) = err {
+            self.raise_with_ref("RuntimeError", "Error in exec script", err);
+        }
+        return return_value.clone();
+    }
+
+    #[track_caller]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn breakpoint(&mut self, message: Option<&str>) -> Value {
+        if self.config.debug {
+            let caller = PanicLocation::caller();
+            if let Some(loc) =self.get_location_from_current_statement_caller(*caller) {
+                self.debug_log(format_args!("<{}: Reached breakpoint{}>", loc, message.map_or("".to_owned(), |m| format!(": {}", m))));
+            } else {
+                self.debug_log(format_args!("<Reached breakpoint{}>", message.map_or("".to_owned(), |m| format!(": {}", m))));
+            }
+        }
+        let mut ret_val = NULL;
+        println!("--- Breakpoint Reached ---");
+        println!("Type 'continue' to resume execution or 'help' for more options.");
+        if let Some(msg) = message {
+            println!("Called with message: {}", msg);
+        }
+        println!("--------------------------");
+        let completions = [
+            "continue".to_owned(),
+            "exit".to_owned(),
+            "vars".to_owned(),
+            "help".to_owned(),
+        ];
+        let mut history = vec![];
+        loop {
+            let input = crate::env::runtime::repl::read_input_breakpoint(
+                "breakpoint> ",
+                "..........> ",
+                &mut history,
+                &completions,
+            );
+            let trimmed = input.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with("set_var(") && trimmed.ends_with(")") {
+                let inner = &trimmed[8..trimmed.len()-1];
+                let parts: Vec<&str> = inner.splitn(2, ',').map(|s| s.trim()).collect();
+                if parts.len() == 2 {
+                    let var_name = parts[0].trim_matches('"').trim_matches('\'');
+                    let var_value_str = parts[1];
+                    let var_value = self.eval(var_value_str);
+                    if self.err.is_some() {
+                        println!("Error evaluating value: {}", self.err.as_ref().unwrap().err_msg());
+                        self.err = None;
+                        continue;
+                    }
+                    self.variables.insert(
+                        var_name.to_owned(),
+                        Variable::new(var_name.to_owned(), var_value.clone(), "any".to_owned(), false, false, false),
+                    );
+                } else {
+                    println!("Invalid syntax for set_var. Use: set_var(\"var_name\", value)");
+                }
+                continue;
+            }
+            if trimmed.starts_with("eval(") && trimmed.ends_with(")") {
+                let inner = &trimmed[5..trimmed.len()-1];
+                let eval_value = self.eval(inner);
+                if self.err.is_some() {
+                    println!("Error evaluating code: {}", self.err.as_ref().unwrap().err_msg());
+                    self.err = None;
+                    continue;
+                } else {
+                    println!("Eval result: {}", format_value(&eval_value));
+                }
+                continue;
+            }
+            if trimmed.starts_with("return ") {
+                let inner = &trimmed[7..];
+                ret_val = self.eval(inner);
+                if self.err.is_some() {
+                    println!("Error evaluating return value: {}", self.err.as_ref().unwrap().err_msg());
+                    self.err = None;
+                    continue;
+                } else {
+                    println!("Returning with value: {}", format_value(&ret_val));
+                    break;
+                }
+            }
+
+            match trimmed {
+                "continue" => break,
+                "exit" => {
+                    self.state = State::Exit;
+                    break;
+                }
+                "vars" => {
+                    println!("--- Variables ---");
+                    for (name, var) in &self.variables {
+                        println!("{}: {}", name, format_value(&var.value));
+                    }
+                    println!("-----------------");
+                }
+                "help" => {
+                    println!("Available commands:");
+                    println!("  continue                 - Resume execution");
+                    println!("  return value             - Return from breakpoint with a value");
+                    println!("  exit                     - Exit the interpreter");
+                    println!("  vars                     - List all variables in the current scope");
+                    println!("  eval(...)                - Evaluate an expression");
+                    println!("  set_var(\"name\", value) - Set a variable to a value");
+                    println!("  help                     - Show this help message");
+                }
+                _ => {
+                    println!("Unknown command: '{}'. Type 'help' for a list of commands.", trimmed);
+                }
+            }
+        }
+        ret_val
+    }
+
+    
+    #[cfg(target_arch = "wasm32")]
+    pub fn breakpoint(&mut self, message: Option<&str>) -> Value {
+        println!("Breakpoint reached{}, but in WASM build. No-op.", message.map_or("".to_owned(), |m| format!("with message \"{}\"", m)));
+        NULL
     }
 
     // this is a lot cleaner than last time, glad i refactored it
@@ -7198,7 +7309,7 @@ impl Interpreter {
     
     fn handle_call(&mut self, function_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
         let special_functions = [
-            "exit", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
+            "breakpoint", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
         ];
 
         let pos_args = pos_args_stmt.into_iter()
@@ -7809,17 +7920,27 @@ impl Interpreter {
                 self.internal_storage.in_function = false;
             }
             match function_name {
-                "exit" => {
-                    let code = if let Some(code) = named_args.get("code") {
-                        code.clone()
-                    } else if !pos_args.is_empty() {
-                        pos_args[0].clone()
+                "breakpoint" => {
+                    let condition = if let Some(condition) = final_args_no_mods.get("condition") {
+                        condition.is_truthy()
                     } else {
-                        Value::Int(Int::from_i64(0))
+                        true
+                    };
+                    let message = if let Some(message) = final_args_no_mods.get("message") {
+                        message.clone()
+                    } else {
+                        Value::Null
+                    };
+                    let message = if let Value::String(s) = message {
+                        Some(s)
+                    } else {
+                        None
                     };
                     self.stack.pop();
-                    self.exit(code.clone());
-                    return code;
+                    if !condition {
+                        return NULL;
+                    }
+                    return self.breakpoint(message.as_deref());
                 }
                 "fetch" => {
                     self.stack.pop();
@@ -7850,21 +7971,10 @@ impl Interpreter {
                 "eval" => {
                     self.stack.pop();
                     if let Some(Value::String(script_str)) = final_args_no_mods.get("code") {
-                        self.debug_log(
-                            format_args!("<Eval script: '{}'>", script_str)
-                        );
-                        let lexer = Lexer::new(to_static(script_str.clone()), to_static(self.file_path.clone()));
-                        let tokens = lexer.tokenize();
-
-                        let mut parser = Parser::new(
-                            tokens,
-                        );
-                        let statements = parser.parse();
-                        let (return_value, _state, err, _variables) = self.run_isolated(self.variables.clone(), &statements, false);
-                        if let Some(err) = err {
-                            self.raise_with_ref("RuntimeError", "Error in exec script", err);
+                        self.eval(script_str);
+                        if self.err.is_some() {
+                            return NULL;
                         }
-                        return return_value.clone();
                     } else {
                         return self.raise("TypeError", "Expected a string in 'code' argument in eval");
                     }

@@ -4,6 +4,7 @@ use bincode::{Encode, Decode};
 use std::borrow::Cow;
 #[cfg(not(target_arch = "wasm32"))]
 use std::panic::Location as PanicLocation;
+use std::fmt;
 
 pub static DEFAULT_TOKEN: Lazy<Token> = Lazy::new(Token::default);
 
@@ -72,6 +73,12 @@ impl Default for Location {
             line_number: 0,
             range: (0, 0),
         }
+    }
+}
+
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}:{}", self.file, self.line_number, self.range.0)
     }
 }
 

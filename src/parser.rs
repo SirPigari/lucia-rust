@@ -3508,6 +3508,13 @@ impl Parser {
                         if t.0 == "SEPARATOR" && t.1 == "," {
                             is_tuple = true;
                             self.next();
+
+                            if let Some(next) = self.token() {
+                                if next.0 == "SEPARATOR" && next.1 == ")" {
+                                    break;
+                                }
+                            }
+
                             let expr = self.parse_expression();
                             values.push(expr);
                         } else {

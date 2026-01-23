@@ -64,6 +64,12 @@ userenv.lib pathcch.lib powrprof.lib gdi32.lib shell32.lib bcrypt.lib advapi32.l
 
 It has to link with a billion stupid libs because microslop cannot decide what is where.
 
+I don't know what else to say its really self documented.
+
+Just copy this and put any code into the `code` variable
+
+## ABI validation
+
 If you want to be sure all the ABI is correct, include [lucia_size_check.h](../assets/include/lucia_size_check.h).
 
 ```c
@@ -80,7 +86,3 @@ It uses static assert for the checks so if any fails you will not be able to com
 
 > [!NOTE]
 > `lucia_size_check.h` is currently experimental because im not sure how much it works on 32bit machines or on MSVC (fuck you microslop)
-
-I don't know what else to say its really self documented.
-
-Just copy this and put any code into the `code` variable

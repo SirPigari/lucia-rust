@@ -25,4 +25,4 @@ assert_eq!(range(2, 10, 2, as=tuple), (2, 4, 6, 8))
 
 help()
 warn("this is a warning")
-exit()
+breakpoint(false)

@@ -711,3 +711,12 @@ pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Resul
     Ok(input)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_input_breakpoint(
+    prompt: &str,
+    multiline_prompt: &str,
+    history: &mut Vec<String>,
+    completions: &[String],
+) -> String {
+    read_input(prompt, multiline_prompt, history, completions, &std::env::temp_dir().join("lucia_bp_history"))
+}

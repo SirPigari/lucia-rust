@@ -13,8 +13,10 @@ use crate::env::runtime::internal_structs::{Cache, CacheFormat};
 fn hash_file_content(path: &str) -> std::io::Result<String> {
     let abs_path = std::fs::canonicalize(path)?;
     let abs_path_str = abs_path.to_string_lossy();
+    let content_bytes = std::fs::read(&abs_path)?;
     let mut hasher = Sha256::new();
     hasher.update(abs_path_str.as_bytes());
+    hasher.update(&content_bytes);
     Ok(format!("{:x}", hasher.finalize()))
 }
 

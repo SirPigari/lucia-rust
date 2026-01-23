@@ -82,12 +82,11 @@
     - [Type Checking Operators](#type-checking-operators)
     - [Pipeline Operator](#pipeline-operator)
     - [Increment / Decrement Operators](#increment--decrement-operators)
-    - [Block Syntax](#block-syntax)
+  - [Block Syntax](#block-syntax)
     - [Example of a Block](#example-of-a-block)
     - [Why Use Blocks?](#why-use-blocks)
   - [Indentation](#indentation)
     - [Example](#example)
-    - [Summary](#summary)
   - [If Statements](#if-statements)
     - [1. Basic `if`](#1-basic-if)
     - [2. `if` with `else`](#2-if-with-else)
@@ -1404,7 +1403,7 @@ assert_eq!(++pp, 10)
 | `--i`    | Prefix decrement  | `--i`   | `i-1`          |
 | `i--`    | Postfix decrement | `i--`   | `i` then `i-1` |
 
-### Block Syntax
+## Block Syntax
 
 Blocks in Lucia start with a statement that is followed by a `:`, and the body of the block is indented (optional, but recommended for readability). The block is terminated using the `end` keyword.
 
@@ -1451,13 +1450,6 @@ end
 ```
 
 Since blocks in Lucia are clearly defined by `:` and `end`, indentation does not affect how the code runs. However, using consistent indentation is recommended to improve readability.
-
-### Summary
-
-- A block in Lucia is created by using a statement followed by a colon (`:`) and indented code.
-- Blocks are terminated with the `end` keyword.
-- Indentation is important in Lucia, and the code inside a block must be consistently indented.
-- Blocks improve code organization and readability, ensuring that related code is grouped together.
 
 ## If Statements
 

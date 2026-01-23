@@ -1185,10 +1185,10 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
     let mut map = HashMap::with_capacity_and_hasher(9, Default::default());
 
     map.insert(
-        "exit".to_string(),
+        "breakpoint".to_string(),
         FunctionMetadata {
-            name: "exit".to_string(),
-            parameters: vec![Parameter::positional_optional("code", "int", Value::Int(Int::from_i64(0 as i64)))],
+            name: "breakpoint".to_string(),
+            parameters: vec![Parameter::positional_optional("condition", "any", Value::Boolean(true)), Parameter::positional_optional("message", "?str", Value::Null)],
             return_type: Type::new_simple("void"),
             is_public: true,
             is_static: true,
