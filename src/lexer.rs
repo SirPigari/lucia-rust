@@ -235,11 +235,17 @@ impl<'a> Lexer<'a> {
             let mut chars = s.char_indices().peekable();
             let mut rel_end = 0;
 
-            let prev_is_digit = start > 0
-                && self.code[..start].chars().last().is_some_and(|c| c.is_ascii_digit());
+            let allow_sign = match tokens.last() {
+                None => true,
+                Some(tok) => matches!(
+                    &*tok.0,
+                    TK_OPERATOR
+                    | TK_SEPARATOR
+                ),
+            };
 
             if let Some(&(i, c)) = chars.peek() {
-                if (c == '-' || c == '+') && !prev_is_digit {
+                if allow_sign && (c == '-' || c == '+') {
                     rel_end = i + c.len_utf8();
                     chars.next();
                 }
@@ -638,12 +644,18 @@ impl<'a> Lexer<'a> {
             let s = &self.code[start..];
             let mut chars = s.char_indices().peekable();
             let mut rel_end = 0;
-
-            let prev_is_digit = start > 0
-                && self.code[..start].chars().last().is_some_and(|c| c.is_ascii_digit());
+            
+            let allow_sign = match tokens.last() {
+                None => true,
+                Some(tok) => matches!(
+                    &*tok.0,
+                    TK_OPERATOR
+                    | TK_SEPARATOR
+                ),
+            };
 
             if let Some(&(i, c)) = chars.peek() {
-                if (c == '-' || c == '+') && !prev_is_digit {
+                if allow_sign && (c == '-' || c == '+') {
                     rel_end = i + c.len_utf8();
                     chars.next();
                 }

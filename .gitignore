@@ -11,6 +11,8 @@ t.lc
 /tests/run_tests
 /tests/run_benchmarks.exe
 /tests/run_benchmarks
+/src/env/bundler/template/*
+!/src/env/bundler/template/*.rs
 
 # Lym
 /src/env/assets/lym

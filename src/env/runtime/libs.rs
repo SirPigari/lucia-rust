@@ -34,8 +34,8 @@ pub static _STD_LIBS: Lazy<HashMap<&'static str, LibInfo>> = Lazy::new(|| {
         "2.0.0",
         &EXPECTED_VERSION,
     ));
-    #[cfg(feature = "request")]
-    m.insert("request", LibInfo::new(
+    #[cfg(feature = "requests")]
+    m.insert("requests", LibInfo::new(
         "This module provides HTTP request functionality.",
         "0.11.14",
         &EXPECTED_VERSION,

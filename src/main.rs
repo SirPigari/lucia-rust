@@ -114,6 +114,9 @@ mod env {
         }
     }
     pub mod bundler {
+        pub mod template {
+            pub mod common;
+        }
         pub mod bundle;
     }
 }
@@ -147,6 +150,7 @@ use crate::env::runtime::libs::load_std_libs_embedded;
 use crate::env::runtime::libs::load_std_libs;
 
 const VERSION: &str = env!("VERSION");
+const BUILD_UUID: &str = env!("BUILD_UUID");
 const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
 pub fn get_build_info() -> BuildInfo {
@@ -1992,18 +1996,18 @@ fn bundle(
     args: Vec<String>,
     quiet_flag: bool,
     command_to_run: Option<String>,
+    default_argv: Vec<String>,
     opt_level: String,
 ) -> Result<String, (i32, Vec<Error>)> {
     std::env::set_current_dir(&cwd).map_err(|e| (1, vec![Error::new("IOError", &format!("Failed to set current directory: {}", e), "<bundle>")]))?;
-    let libraries = if std_libs.0 {
+    let mut libraries = std_libs.1;
+    if std_libs.0 {
         let libs = crate::env::runtime::libs::_STD_LIBS
             .iter()
             .map(|(k, _)| k.to_string())
             .collect::<Vec<String>>();
-        libs
-    } else {
-        std_libs.1
-    };
+        libraries.extend(libs);
+    }
     
     let res = bundle_to_exe(
         &config_path.to_str().unwrap_or("config.json"),
@@ -2016,6 +2020,7 @@ fn bundle(
         run_flag,
         &opt_level,
         quiet_flag,
+        default_argv,
     );
     return res;
 }
@@ -2283,6 +2288,7 @@ fn main() {
         let mut main_file = String::new();
         let mut output_path = String::new();
         let mut files = Vec::new();
+        let mut default_argv: Vec<String> = Vec::new();
         let mut std_libs = (true, Vec::new());
         let mut opt_level = "0".to_string();
         let mut i = 1;
@@ -2297,20 +2303,56 @@ fn main() {
                         exit(1);
                     }
                 }
-                "--" | "-f" => {
+                "-f" => {
                     if i + 1 < args.len() {
                         files.push(args[i + 1].clone());
                         i += 1;
                     } else {
-                        eprintln!("Error: -- or -f requires a value.");
+                        eprintln!("Error: -f requires a value.");
                         exit(1);
                     }
+                }
+                "--argv" => {
+                    if i + 1 < args.len() {
+                        let argv_str = args[i + 1].clone();
+                        match serde_json::from_str::<Vec<String>>(&argv_str) {
+                            Ok(vec) => {
+                                default_argv = vec;
+                            }
+                            Err(e) => {
+                                eprintln!("Error: Failed to parse --argv value as JSON array: {}", e);
+                                exit(1);
+                            }
+                        }
+                        i += 1;
+                    } else {
+                        eprintln!("Error: --argv requires a value.");
+                        exit(1);
+                    }
+                }
+                "--" => {
+                    i += 1;
+                    while i < args.len() {
+                        default_argv.push(args[i].clone());
+                        i += 1;
+                    }
+                    break;
                 }
                 "--bundle" | "-b" => {}
                 "--quiet" | "-q" => quiet_flag = true,
                 "--std-libs" => std_libs.0 = true,
                 "--no-std-libs" | "-ns" => std_libs.0 = false,
                 "--run" | "-r" => run_flag = true,
+                "--lib" | "-l" => {
+                    if i + 1 < args.len() {
+                        let lib = args[i + 1].clone();
+                        std_libs.1.push(lib);
+                        i += 1;
+                    } else {
+                        eprintln!("Error: --lib requires a value.");
+                        exit(1);
+                    }
+                }
                 arg if arg.starts_with("--std-lib=") => {
                     let lib = arg["--std-lib=".len()..].to_string();
                     std_libs.1.push(lib);
@@ -2351,7 +2393,7 @@ fn main() {
             eprintln!("Error: Bundling is only supported on Windows.");
             exit(1);
         }
-        bundle(
+        match bundle(
             &main_file,
             &output_path,
             files,
@@ -2362,13 +2404,19 @@ fn main() {
             args,
             quiet_flag,
             command_to_run,
+            default_argv,
             opt_level,
-        ).unwrap_or_else(|(code, errors)| {
-            for error in errors {
-                handle_error(&error, &main_file, &Config::default());
+        ) {
+            Ok(msg) => {
+                println!("{}", msg);
             }
-            exit(code);
-        });
+            Err((code, errors)) => {
+                for error in errors {
+                    handle_error(&error, &main_file, &Config::default());
+                }
+                exit(code);
+            }
+        }
         exit(0);
     }
 

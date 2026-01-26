@@ -27,11 +27,11 @@ _Total TODOs found: 8_
 ### [`src/interpreter.rs:3433:1`](../../../src/interpreter.rs#L3433) _(added by **SirPigari** on **2025-10-12**)_
 - Implement enum conversion
 
-### [`src/env/bundler/bundle.rs:13:1`](../../../src/env/bundler/bundle.rs#L13) _(added by **SirPigari** on **2025-08-27**)_
-- fix it
-
 ### [`src/env/libs/nest/main.rs:1:1`](../../../src/env/libs/nest/main.rs#L1) _(added by **SirPigari** on **2025-07-19**)_
 - Implement the 'nest' module with HTTP client and server utilities
+
+### [`src/env/bundler/bundle.rs:15:1`](../../../src/env/bundler/bundle.rs#L15) **(TODO not committed yet)**
+- When adding a non-native lib it cannot find it.
 
 ---
 *Report generated automatically.*

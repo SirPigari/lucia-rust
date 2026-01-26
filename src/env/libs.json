@@ -6,7 +6,7 @@
             "version": "2.0.0",
             "expected_lucia_version": "^2.0.0"
         },
-        "request": {
+        "requests": {
             "description": "This module provides HTTP request functionality.",
             "version": "0.11.14",
             "expected_lucia_version": "^2.0.0"
