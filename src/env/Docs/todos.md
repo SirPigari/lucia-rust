@@ -5,11 +5,8 @@ DO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.
 List of all TODOs in Lucia source code.
 Be free to fix them or add new ones.  
 
-_Total TODOs found: 8_
+_Total TODOs found: 7_
 ---
-
-### [`src/env/bundler/bundle.rs:32:1`](../../../src/env/bundler/bundle.rs#L32) _(added by **SirPigari** on **2026-01-26**)_
-- When adding a non-native lib it cannot find it.
 
 ### [`src/env/Docs/examples/11_quine.lc:3:1`](../../../examples/11_quine.lc#L3) _(added by **SirPigari** on **2026-01-18**)_
 - fix the escaping

@@ -29,8 +29,6 @@ fn add_dir_recursively(builder: &mut Builder<Encoder<&mut Vec<u8>>>, base: &Path
     Ok(())
 }
 
-// TODO
-// When adding a non-native lib it cannot find it.
 pub fn bundle_to_exe(
     config_path: &str,
     output_path: &str,
