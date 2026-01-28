@@ -48,6 +48,7 @@ typedef struct LuciaConfig {
     CBool allow_inline_config;               // whether to allow inline config in code
     CBool disable_runtime_type_checking;     // whether to disable runtime type checking
     const char* home_dir;                    // path to home directory, or NULL for default
+    const char* libs_paths[16];              // array of paths to search for libraries, limit to 16 for simplicity. NULL entries are ignored
     size_t stack_size;                       // stack size in bytes
     const char* version;                     // lucia version string
 } LuciaConfig;

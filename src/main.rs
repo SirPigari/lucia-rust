@@ -650,6 +650,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
         allow_inline_config: primary.allow_inline_config,
         disable_runtime_type_checking: primary.disable_runtime_type_checking,
         home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
+        libs_paths: if primary.libs_paths.len() <= 1 { fallback.libs_paths } else { primary.libs_paths },
         stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
         type_checker: merge_type_checker_configs(primary.type_checker, fallback.type_checker),
         color_scheme: merge_color_schemes(primary.color_scheme, fallback.color_scheme),
@@ -712,6 +713,7 @@ fn create_default_config(env_path: &Path) -> Config {
         allow_unsafe: false,
         allow_inline_config: true,
         home_dir: fix_path(env_path.to_str().unwrap_or(".").to_string()),
+        libs_paths: vec![env_path.join("libs").to_str().unwrap_or("./libs").to_string()],
         disable_runtime_type_checking: false,
         stack_size: 16777216,
         type_checker: TypeCheckerConfig::default(),
@@ -1998,6 +2000,8 @@ fn bundle(
     command_to_run: Option<String>,
     default_argv: Vec<String>,
     opt_level: String,
+    hide_console: bool,
+    default_quiet: bool
 ) -> Result<String, (i32, Vec<Error>)> {
     std::env::set_current_dir(&cwd).map_err(|e| (1, vec![Error::new("IOError", &format!("Failed to set current directory: {}", e), "<bundle>")]))?;
     let mut libraries = std_libs.1;
@@ -2019,7 +2023,9 @@ fn bundle(
         command_to_run,
         run_flag,
         &opt_level,
+        hide_console,
         quiet_flag,
+        default_quiet,
         default_argv,
     );
     return res;
@@ -2133,6 +2139,7 @@ fn main() {
         ("--disable-preprocessor, -dp", "Disable preprocessor"),
         ("--fmt <path>", "Format source code file"),
         ("--config <path>", "Specify a custom config file path"),
+        ("--libs-dir <dir>, -L <dir>", "Specify a custom libraries directory path (can be multiple). Relative to 'home_dir'"),
         ("--dump-pp", "Dump source code after preprocessing"),
         ("--dump-ast", "Dump AST after parsing"),
         ("--dump", "Dump both source code and AST (equivalent to --dump-pp and --dump-ast)"),
@@ -2167,6 +2174,7 @@ fn main() {
     let mut disable_preprocessor = false;
     let mut fmt_files: Vec<String> = Vec::new();
     let mut config_arg: Option<String> = None;
+    let mut libs_dirs: Vec<String> = Vec::new();
     let mut dump_pp_flag = false;
     let mut dump_ast_flag = false;
     let mut create_lcx = false;
@@ -2291,6 +2299,8 @@ fn main() {
         let mut default_argv: Vec<String> = Vec::new();
         let mut std_libs = (true, Vec::new());
         let mut opt_level = "0".to_string();
+        let mut hide_console = false;
+        let mut default_quiet = true;
         let mut i = 1;
         while i < args.len() {
             match args[i].as_str() {
@@ -2341,8 +2351,10 @@ fn main() {
                 "--bundle" | "-b" => {}
                 "--quiet" | "-q" => quiet_flag = true,
                 "--std-libs" => std_libs.0 = true,
-                "--no-std-libs" | "-ns" => std_libs.0 = false,
+                "--no-std-libs" | "-ns" | "--dont-include-std-libs" | "-di" => std_libs.0 = false,
                 "--run" | "-r" => run_flag = true,
+                "--hide-console" | "-hc" => hide_console = true,
+                "--no-quiet" | "-nq" => default_quiet = false,
                 "--lib" | "-l" => {
                     if i + 1 < args.len() {
                         let lib = args[i + 1].clone();
@@ -2406,6 +2418,8 @@ fn main() {
             command_to_run,
             default_argv,
             opt_level,
+            hide_console,
+            default_quiet,
         ) {
             Ok(msg) => {
                 println!("{}", msg);
@@ -2547,6 +2561,25 @@ fn main() {
                     i += 1;
                 } else {
                     eprintln!("--config requires a path");
+                    exit(1);
+                }
+            }
+            "--libs-dir" | "-L" => {
+                if i + 1 < left_args.len() {
+                    let p = PathBuf::from(&left_args[i + 1]);
+                    let abs_path = if p.is_absolute() {
+                        p
+                    } else {
+                        cwd.join(p)
+                    };
+                    if !abs_path.exists() || !abs_path.is_dir() {
+                        eprintln!("Libraries directory does not exist or is not a directory: {}", abs_path.display());
+                        exit(1);
+                    }
+                    libs_dirs.push(abs_path.to_str().unwrap_or(left_args[i + 1].as_str()).to_string());
+                    i += 1;
+                } else {
+                    eprintln!("{} requires a path", arg);
                     exit(1);
                 }
             }
@@ -2845,6 +2878,7 @@ fn main() {
     if cache.1 {
         config.cache_format = cache.0;
     }
+    config.libs_paths.extend(libs_dirs);
 
     if static_check_flag_auto_fix {
         config.type_checker.try_to_auto_fix = true;

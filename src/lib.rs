@@ -101,6 +101,7 @@ pub struct LuciaConfig {
     pub allow_inline_config: CBool,
     pub disable_runtime_type_checking: CBool,
     pub home_dir: *const c_char,
+    pub libs_paths: [*const c_char; 16], // only allow up to 16 paths for simplicity
     pub stack_size: usize,
     pub version: *const c_char,
 }
@@ -118,6 +119,17 @@ unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
         allow_inline_config: cfg.allow_inline_config != 0,
         disable_runtime_type_checking: cfg.disable_runtime_type_checking != 0,
         home_dir: if cfg.home_dir.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.home_dir).to_string_lossy().into_owned() } },
+        libs_paths: {
+            let mut paths = Vec::with_capacity(16);
+            for i in 0..16 {
+                let path_ptr = cfg.libs_paths[i];
+                if !path_ptr.is_null() {
+                    let path_str = unsafe { CStr::from_ptr(path_ptr).to_string_lossy().into_owned() };
+                    paths.push(path_str);
+                }
+            }
+            paths
+        },
         stack_size: cfg.stack_size,
         version: if cfg.version.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.version).to_string_lossy().into_owned() } },
         color_scheme: Default::default(),
@@ -664,6 +676,13 @@ pub extern "C" fn lucia_free_config(cfg: LuciaConfig) {
     if !home_dir_ptr.is_null() {
         unsafe { let _ = CString::from_raw(home_dir_ptr); }
     }
+    let libs_paths = cfg.libs_paths;
+    for path_ptr in libs_paths.iter() {
+        let p = *path_ptr as *mut c_char;
+        if !p.is_null() {
+            unsafe { let _ = CString::from_raw(p); }
+        }
+    }
     let version_ptr = cfg.version as *mut c_char;
     if !version_ptr.is_null() {
         unsafe { let _ = CString::from_raw(version_ptr); }
@@ -783,6 +802,7 @@ pub extern "C" fn lucia_print_size_checks() {
     static_assert_field!(LuciaConfig, allow_inline_config, CBool);
     static_assert_field!(LuciaConfig, disable_runtime_type_checking, CBool);
     static_assert_field!(LuciaConfig, home_dir, *const c_char);
+    static_assert_field!(LuciaConfig, libs_paths, [*const c_char; 16]);
     static_assert_field!(LuciaConfig, stack_size, usize);
     static_assert_field!(LuciaConfig, version, *const c_char);
 
@@ -824,6 +844,13 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
         allow_inline_config: default_cfg.allow_inline_config as CBool,
         disable_runtime_type_checking: default_cfg.disable_runtime_type_checking as CBool,
         home_dir: CString::new(default_cfg.home_dir).unwrap().into_raw(),
+        libs_paths: {
+            let mut arr = [std::ptr::null(); 16];
+            for (i, path) in default_cfg.libs_paths.into_iter().enumerate().take(16) {
+                arr[i] = CString::new(path).unwrap().into_raw();
+            }
+            arr
+        },
         stack_size: default_cfg.stack_size,
         version: CString::new(default_cfg.version).unwrap().into_raw()
     }

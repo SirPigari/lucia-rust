@@ -11,6 +11,9 @@
   "allow_inline_config": true,
   "disable_runtime_type_checking": false,
   "home_dir": "C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env",
+  "libs_paths": [
+    ".\\libs"
+  ],
   "stack_size": 16777216,
   "version": "2.0.0",
   "type_checker": {

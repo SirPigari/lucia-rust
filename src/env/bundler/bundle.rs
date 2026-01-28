@@ -12,6 +12,23 @@ use crate::env::runtime::errors::Error;
 use crate::env::bundler::template::common::*;
 use crate::{BUILD_UUID, VERSION};
 
+fn add_dir_recursively(builder: &mut Builder<Encoder<&mut Vec<u8>>>, base: &PathBuf, path_in_tar: &str) -> Result<(), std::io::Error> {
+    for entry in fs::read_dir(base)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+
+        if path.is_file() {
+            let tar_path = format!("{}/{}", path_in_tar, file_name);
+            builder.append_path_with_name(&path, tar_path)?;
+        } else if path.is_dir() {
+            let new_tar_path = format!("{}/{}", path_in_tar, file_name);
+            add_dir_recursively(builder, &path, &new_tar_path)?;
+        }
+    }
+    Ok(())
+}
+
 // TODO
 // When adding a non-native lib it cannot find it.
 pub fn bundle_to_exe(
@@ -24,7 +41,9 @@ pub fn bundle_to_exe(
     command_to_run: Option<String>,
     run_flag: bool,
     opt_level: &str,
+    hide_console: bool,
     quiet_flag: bool,
+    default_quiet: bool,
     default_argv: Vec<String>,
 ) -> Result<String, (i32, Vec<Error>)> {
     let log = |msg: &str| { if !quiet_flag { println!("{}", msg); } };
@@ -64,18 +83,31 @@ pub fn bundle_to_exe(
     let main_tar_path = format!("src/{}", main_file_name);
 
     let command = command_to_run.unwrap_or_else(|| {
+        let q = if default_quiet { "-q" } else { "" };
         if cfg!(windows) {
-            format!("lucia.exe {} --config config.json -q {} -- ", main_tar_path, default_argv.join(" "))
+            format!("lucia.exe {} --config config.json {} -L .\\libs  {}-- ", main_tar_path, q, default_argv.join(" "))
         } else {
-            format!("./lucia {} --config config.json -q {} -- ", main_tar_path, default_argv.join(" "))
+            format!("./lucia {} --config config.json {} -L ./libs/ {} -- ", main_tar_path, q, default_argv.join(" "))
         }
     });
+
+    let mut runner_template_exe = format!("runner_template{}", extension);
+    #[cfg(target_os = "windows")] if hide_console {
+        log("Using no-console runner template for Windows...");
+        log("Warning: 'hide_console' is currently experimental and may not work as expected.");
+        runner_template_exe = "runner_template_noconsole.exe".to_owned();
+    }
+    #[cfg(not(target_os = "windows"))] {
+        if hide_console {
+            log("Warning: 'hide_console' option is ignored on non-Windows platforms.");
+        }
+    }
 
     log("Copying runner template...");
     let runner_template_path = home_dir
         .join("bundler")
         .join("template")
-        .join(format!("runner_template{}", extension));
+        .join(runner_template_exe);
 
     fs::copy(&runner_template_path, output_path)
         .map_err(|e| (1, vec![Error::new_anonymous("IOError", &e.to_string())]))?;
@@ -144,8 +176,14 @@ pub fn bundle_to_exe(
 
         log("Adding libraries...");
         for lib in &libs_paths {
-            let name = lib.file_name().unwrap().to_string_lossy();
-            builder.append_path_with_name(lib, format!("libs/{}", name)).unwrap();
+            if !lib.exists() {
+                eprintln!("Warning: Library path {:?} does not exist, skipping.", lib);
+                continue;
+            }
+
+            let lib_name = lib.file_name().unwrap().to_string_lossy();
+            add_dir_recursively(&mut builder, lib, &format!("libs/{}", lib_name))
+                .unwrap_or_else(|e| eprintln!("Error while adding library {:?}: {}", lib, e));
         }
 
         let encoder = builder.into_inner().unwrap();
@@ -174,7 +212,7 @@ pub fn bundle_to_exe(
         uuid
     };
 
-    let footer = BundleFooter::new(data_offset, lucia_version, lucia_uuid);
+    let footer = BundleFooter::new(data_offset, lucia_version, lucia_uuid, BundleFlags::new(hide_console));
     exe_bytes.extend_from_slice(&footer.as_bytes());
 
     fs::write(output_path, exe_bytes).unwrap();

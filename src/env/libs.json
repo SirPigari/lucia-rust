@@ -6,11 +6,6 @@
             "version": "2.0.0",
             "expected_lucia_version": "^2.0.0"
         },
-        "requests": {
-            "description": "This module provides HTTP request functionality.",
-            "version": "0.11.14",
-            "expected_lucia_version": "^2.0.0"
-        },
         "math": {
             "description": "Provides mathematical functions and constants.",
             "version": "1.0.0",

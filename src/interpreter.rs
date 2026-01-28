@@ -3784,125 +3784,111 @@ impl Interpreter {
                     &format!("Module '{}' not found in WebAssembly build", module_name),
                 );
             }
-            let libs_dir = PathBuf::from(self.config.home_dir.clone()).join("libs");
-    
-            let base_module_path = match module_path_opt {
-                Some(map_statement) => {
-                    let path_eval = self.evaluate(&map_statement);
-                    let path_str = path_eval.to_string();
-            
-                    if path_str.is_empty() {
-                        self.stack.pop();
-                        self.raise("RuntimeError", "Empty 'path' in import statement");
-                        return NULL;
-                    }
-            
-                    let mut path = PathBuf::from(path_str);
-                    if path.is_relative() {
-                        path = self.cwd.join(path);
-                    }
-                    
-                    let path = match path.canonicalize() {
-                        Ok(p) => p,
-                        Err(_) => path.clone(),
-                    };
-                    path
-                }
-                None => {
-                    match libs_dir.canonicalize() {
-                        Ok(p) => p,
-                        Err(_) => libs_dir.clone(),
-                    }
-                }
-            };
-                
-            let mut resolved_module_path: Option<PathBuf> = None;
+
+            let resolved_module_path: Option<PathBuf>;
+            let mut found_in_dirs: Vec<PathBuf> = vec![];
             let module_variants = generate_name_variants(&base_name);
+            let lib_names_map = get_lib_names();
 
-            for variant in &module_variants {
-                let candidate_dir = base_module_path.join(variant);
-
-                if candidate_dir.exists() && candidate_dir.is_dir() {
-                    resolved_module_path = Some(candidate_dir);
-                    break;
-                } else {
-                    let extensions = [".lc", ".lucia", ".rs", ""];
-                    for ext in &extensions {
-                        let candidate_file = base_module_path.join(format!("{}{}", variant, ext));
-                        if candidate_file.exists() && candidate_file.is_file() {
-                            resolved_module_path = Some(candidate_file);
-                            break;
-                        }
-                    }
+            if let Some(map_statement) = &module_path_opt {
+                let path_eval = self.evaluate(map_statement);
+                let path_str = path_eval.to_string();
+                if path_str.is_empty() {
+                    self.stack.pop();
+                    return self.raise("RuntimeError", "Empty 'path' in import statement");
                 }
 
-                if resolved_module_path.is_some() {
-                    break;
+                let mut base_path = PathBuf::from(path_str);
+                if base_path.is_relative() {
+                    base_path = self.cwd.join(base_path);
                 }
-            }
-
-            if resolved_module_path.is_none() {
-                let lib_names_map = get_lib_names();
+                base_path = base_path.canonicalize().unwrap_or(base_path);
 
                 for variant in &module_variants {
-                    if let Some(original_name) = lib_names_map.get(&Arc::from(variant.as_str())) {
-                        let candidate_dir = libs_dir.join(&**original_name);
-                        
-                        if candidate_dir.exists() && candidate_dir.is_dir() {
-                            resolved_module_path = Some(candidate_dir);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if resolved_module_path.is_none() {
-                let mut candidates = vec![];
-                if let Ok(entries) = fs::read_dir(&base_module_path) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        let file_stem_opt = path.file_stem().and_then(|s| s.to_str());
-                        let is_valid_ext = path.is_file() && path.extension()
-                            .and_then(|e| e.to_str())
-                            .map_or(false, |ext| ext == "lc" || ext == "lucia" || ext == "rs");
-    
-                        let is_dir = path.is_dir();
-    
-                        if let Some(file_stem) = file_stem_opt {
-                            if is_valid_ext || is_dir {
-                                candidates.push(file_stem.to_string());
+                    let candidate_dir = base_path.join(variant);
+                    if candidate_dir.exists() && candidate_dir.is_dir() {
+                        found_in_dirs.push(candidate_dir.clone());
+                    } else {
+                        for ext in &[".lc", ".lucia", ".rs", ""] {
+                            let candidate_file = base_path.join(format!("{}{}", variant, ext));
+                            if candidate_file.exists() && candidate_file.is_file() {
+                                found_in_dirs.push(candidate_file.clone());
                             }
                         }
                     }
                 }
-    
-                if let Some(closest) = find_closest_match(&base_name, &candidates) {
+
+                if found_in_dirs.is_empty() {
+                    for variant in &module_variants {
+                        if let Some(original_name) = lib_names_map.get(&Arc::from(variant.as_str())) {
+                            let candidate_dir = base_path.join(&**original_name);
+                            if candidate_dir.exists() && candidate_dir.is_dir() {
+                                found_in_dirs.push(candidate_dir.clone());
+                            }
+                        }
+                    }
+                }
+            } else {
+                for lib_dir_str in &self.config.libs_paths {
+                    let base_module_path = {
+                        let p = PathBuf::from(lib_dir_str);
+                        let abs_path = if p.is_absolute() {
+                            p
+                        } else {
+                            PathBuf::from(&self.config.home_dir).join(p)
+                        };
+                        abs_path.canonicalize().unwrap_or(abs_path)
+                    };
+
+                    for variant in &module_variants {
+                        let candidate_dir = base_module_path.join(variant);
+
+                        if candidate_dir.exists() && candidate_dir.is_dir() {
+                            found_in_dirs.push(candidate_dir.clone());
+                        } else {
+                            for ext in &[".lc", ".lucia", ".rs", ""] {
+                                let candidate_file = base_module_path.join(format!("{}{}", variant, ext));
+                                if candidate_file.exists() && candidate_file.is_file() {
+                                    found_in_dirs.push(candidate_file.clone());
+                                }
+                            }
+                        }
+                    }
+
+                    if found_in_dirs.is_empty() {
+                        for variant in &module_variants {
+                            if let Some(original_name) = lib_names_map.get(&Arc::from(variant.as_str())) {
+                                let candidate_dir = base_module_path.join(&**original_name);
+                                if candidate_dir.exists() && candidate_dir.is_dir() {
+                                    found_in_dirs.push(candidate_dir.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            match found_in_dirs.len() {
+                0 => {
                     self.stack.pop();
-                    return self.raise_with_help(
+                    return self.raise("ImportError", &format!("Module '{}' not found", &module_name));
+                }
+                1 => {
+                    resolved_module_path = Some(found_in_dirs.remove(0));
+                }
+                _ => {
+                    let paths_str = found_in_dirs.iter()
+                        .map(|p| format!("'{}'", p.display()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.stack.pop();
+                    return self.raise(
                         "ImportError",
-                        &format!("Module '{}' not found at path '{}'", &module_name, base_module_path.display()),
-                        &format!("Did you mean '{}{}{}'?",
-                            check_ansi("\x1b[4m", &self.config.supports_color),
-                            closest,
-                            check_ansi("\x1b[24m", &self.config.supports_color),
-                        ),
+                        &format!("Module '{}' is ambiguous, found in multiple locations: {}", module_name, paths_str)
                     );
                 }
-    
-                let display_path = base_module_path
-                    .display()
-                    .to_string()
-                    .trim_start_matches(r"\\?\")
-                    .to_string();
-            
-                self.stack.pop();
-                return self.raise("ImportError", &format!(
-                    "Module '{}' not found at path '{}'",
-                    &module_name,
-                    display_path
-                ));
             }
-    
+
             module_path = resolved_module_path.unwrap();
     
             if module_path.is_file() {
@@ -4051,8 +4037,26 @@ impl Interpreter {
                                     continue;
                                 }
                         
-                                let dep_path = libs_dir.join(dep_name);
-                                if !dep_path.exists() {
+                                let mut dep_exists = false;
+                                let mut dep_path = PathBuf::new();
+                                let mut dep_matching_count = 0;
+                                for lib_dir_str in &self.config.libs_paths {
+                                    let candidate_path = PathBuf::from(lib_dir_str).join(dep_name);
+                                    if candidate_path.exists() && candidate_path.is_dir() {
+                                        dep_exists = true;
+                                        dep_path = candidate_path;
+                                        dep_matching_count += 1;
+                                    }
+                                }
+                                if dep_matching_count > 1 {
+                                    self.stack.pop();
+                                    return self.raise_with_help(
+                                        "ImportError",
+                                        &format!("Dependency '{}' is ambiguous, found in multiple locations", dep_name),
+                                        &format!("Remove or rename the library with the conflicting name to resolve the ambiguity."),
+                                    );
+                                }
+                                if !dep_exists {
                                     self.stack.pop();
                                     return self.raise("ImportError", &format!(
                                         "Dependency '{}' listed in manifest not found in '{}'",

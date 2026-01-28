@@ -27,6 +27,7 @@ pub struct Config {
     pub allow_inline_config: bool,
     pub disable_runtime_type_checking: bool,
     pub home_dir: String,
+    pub libs_paths: Vec<String>,
     pub stack_size: usize,
     pub version: String,
     pub type_checker: TypeCheckerConfig,
@@ -104,6 +105,10 @@ impl Default for TypeCheckerConfig {
 
 impl Default for Config {
     fn default() -> Self {
+        let home_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+            .unwrap_or_else(|| Path::new(".").to_path_buf());
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             moded: false,
@@ -117,10 +122,10 @@ impl Default for Config {
             allow_unsafe: false,
             allow_inline_config: false,
             disable_runtime_type_checking: false,
-            home_dir: std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|parent| parent.to_string_lossy().into_owned()))
-                .unwrap_or_else(|| ".".to_string()),
+            home_dir: home_dir
+                .to_string_lossy()
+                .into_owned(),
+            libs_paths: vec![home_dir.join("libs").to_string_lossy().into_owned()],
             stack_size: 16777216, // 16 MB
             type_checker: TypeCheckerConfig::default(),
             color_scheme: ColorScheme::default(),

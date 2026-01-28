@@ -12,7 +12,7 @@ TARGET_DIR = "./src/env/bin"
 #unix EXTENSION = ""
 TARGET_EXE = "lucia${EXTENSION}"
 TARGET     = "${TARGET_DIR}/${TARGET_EXE}"
-TARGET_STANDALONE = "${TARGET_DIR}/lucia_standalone${EXTENSION}"
+TARGET_STANDALONE = "${TARGET_DIR}/lucia-standalone${EXTENSION}"
 
 #windows TARGET = "${#replace(TARGET, "/", "\\\\")}"
 #windows TARGET_STANDALONE = "${#replace(TARGET_STANDALONE, "/", "\\\\")}"
@@ -32,6 +32,7 @@ BENCH_DEST = "./tests/run_benchmarks${EXTENSION}"
 #windows BENCH_DEST = "${#replace(BENCH_DEST, "/", "\\\\")}"
 BUNDLER_DEST = "./src/env/bundler/template/runner_template${EXTENSION}"
 #windows BUNDLER_DEST = "${#replace(BUNDLER_DEST, "/", "\\\\")}"
+#windows BUNDLER_NOCONSOLE_DEST = ".\\src\\env\\bundler\\template\\runner_template_noconsole${EXTENSION}"
 
 #windows MKDIR = "powershell.exe -NoProfile -Command \"if (-not (Test-Path '${TARGET_DIR}')) { New-Item -ItemType Directory -Path '${TARGET_DIR}' | Out-Null }\""
 #unix MKDIR = "mkdir -p ${TARGET_DIR}"
@@ -140,6 +141,8 @@ build-tests:
 build-bundler:
     cargo build --bin bundle_runner_template --release
     ${MOVE} ./target/release/bundle_runner_template${EXTENSION} ${BUNDLER_DEST} ${MOVE_END}
+    #windows cargo build --bin bundle_runner_template --release --features no_console
+    #windows ${MOVE} ./target/release/bundle_runner_template${EXTENSION} ${BUNDLER_NOCONSOLE_DEST} ${MOVE_END}
 
 clean:
     cargo clean
