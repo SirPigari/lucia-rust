@@ -380,9 +380,9 @@ println(c)  // 0.69
 [Complex numbers](https://en.wikipedia.org/wiki/Complex_numbers) are of type `float`.
 
 ```lucia
-x: complex = 3 + 4i
-y: complex = 2 - 3i
-z: complex = 1i
+x: float = 3 + 4i
+y: float = 2 - 3i
+z: float = 1i
 
 println(x) // 3 + 4i
 println(y) // 2 - 3i
@@ -1326,7 +1326,7 @@ assert_eq!(++pp, 10)
 > - Factorials follow [**standard factorial rules**](https://en.wikipedia.org/wiki/Factorial)
 > - `x!!` = multiply every second number down: `7!! = 7*5*3*1 = 105`
 > - `x!!!` = multiply every third number down: `6!!! = 6*3*1 = 18`
-> - Absolute values can be nested: `|-|-5|| = 5`
+> - Absolute values can be nested: `|-|-5| | = 5` (the `|` must be separated by a space)
 > - Strings can be repeated with `*`
 
 ### Bitwise Operators
@@ -1625,7 +1625,7 @@ B
 
 The `-li` operator comes from the czech **-li** suffix for creating conditional verbs
 
-[WordReference Formus Thread](https://forum.wordreference.com/threads/li-chce%C5%A1-li.2747732/) about **-li** suffix
+[WordReference Forums Thread](https://forum.wordreference.com/threads/li-chce%C5%A1-li.2747732/) about **-li** suffix
 
 ```lucia
 state: bool = true
