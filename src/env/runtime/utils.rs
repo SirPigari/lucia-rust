@@ -1810,6 +1810,14 @@ pub fn is_number_parentheses(n: &str) -> bool {
 }
 
 #[inline(always)]
+pub fn unalias_type(value: &Type) -> Type {
+    match value {
+        Type::Alias { name: _, base_type, .. } => unalias_type(base_type),
+        _ => value.clone(),
+    }
+}
+
+#[inline(always)]
 pub fn get_inner_type(value: &Type) -> Result<(String, Type), String> {
     match value {
         Type::Simple { .. } => Ok((value.display_simple(), value.clone())),

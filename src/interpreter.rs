@@ -34,6 +34,7 @@ use crate::env::runtime::utils::{
     get_pointer_depth_and_base_value,
     is_type_ident_available,
     get_object_type_ident,
+    unalias_type,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2080,10 +2081,13 @@ impl Interpreter {
         }
         for method in methods_ast {
             let mut m = method.node;
-            let func;
+            let mut func;
             if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags } = &mut m {
                 modifiers.insert(0, "final".to_owned());
                 func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags, true);
+                if let Value::Function(f) = &mut func {
+                    f.promote_to_method(Arc::new(Mutex::new(self.clone())));
+                }
                 if self.err.is_some() {
                     self.variables = saved_variables;
                     return NULL;
@@ -2127,6 +2131,7 @@ impl Interpreter {
                 };
                 existing_methods.push((name, f));
             }
+            
         } else {
             return self.raise("TypeError", &format!("'{}' is not a struct type", struct_name));
         }
@@ -2153,14 +2158,23 @@ impl Interpreter {
         let fields = new_fields;
 
         let struct_ty = match self.variables.get(&struct_name) {
-            Some(Variable { value: Value::Type(ty), .. }) => match ty {
-                Type::Struct { .. } => ty.clone(),
-                _ => return self.raise("TypeError", &format!("'{}' is not a struct type. ({})", struct_name, ty.display_simple())),
-            },
-            Some(v) => {
-                return self.raise("TypeError", &format!("'{}' is not a struct type. ({})", struct_name, v.get_type().display_simple()))
+            Some(Variable { value: Value::Type(ty), .. }) => {
+                let unaliased_ty = unalias_type(ty);
+                match unaliased_ty {
+                    Type::Struct { .. } => unaliased_ty.clone(),
+                    _ => return self.raise(
+                        "TypeError",
+                        &format!("'{}' is not a struct type. ({})", struct_name, ty.display_simple()),
+                    ),
+                }
             }
-            _ => return self.raise("TypeError", &format!("Struct '{}' does not exist", struct_name)),
+            Some(v) => {
+                return self.raise(
+                    "TypeError",
+                    &format!("'{}' is not a struct type. ({})", struct_name, v.get_type().display_simple()),
+                )
+            }
+            None => return self.raise("TypeError", &format!("Struct '{}' does not exist", struct_name)),
         };
 
         if is_null {
@@ -6991,6 +7005,7 @@ impl Interpreter {
                     self.raise("TypeError", &format!("'{}' is not a struct type", s.ty.display_simple()));
                     return None;
                 };
+                
                 return Some((s.clone().name().to_string(), props));
             }
             _ => {
@@ -7161,10 +7176,12 @@ impl Interpreter {
                     Value::Function(f) => f.clone(),
                     other => return self.raise("TypeError", &format!("Expected function, got {}", other)),
                 },
-                None => return self.raise(
-                    "NameError",
-                    &format!("No method '{}' in '{}'", method_name, temp_var.get_name()),
-                ),
+                None => {
+                    return self.raise(
+                        "NameError",
+                        &format!("No method '{}' in '{}'", method_name, temp_var.get_name()),
+                    )
+                },
             }
         };
 
@@ -7885,7 +7902,7 @@ impl Interpreter {
             }
         }
 
-        let result;
+        let mut result;
 
         let final_args_variables = final_args
         .iter()
@@ -8219,24 +8236,42 @@ impl Interpreter {
             interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
             interpreter.internal_storage.in_function = true;
 
+            let tmp_self_name = "__method_self_tmp".to_string();
+            let tmp_self_val = if let Some(ref obj_var) = object_variable { obj_var.get_value().clone() } else { Value::Null };
+            interpreter.variables.insert(
+                tmp_self_name.clone(),
+                Variable::new(tmp_self_name.clone(), tmp_self_val.clone(), tmp_self_val.type_name(), false, true, true),
+            );
+
+            let mut tmp_obj_local = interpreter.variables.get(&tmp_self_name).unwrap().clone();
+
             result = interpreter.call_function(
                 &Function::Custom(func.get_function()),
                 positional,
                 named_map,
-                None,
+                Some((None, None, Some(&mut tmp_obj_local))),
             );
-  
+
+            interpreter.variables.insert(tmp_self_name.clone(), tmp_obj_local.clone());
+
             if change_in_function {
                 self.internal_storage.in_function = false;
             }
 
-            for var in instance_variables {
-                if let Some(v) = interpreter.variables.get_mut(&var) {
-                    if let Some(ref mut object_variable) = object_variable {
+            for var in instance_variables.iter() {
+                if let Some(ref mut object_variable) = object_variable {
+                    if let Some(v) = interpreter.variables.get_mut(var) {
                         object_variable.set_value(v.get_value().clone());
+                        continue;
+                    }
+                    if let Some(vtmp) = interpreter.variables.get_mut(&tmp_self_name) {
+                        object_variable.set_value(vtmp.get_value().clone());
+                        continue;
                     }
                 }
             }
+
+            interpreter.variables.remove(&tmp_self_name);
 
             if interpreter.err.is_some() {
                 self.stack.pop();
@@ -8542,6 +8577,17 @@ impl Interpreter {
         );
         if let Value::Error(e) = &result {
             return self.raise_err(e.as_ref().clone());
+        }
+        if let Value::Struct(s_box) = &mut result {
+            if let Type::Struct { name, .. } = &s_box.ty {
+                if let Some(var) = self.variables.get(name) {
+                    if let Value::Type(ty) = &var.value {
+                        if matches!(ty, Type::Struct { .. }) {
+                            s_box.ty = ty.clone();
+                        }
+                    }
+                }
+            }
         }
         let (is_valid, err) = self.check_type(&result, &metadata.return_type);
         if !is_valid {

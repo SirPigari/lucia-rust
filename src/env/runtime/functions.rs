@@ -603,6 +603,17 @@ impl Function {
         self.metadata().is_final
     }
 
+    pub fn promote_to_method(&mut self, interpreter: Arc<Mutex<Interpreter>>) {
+        match self {
+            Function::Custom(f) => *self = Function::CustomMethod(Arc::new(UserFunctionMethod {
+                meta: f.meta.clone(),
+                body: f.body.clone(),
+                interpreter: interpreter,
+            })),
+            _ => {}
+        }
+    }
+
     pub fn ftype(&self) -> &'static str {
         match self {
             Function::Native(_) => "NativeFunction",
@@ -632,7 +643,7 @@ impl Function {
 impl fmt::Debug for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let meta = self.metadata();
-        f.debug_struct("Function")
+        f.debug_struct(format!("Function::{}", self.ftype()).as_str())
             .field("name", &meta.name)
             .field("parameters", &meta.parameters)
             .field("return_type", &meta.return_type)

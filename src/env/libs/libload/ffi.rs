@@ -231,7 +231,7 @@ impl LuciaFfiFn {
         let mut stored_args = STORED_ARGS.lock();
         stored_args.clear();
         stored_args.reserve(args.len());
-
+        
         let ffi_args: Result<Vec<Arg>, String> = args
             .iter()
             .zip(self.arg_types.iter())
@@ -257,8 +257,8 @@ impl LuciaFfiFn {
         macro_rules! store_int {
             ($variant:ident, $rust_type:ty) => {{
                 let val = match v {
-                    Value::Int(i) => i.to_i64().unwrap_or(0) as $rust_type,
-                    _ => return Err(format!("Expected Int for {:?} at arg #{}", t, idx + 1)),
+                    Value::Int(i) => TryInto::<$rust_type>::try_into(i.to_i128().unwrap_or(0)).unwrap_or(0),
+                    _ => return Err(format!("Expected Int for {:?} at arg #{}, got {}", t, idx + 1, v.get_type().display_simple())),
                 };
                 stored.push(StoredValue::$variant(val));
                 if let StoredValue::$variant(stored_val) = stored.last().unwrap() {
@@ -287,7 +287,7 @@ impl LuciaFfiFn {
                         Ok(v) => v as f32,
                         Err(_) => f.to_str().parse::<f32>().unwrap_or(0.0),
                     },
-                    _ => return Err(format!("Expected Float for Float at arg #{}", idx + 1)),
+                    _ => return Err(format!("Expected Float for Float at arg #{}, got {}", idx + 1, v.get_type().display_simple())),
                 };
                 stored.push(StoredValue::Float(val));
                 if let StoredValue::Float(stored_val) = stored.last().unwrap() {
@@ -303,7 +303,7 @@ impl LuciaFfiFn {
                         Ok(v) => v,
                         Err(_) => f.to_str().parse::<f64>().unwrap_or(0.0),
                     },
-                    _ => return Err(format!("Expected Float for Double at arg #{}", idx + 1)),
+                    _ => return Err(format!("Expected Float for Double at arg #{}, got {}", idx + 1, v.get_type().display_simple())),
                 };
                 stored.push(StoredValue::Double(val));
                 if let StoredValue::Double(stored_val) = stored.last().unwrap() {
@@ -316,7 +316,7 @@ impl LuciaFfiFn {
             ValueType::Bool => {
                 let val = match v {
                     Value::Boolean(b) => *b as u8,
-                    _ => return Err(format!("Expected Boolean for Bool at arg #{}", idx + 1)),
+                    _ => return Err(format!("Expected Boolean for Bool at arg #{}, got {}", idx + 1, v.get_type().display_simple())),
                 };
                 stored.push(StoredValue::Bool(val));
                 if let StoredValue::Bool(stored_val) = stored.last().unwrap() {
@@ -354,7 +354,7 @@ impl LuciaFfiFn {
                         Err("Expected Value::Int inside pointer Arc".into())
                     }
                 }
-                _ => Err(format!("Expected Int or Pointer for Ptr at arg #{}", idx + 1)),
+                _ => Err(format!("Expected Int or Pointer for Ptr at arg #{}, got {}", idx + 1, v.get_type().display_simple())),
             },
             
             ValueType::Void => Ok(Arg::new(&StoredValue::Null)),

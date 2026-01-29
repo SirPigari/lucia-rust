@@ -1,0 +1,34 @@
+#config allow_unsafe = true
+#config debug = false
+import (*) from raylib_lucia
+
+InitWindow(800, 600, "Utah Teapotah")
+SetTargetFPS(60)
+
+cam: Camera3D = Camera3D.new((10, 5, 30), (0, 1, 0), (0, 1, 0), 45)
+cam.set_projection(CAMERA_PERSPECTIVE)
+
+teapot: Model = LoadModel("../../assets/utah_teapot.obj")
+
+teapot_pos := (0, 0, 0)
+teapot_up := (0, 1, 0)
+teapot_scale := (1, 1, 1)
+
+rotation: float = 0.0
+
+while !WindowShouldClose():
+    rotation += 45.0 * GetFrameTime()
+    BeginDrawing()
+    DrawFPS(10, 10)
+    
+    ClearBackground(BLACK)
+    
+    BeginMode3D(cam)
+    DrawModelEx(teapot, teapot_pos, teapot_up, rotation, teapot_scale, BLUE)
+    DrawModelWiresEx(teapot, teapot_pos, teapot_up, rotation, teapot_scale, DARKBLUE)
+    EndMode3D()
+
+    EndDrawing()
+end
+
+CloseWindow() // auto unloads models
