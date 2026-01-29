@@ -8233,6 +8233,7 @@ impl Interpreter {
         } else if let Function::CustomMethod(func) = func {
             let interpreter_arc = func.get_interpreter();
             let mut interpreter = interpreter_arc.lock();
+            interpreter.config = self.config.clone();
             interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
             interpreter.internal_storage.in_function = true;
 
