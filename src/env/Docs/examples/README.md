@@ -50,6 +50,10 @@ The files are sorted by difficulty, indicated by the numeric prefix in the file 
   A [quine](https://en.wikipedia.org/wiki/Quine_%28computing%29) that prints its own source code.  
   Includes: TODO
 
-* [12_custom_lang.lc](./12_custom_lang.lc)  
+* [12_utah_teapot.lc](./12_utah_teapot.lc)  
+  A rotating 3D Utah Teapot rendering using the [Raylib](https://www.raylib.com/) bindings.  
+  Includes: TODO
+
+* [13_custom_lang.lc](./13_custom_lang.lc)  
   A simple custom language compiler written in Lucia.  
   Includes: TODO
