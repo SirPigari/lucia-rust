@@ -830,6 +830,7 @@ fn activate_environment(env_path: &Path, respect_existing_moded: bool) -> io::Re
             Ok(mut config) => {
                 if config.moded {
                     config.home_dir = env_path_str;
+                    config.libs_paths = vec![env_path.join("libs").to_str().unwrap_or("./libs").to_string()];
                     let config_str = serde_json::to_string_pretty(&config)
                         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to serialize config"))?;
                     fs::write(&config_path, config_str)

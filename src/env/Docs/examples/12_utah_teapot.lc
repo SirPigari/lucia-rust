@@ -19,9 +19,9 @@ rotation: float = 0.0
 while !WindowShouldClose():
     rotation += 45.0 * GetFrameTime()
     BeginDrawing()
-    DrawFPS(10, 10)
     
     ClearBackground(BLACK)
+    DrawFPS(10, 10)
     
     BeginMode3D(cam)
     DrawModelEx(teapot, teapot_pos, teapot_up, rotation, teapot_scale, BLUE)

@@ -89,6 +89,7 @@ pub fn bundle_to_exe(
         }
     });
 
+    #[allow(unused_mut)]
     let mut runner_template_exe = format!("runner_template{}", extension);
     #[cfg(target_os = "windows")] if hide_console {
         log("Using no-console runner template for Windows...");
