@@ -2059,7 +2059,7 @@ fn main() {
         eprintln!("{}", "Oops! The program panicked!".red().bold());
         eprintln!("Message: {}", display_msg.red());
         eprintln!("{}", location.red());
-        eprintln!();
+        eprintln!("");
         eprintln!("{}", "--- Build info ---".dimmed());
         eprintln!("Version: {}", build_info.version.cyan());
         eprintln!("Rustc Version: {}", build_info.rustc_version.cyan());

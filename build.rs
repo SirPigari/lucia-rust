@@ -177,7 +177,7 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
     let _ = writeln!(file, "# TODO Report\n\nDO NOT MODIFY THIS FILE. IT'S GENERATED AUTOMATICALLY.  \n\nList of all TODOs in Lucia source code.\nBe free to fix them or add new ones.  \n");
 
     let total_todos = todos_with_meta.len();
-    let _ = writeln!(file, "_Total TODOs found: {}_\n---\n", total_todos);
+    let _ = writeln!(file, "*Total TODOs found: {}*\n\n---\n", total_todos);
 
     for (location, lines, _) in todos_with_meta {
         if let Some((file_path, line_str)) = location.rsplit_once(':') {
@@ -192,8 +192,8 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
             let blame_info = get_git_blame_author_date(&full_path, line_num);
             let meta_line = match blame_info {
                 Some((author, _)) if author == "uncommitted" => "**(TODO not committed yet)**".to_string(),
-                Some((author, date)) => format!("_(added by **{}** on **{}**)_", author, date),
-                None => "_(added by unknown)_".to_string(),
+                Some((author, date)) => format!("*(added by **{}** on **{}**)*", author, date),
+                None => "*(added by unknown)*".to_string(),
             };
 
             let col = lines
@@ -215,6 +215,8 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
             let _ = writeln!(file, "### `{}`", location);
         }
 
+        let _ = writeln!(file);
+
         for line in lines {
             if !line.is_empty() {
                 let _ = writeln!(file, "- {}", line);
@@ -222,8 +224,6 @@ fn scan_todos_and_generate_report(src_dir: &Path, manifest_dir: &Path) {
         }
         let _ = writeln!(file);
     }
-
-    let _ = writeln!(file, "---\n*Report generated automatically.*\n");
 
     let _ = file.flush();
 }
