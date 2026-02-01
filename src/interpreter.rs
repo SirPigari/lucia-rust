@@ -37,13 +37,6 @@ use crate::env::runtime::utils::{
     unalias_type,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use crossterm::{
-    cursor::{MoveUp, MoveToColumn},
-    terminal::{Clear, ClearType},
-    ExecutableCommand,
-};
-
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
 use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
 use crate::env::runtime::value::Value;
@@ -55,7 +48,7 @@ use crate::env::runtime::native::{self, get_default_type_method, get_type_method
 use crate::env::runtime::functions::{FunctionMetadata, Parameter, ParameterKind, Function, NativeFunction, UserFunctionMethod, UserFunction, Callable};
 use crate::env::runtime::generators::{Generator, GeneratorType, NativeGenerator, CustomGenerator, RangeValueIter, InfRangeIter, RangeLengthIter};
 use crate::env::runtime::libs::{STD_LIBS, get_lib_names};
-use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement};
+use crate::env::runtime::internal_structs::{Cache, InternalStorage, State, PatternMethod, Stack, StackType, EffectFlags, PathElement, ScopeStack};
 use crate::env::runtime::plugins::{PluginRuntime};
 use crate::env::runtime::structs_and_enums::{Enum, Struct};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -67,7 +60,7 @@ use tokio::runtime::Runtime;
 use reqwest;
 #[cfg(not(target_arch = "wasm32"))]
 use serde_urlencoded;
-use std::io::{stdout, Write};
+
 use parking_lot::Mutex;
 use std::panic::Location as PanicLocation;
 use rustc_hash::FxHashMap;
@@ -100,6 +93,7 @@ pub struct Interpreter {
     defer_stack: Vec<Vec<Statement>>,
     scope: String,
     pub collected_effects: EffectFlags,
+    scopes: ScopeStack,
     
     #[serde(skip)]
     pub stop_flag: Option<Arc<AtomicBool>>,
@@ -134,11 +128,13 @@ impl Interpreter {
                 in_function: false,
                 is_the_main_thread: false,
                 plugin_runtime: None,
+                underscore_vars_initialized: false,
             },
             defer_stack: vec![],
             scope: "main".to_owned(),
             stop_flag: None,
             collected_effects: EffectFlags::empty(),
+            scopes: ScopeStack::new(),
         };
 
 
@@ -1337,6 +1333,7 @@ impl Interpreter {
         Ok(self.return_value.clone())
     }
 
+    #[inline]
     #[track_caller]
     fn get_location_from_current_statement(&self) -> Option<Location> {
         match &self.current_statement {
@@ -1348,6 +1345,7 @@ impl Interpreter {
         }
     }
 
+    #[inline]
     #[track_caller]
     fn get_location_from_statement_before(&self) -> Option<Location> {
         match &self.statement_before {
@@ -1359,6 +1357,7 @@ impl Interpreter {
         }
     }
 
+    #[inline]
     fn get_location_from_current_statement_id(&self) -> Option<usize> {
         match &self.current_statement {
             Some(Statement { loc, .. }) => match loc {
@@ -1369,6 +1368,7 @@ impl Interpreter {
         }
     }
 
+    #[inline]
     fn get_location_from_current_statement_caller(&self, caller: PanicLocation) -> Option<Location> {
         match &self.current_statement {
             Some(Statement { loc, .. }) => match loc {
@@ -1626,10 +1626,6 @@ impl Interpreter {
             return NULL;
         }
 
-        if self.check_stop_flag() {
-            return NULL;
-        }
-    
         if result != NULL {
             if let Some(var) = self.variables.get_mut("_") {
                 var.set_value(result.clone());
@@ -1637,6 +1633,153 @@ impl Interpreter {
         }
     
         result
+    }
+
+    #[inline]
+    fn run_function_body_fast(
+        &mut self,
+        func_args: FxHashMap<String, Variable>,
+        body: &[Statement],
+        func_ptr: *const (),
+        func_meta: &FunctionMetadata,
+    ) -> (Value, Option<Error>) {
+        let saved_vars = std::mem::replace(&mut self.variables, func_args);
+        let saved_is_returning = self.is_returning;
+        let saved_return_value = std::mem::replace(&mut self.return_value, NULL);
+        let saved_last_called = self.cache.last_called_function.take();
+        let saved_state = std::mem::replace(&mut self.state, State::Normal);
+
+        self.is_returning = false;
+        
+        let last_idx = body.len().saturating_sub(1);
+        let return_value;
+        
+        'tco: loop {
+            let mut last_value = NULL;
+            
+            for (i, stmt) in body.iter().enumerate() {
+                if i == last_idx {
+                    if let Node::Call { ref name, ref pos_args, ref named_args, .. } = stmt.node {
+                        if let Some(var) = self.variables.get(name) {
+                            if let Value::Function(f) = var.get_value() {
+                                if f.ptr() == func_ptr {
+                                    let mut evaluated_pos_args = Vec::with_capacity(pos_args.len());
+                                    for arg in pos_args {
+                                        let val = self.evaluate(arg);
+                                        if self.err.is_some() {
+                                            break;
+                                        }
+                                        evaluated_pos_args.push(val);
+                                    }
+                                    
+                                    if self.err.is_none() {
+                                        let mut new_vars = self.variables.clone();
+                                        for (idx, param) in func_meta.parameters.iter().enumerate() {
+                                            if let Some(val) = evaluated_pos_args.get(idx) {
+                                                new_vars.insert(
+                                                    param.name.clone(),
+                                                    Variable::new(param.name.clone(), val.clone(), "any".to_string(), false, false, false),
+                                                );
+                                            }
+                                        }
+                                        for (key, arg) in named_args {
+                                            let val = self.evaluate(arg);
+                                            if self.err.is_some() {
+                                                break;
+                                            }
+                                            new_vars.insert(
+                                                key.clone(),
+                                                Variable::new(key.clone(), val.clone(), "any".to_string(), false, false, false),
+                                            );
+                                        }
+                                        if self.err.is_none() {
+                                            self.variables = new_vars;
+                                            self.is_returning = false;
+                                            self.cache.last_called_function = None;
+                                            continue 'tco;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                last_value = self.evaluate(stmt);
+                if self.err.is_some() || self.is_returning {
+                    break;
+                }
+                
+                if let State::TCO(ref tco_stmt) = self.state.clone() {
+                    if let Node::Call { ref name, ref pos_args, ref named_args, .. } = tco_stmt.node {
+                        if let Some(var) = self.variables.get(name) {
+                            if let Value::Function(f) = var.get_value() {
+                                if f.ptr() == func_ptr {
+                                    let mut evaluated_pos_args = Vec::with_capacity(pos_args.len());
+                                    for arg in pos_args {
+                                        let val = self.evaluate(arg);
+                                        if self.err.is_some() {
+                                            break;
+                                        }
+                                        evaluated_pos_args.push(val);
+                                    }
+                                    
+                                    if self.err.is_none() {
+                                        let mut new_vars = self.variables.clone();
+                                        for (idx, param) in func_meta.parameters.iter().enumerate() {
+                                            if let Some(val) = evaluated_pos_args.get(idx) {
+                                                new_vars.insert(
+                                                    param.name.clone(),
+                                                    Variable::new(param.name.clone(), val.clone(), "any".to_string(), false, false, false),
+                                                );
+                                            }
+                                        }
+                                        for (key, arg) in named_args {
+                                            let val = self.evaluate(arg);
+                                            if self.err.is_some() {
+                                                break;
+                                            }
+                                            new_vars.insert(
+                                                key.clone(),
+                                                Variable::new(key.clone(), val.clone(), "any".to_string(), false, false, false),
+                                            );
+                                        }
+                                        if self.err.is_none() {
+                                            self.variables = new_vars;
+                                            self.state = State::Normal;
+                                            self.is_returning = false;
+                                            self.cache.last_called_function = None;
+                                            continue 'tco;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            
+            return_value = if self.is_returning {
+                std::mem::replace(&mut self.return_value, saved_return_value)
+            } else if self.err.is_none() {
+                self.return_value = saved_return_value;
+                last_value
+            } else {
+                self.return_value = saved_return_value;
+                NULL
+            };
+            break;
+        }
+
+        let err = self.err.take();
+        
+        self.variables = saved_vars;
+        self.is_returning = saved_is_returning;
+        self.cache.last_called_function = saved_last_called;
+        self.state = saved_state;
+
+        (return_value, err)
     }
 
     #[track_caller]
@@ -2840,6 +2983,7 @@ impl Interpreter {
         return NULL;
     }
 
+    #[inline]
     fn handle_while(&mut self, condition: Statement, body: &[Statement]) -> Value {
         loop {
             let cond_val = self.evaluate(&condition);
@@ -2855,12 +2999,11 @@ impl Interpreter {
                 if self.is_returning {
                     return result;
                 }
-            }
-
-            match self.state {
-                State::Break => { self.state = State::Normal; break; },
-                State::Continue => { self.state = State::Normal; },
-                _ => {}
+                match self.state {
+                    State::Break => { self.state = State::Normal; return NULL; },
+                    State::Continue => { self.state = State::Normal; break; },
+                    _ => {}
+                }
             }
         }
 
@@ -6140,6 +6283,7 @@ impl Interpreter {
         value   
     }
 
+    #[inline]
     fn handle_variable(&mut self, name: &str) -> Value {
         if self.err.is_some() {
             return NULL;
@@ -6280,6 +6424,7 @@ impl Interpreter {
         }
     }
     
+    #[inline]
     fn handle_for_loop(&mut self, node: ForLoopNode, body: &[Statement]) -> Value {
         match node {
             ForLoopNode::ForIn { variable, iterable } => {
@@ -6296,6 +6441,8 @@ impl Interpreter {
                 let iter_items = iterable_value.iter();
 
                 let mut prev_vars: Vec<Option<Variable>> = Vec::new();
+                let mut binding_names: Vec<String> = Vec::new();
+                
                 for item in iter_items {
                     if self.check_stop_flag() { return NULL; }
 
@@ -6313,10 +6460,17 @@ impl Interpreter {
                         Err((etype, emsg)) => return self.raise(&etype, &emsg),
                     };
 
-                    prev_vars.clear();
-                    prev_vars.reserve(bindings.len());
-                    for name in bindings.keys() {
-                        prev_vars.push(self.variables.remove(name));
+                    if binding_names.is_empty() || binding_names.len() != bindings.len() {
+                        binding_names.clear();
+                        prev_vars.clear();
+                        for name in bindings.keys() {
+                            binding_names.push(name.clone());
+                            prev_vars.push(self.variables.remove(name));
+                        }
+                    } else {
+                        for (i, name) in binding_names.iter().enumerate() {
+                            prev_vars[i] = self.variables.remove(name);
+                        }
                     }
 
                     for (name, val) in &bindings {
@@ -6325,29 +6479,31 @@ impl Interpreter {
                         ));
                     }
 
+                    let mut should_break = false;
                     for stmt in body {
                         result = self.evaluate(stmt);
                         if self.err.is_some() || self.is_returning {
-                            for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
+                            for (name, prev_var) in binding_names.iter().zip(prev_vars.iter()) {
                                 if let Some(var) = prev_var {
                                     self.variables.insert(name.clone(), var.clone());
                                 }
                             }
                             return result;
                         }
+                        match self.state {
+                            State::Break => { self.state = State::Normal; should_break = true; break; },
+                            State::Continue => { self.state = State::Normal; break; },
+                            _ => {}
+                        }
                     }
 
-                    for (name, prev_var) in bindings.keys().zip(prev_vars.iter()) {
+                    for (name, prev_var) in binding_names.iter().zip(prev_vars.iter()) {
                         if let Some(var) = prev_var {
                             self.variables.insert(name.clone(), var.clone());
                         }
                     }
 
-                    match self.state {
-                        State::Break => { self.state = State::Normal; break; },
-                        State::Continue => { self.state = State::Normal; continue; },
-                        _ => {}
-                    }
+                    if should_break { break; }
                 }
 
                 result
@@ -6358,23 +6514,25 @@ impl Interpreter {
                 if self.err.is_some() { return NULL; }
 
                 let mut result = NULL;
-                while {
+                loop {
                     if self.check_stop_flag() { return NULL; }
 
                     let cond_value = self.evaluate(&condition);
                     if self.err.is_some() { return NULL; }
-                    cond_value.is_truthy()
-                } {
+                    if !cond_value.is_truthy() { break; }
+
+                    let mut should_break = false;
                     for stmt in body {
                         result = self.evaluate(stmt);
                         if self.err.is_some() || self.is_returning { return result; }
+                        match self.state {
+                            State::Break => { self.state = State::Normal; should_break = true; break; },
+                            State::Continue => { self.state = State::Normal; break; },
+                            _ => {}
+                        }
                     }
-
-                    match self.state {
-                        State::Break => { self.state = State::Normal; break; },
-                        State::Continue => { self.state = State::Normal; },
-                        _ => {}
-                    }
+                    
+                    if should_break { break; }
 
                     self.evaluate(&update);
                     if self.err.is_some() { return NULL; }
@@ -7328,39 +7486,66 @@ impl Interpreter {
         var.get_value().clone()
     }
     
+    #[inline]
     fn handle_call(&mut self, function_name: &str, pos_args_stmt: Vec<Statement>, named_args_stmt: HashMap<String, Statement>) -> Value {
+        let fast_path_func = if named_args_stmt.is_empty() {
+            if let Some((cached_name, cached_func)) = &self.cache.last_called_function {
+                if cached_name == function_name && cached_func.is_native() {
+                    let meta = cached_func.metadata();
+                    let param_count = meta.parameters.len();
+                    let arg_count = pos_args_stmt.len();
+                    if arg_count == param_count && !meta.parameters.iter().any(|p| p.kind == ParameterKind::Variadic) {
+                        Some((cached_func.clone(), meta.parameters.iter().map(|p| p.name.clone()).collect::<Vec<_>>()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        if let Some((func, param_names)) = fast_path_func {
+            let mut args = HashMap::with_capacity(param_names.len());
+            for (i, stmt) in pos_args_stmt.into_iter().enumerate() {
+                let val = self.evaluate(&stmt);
+                if self.err.is_some() {
+                    return NULL;
+                }
+                args.insert(param_names[i].clone(), val);
+            }
+            
+            if func.is_natively_callable() {
+                return func.call(&args);
+            } else {
+                return func.call_shared(&args, self);
+            }
+        }
+        
         let special_functions = [
             "breakpoint", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
         ];
 
-        let pos_args = pos_args_stmt.into_iter()
-            .map(|stmt| { 
-                let r = self.evaluate(&stmt);
-                if self.err.is_some() {
-                    NULL
-                } else {
-                    r
-                }
-            })
-            .collect::<Vec<Value>>();
-
-        if self.err.is_some() {
-            return NULL;
+        let mut pos_args = Vec::with_capacity(pos_args_stmt.len());
+        for stmt in pos_args_stmt {
+            let r = self.evaluate(&stmt);
+            if self.err.is_some() {
+                return NULL;
+            }
+            pos_args.push(r);
         }
 
-        let named_args = named_args_stmt.into_iter()
-            .map(|(k, v)| {
-                let r = self.evaluate(&v);
-                if self.err.is_some() {
-                    (k, NULL)
-                } else {
-                    (k, r)
-                }
-            })
-            .collect::<HashMap<String, Value>>();
-
-        if self.err.is_some() {
-            return NULL;
+        let mut named_args = HashMap::with_capacity(named_args_stmt.len());
+        for (k, v) in named_args_stmt {
+            let r = self.evaluate(&v);
+            if self.err.is_some() {
+                return NULL;
+            }
+            named_args.insert(k, r);
         }
 
         let is_special_function = special_functions.contains(&function_name);
@@ -7604,9 +7789,9 @@ impl Interpreter {
                 }
         }
         
-        let positional: Vec<Value> = pos_args.clone();
-        let mut named_map: HashMap<String, Value> = named_args.clone();
-        let mut final_args: HashMap<String, (Value, Vec<String>)> = HashMap::new();
+        let positional: Vec<Value> = pos_args;
+        let mut named_map: HashMap<String, Value> = named_args;
+        let mut final_args: HashMap<String, (Value, Vec<String>)> = HashMap::with_capacity(metadata.parameters.len());
 
         let passed_args_count = positional.len() + named_map.len();
         let expected_args_count = metadata.parameters.len();
@@ -8002,10 +8187,8 @@ impl Interpreter {
                 }
                 "warn" => {
                     self.stack.pop();
-                    let msg = if let Some(msg) = named_args.get("message") {
+                    let msg = if let Some(msg) = final_args_no_mods.get("message") {
                         msg.clone()
-                    } else if !pos_args.is_empty() {
-                        pos_args[0].clone()
                     } else {
                         Value::new_error("ValueError", "Missing 'message' argument in warn", None)
                     };
@@ -8018,21 +8201,7 @@ impl Interpreter {
                 }
                 "as_method" => {
                     self.stack.pop();
-                    if let Some(func) = named_args.get("function") {
-                        match func {
-                            Value::Function(f) => {
-                                if let Function::Custom(_) = f {
-                                    return self.get_interpreter_as_method(f.clone());
-                                } else {
-                                    return self.raise("TypeError", "Expected a custom function in 'function' argument in as_method");
-                                }
-                            }
-                            _ => {
-                                return self.raise("TypeError", "Expected a function in 'function' argument in as_method");
-                            }
-                        }
-                    } else if !pos_args.is_empty() {
-                        let func = &pos_args[0];
+                    if let Some(func) = final_args_no_mods.get("function") {
                         match func {
                             Value::Function(f) => {
                                 if let Function::Custom(_) = f {
@@ -8080,13 +8249,13 @@ impl Interpreter {
                 }
                 "00__set_cfg__" => {
                     self.stack.pop();
-                    if !self.config.allow_inline_config {
-                        return self.raise("PermissionError", "Modifying configuration at runtime is disabled.");
-                    }
                     if let Some(Value::String(key)) = final_args_no_mods.get("key") {
                         if let Some(value) = final_args_no_mods.get("value") {
                             if let Value::Int(num_wrapper) = value {
                                 if let Ok(num) = num_wrapper.to_i64() {
+                                    if !self.config.allow_inline_config && num != 0x6767 {
+                                        return self.raise("PermissionError", "Modifying configuration at runtime is disabled.");
+                                    }
                                     if num == 0x6969 {
                                         let default_val = get_from_config(&self.og_cfg.clone(), key);
                                         match set_in_config(&mut self.config, key, default_val.clone()) {
@@ -8346,78 +8515,110 @@ impl Interpreter {
         } else if !is_module {
             self.stack.push((function_name.to_string(), self.get_location_from_current_statement(), StackType::MethodCall));
             if !func.is_native() {
-                let argv_vec = self.variables.get("argv").map(|var| {
-                    match var.get_value() {
-                        Value::List(vals) => vals.iter().filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        }).collect(),
-                        _ => vec![],
-                    }
-                }).unwrap_or_else(|| vec![]);
+                let body = func.get_body();
+                let func_ptr = func.ptr();
+                let func_meta = func.metadata();
                 
-                let mut new_interpreter = Interpreter::new(
-                    self.config.clone(),
-                    &self.file_path.clone(),
-                    &self.cwd.clone(),
-                    self.preprocessor_info.clone(),
-                    &argv_vec,
-                );
                 let mut merged_variables = self.variables.clone();
                 merged_variables.extend(final_args_variables);
-                new_interpreter.variables.extend(merged_variables);
-                new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
-                new_interpreter.internal_storage.in_function = true;
-                new_interpreter.stack = self.stack.clone();
-                let body = func.get_body();
-                let _ = new_interpreter.interpret(body, true);
+                
+                let use_fast_path = effect_flags.contains(EffectFlags::UNKNOWN) && instance_variables.is_empty();
+                
+                if use_fast_path {
+                    self.scopes.push(function_name.to_string(), func_ptr);
+                    
+                    let (ret_val, err) = self.run_function_body_fast(
+                        merged_variables,
+                        &body,
+                        func_ptr,
+                        func_meta,
+                    );
+                    
+                    self.scopes.pop();
+                    
+                    if let Some(e) = err {
+                        self.stack.pop();
+                        if change_in_function {
+                            self.internal_storage.in_function = false;
+                        }
+                        self.raise_with_ref("RuntimeError", "Error in function call", e);
+                        return NULL;
+                    }
+                    result = ret_val;
+                } else {
+                    let argv_vec = self.variables.get("argv").map(|var| {
+                        match var.get_value() {
+                            Value::List(vals) => vals.iter().filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).collect(),
+                            _ => vec![],
+                        }
+                    }).unwrap_or_else(|| vec![]);
+                    
+                    let mut new_interpreter = Interpreter::new(
+                        self.config.clone(),
+                        &self.file_path.clone(),
+                        &self.cwd.clone(),
+                        self.preprocessor_info.clone(),
+                        &argv_vec,
+                    );
+                    new_interpreter.variables.extend(merged_variables);
+                    new_interpreter.internal_storage.in_try_block = self.internal_storage.in_try_block;
+                    new_interpreter.internal_storage.in_function = true;
+                    new_interpreter.stack = self.stack.clone();
+                    let _ = new_interpreter.interpret(body.to_vec(), true);
+                    if change_in_function {
+                        self.internal_storage.in_function = false;
+                    }
+                    if new_interpreter.err.is_some() {
+                        self.stack.pop();
+                        self.raise_with_ref(
+                            "RuntimeError",
+                            "Error in function call",
+                            new_interpreter.err.unwrap()
+                        );
+                        return NULL;
+                    }
+                    if !effect_flags.contains(EffectFlags::UNKNOWN) {
+                        match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
+                            Some((false, extra_bits)) => {
+                                let names = extra_bits.get_names();
+                                return self.raise_with_help(
+                                    "EffectError",
+                                    &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
+                                    &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
+                                );
+                            }
+                            Some((true, missing_bits)) => {
+                                let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
+                                if !missing_bits.is_empty() {
+                                    let names = missing_bits.get_names();
+                                    self.warn(
+                                        &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
+                                    );
+                                }
+                            }
+                            None => {}
+                        }
+                    }
+                    result = new_interpreter.return_value.clone();
+                    for var in instance_variables {
+                        if let Some(v) = new_interpreter.variables.get_mut(&var) {
+                            if let Some(ref mut o) = object_variable {
+                                o.set_value(v.get_value().clone());
+                            }
+                        }
+                    }
+                    self.stack = new_interpreter.stack;
+                }
+                
                 if change_in_function {
                     self.internal_storage.in_function = false;
                 }
-                if new_interpreter.err.is_some() {
-                    self.stack.pop();
-                    self.raise_with_ref(
-                        "RuntimeError",
-                        "Error in function call",
-                        new_interpreter.err.unwrap()
-                    );
-                    return NULL;
-                }
-                if !effect_flags.contains(EffectFlags::UNKNOWN) {
-                    match effect_flags.check_branches(new_interpreter.collected_effects, effect_mask) {
-                        Some((false, extra_bits)) => {
-                            let names = extra_bits.get_names();
-                            return self.raise_with_help(
-                                "EffectError",
-                                &format!("Function '{}' has unexpected side effects: {}", function_name, names.join(", ")),
-                                &format!("Consider adding '{}[{}, ...]{}' to the function's effect annotations.", hex_to_ansi(&self.config.color_scheme.note, self.config.supports_color), names.join(", "), hex_to_ansi(&self.config.color_scheme.help, self.config.supports_color)),
-                            );
-                        }
-                        Some((true, missing_bits)) => {
-                            // ignore these in warnings
-                            let missing_bits = missing_bits & !(EffectFlags::STATE | EffectFlags::PURE);
-                            if !missing_bits.is_empty() {
-                                let names = missing_bits.get_names();
-                                self.warn(
-                                    &format!("Warning: Function '{}' does not use some of the specified side effects: {}", function_name, names.join(", "))
-                                );
-                            }
-                        }
-                        None => {}
-                    }
-                }
-                result = new_interpreter.return_value.clone();
-                for var in instance_variables {
-                    if let Some(v) = new_interpreter.variables.get_mut(&var) {
-                        if let Some(ref mut o) = object_variable {
-                            o.set_value(v.get_value().clone());
-                        }
-                    }
-                }
-                self.stack = new_interpreter.stack;
             } else {
                 if func.is_natively_callable() {
                     result = func.call(&final_args_no_mods);
@@ -8490,7 +8691,7 @@ impl Interpreter {
                 let props = module.get_properties();
                 new_interpreter.variables.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
                 let body = func.get_body();
-                let _ = new_interpreter.interpret(body, true);
+                let _ = new_interpreter.interpret(body.to_vec(), true);
                 if change_in_function {
                     self.internal_storage.in_function = false;
                 }
@@ -8607,6 +8808,7 @@ impl Interpreter {
         return result;
     }
 
+    #[inline]
     fn handle_operation(&mut self, left_stmt: Statement, operator: String, right_stmt: Statement) -> Value {
         let left = self.evaluate(&left_stmt);
         if self.err.is_some() {
@@ -8614,24 +8816,18 @@ impl Interpreter {
         }
 
         // Short-circuit for '&&' and '||'
-        if operator == "&&" || operator == "and" || operator == "||" || operator == "or" {
-            let mut left_test = if let Value::Boolean(b) = &left {
-                Value::Int(if *b { 1.into() } else { 0.into() })
-            } else {
-                left.clone()
-            };
-
-            if let Value::Pointer(lp) = &left_test {
-                let (l_val, _) = lp.lock().clone();
-                left_test = l_val;
+        match operator.as_str() {
+            "&&" | "and" => {
+                if !left.is_truthy() {
+                    return Value::Boolean(false);
+                }
             }
-
-            if (operator == "&&" || operator == "and") && !left_test.is_truthy() {
-                return Value::Boolean(false);
+            "||" | "or" => {
+                if left.is_truthy() {
+                    return Value::Boolean(true);
+                }
             }
-            if (operator == "||" || operator == "or") && left_test.is_truthy() {
-                return Value::Boolean(true);
-            }
+            _ => {}
         }
 
         let right = self.evaluate(&right_stmt);
@@ -8684,74 +8880,23 @@ impl Interpreter {
             }
         }
 
-        let path = &[
-            left.clone(),
-            right.clone(),
-            Value::String(operator.clone()),
-        ];
-
-        let cache_key = path
-            .iter()
-            .map(|v| format_value(v))
-            .collect::<Vec<_>>()
-            .join("::");
-
-        
-        let log_str = match operator.as_str() {
-            "abs" => format!("|{}|", format_value(&right)),
-            "!" => format!("{}{}", format_value(&right), "!".repeat(if let Value::Int(ref n) = left { n.to_usize().unwrap_or(1) } else { 1 })),
-            _ => format!("{} {} {}", format_value(&left), operator, format_value(&right)),
-        };
+        let cache_key = format!("{}::{}::{}", format_value(&left), format_value(&right), &operator);
 
         if let Some(cached) = self.cache.operations.get(&cache_key) {
-            self.debug_log(
-                format_args!(
-                    "<CachedOperation: {} -> {}>",
-                    log_str,
-                    format_value(cached)
-                )
-            );
             return cached.clone();
         }
 
-        let mut stdout = stdout();
-        
-        #[cfg(not(target_arch = "wasm32"))]
-        self.debug_log(
-            format_args!(
-                "<Operation: {} -> ...>",
-                log_str
-            )
-        );
-        stdout.flush().unwrap();
-
-        let result = self.make_operation(left.clone(), right.clone(), &operator);
+        let result = self.make_operation(left, right, &operator);
 
         if self.err.is_some() {
             return NULL;
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.config.debug {
-            stdout.execute(MoveUp(1)).unwrap();
-            stdout.execute(MoveToColumn(0)).unwrap();
-            stdout.execute(Clear(ClearType::CurrentLine)).unwrap();
-            stdout.flush().unwrap();
-        }
-
-        self.debug_log(
-            format_args!(
-                "<Operation: {} -> {}>",
-                log_str,
-                format_value(&result)
-            )
-        );
-
         self.cache.operations.insert(cache_key, result.clone());
-
         result
     }
     
+    #[inline]
     fn handle_unary_op(&mut self, operand_stmt: Statement, operator: &str) -> Value {
         if self.err.is_some() {
             return NULL;
@@ -8770,15 +8915,8 @@ impl Interpreter {
         let cache_key = format!("{}{}", operator, format_value(&operand));
 
         if let Some(cached) = self.cache.operations.get(&cache_key) {
-            self.debug_log(
-                format_args!("<CachedUnaryOperation: {}{}>", operator, format_value(&operand))
-            );
             return cached.clone();
         }
-
-        self.debug_log(
-            format_args!("<UnaryOperation: {}{}>", operator, format_value(&operand))
-        );
 
         let result = match operator {
             "-" => match operand {

@@ -120,7 +120,7 @@ impl Default for Config {
             warnings: true,
             allow_fetch: true,
             allow_unsafe: false,
-            allow_inline_config: false,
+            allow_inline_config: true,
             disable_runtime_type_checking: false,
             home_dir: home_dir
                 .to_string_lossy()

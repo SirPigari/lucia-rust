@@ -491,21 +491,21 @@ impl Function {
         }
     }
 
-    pub fn get_body(&self) -> Vec<Statement> {
+    pub fn get_body(&self) -> &[Statement] {
         match self {
-            Function::Native(_) => vec![],
-            Function::Custom(f) => f.body.clone(),
-            Function::Lambda(f, _) => f.body.clone(),
-            Function::SharedNative(_) => vec![],
-            Function::NativeMethod(_) => vec![],
-            Function::CustomMethod(f) => f.body.clone(),
+            Function::Native(_) => &[],
+            Function::Custom(f) => &f.body,
+            Function::Lambda(f, _) => &f.body,
+            Function::SharedNative(_) => &[],
+            Function::NativeMethod(_) => &[],
+            Function::CustomMethod(f) => &f.body,
         }
     }
 
     pub fn get_type(&self) -> Type {
         Type::Function {
             parameter_types: self.get_parameter_types(),
-            return_type: Box::new(self.get_return_type()),
+            return_type: Box::new(self.get_return_type().clone()),
         }
     }
 
@@ -557,8 +557,8 @@ impl Function {
         &self.metadata().name
     }
 
-    pub fn get_return_type(&self) -> Type {
-        self.metadata().return_type.clone()
+    pub fn get_return_type(&self) -> &Type {
+        &self.metadata().return_type
     }
 
     pub fn get_parameter_types(&self) -> Vec<Type> {

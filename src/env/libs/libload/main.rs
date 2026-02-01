@@ -395,7 +395,7 @@ fn create_callback(args: &HashMap<String, Value>, interp_ptr: &mut Interpreter) 
     };
 
     let cb: &'static CallbackData = Box::leak(Box::new(CallbackData {
-        body: Box::new(func.get_body()),
+        body: Box::new(func.get_body().to_vec()),
         interp_ptr,
     }));
 

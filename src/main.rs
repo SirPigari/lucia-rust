@@ -2140,6 +2140,7 @@ fn main() {
         ("--disable-preprocessor, -dp", "Disable preprocessor"),
         ("--fmt <path>", "Format source code file"),
         ("--config <path>", "Specify a custom config file path"),
+        ("--default-config, -dc", "Reset to default configuration"),
         ("--libs-dir <dir>, -L <dir>", "Specify a custom libraries directory path (can be multiple). Relative to 'home_dir'"),
         ("--dump-pp", "Dump source code after preprocessing"),
         ("--dump-ast", "Dump AST after parsing"),
@@ -2175,6 +2176,7 @@ fn main() {
     let mut disable_preprocessor = false;
     let mut fmt_files: Vec<String> = Vec::new();
     let mut config_arg: Option<String> = None;
+    let mut default_config_flag = false;
     let mut libs_dirs: Vec<String> = Vec::new();
     let mut dump_pp_flag = false;
     let mut dump_ast_flag = false;
@@ -2565,6 +2567,9 @@ fn main() {
                     exit(1);
                 }
             }
+            "--default-config" | "-dc" => {
+                default_config_flag = true;
+            }
             "--libs-dir" | "-L" => {
                 if i + 1 < left_args.len() {
                     let p = PathBuf::from(&left_args[i + 1]);
@@ -2812,8 +2817,8 @@ fn main() {
     }
 
     let home_dir = config.home_dir
-    .to_string()
-    .replace("\\", "/");
+        .to_string()
+        .replace("\\", "/");
 
     let home_dir_path = PathBuf::from(home_dir.clone());
 
@@ -2826,8 +2831,8 @@ fn main() {
     }
 
     let home_dir = config.home_dir
-    .to_string()
-    .replace("\\", "/");
+        .to_string()
+        .replace("\\", "/");
 
     let home_dir_path = PathBuf::from(home_dir.clone());
 
@@ -2859,6 +2864,12 @@ fn main() {
     if !home_dir_path.exists() {
         eprintln!("Home directory does not exist: {}", home_dir_path.display());
         exit(1);
+    }
+
+    if default_config_flag {
+        config = Config::default();
+        config.home_dir = enviroment_dir.join("home").to_string_lossy().to_string();
+        config.libs_paths = vec![enviroment_dir.join("libs").to_string_lossy().to_string()];
     }
 
     if debug_flag {

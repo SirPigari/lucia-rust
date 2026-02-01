@@ -44,7 +44,6 @@ impl EffectFlags {
     // ALL — all possible effects.
     pub const ALL: Self                 = Self(Self::PURE.0 | Self::IO.0 | Self::STATE.0 | Self::UNSAFE.0 | Self::MAY_FAIL.0 | Self::UNKNOWN.0);
 
-    /// Returns an empty flag set (equivalent to PURE).
     #[inline]
     pub const fn empty() -> Self {
         Self(0)
@@ -55,31 +54,26 @@ impl EffectFlags {
         self.0 != 0
     }
 
-    /// Combines two flags into one (bitwise OR).
     #[inline]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
-    /// Adds another flag to this set (bitwise OR assignment).
     #[inline]
     pub fn insert(&mut self, other: Self) {
         self.0 |= other.0;
     }
 
-    /// Removes a flag from this set (bitwise AND with inverse).
     #[inline]
     pub fn remove(&mut self, other: Self) {
         self.0 &= !other.0;
     }
 
-    /// Checks if a specific flag is set.
     #[inline]
     pub const fn contains(self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
 
-    /// Returns true if there are no side effects (PURE).
     #[inline]
     pub const fn is_pure(self) -> bool {
         self.0 == Self::PURE.0
@@ -90,13 +84,11 @@ impl EffectFlags {
         self.0 == 0
     }
 
-    /// Returns the raw bit value (for debugging or serialization).
     #[inline]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
-    /// Creates a flag set from a raw u32 bitmask.
     #[inline]
     pub const fn from_u32(bits: u32) -> Self {
         Self(bits)
@@ -233,6 +225,27 @@ impl PathElement {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Encode, Decode)]
+pub struct ScopeStack {
+    frames: Vec<(String, usize)>,
+}
+
+impl ScopeStack {
+    #[inline]
+    pub fn new() -> Self {
+        Self { frames: Vec::with_capacity(16) }
+    }
+    
+    #[inline]
+    pub fn push(&mut self, name: String, func_ptr: *const ()) {
+        self.frames.push((name, func_ptr as usize));
+    }
+    
+    #[inline]
+    pub fn pop(&mut self) {
+        self.frames.pop();
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Stack {
@@ -540,6 +553,7 @@ pub struct InternalStorage {
     pub in_function: bool,
     pub is_the_main_thread: bool,
     pub plugin_runtime: Option<PluginRuntime>,
+    pub underscore_vars_initialized: bool,
 }
 
 #[derive(Serialize)]

@@ -134,7 +134,6 @@ bench:
 
 build-tests:
     cargo build --release --bin run_tests && cargo build --release --bin run_benchmarks
-    #exists("./tests") mkdir ./tests
     ${MOVE} ${TESTS_TARGET} ${TESTS_DEST} ${MOVE_END}
     ${MOVE} ${BENCH_TARGET} ${BENCH_DEST} ${MOVE_END}
 

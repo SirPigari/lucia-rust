@@ -84,6 +84,14 @@ fun early_return_function(a: int) -> int:
     throw "This line is never reached"
 end
 
+fun tco_recursive_function(depth: int) -> void:
+    if depth >= 1500:
+        println(f'Reached {depth} without stack overflow!')
+        return
+    end
+    tco_recursive_function(depth + 1)
+end
+
 // === Assertions ===
 
 assert_eq!(void_function(), null)
@@ -104,3 +112,4 @@ assert_eq!(variadic_function(1, 2, 3, 4, 5), 15)
 assert_eq!(unpacking_variadics("Hello", "World!"), null)
 assert_eq!(early_return_function(10), 20)
 assert_eq!(early_return_function(-5), -1)
+assert_eq!(tco_recursive_function(0), null)

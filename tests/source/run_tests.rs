@@ -115,6 +115,7 @@ fn main() {
             let output = Command::new(&target_path)
                 .arg(&path)
                 .arg("-q")
+                .arg("-dc")
                 .arg("--no-color")
                 .arg("--stack-size")
                 .arg("4194304") // 4MB stack size

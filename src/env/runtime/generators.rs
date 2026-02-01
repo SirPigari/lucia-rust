@@ -739,18 +739,21 @@ impl RangeValueIter {
 pub struct RangeLengthIter {
     current: Int,
     end: Int,
-    step: usize,
+    step_int: Int,
     index: Int,
+    one: Int,
     done: bool,
 }
 
 impl RangeLengthIter {
     pub fn new(start: Int, end: Int, step: usize) -> Self {
+        let actual_step = if step == 0 { 1 } else { step };
         Self {
             current: start,
             end,
-            step: if step == 0 { 1 } else { step },
+            step_int: Int::from(actual_step as i64),
             index: Int::from(0),
+            one: Int::from(1),
             done: false,
         }
     }
@@ -776,6 +779,7 @@ pub struct VecIter {
 }
 
 impl VecIter {
+    #[inline]
     pub fn new(vec: &[Value]) -> Self {
         Self {
             vec: vec.to_vec(),
@@ -905,6 +909,7 @@ impl Iterator for RangeValueIter {
 impl Iterator for RangeLengthIter {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
             return None;
@@ -912,7 +917,7 @@ impl Iterator for RangeLengthIter {
 
         let val = self.current.clone();
 
-        self.index = add_int(&self.index, &Int::from(1)).unwrap_or(self.index.clone());
+        self.index = add_int(&self.index, &self.one).unwrap_or(self.index.clone());
 
         if let Some(cmp_result) = cmp_int(&self.index, &self.end) {
             if cmp_result == Ordering::Equal {
@@ -922,7 +927,7 @@ impl Iterator for RangeLengthIter {
             self.done = true;
         }
 
-        self.current = add_int(&self.current, &Int::from(self.step as i64)).unwrap_or(self.current.clone());
+        self.current = add_int(&self.current, &self.step_int).unwrap_or(self.current.clone());
 
         Some(Value::Int(val))
     }
@@ -963,17 +968,15 @@ impl Iterator for EnumerateIter {
 impl Iterator for VecIter {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done || self.index >= self.vec.len() {
+        if self.index >= self.vec.len() {
+            self.done = true;
             return None;
         }
 
         let val = self.vec[self.index].clone();
         self.index += 1;
-
-        if self.index >= self.vec.len() {
-            self.done = true;
-        }
 
         Some(val)
     }

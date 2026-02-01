@@ -25,7 +25,7 @@ Be free to fix them or add new ones.
 
 - Implement 'op_index_set'
 
-### [`src/interpreter.rs:3447:1`](../../../src/interpreter.rs#L3447) *(added by **SirPigari** on **2025-10-12**)*
+### [`src/interpreter.rs:3592:1`](../../../src/interpreter.rs#L3592) *(added by **SirPigari** on **2025-10-12**)*
 
 - Implement enum conversion
 

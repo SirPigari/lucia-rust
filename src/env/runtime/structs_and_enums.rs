@@ -135,15 +135,15 @@ impl Struct {
         None
     }
 
+    #[inline]
     pub fn get_field(&self, field: &str) -> Option<&Value> {
-        match self.fields.get(field) {
-            Some((v, _)) => Some(&**v),
-            None => None,
-        }
+        self.fields.get(field).map(|(v, _)| &**v)
     }
 
+    #[inline]
     pub fn set_field(&mut self, field: String, value: Value) -> Option<Box<Value>> {
-        self.fields.insert(field, (Box::new(value.clone()), value.get_type())).map(|(v, _)| v)
+        let ty = value.get_type();
+        self.fields.insert(field, (Box::new(value), ty)).map(|(v, _)| v)
     }
 
     pub fn get_fields(&self) -> &HashMap<String, (Box<Value>, Type)> {
@@ -203,11 +203,14 @@ impl Struct {
         map
     }
 
+    #[inline]
     pub fn get(&self, field: &str) -> Option<&Value> {
         self.fields.get(field).map(|(v, _)| v.as_ref())
     }
+    #[inline]
     pub fn set(&mut self, field: String, value: Value) -> Option<Box<Value>> {
-        self.fields.insert(field, (Box::new(value.clone()), value.get_type())).map(|(v, _)| v)
+        let ty = value.get_type();
+        self.fields.insert(field, (Box::new(value), ty)).map(|(v, _)| v)
     }
     pub fn remove(&mut self, field: &str) -> Option<Box<Value>> {
         self.fields.remove(field).map(|(v, _)| v)
