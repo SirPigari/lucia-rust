@@ -25,6 +25,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 
 // just to be sure its uint8_t
 typedef uint8_t CBool;
