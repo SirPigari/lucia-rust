@@ -213,6 +213,7 @@ use crate::lexer::Lexer;
 use crate::interpreter::Interpreter;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const CUSTOM_PANIC_MARKER: u8 = 0x1B;
 
 pub fn now_ms() -> f64 {
     web_sys::window()
