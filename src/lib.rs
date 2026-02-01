@@ -52,6 +52,7 @@ use crate::env::runtime::config::Config;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::libs::load_std_libs_embedded;
+use crate::env::runtime::utils::format_value;
 pub use crate::env::runtime::errors::Error;
 use parking_lot::Mutex;
 use core::ffi::{c_char, c_void};
@@ -60,6 +61,7 @@ use std::ffi::CString;
 use std::ffi::CStr;
 use std::sync::Arc;
 use std::path::PathBuf;
+use std::cell::RefCell;
 
 use interpreter::Interpreter;
 use parser::Parser;
@@ -67,6 +69,12 @@ use lexer::Lexer;
 
 const VERSION: &str = env!("VERSION");
 const CUSTOM_PANIC_MARKER: u8 = 0x1B;
+
+thread_local! {
+    static DEBUG_BUFFER: RefCell<String> = RefCell::new(String::with_capacity(2048));
+    static DISPLAY_BUFFER: RefCell<String> = RefCell::new(String::with_capacity(2048));
+    static LOCATION_BUFFER: RefCell<String> = RefCell::new(String::with_capacity(256));
+}
 
 #[repr(C)]
 pub struct BuildInfo {
@@ -198,7 +206,7 @@ fn value_to_abi(v: &Value) -> LuciaValue {
                 },
             }
         },
-        Value::List(l) => {
+        Value::Tuple(l) | Value::List(l) => {
             let abi_list: Vec<LuciaValue> =
                 l.iter().map(value_to_abi).collect();
 
@@ -255,6 +263,62 @@ fn value_to_abi(v: &Value) -> LuciaValue {
     }
 }
 
+fn abi_to_value(v: &LuciaValue) -> Value {
+    match v.tag {
+        LuciaValueType::VALUE_INT => Value::Int(imagnum::Int::from(unsafe { v.data.int_v })),
+        LuciaValueType::VALUE_FLOAT => Value::Float(imagnum::Float::from(unsafe { v.data.float_v })),
+        LuciaValueType::VALUE_BOOLEAN => Value::Boolean(unsafe { v.data.bool_v } != 0),
+        LuciaValueType::VALUE_STRING => {
+            if unsafe { v.data.string_v }.is_null() {
+                Value::String(String::new())
+            } else {
+                let c_str = unsafe { CStr::from_ptr(v.data.string_v) };
+                match c_str.to_str() {
+                    Ok(s) => Value::String(s.to_string()),
+                    Err(_) => Value::String(String::new()),
+                }
+            }
+        },
+        LuciaValueType::VALUE_LIST => {
+            let len = v.length;
+            if unsafe { v.data.list_ptr }.is_null() || len == 0 {
+                Value::List(vec![])
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts(v.data.list_ptr, len) };
+                let list: Vec<Value> = slice.iter().map(abi_to_value).collect();
+                Value::List(list)
+            }
+        },
+        LuciaValueType::VALUE_BYTES => {
+            let len = v.length;
+            if unsafe { v.data.bytes_ptr }.is_null() || len == 0 {
+                Value::Bytes(vec![])
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts(v.data.bytes_ptr, len) };
+                Value::Bytes(slice.to_vec())
+            }
+        },
+        LuciaValueType::VALUE_MAP => {
+            let len = v.length;
+            if unsafe { v.data.map_ptr }.is_null() || len == 0 {
+                Value::Map(rustc_hash::FxHashMap::default())
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts(v.data.map_ptr, len) };
+                let mut map = rustc_hash::FxHashMap::default();
+                let mut i = 0;
+                while i + 1 < len {
+                    let key = abi_to_value(&slice[i]);
+                    let value = abi_to_value(&slice[i + 1]);
+                    map.insert(key, value);
+                    i += 2;
+                }
+                Value::Map(map)
+            }
+        },
+        _ => Value::Null,
+    }
+}
+
 fn error_to_abi(e: &Error) -> LuciaError {
     let location = e.loc.clone().unwrap_or_default();
     LuciaError {
@@ -264,6 +328,330 @@ fn error_to_abi(e: &Error) -> LuciaError {
         line_num: location.line_number as u32,
         line_text: CString::new(location.line_string.clone()).unwrap().into_raw(),
         column: location.range.0,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_null() -> LuciaValue { LuciaValue { tag: LuciaValueType::VALUE_NULL, data: ValueData { int_v: 0 }, length: 0 } }
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_int(v: i64) -> LuciaValue { LuciaValue { tag: LuciaValueType::VALUE_INT, data: ValueData { int_v: v }, length: 0 } }
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_float(v: f64) -> LuciaValue { LuciaValue { tag: LuciaValueType::VALUE_FLOAT, data: ValueData { float_v: v }, length: 0 } }
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_bool(v: CBool) -> LuciaValue { LuciaValue { tag: LuciaValueType::VALUE_BOOLEAN, data: ValueData { bool_v: v }, length: 0 } }
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_string(utf8: *const c_char) -> LuciaValue {
+    if utf8.is_null() {
+        return LuciaValue { tag: LuciaValueType::VALUE_STRING, data: ValueData { string_v: std::ptr::null() }, length: 0 };
+    }
+    let c_str = unsafe { CStr::from_ptr(utf8) };
+    match c_str.to_str() {
+        Ok(s) => {
+            match CString::new(s) {
+                Ok(cstring) => {
+                    let len = s.len();
+                    let ptr = cstring.into_raw();
+                    LuciaValue {
+                        tag: LuciaValueType::VALUE_STRING,
+                        data: ValueData { string_v: ptr },
+                        length: len,
+                    }
+                }
+                Err(_) => LuciaValue {
+                    tag: LuciaValueType::VALUE_STRING,
+                    data: ValueData { string_v: std::ptr::null() },
+                    length: 0,
+                },
+            }
+        }
+        Err(_) => LuciaValue {
+            tag: LuciaValueType::VALUE_STRING,
+            data: ValueData { string_v: std::ptr::null() },
+            length: 0,
+        },
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_bytes(data: *const u8, len: usize) -> LuciaValue {
+    if data.is_null() || len == 0 {
+        return LuciaValue { tag: LuciaValueType::VALUE_BYTES, data: ValueData { bytes_ptr: std::ptr::null() }, length: 0 };
+    }
+    let slice = unsafe { std::slice::from_raw_parts(data, len) };
+    let boxed = slice.to_vec().into_boxed_slice();
+    let ptr = boxed.as_ptr();
+    std::mem::forget(boxed);
+    LuciaValue {
+        tag: LuciaValueType::VALUE_BYTES,
+        data: ValueData { bytes_ptr: ptr },
+        length: len,
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_list(items: *const LuciaValue, len: usize) -> LuciaValue {
+    if items.is_null() || len == 0 {
+        return LuciaValue { tag: LuciaValueType::VALUE_LIST, data: ValueData { list_ptr: std::ptr::null() }, length: 0 };
+    }
+    let slice = unsafe { std::slice::from_raw_parts(items, len) };
+    let boxed = slice.to_vec().into_boxed_slice();
+    let ptr = boxed.as_ptr();
+    std::mem::forget(boxed);
+    LuciaValue {
+        tag: LuciaValueType::VALUE_LIST,
+        data: ValueData { list_ptr: ptr },
+        length: len,
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_map(entries: *const LuciaValue, len: usize) -> LuciaValue {
+    if entries.is_null() || len == 0 {
+        return LuciaValue { tag: LuciaValueType::VALUE_MAP, data: ValueData { map_ptr: std::ptr::null() }, length: 0 };
+    }
+    let flat_len = len * 2;
+    let slice = unsafe { std::slice::from_raw_parts(entries, flat_len) };
+    let boxed = slice.to_vec().into_boxed_slice();
+    let ptr = boxed.as_ptr();
+    std::mem::forget(boxed);
+    LuciaValue {
+        tag: LuciaValueType::VALUE_MAP,
+        data: ValueData { map_ptr: ptr },
+        length: flat_len,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_cmp(a: LuciaValue, b: LuciaValue) -> i32 {
+    let val_a = abi_to_value(&a);
+    let val_b = abi_to_value(&b);
+    match val_a.partial_cmp(&val_b) {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Greater) => 1,
+        Some(std::cmp::Ordering::Equal) => 0,
+        None => 0,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_hash(v: LuciaValue) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let val = abi_to_value(&v);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    val.hash(&mut hasher);
+    hasher.finish()
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_get_type(v: LuciaValue) -> LuciaValueType {
+    v.tag
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_type_name(t: LuciaValueType) -> *const c_char {
+    match t {
+        LuciaValueType::VALUE_NULL        => b"void\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_INT         => b"int\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_FLOAT       => b"float\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_STRING      => b"str\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_BOOLEAN     => b"bool\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_LIST        => b"list\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_MAP         => b"map\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_BYTES       => b"bytes\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_POINTER     => b"<ptr>\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_UNSUPPORTED => b"<unsupported>\0".as_ptr() as *const c_char,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_string_ptr(v: LuciaValue) -> *const c_char {
+    unsafe { v.data.string_v }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_string_clone(v: LuciaValue, out: *mut *const c_char, out_len: *mut usize) -> CBool {
+    if v.tag != LuciaValueType::VALUE_STRING {
+        return 0;
+    }
+    let str_ptr = unsafe { v.data.string_v };
+    if str_ptr.is_null() {
+        unsafe {
+            *out = std::ptr::null();
+            *out_len = 0;
+        }
+        return 1;
+    }
+    let c_str = unsafe { CStr::from_ptr(str_ptr) };
+    match c_str.to_str() {
+        Ok(s) => {
+            match CString::new(s) {
+                Ok(cstring) => {
+                    let len = s.len();
+                    let ptr = cstring.into_raw();
+                    unsafe {
+                        *out = ptr;
+                        *out_len = len;
+                    }
+                    1
+                }
+                Err(_) => 0,
+            }
+        }
+        Err(_) => 0,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_is_null(v: LuciaValue) -> CBool {
+    if v.tag == LuciaValueType::VALUE_NULL {
+        1
+    } else {
+        0
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_debug(v: LuciaValue) -> *const c_char {
+    let val = abi_to_value(&v);
+    let debug_str = format_value(&val);
+    DEBUG_BUFFER.with(|buf_cell| {
+        let mut buf = buf_cell.borrow_mut();
+        buf.clear();
+        buf.push_str(&debug_str);
+        buf.push('\0');
+        buf.as_ptr() as *const c_char
+    })
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_display(v: LuciaValue) -> *const c_char {
+    let val = abi_to_value(&v);
+    let display_str = val.to_string();
+    DISPLAY_BUFFER.with(|buf_cell| {
+        let mut buf = buf_cell.borrow_mut();
+        buf.clear();
+        buf.push_str(&display_str);
+        buf.push('\0');
+        buf.as_ptr() as *const c_char
+    })
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_list_len(list: LuciaValue) -> u32 {
+    if list.tag != LuciaValueType::VALUE_LIST {
+        return 0;
+    }
+    list.length as u32
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_list_get(list: LuciaValue, index: usize) -> *const LuciaValue {
+    if list.tag != LuciaValueType::VALUE_LIST {
+        return std::ptr::null();
+    }
+    if index >= list.length {
+        return std::ptr::null();
+    }
+    unsafe { &*list.data.list_ptr.add(index) as *const LuciaValue }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_list_try_get(list: LuciaValue, index: usize, out: *mut *const LuciaValue) -> CBool {
+    if list.tag != LuciaValueType::VALUE_LIST {
+        return 0;
+    }
+    if index >= list.length {
+        return 0;
+    }
+    unsafe { *out = &*list.data.list_ptr.add(index) as *const LuciaValue; }
+    1
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_len(map: LuciaValue) -> u32 {
+    if map.tag != LuciaValueType::VALUE_MAP {
+        return 0;
+    }
+    (map.length / 2) as u32 // length is flattened [k,v,k,v,...], so divide by 2 for pair count
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_get(map: LuciaValue, key: *const LuciaValue) -> *const LuciaValue {
+    if map.tag != LuciaValueType::VALUE_MAP || key.is_null() {
+        return std::ptr::null();
+    }
+    let len = map.length;
+    let slice = unsafe { std::slice::from_raw_parts(map.data.map_ptr, len) };
+    let key_val = unsafe { *key };
+    let mut i = 0;
+    while i + 1 < len {
+        if lucia_value_cmp(slice[i], key_val) == 0 {
+            return &slice[i + 1] as *const LuciaValue;
+        }
+        i += 2;
+    }
+    std::ptr::null()
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_try_get(map: LuciaValue, key: *const LuciaValue, out: *mut *const LuciaValue) -> CBool {
+    if map.tag != LuciaValueType::VALUE_MAP || key.is_null() {
+        return 0;
+    }
+    let len = map.length;
+    let slice = unsafe { std::slice::from_raw_parts(map.data.map_ptr, len) };
+    let key_val = unsafe { *key };
+    let mut i = 0;
+    while i + 1 < len {
+        if lucia_value_cmp(slice[i], key_val) == 0 {
+            unsafe { *out = &slice[i + 1] as *const LuciaValue; }
+            return 1;
+        }
+        i += 2;
+    }
+    0
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_get_cstr(map: LuciaValue, key: *const c_char) -> *const LuciaValue {
+    if map.tag != LuciaValueType::VALUE_MAP {
+        return std::ptr::null();
+    }
+    if key.is_null() {
+        return std::ptr::null();
+    }
+    let key_value = lucia_value_string(key);
+    let result = lucia_map_get(map, &key_value as *const LuciaValue);
+    lucia_free_value(key_value);
+    result
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_try_get_cstr(map: LuciaValue, key: *const c_char, out: *mut *const LuciaValue) -> CBool {
+    if map.tag != LuciaValueType::VALUE_MAP {
+        return 0;
+    }
+    if key.is_null() {
+        return 0;
+    }
+    let key_value = lucia_value_string(key);
+    let result = lucia_map_try_get(map, &key_value as *const LuciaValue, out);
+    lucia_free_value(key_value);
+    result
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE) {
+    if err.is_null() || out.is_null() {
+        return;
+    }
+    unsafe {
+        libc::fprintf(
+            out,
+            b"%d:%zu: %s\n - %s: %s".as_ptr() as *const c_char,
+            (*err).line_num,
+            (*err).column,
+            (*err).line_text,
+            (*err).err_type,
+            (*err).err_msg,
+        );
+        if !(*err).help_msg.is_null() {
+            libc::fprintf(
+                out,
+                b"\nHelp: %s".as_ptr() as *const c_char,
+                (*err).help_msg,
+            );
+        }
+        libc::fprintf(out, b"\n".as_ptr() as *const c_char);
+    }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_error_type(err: *const LuciaError) -> *const c_char {
+    if err.is_null() { return std::ptr::null(); }
+    unsafe { (*err).err_type }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_error_message(err: *const LuciaError) -> *const c_char {
+    if err.is_null() { return std::ptr::null(); }
+    unsafe { (*err).err_msg }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_error_help(err: *const LuciaError) -> *const c_char {
+    if err.is_null() { return std::ptr::null(); }
+    unsafe { (*err).help_msg }
+}
+#[unsafe(no_mangle)] pub extern "C" fn lucia_error_location(err: *const LuciaError) -> *const c_char {
+    if err.is_null() { return std::ptr::null(); }
+    unsafe {
+        let location_str = format!("{}:{}", (*err).line_num, (*err).column);
+        LOCATION_BUFFER.with(|buf_cell| {
+            let mut buf = buf_cell.borrow_mut();
+            buf.clear();
+            buf.push_str(&location_str);
+            buf.push('\0');
+            buf.as_ptr() as *const c_char
+        })
     }
 }
 

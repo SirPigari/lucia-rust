@@ -21,6 +21,7 @@
 //
 // IMPORTANT: VALUE_POINTER values ARE automatically freed by lucia_free_value() - the Arc reference count is decremented.
 //            Do NOT manually free the pointer inside VALUE_POINTER values.
+// IMPORTANT: Anything marked as "borrowed" must NOT be freed by the user.
 
 #include <stdint.h>
 #include <stddef.h>
@@ -83,10 +84,56 @@ typedef union ValueData {
 struct LuciaValue {
     LuciaValueType tag;
     ValueData data;
-    size_t length; // used for lists, bytes, maps
+    size_t length;
 };
 
-// helpers to convert LuciaValue to native types
+// value constructors
+LuciaValue lucia_value_null(void);
+LuciaValue lucia_value_int(int64_t v);
+LuciaValue lucia_value_float(double v);
+LuciaValue lucia_value_bool(CBool v);
+LuciaValue lucia_value_string(const char* utf8); // owns result. Copies utf8 internally. Must lucia_free_value().
+LuciaValue lucia_value_bytes(const uint8_t* data, size_t len); // owns result. Copies data internally. Must lucia_free_value().
+
+// owns result. Copies the items array internally (shallow copy of LuciaValue structs). Must lucia_free_value().
+LuciaValue lucia_value_list(const LuciaValue* items, size_t len);
+
+// owns result. len = number of key-value pairs. entries must be [k0,v0,k1,v1,...] (len*2 elements). Must lucia_free_value().
+LuciaValue lucia_value_map(const LuciaValue* entries, size_t len);
+
+// utils
+int lucia_value_cmp(LuciaValue a, LuciaValue b);                                 // compares two values. returns -1, 0, or 1
+uint64_t lucia_value_hash(LuciaValue v);                                         // stable hash for use in hash maps
+LuciaValueType lucia_value_get_type(LuciaValue v);                               // returns the type tag
+const char* lucia_value_type_name(LuciaValueType t);                             // borrowed static string.
+const char* lucia_value_string_ptr(LuciaValue v);                                // borrowed pointer into the LuciaValue's string.
+CBool lucia_value_string_clone(LuciaValue v, const char** out, size_t* out_len); // owns *out. Allocates a new copy. Caller must free *out.
+CBool lucia_value_is_null(LuciaValue v);                                         // returns 1 if value is null, 0 otherwise
+
+// borrowed from internal thread-local buffer. Valid until next call to lucia_value_debug.
+const char* lucia_value_debug(LuciaValue v);
+
+// borrowed from separate internal thread-local buffer. Valid until next call to lucia_value_display.
+const char* lucia_value_display(LuciaValue v);
+
+// map/list utils - all return borrowed pointers into the backing LuciaValue.
+uint32_t lucia_list_len(LuciaValue list);
+const LuciaValue* lucia_list_get(LuciaValue list, size_t index);                          // returns NULL if not a list or out of bounds
+CBool lucia_list_try_get(LuciaValue list, size_t index, const LuciaValue** out);          // returns 1 on success, 0 on failure
+uint32_t lucia_map_len(LuciaValue map);                                                   // returns number of key-value pairs
+const LuciaValue* lucia_map_get(LuciaValue map, const LuciaValue* key);                   // returns NULL if not found
+CBool lucia_map_try_get(LuciaValue map, const LuciaValue* key, const LuciaValue** out);   // returns 1 if found, 0 if not
+const LuciaValue* lucia_map_get_cstr(LuciaValue map, const char* key);                    // key is converted to a string value internally (temporary, freed automatically). Returns borrowed pointer or NULL.
+CBool lucia_map_try_get_cstr(LuciaValue map, const char* key, const LuciaValue** out);    // same as above but returns bool
+
+// error helpers - all take borrowed pointers to LuciaError
+void lucia_error_print(const LuciaError* err, FILE* out); // prints formatted error to FILE*. No allocation.
+const char* lucia_error_type(const LuciaError* err);
+const char* lucia_error_message(const LuciaError* err);
+const char* lucia_error_help(const LuciaError* err);
+const char* lucia_error_location(const LuciaError* err); // borrowed from internal thread-local buffer. Valid until next call to lucia_error_location.
+
+// helpers to convert LuciaValue to native types (all borrowed)
 int64_t value_as_int(LuciaValue v);
 double value_as_float(LuciaValue v);
 CBool value_as_bool(LuciaValue v);
