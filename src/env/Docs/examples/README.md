@@ -40,11 +40,11 @@ The files are sorted by difficulty, indicated by the numeric prefix in the file 
 
 * [09_game_of_life.lc](./09_game_of_life.lc)  
   An implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life).  
-  Includes: TODO
+  Includes: [Import](../language-syntax.md#importing-modules), [Function definition](../language-syntax.md#functions), [Function call](../language-syntax.md#functions), [Built-in functions](../language-syntax.md#built-in-functions), [If statement](../language-syntax.md#if-statements), [For loop](../language-syntax.md#for-loops), [While loop](../language-syntax.md#while-loops), [Enums](../language-syntax.md#enums), [Match](../language-syntax.md#match), [List definition](../language-syntax.md#lists), [Variable definition](../language-syntax.md#variables--types), [Operators](../language-syntax.md#operators), [Number definition](../language-syntax.md#numbers)
 
 * [10_bouncing_square_raylib.lc](./10_bouncing_square_raylib.lc)  
   A bouncing square example using the [Raylib](https://www.raylib.com/) bindings.  
-  Includes: TODO
+  Includes: [Import](../language-syntax.md#importing-modules), [Function definition](../language-syntax.md#functions), [Function call](../language-syntax.md#functions), [Built-in functions](../language-syntax.md#built-in-functions), [If statement](../language-syntax.md#if-statements), [While loop](../language-syntax.md#while-loops), [Variable definition](../language-syntax.md#variables--types), [Operators](../language-syntax.md#operators), [Number definition](../language-syntax.md#numbers)
 
 * [11_quine.lc](./11_quine.lc)  
   A [quine](https://en.wikipedia.org/wiki/Quine_%28computing%29) that prints its own source code.  

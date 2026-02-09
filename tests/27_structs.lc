@@ -124,3 +124,21 @@ l := k as I
 assert_eq!(l.g, 10)
 assert_err!(l.f)
 assert_err!(k as P) // incompatible types
+
+private a: int = 10
+public b: int = 20
+
+public typedef struct A<T> = {
+    a: T,
+    b: T,
+}
+
+for A:
+    static fun get() -> Self:
+        return A { a, b }
+    end
+end
+
+a_instance: A[int] = A.get()
+assert_eq!(a_instance.a, 10)
+assert_eq!(a_instance.b, 20)

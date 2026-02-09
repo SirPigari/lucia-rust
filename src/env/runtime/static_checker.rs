@@ -6,8 +6,8 @@ use crate::env::runtime::config::Config;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::{Statement, Node, TypeNode, TypeDeclNode, PtrNode, ThrowNode, MatchCase, IterableNode, RangeModeType, AccessType, ParamAST, alloc_loc, get_loc};
-use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, CAN_BE_UNINITIALIZED, check_ansi, find_closest_match, unescape_string};
-use crate::env::runtime::types::{Type, VALID_TYPES};
+use crate::env::runtime::utils::{fix_path, hex_to_ansi, to_static, special_function_meta, check_ansi, find_closest_match, unescape_string};
+use crate::env::runtime::types::{Type, SimpleType, VALID_TYPES};
 use crate::env::runtime::tokens::Location;
 use crate::env::runtime::internal_structs::{State, PathElement, EffectFlags};
 use crate::env::runtime::functions::FunctionMetadata;
@@ -358,10 +358,10 @@ impl Checker {
         let value_type = value.get_type();
 
         match expected {
-            Type::Simple { name: expected_type } => {
-                if expected_type != "any" {
+            Type::Simple { ty: expected_type } => {
+                if *expected_type != SimpleType::Any {
                     match value_type {
-                        Type::Simple { name: value_type_name, .. } => {
+                        Type::Simple { ty: value_type_name, .. } => {
                             if value_type_name != *expected_type {
                                 status = false;
                             }
@@ -508,7 +508,7 @@ impl Checker {
             for (var, val) in &self.state.defined_vars.clone() {
                 if !self.state.used_vars.contains(var)
                     && !self.state.loop_vars.contains(var)
-                    && !CAN_BE_UNINITIALIZED.contains(&var.as_str())
+                    && !SimpleType::can_be_uninitialized_str(&var.as_str())
                     && !var.starts_with('_')
                 {
                     let builtin = val.is_builtin;
@@ -764,7 +764,7 @@ impl Checker {
 
         if is_default {
             match declared_type {
-                Type::Simple { ref name, ..} if CAN_BE_UNINITIALIZED.contains(&name.as_str()) => {},
+                Type::Simple { ref ty, ..} if ty.can_be_uninitialized() => {},
                 Type::Reference { .. } => {},
                 _ => {
                     self.raise_with_help(ErrorTypes::TypeError, &format!("Cannot declare variable '{}' as default because its type '{}' cannot be uninitialized", name, declared_type.display_simple()), "Only variables of type 'any', 'map', 'list', 'tuple', 'void', or maybe types can be declared as default");

@@ -124,3 +124,9 @@ assert!(*initialized_h, "h should be initialized after access")
 (*initialized_h) = false
 assert_eq!(h, 69)
 assert!(!*initialized_h, "h should not re-initialize on second access")
+
+import (A) from "27_structs.lc" from "." as structs
+
+a_instance: A[int] = A.get()
+assert_eq!(a_instance.a, 10)
+assert_eq!(a_instance.b, 20)

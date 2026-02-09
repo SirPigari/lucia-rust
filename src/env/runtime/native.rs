@@ -1,6 +1,6 @@
 use crate::env::runtime::utils::{to_static, format_int, fix_path, format_value as format_value_dbg, self, parse_type, get_inner_type, find_struct_method, make_native_method_pt, make_native_method, make_native_shared_fn, convert_value_to_type, check_type_ident};
 use crate::env::runtime::value::Value;
-use crate::env::runtime::types::{Int, Float, Type};
+use crate::env::runtime::types::{Int, Float, Type, SimpleType};
 use crate::env::runtime::functions::{Function, NativeFunction, SharedNativeFunction, Parameter};
 use crate::env::runtime::generators::{GeneratorType, Generator, NativeGenerator, RangeValueIter, VecIter, EnumerateIter, FilterIter, MapIter, RepeatingIter};
 #[cfg(not(target_arch = "wasm32"))]
@@ -347,14 +347,14 @@ fn range(args: &HashMap<String, Value>) -> Value {
             Err(e) => return Value::new_error("TypeError", to_static(e), None),
         };
         match inner {
-            Type::Simple { name, .. } => match name.as_str() {
-                "generator" => (true, false),
-                "tuple" => (false, true),
-                "list" => (false, false),
+            Type::Simple { ty } => match ty {
+                SimpleType::Generator => (true, false),
+                SimpleType::Tuple => (false, true),
+                SimpleType::List => (false, false),
                 _ => {
                     return Value::new_error(
                         "TypeError",
-                        to_static(format!("unsupported type '{}' for 'as'", name)),
+                        to_static(format!("unsupported type '{}' for 'as'", ty.to_string())),
                         None,
                     );
                 }

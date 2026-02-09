@@ -38,7 +38,7 @@ use crate::env::runtime::utils::{
 };
 
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
-use crate::env::runtime::types::{Int, Float, Type, VALID_TYPES};
+use crate::env::runtime::types::{Int, Float, Type, SimpleType, VALID_TYPES};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::errors::Error;
 use crate::env::runtime::variables::Variable;
@@ -501,8 +501,8 @@ impl Interpreter {
             return (true, None);
         }
 
-        if let Type::Simple { name: expected_type } = expected {
-            if expected_type == "any" {
+        if let Type::Simple { ty: expected_type } = expected {
+            if *expected_type == SimpleType::Any {
                 return (true, None);
             }
         }
@@ -517,21 +517,21 @@ impl Interpreter {
         }
 
         match expected {
-            Type::Simple { name: expected_type  } => {
-                if expected_type != "any" {
+            Type::Simple { ty: expected_type  } => {
+                if *expected_type != SimpleType::Any {
                     match value_type {
-                        Type::Simple { name: value_type_name, .. } => {
+                        Type::Simple { ty: value_type_name, .. } => {
                             if value_type_name != *expected_type {
                                 status = false;
                             }
                         }
                         Type::Function { .. } => {
-                            if expected_type != "function" {
+                            if *expected_type != SimpleType::Function {
                                 status = false;
                             }
                         }
                         Type::Generator { .. } => {
-                            if expected_type != "generator" {
+                            if *expected_type != SimpleType::Generator {
                                 status = false;
                             }
                         }
@@ -1659,7 +1659,21 @@ impl Interpreter {
             
             for (i, stmt) in body.iter().enumerate() {
                 if i == last_idx {
-                    if let Node::Call { ref name, ref pos_args, ref named_args, .. } = stmt.node {
+                    let call = match &stmt.node {
+                        Node::Call { name, pos_args, named_args, .. } => {
+                            Some((name, pos_args, named_args))
+                        }
+                        Node::Return { value } => {
+                            if let Node::Call { ref name, ref pos_args, ref named_args, .. } = (&**value).node {
+                                Some((name, pos_args, named_args))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    
+                    if let Some((name, pos_args, named_args)) = call {
                         if let Some(var) = self.variables.get(name) {
                             if let Value::Function(f) = var.get_value() {
                                 if f.ptr() == func_ptr {
@@ -5316,7 +5330,7 @@ impl Interpreter {
                 };
 
                 match &base_type {
-                    Type::Simple { name, .. } if name == "list" || name == "tuple" || name == "map" => {
+                    Type::Simple { ty, .. } if *ty == SimpleType::List || *ty == SimpleType::Tuple || *ty == SimpleType::Map => {
                         Type::Indexed {
                             base_type: Box::new(base_type.clone()),
                             elements: elements,

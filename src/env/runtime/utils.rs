@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction, SharedNativeFunction, NativeFunction};
 use crate::env::runtime::statements::{Statement, Node, TypeNode, PtrNode, IterableNode};
 use crate::env::runtime::structs_and_enums::Struct;
-use crate::env::runtime::types::{Int, Float, Type};
+use crate::env::runtime::types::{Float, Int, SimpleType, Type};
 use crate::env::runtime::value::{Value};
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))]
@@ -2207,9 +2207,9 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
 
     match (&inner_actual, &inner_expected) {
         (
-            Simple { name: actual_name, .. },
-            Simple { name: expected_name, .. },
-        ) if expected_name == "any" || actual_name == "any" =>
+            Simple { ty: actual_name, .. },
+            Simple { ty: expected_name, .. },
+        ) if *expected_name == SimpleType::Any || *actual_name == SimpleType::Any =>
         {
             return true;
         }
@@ -2223,16 +2223,16 @@ pub fn type_matches(actual: &Type, expected: &Type) -> bool {
         }
 
         (
-            Simple { name: actual_name, .. },
+            Simple { ty: actual_name, .. },
             _
-        ) if actual_name == "any" =>
+        ) if *actual_name == SimpleType::Any =>
         {
             return true;
         }
 
         (
-            _, Simple { name: expected_name, .. }
-        ) if expected_name == "any" =>
+            _, Simple { ty: expected_name, .. }
+        ) if *expected_name == SimpleType::Any =>
         {
             return true;
         }
@@ -2590,10 +2590,6 @@ pub const KEYWORDS: &[&str] = &[
 pub const RESERVED_KEYWORDS: &[&str] = &[
     "fun", "gen", "return", "export", "throw", "try", "if", "for", "while", "import",
     "forget", "match", "defer", "true", "false", "null", "typedef", "type"
-];
-
-pub const CAN_BE_UNINITIALIZED: &[&str] = &[
-    "int", "float", "bool", "str", "map", "list", "function", "bytes", "tuple", "any", "void"
 ];
 
 #[cfg(target_pointer_width = "64")]

@@ -7,7 +7,7 @@ import (max) from math
 // made by Markofwitch 2025, the developer of Lucia
 // NOTE: This is very slow and stupid
 
-// disable debug printlning, faster
+// disable debug printing, faster
 #config debug = false
 // for pointers
 #config allow_unsafe = true
@@ -35,7 +35,7 @@ typedef enum ASTNode {
     ),
     UnaryOp(str, ASTNode),
     Number(str),
-    println(ASTNode),
+    Print(ASTNode),
     String(str),
     While(ASTNode, ASTNode),
     If(ASTNode, ASTNode, ASTNode),
@@ -149,7 +149,7 @@ fun parse(tokens: list[Token]) -> list[ASTNode]:
                 *pos += 1
                 return ASTNode.Number(n)
             end
-            Token.Ident(id) if id == "println" ->
+            Token.Ident(id) if id == "print" ->
                 *pos += 1
                 if *pos >= len(tokens) || tokens[*pos] != ParenOpen:
                     throw "Expected '('" from "SyntaxError"
@@ -160,7 +160,7 @@ fun parse(tokens: list[Token]) -> list[ASTNode]:
                     throw f"Expected ')', found {tokens[*pos]}" from "SyntaxError"
                 end
                 (*pos) += 1
-                return ASTNode.println(expr)
+                return ASTNode.Print(expr)
             end
             Token.Ident(id) if id == "true" ->
                 *pos += 1
@@ -415,7 +415,7 @@ fun compile_into_x86_64_asm_win(ast: list[ASTNode]) -> str:
                     _ -> throw f"Unknown unary operator: {op}" from "CompileError",
                 end
             end
-            ASTNode.println(expr) ->
+            ASTNode.Print(expr) ->
                 expr_asm := compile_node(expr)
                 fmt := match (expr):
                     ASTNode.String(_) -> "fmt_str",
@@ -765,7 +765,7 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                     _ -> throw f"Unknown unary operator: {op}" from "CompileError",
                 end
             end
-            ASTNode.println(expr) ->
+            ASTNode.Print(expr) ->
                 expr_asm := compile_node(expr)
                 match (expr):
                     ASTNode.String(_) ->
@@ -1140,13 +1140,13 @@ while (steps > 0) {
     let i = 0
     while (i < 100) {
         if (cells[i] == 1) {
-            println("#")
+            print("#")
         } else {
-            println(".")
+            print(".")
         }
         i = i + 1
     }
-    println("\n")
+    print("\n")
 
     let next = [0; 100]
 

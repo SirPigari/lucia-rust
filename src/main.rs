@@ -3204,7 +3204,7 @@ fn main() {
     let config_debug_color = config.color_scheme.debug.clone();
     let config_supports_color = config.supports_color;
     let cache_dir = home_dir_path.join(".cache");
-    let handle = thread::Builder::new()
+    let handle = match thread::Builder::new()
         .stack_size(stack_size_lucia)
         .name(format!("Lucia-{}", VERSION))
         .spawn(move || {
@@ -3227,8 +3227,13 @@ fn main() {
                 cache_dir,
                 plugin_runtime,
             );
-        })
-        .unwrap();
+        }) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("Failed to create execution thread: {}", e);
+            exit(1);
+        }
+    };
 
     if timer_flag {
         println!("{}", format!("{}Handle creation time: {:?}{}", hex_to_ansi(&config_debug_color, config_supports_color), handle_creation_time_start.elapsed(), hex_to_ansi("reset", config_supports_color)));

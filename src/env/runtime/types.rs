@@ -2,6 +2,7 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::utils::get_inner_type;
+use core::fmt;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use serde::{Serialize, Deserialize};
@@ -14,10 +15,29 @@ pub const VALID_TYPES: &[&str] = &[
     "void", "any", "int", "float", "bool", "str", "map", "list", "function", "generator", "bytes", "tuple", "auto", "type",
 ];
 
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Hash, PartialEq, Eq)]
+pub enum SimpleType {
+    Void,
+    Any,
+    Int,
+    Float,
+    Bool,
+    Str,
+    Map,
+    List,
+    Function,
+    Generator,
+    Bytes,
+    Tuple,
+    Auto,
+    Type,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub enum Type {
     Simple {
-        name: String,
+        ty: SimpleType,
     },
     Function {
         parameter_types: Vec<Type>,
@@ -67,8 +87,8 @@ pub enum Type {
 impl Type {
     pub fn display(&self) -> String {
         match self {
-            Type::Simple { name } => {
-                format!("<type '{}'>", name)
+            Type::Simple { ty } => {
+                format!("<type '{}'>", ty.to_string())
             },
             Type::Function { parameter_types, return_type } => {
                 let params = parameter_types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ");
@@ -144,8 +164,8 @@ impl Type {
 
     pub fn display_simple(&self) -> String {
         match self {
-            Type::Simple { name } => {
-                name.to_owned()
+            Type::Simple { ty } => {
+                ty.to_string()
             },
             Type::Function { parameter_types, return_type } => {
                 let params = parameter_types.iter().map(|t| t.display_simple()).collect::<Vec<_>>().join(", ");
@@ -214,7 +234,7 @@ impl Type {
         }
 
         let mut t = Type::Simple {
-            name: base.to_owned(),
+            ty: SimpleType::from_str(base).unwrap_or(SimpleType::Any),
         };
 
         let rest = name[..name.len() - base.len()].as_bytes();
@@ -249,7 +269,7 @@ impl Type {
     pub fn new_list(element_type: Type) -> Self {
         Type::Indexed {
             base_type: Box::new(Type::Simple {
-                name: "list".to_string(),
+                ty: SimpleType::List,
             }),
             elements: vec![element_type],
         }
@@ -274,8 +294,8 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         use Type::*;
         match (self, other) {
-            (Simple { name: n1 },
-             Simple { name: n2 }) => {
+            (Simple { ty: n1 },
+             Simple { ty: n2 }) => {
                 n1 == n2
             },
 
@@ -337,8 +357,8 @@ impl Hash for Type {
         use Type::*;
         std::mem::discriminant(self).hash(state);
         match self {
-            Simple { name } => {
-                name.hash(state);
+            Simple { ty } => {
+                ty.hash(state);
             }
             Function { parameter_types, return_type } => {
                 parameter_types.hash(state);
@@ -382,6 +402,74 @@ impl Hash for Type {
             Unwrap(values) => {
                 values.hash(state);
             }
+        }
+    }
+}
+
+impl fmt::Display for SimpleType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SimpleType::Void => "void",
+            SimpleType::Any => "any",
+            SimpleType::Int => "int",
+            SimpleType::Float => "float",
+            SimpleType::Bool => "bool",
+            SimpleType::Str => "str",
+            SimpleType::Map => "map",
+            SimpleType::List => "list",
+            SimpleType::Function => "function",
+            SimpleType::Generator => "generator",
+            SimpleType::Bytes => "bytes",
+            SimpleType::Tuple => "tuple",
+            SimpleType::Auto => "auto",
+            SimpleType::Type => "type",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl SimpleType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "void" => Some(SimpleType::Void),
+            "any" => Some(SimpleType::Any),
+            "int" => Some(SimpleType::Int),
+            "float" => Some(SimpleType::Float),
+            "bool" => Some(SimpleType::Bool),
+            "str" => Some(SimpleType::Str),
+            "map" => Some(SimpleType::Map),
+            "list" => Some(SimpleType::List),
+            "function" => Some(SimpleType::Function),
+            "generator" => Some(SimpleType::Generator),
+            "bytes" => Some(SimpleType::Bytes),
+            "tuple" => Some(SimpleType::Tuple),
+            "auto" => Some(SimpleType::Auto),
+            "type" => Some(SimpleType::Type),
+            _ => None,
+        }
+    }
+    
+    pub fn can_be_uninitialized(&self) -> bool {
+        match self {
+            SimpleType::Int
+            | SimpleType::Float
+            | SimpleType::Bool
+            | SimpleType::Str
+            | SimpleType::Map
+            | SimpleType::List
+            | SimpleType::Function
+            | SimpleType::Bytes
+            | SimpleType::Tuple
+            | SimpleType::Any
+            | SimpleType::Void => true,
+            _ => false,
+        }
+    }
+
+    pub fn can_be_uninitialized_str(s: &str) -> bool {
+        match SimpleType::from_str(s) {
+            Some(ty) => ty.can_be_uninitialized(),
+            None => false,
         }
     }
 }

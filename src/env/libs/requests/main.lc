@@ -1,7 +1,7 @@
 // This module provides HTTP request functionality.
 // It includes functions to make GET and POST requests, handle headers, and manage request parameters.
 // Lucia version 2.0.0, module: requests@0.11.14
-import (str_to_json) from collections
+import json
 
 public static final fun get(
     url: str,
@@ -25,7 +25,7 @@ public static final fun to_json(
         throw "Response is null, cannot convert to JSON." from "ValueError"
     end
 
-    return str_to_json(response["body"])
+    return json.parse(response["body"])
 end
 
 public static final fun post(
