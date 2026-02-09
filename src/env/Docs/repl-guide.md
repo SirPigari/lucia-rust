@@ -63,18 +63,18 @@ Statements: [{"type": "BOOLEAN", "value": "null"}]
 ### Simple print
 
 ```lucia-repl
->>> print("hello, world")
-Tokens: [("IDENTIFIER", "print"), ("SEPARATOR", "("), ("STRING", "\"hello, world\""), ("SEPARATOR", ")")]
-Statements: [{"type": "CALL", "name": "print", "pos_arguments": [{"type": "STRING", "value": ""hello, world"", "mods": []}], "named_arguments": {}}]
+>>> println("hello, world")
+Tokens: [("IDENTIFIER", "println"), ("SEPARATOR", "("), ("STRING", "\"hello world\""), ("SEPARATOR", ")")]
+Statements: [{"type": "CALL", "name": "println", "pos_args": [{"type": "STRING", "value": "\"hello world\"", "mods": []}], "named_args": {}}]
 hello, world
 ```
 
 ### While true loop
 
 ```lucia-repl
->>> while true: print("looping") end
-Tokens: [("IDENTIFIER", "while"), ("BOOLEAN", "true"), ("SEPARATOR", ":"), ("IDENTIFIER", "print"), ("SEPARATOR", "("), ("STRING", "\"looping\""), ("SEPARATOR", ")"), ("IDENTIFIER", "end")]
-Statements: [{"type": "WHILE", "condition": {"type": "BOOLEAN", "value": "true"}, "body": [{"type": "CALL", "name": "print", "pos_arguments": [{"type": "STRING", "value": ""looping"", "mods": []}], "named_arguments": {}}]}]
+>>> while true: println("looping") end
+Tokens: [("IDENTIFIER", "while"), ("BOOLEAN", "true"), ("SEPARATOR", ":"), ("IDENTIFIER", "println"), ("SEPARATOR", "("), ("STRING", "\"looping\""), ("SEPARATOR", ")"), ("IDENTIFIER", "end")]
+Statements: [{"type": "WHILE", "condition": {"type": "BOOLEAN", "value": "true"}, "body": [{"type": "CALL", "name": "println", "pos_args": [{"type": "STRING", "value": "\"looping\"", "mods": []}], "named_args": {}}]}] 
 looping
 looping
 ... (press Ctrl+T to stop)

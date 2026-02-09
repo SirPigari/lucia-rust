@@ -1,5 +1,8 @@
 # Contributing to Lucia
 
+> [!WARNING]
+> OUTDATED
+
 Thanks for your interest in contributing to Lucia.
 
 Lucia is a expressive scripting programming language written in Rust. Contributions to its core, standard library, tooling, documentation, and ecosystem are welcome.

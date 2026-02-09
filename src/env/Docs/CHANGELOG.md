@@ -5,7 +5,8 @@
 ### Major Changes
 
 - **Complete rewrite**: The entire interpreter is now written in <a href="https://www.rust-lang.org/"><img src="https://upload.wikimedia.org/wikipedia/commons/0/0f/Original_Ferris.svg" alt="Rust" style="height:1em; vertical-align: text-bottom; position: relative; top: 2px;"/>Rust</a>, providing better performance, memory safety, and maintainability
-- **New syntax**: 
+
+- **New syntax**:  
   - `:=` for automatic type inference
   - `=>` for lambdas
   - `typedef` for type definitions (structs, enums, aliases)
@@ -15,7 +16,7 @@
   - `defer` for cleanup operations
   - `&` and `*` for references and dereferencing
   - `++` for pointer flattening and postfix/prefix addition
-  - `--` for postfix/prefix subtraction 
+  - `--` for postfix/prefix subtraction  
   - `![effect]` and `!<[effect]>` for function effects
   - `where` clauses for local bindings
   - `for Type:` impl blocks for methods

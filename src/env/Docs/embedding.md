@@ -15,7 +15,7 @@ int main() {
     const char* code = "println(\"Hello World\") 42";
     LuciaResult result = lucia_interpret(code, &config);
 
-    if (result.tag == LUCIA_RESULT_OK) {
+    if (lucia_result_is_ok(result)) {
         printf("Script executed successfully.\n");
         int64_t i;
         if (!try_value_as_int(result.data.value, &i)) {
@@ -23,8 +23,10 @@ int main() {
         } else {
             printf("Return value as int: %lld\n", i);
         }
-    } else if (result.tag == LUCIA_RESULT_ERROR) {
+    } else if (lucia_result_is_error(result)) {
         printf("Error: %s\n", result.data.error.err_msg);
+    } else {
+        printf("Panic: %s\n", result.data.panic.panic_msg);
     }
 
     lucia_free_result(result);

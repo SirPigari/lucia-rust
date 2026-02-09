@@ -66,7 +66,7 @@ Example:
 ```lucia
 // V -- here
 for (i in [0..10]):
-    print(i)
+    println(i)
 end
 
   // V -- here
@@ -135,7 +135,7 @@ final APPLICATION_NAME: str = "Lucia"
 
 ### Modules
 
-Modules should be in [snake_case](https://en.wikipedia.org/wiki/Snake_case) 
+Modules should be in [snake_case](https://en.wikipedia.org/wiki/Snake_case)  
 
 Example:  
 
@@ -190,7 +190,7 @@ Example:
 ```lucia
 // instead of printData or PrintData or printdata or anything else
 fun print_data(data: list) -> void:
-    print(data)
+    println(data)
 end
 ```
 
@@ -224,7 +224,7 @@ Use `if` for big if statements like
 ```lucia
 if (x > 69):
     y := x - 3
-    print(y)
+    println(y)
     for i in [0..y]:
         z *= i
     end
@@ -294,7 +294,7 @@ Examples:
 
 ```lucia
 #macro log!($x):
-    print(f"[LOG] $x$")
+    println(f"[LOG] $x$")
 #endmacro
 ```
 
@@ -438,7 +438,7 @@ Examples:
 
 ```lucia
 // this is a comment
-print("hello world")
+println("hello world")
 ```
 
 ```lucia

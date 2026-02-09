@@ -25,22 +25,31 @@ To install Lucia by cloning the repository and building from source, follow thes
     cd lucia
     ```
 
-4. Build Lucia using Cargo (requires Rust toolchain and Makefile installed):
+4. Build Lucia using Cargo (requires Rust toolchain and Makefile or Mewo installed, we will use Mewo after):
+
+    Mewo:
 
     ```console
+    mewo release
+    ```
+
+    Make:
+
+    ```console
+    mv ./src/env/assets/Makefile.bak ./Makefile
     make release
     ```
 
 5. Activate the Lucia environment:
 
     ```console
-    make activate
+    mewo activate
     ```
 
 6. (Optional) To install the binary system-wide:
 
     ```console
-    make install
+    mewo install
     ```
 
 7. Verify the installation by running:
@@ -77,6 +86,6 @@ Make sure Lucia is added to your system's PATH. If it isn't, add the directory c
 
 ### Next Steps
 
-Start writing and running Lucia programs! For a quick start, see the [Getting Started](./getting-started.md) guide.
+Start writing and running Lucia programs! For a quick start, see the [Getting Started](./language-syntax.md#getting-started) guide.
 
 If you run into any issues, check the [Lucia GitHub Issues](https://github.com/SirPigari/lucia-rust/issues) page for help or to report problems.

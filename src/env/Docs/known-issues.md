@@ -7,7 +7,8 @@ This is because we want to separate long-term known issues from short-term bugs 
 
 ---
 
-## Format  
+## Format
+
 Each issue should follow this structure:
 
 ### [Short Title]
