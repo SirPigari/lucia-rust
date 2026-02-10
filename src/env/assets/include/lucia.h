@@ -16,7 +16,15 @@
 //
 // Ownership rules:
 //  - Owned (must free using lucia_free_*): LuciaValue, LuciaError, LuciaConfig, LuciaResult
-//  - Borrowed (do NOT free): VALUE_POINTER inside LuciaValue (managed by Arc), all fields in BuildInfo
+//  - Borrowed (do NOT free): VALUE_POINTER inside LuciaValue (managed by Arc), strings returned by 
+//        - lucia_value_string_ptr()
+//        - lucia_value_debug()
+//        - lucia_value_display()
+//        - lucia_error_type()
+//        - lucia_error_message()
+//        - lucia_error_help()
+//        - lucia_error_location()
+//        - and any pointers returned by list/map get functions (managed by the backing LuciaValue)
 //  - Stack-safe / static: BuildInfo itself can be returned by value or live on stack, strings inside are static
 //
 // IMPORTANT: VALUE_POINTER values ARE automatically freed by lucia_free_value() - the Arc reference count is decremented.
@@ -26,6 +34,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+
+#define LUCIA_API_VERSION 0x1000 // 0x(major)(minor)(02patch) - https://semver.org/
+#define LUCIA_API_VERSION_STRING "1.0.0"
+
+#define LUCIA_VERSION_MAJOR ((LUCIA_API_VERSION >> 12) & 0xF)
+#define LUCIA_VERSION_MINOR (((LUCIA_API_VERSION) >> 8)  & 0xF)
+#define LUCIA_VERSION_PATCH ((LUCIA_API_VERSION) & 0xFF)
 
 // just to be sure its uint8_t
 typedef uint8_t CBool;
