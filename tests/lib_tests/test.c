@@ -5,11 +5,9 @@
 int main(void) {
     printf("=== Lucia C API Test ===\n\n");
 
-    // 1. Config
     LuciaConfig cfg = lucia_default_config();
     printf("Created default config\n\n");
 
-    // 2. Simple program returning 42
     const char* code_simple = 
         "s: int = 0\n"
         "for i in [0..10]:\n"
@@ -23,14 +21,13 @@ int main(void) {
         const LuciaValue* val = lucia_result_value(&res_simple);
         printf("[Simple] debug: %s\n", lucia_value_debug(*val));
         printf("[Simple] display: %s\n", lucia_value_display(*val));
-        printf("[Simple] as int: %lld\n\n", value_as_int(*val));
+        printf("[Simple] as int: %ld\n\n", value_as_int(*val));
     } else {
         const LuciaError* err = lucia_result_error(&res_simple);
         printf("[Simple] Error: %s\n", lucia_error_message(err));
     }
     lucia_free_result(res_simple);
 
-    // 3. Program returning list
     const char* code_list =
         "lst: list = [1, 2, 3, 4, 5]\n"
         "return lst\n";
@@ -42,14 +39,13 @@ int main(void) {
             printf("[List] size: %zu\n", val->length);
             for (size_t i = 0; i < val->length; ++i) {
                 const LuciaValue* item = lucia_list_get(*val, i);
-                printf("%lld ", value_as_int(*item));
+                printf("%ld ", value_as_int(*item));
             }
             printf("\n\n");
         }
     }
     lucia_free_result(res_list);
 
-    // 4. Program returning map
     const char* code_map =
         "m: map = { \"a\": 10, \"b\": 20, \"c\": 30 }\n"
         "return m\n";
@@ -62,16 +58,15 @@ int main(void) {
         for (size_t i = 0; i < (val->length/2); ++i) {
             const LuciaValue* key = &entries[i*2];
             const LuciaValue* value = &entries[i*2 + 1];
-            printf("%s => %lld\n", lucia_value_string_ptr(*key), value_as_int(*value));
+            printf("%s => %ld\n", lucia_value_string_ptr(*key), value_as_int(*value));
         }
         const LuciaValue* b_val = lucia_map_get_cstr(*val, "b");
         if (b_val) {
-            printf("[Map] b via key: %lld\n\n", value_as_int(*b_val));
+            printf("[Map] b via key: %ld\n\n", value_as_int(*b_val));
         }
     }
     lucia_free_result(res_map);
 
-    // 5. Program returning string
     const char* code_string =
         "return \"hello lucia\"\n";
 
@@ -83,7 +78,6 @@ int main(void) {
     }
     lucia_free_result(res_string);
 
-    // 6. Boolean and float test
     const char* code_bool_float =
         "return (true, 3.1415)\n";
 
@@ -99,7 +93,6 @@ int main(void) {
     }
     lucia_free_result(res_bf);
 
-    // 7. Pointer example (just store nullptr in Lucia)
     const char* code_pointer =
         "ptr: &void = &null\n"
         "return ptr\n";
@@ -111,7 +104,6 @@ int main(void) {
     }
     lucia_free_result(res_ptr);
 
-    // 8. Error example
     const char* code_error =
         "a: int = \"not an int\"\n"
         "return a\n";
@@ -126,7 +118,6 @@ int main(void) {
     }
     lucia_free_result(res_err);
 
-    // 9. Test interpret_with_argv
     const char* code_argv =
         "return argv[0], argv[1]\n";
     const char* argv_arr[] = { "foo", "bar" };
@@ -140,7 +131,6 @@ int main(void) {
     }
     lucia_free_result(res_argv);
 
-    // 10. BuildInfo
     const BuildInfo* info = lucia_get_build_info();
     printf("[BuildInfo] name        : %s\n", info->name);
     printf("[BuildInfo] version     : %s\n", info->version);
