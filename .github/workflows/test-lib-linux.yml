@@ -74,7 +74,7 @@ jobs:
 
     steps:
       - name: Install tools
-        run: pacman -Sy --noconfirm git make rustup gcc g++
+        run: pacman -Sy --noconfirm git make rustup gcc
 
       - name: Set Rust ${{ matrix.rust }}
         run: rustup default ${{ matrix.rust }}
