@@ -4,6 +4,7 @@ Cargo.lock
 /temp/
 test.lc
 t.lc
+/test.c
 
 # Binary outputs
 /src/env/bin/*

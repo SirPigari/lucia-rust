@@ -2399,15 +2399,15 @@ fn main() {
             exit(1);
         }
         if output_path.is_empty() {
-            output_path = format!("{}.exe", PathBuf::from(&main_file).file_stem().unwrap_or_default().to_str().unwrap_or_else(|| {
+            output_path = format!("{}{}", PathBuf::from(&main_file).file_stem().unwrap_or_default().to_str().unwrap_or_else(|| {
                 eprintln!("Error: Invalid main file name '{}'.", main_file);
                 exit(1);
-            }));
+            }), if cfg!(target_os = "windows") { ".exe" } else { "" });
         }
-        if cfg!(not(target_os = "windows")) {
-            eprintln!("Error: Bundling is only supported on Windows.");
-            exit(1);
-        }
+        // if cfg!(not(target_os = "windows")) {
+        //     eprintln!("Error: Bundling is only supported on Windows.");
+        //     exit(1);
+        // }
         match bundle(
             &main_file,
             &output_path,

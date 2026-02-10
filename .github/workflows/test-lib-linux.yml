@@ -1,0 +1,94 @@
+# .github/workflows/test-lib-linux.yml
+name: Lucia Rust Lib Tests - Linux
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
+      - '**.toml'
+      - '**.c'
+      - '**.cpp'
+      - '**.h'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - '**.lc'
+      - '**.lucia'
+      - '**.rs'
+      - '**.toml'
+      - '**.c'
+      - '**.cpp'
+      - '**.h'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-ubuntu:
+    name: Test (Ubuntu) - ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y make gcc g++
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
+      - name: Build lib
+        run: make lib
+
+      - name: Build C test binary
+        run: gcc -std=c99 ./tests/lib_tests/test.c -I./src/env/assets/include ./src/env/bin/liblucia.a -o test_lucia_c -lm && ./test_lucia_c
+
+      - name: Build C++ test binary
+        run: g++ -std=c++11 ./tests/lib_tests/test.cpp -I./src/env/assets/include ./src/env/bin/liblucia.a -o test_lucia_cpp -lm && ./test_lucia_cpp
+
+  test-arch:
+    name: Test (Arch Linux) - ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: archlinux:base-devel
+    strategy:
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - name: Install tools
+        run: pacman -Sy --noconfirm git make rustup gcc g++
+
+      - name: Set Rust ${{ matrix.rust }}
+        run: rustup default ${{ matrix.rust }}
+
+      - uses: actions/checkout@v4
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
+      - name: Build lib
+        run: make lib
+
+      - name: Build C test binary
+        run: gcc -std=c99 ./tests/lib_tests/test.c -I./src/env/assets/include ./src/env/bin/liblucia.a -o test_lucia_c -lm && ./test_lucia_c
+
+      - name: Build C++ test binary
+        run: g++ -std=c++11 ./tests/lib_tests/test.cpp -I./src/env/assets/include ./src/env/bin/liblucia.a -o test_lucia_cpp -lm && ./test_lucia_cpp

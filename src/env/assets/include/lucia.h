@@ -142,13 +142,6 @@ CBool lucia_map_try_get(LuciaValue map, const LuciaValue* key, const LuciaValue*
 const LuciaValue* lucia_map_get_cstr(LuciaValue map, const char* key);                    // key is converted to a string value internally (temporary, freed automatically). Returns borrowed pointer or NULL.
 CBool lucia_map_try_get_cstr(LuciaValue map, const char* key, const LuciaValue** out);    // same as above but returns bool
 
-// error helpers - all take borrowed pointers to LuciaError
-void lucia_error_print(const LuciaError* err, FILE* out); // prints formatted error to FILE*. No allocation.
-const char* lucia_error_type(const LuciaError* err);
-const char* lucia_error_message(const LuciaError* err);
-const char* lucia_error_help(const LuciaError* err);
-const char* lucia_error_location(const LuciaError* err); // borrowed from internal thread-local buffer. Valid until next call to lucia_error_location.
-
 // helpers to convert LuciaValue to native types (all borrowed)
 int64_t value_as_int(LuciaValue v);
 double value_as_float(LuciaValue v);
@@ -219,6 +212,13 @@ const LuciaValue* lucia_result_value(const LuciaResult* res);  // returns NULL i
 const LuciaError* lucia_result_error(const LuciaResult* res);  // returns NULL if not error
 CBool lucia_result_try_as_value(const LuciaResult* res, const LuciaValue** out); // returns true on value, false on error
 CBool lucia_result_try_as_error(const LuciaResult* res, const LuciaError** out); // returns true on error, false on value
+
+// error helpers - all take borrowed pointers to LuciaError
+void lucia_error_print(const LuciaError* err, FILE* out); // prints formatted error to FILE*. No allocation.
+const char* lucia_error_type(const LuciaError* err);
+const char* lucia_error_message(const LuciaError* err);
+const char* lucia_error_help(const LuciaError* err);
+const char* lucia_error_location(const LuciaError* err); // borrowed from internal thread-local buffer. Valid until next call to lucia_error_location.
 
 // BuildInfo is static, doesnt need freeing
 typedef struct BuildInfo {
