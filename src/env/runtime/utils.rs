@@ -357,7 +357,7 @@ pub fn clear_terminal() -> Result<(), io::Error> {
 }
 
 static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
-    let mut m = HashMap::with_capacity_and_hasher(18, Default::default());
+    let mut m = HashMap::with_capacity_and_hasher(23, Default::default());
     m.insert("black", "\x1b[30m");
     m.insert("red", "\x1b[31m");
     m.insert("green", "\x1b[32m");
@@ -376,6 +376,10 @@ static COLOR_MAP: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     m.insert("bright_cyan", "\x1b[96m");
     m.insert("bright_white", "\x1b[97m");
     m.insert("reset", "\x1b[0m");
+    m.insert("bold", "\x1b[1m");
+    m.insert("dim", "\x1b[2m");
+    m.insert("italic", "\x1b[3m");
+    m.insert("underline", "\x1b[4m");
     m
 });
 

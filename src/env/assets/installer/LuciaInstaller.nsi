@@ -24,7 +24,7 @@ RequestExecutionLevel admin
 Icon "..\installer.ico"
 SetOverwrite on
 
-BrandingText "Installation Wizard by SirPigari"
+BrandingText "Installation Wizard by Markofwitch"
 
 ShowInstDetails show
 !define MUI_ABORTWARNING
