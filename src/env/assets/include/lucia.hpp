@@ -258,6 +258,13 @@ namespace lucia {
 
         void* as_pointer() const { return value_as_pointer(v); }
 
+        static Value from_string(const std::string& s) {
+            return Value(lucia_value_clone(lucia_value_string(s.c_str())), true);
+        }
+        static Value from_bytes(const std::vector<uint8_t>& b) {
+            return Value(lucia_value_clone(lucia_value_bytes(b.data(), b.size())), true);
+        }
+
         Value operator[](size_t index) const {
             const LuciaValue* ptr = lucia_list_get(v, index);
             if (!ptr) throw std::out_of_range("Index out of bounds or not a list");
