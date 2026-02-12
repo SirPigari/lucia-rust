@@ -123,8 +123,17 @@ uint64_t lucia_value_hash(LuciaValue v);                                        
 LuciaValueType lucia_value_get_type(LuciaValue v);                               // returns the type tag
 const char* lucia_value_type_name(LuciaValueType t);                             // borrowed static string.
 const char* lucia_value_string_ptr(LuciaValue v);                                // borrowed pointer into the LuciaValue's string.
-CBool lucia_value_string_clone(LuciaValue v, const char** out, size_t* out_len); // owns *out. Allocates a new copy. Caller must free *out.
 CBool lucia_value_is_null(LuciaValue v);                                         // returns 1 if value is null, 0 otherwise
+
+// cloning
+LuciaValue lucia_value_clone(LuciaValue v);                                      // shallow clones a LuciaValue. Must lucia_free_value() the result.
+LuciaValue lucia_value_deep_clone(LuciaValue v);                                 // deep clones a LuciaValue. Must lucia_free_value() the result.
+CBool lucia_value_string_clone(LuciaValue v, const char** out, size_t* out_len); // owns *out. Allocates a new copy. Caller must free *out.
+
+// validating
+CBool lucia_value_is_valid(LuciaValue v);
+Cbool lucia_value_is_valid_ptr(const LuciaValue* v);
+Cbool lucia_value_is_truthy(LuciaValue v);
 
 // borrowed from internal thread-local buffer. Valid until next call to lucia_value_debug.
 const char* lucia_value_debug(LuciaValue v);

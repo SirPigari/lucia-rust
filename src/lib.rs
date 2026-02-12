@@ -410,6 +410,41 @@ fn error_to_abi(e: &Error) -> LuciaError {
     }
 }
 
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_clone(v: LuciaValue) -> LuciaValue {
+    v.clone()
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_deep_clone(v: LuciaValue) -> LuciaValue {
+    v.clone() // for now, there is no need for a deep clone since everything is cloned by the derived clone but could change in future
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_is_valid(v: LuciaValue) -> CBool {
+    match v.tag {
+        LuciaValueType::VALUE_NULL | LuciaValueType::VALUE_INT | LuciaValueType::VALUE_FLOAT |
+        LuciaValueType::VALUE_STRING | LuciaValueType::VALUE_BOOLEAN | LuciaValueType::VALUE_LIST |
+        LuciaValueType::VALUE_MAP | LuciaValueType::VALUE_BYTES | LuciaValueType::VALUE_POINTER => 1,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_is_valid_ptr(v: *const LuciaValue) -> CBool {
+    if v.is_null() {
+        return 0;
+    }
+
+    match unsafe { &*v }.tag {
+        LuciaValueType::VALUE_NULL | LuciaValueType::VALUE_INT | LuciaValueType::VALUE_FLOAT |
+        LuciaValueType::VALUE_STRING | LuciaValueType::VALUE_BOOLEAN | LuciaValueType::VALUE_LIST |
+        LuciaValueType::VALUE_MAP | LuciaValueType::VALUE_BYTES | LuciaValueType::VALUE_POINTER => 1,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_value_is_truthy(v: LuciaValue) -> CBool {
+    let val = abi_to_value(&v);
+    if val.is_truthy() { 1 } else { 0 }
+}
+
 #[unsafe(no_mangle)] pub extern "C" fn lucia_value_cmp(a: LuciaValue, b: LuciaValue) -> i32 {
     let val_a = abi_to_value(&a);
     let val_b = abi_to_value(&b);

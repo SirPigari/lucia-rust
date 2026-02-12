@@ -23,11 +23,32 @@
 #define LUCIA_VERSION_MINOR (((LUCIA_API_VERSION) >> 8)  & 0xF)
 #define LUCIA_VERSION_PATCH ((LUCIA_API_VERSION) & 0xFF)
 
+typedef uint8_t CBool;
+enum LuciaValueType : uint8_t {
+    VALUE_NULL = 0,
+    VALUE_INT = 1,
+    VALUE_FLOAT = 2,
+    VALUE_STRING = 3,
+    VALUE_BOOLEAN = 4,
+    VALUE_LIST = 5,
+    VALUE_MAP = 6,
+    VALUE_BYTES = 7,
+    VALUE_POINTER = 8,
+    VALUE_UNSUPPORTED = 255,
+};
+
+enum LuciaResultTag : uint8_t {
+    LUCIA_RESULT_OK = 1,
+    LUCIA_RESULT_ERROR = 2,
+    LUCIA_RESULT_CONFIG_ERR = 3,
+    LUCIA_RESULT_PANIC = 4,
+    LUCIA_RESULT_NONE = 0,
+};
+
 extern "C" {
     #include <stdint.h>
     #include <stddef.h>
     #include <stdio.h>
-    typedef uint8_t CBool;
     typedef struct LuciaConfig {
         CBool moded;
         CBool debug;
@@ -44,18 +65,6 @@ extern "C" {
         size_t stack_size;
         const char* version;
     } LuciaConfig;
-    enum LuciaValueType : uint8_t {
-        VALUE_NULL = 0,
-        VALUE_INT = 1,
-        VALUE_FLOAT = 2,
-        VALUE_STRING = 3,
-        VALUE_BOOLEAN = 4,
-        VALUE_LIST = 5,
-        VALUE_MAP = 6,
-        VALUE_BYTES = 7,
-        VALUE_POINTER = 8,
-        VALUE_UNSUPPORTED = 255,
-    };
     typedef struct LuciaValue LuciaValue;
     typedef union ValueData {
         int64_t int_v;
@@ -86,6 +95,11 @@ extern "C" {
     const char* lucia_value_type_name(LuciaValueType t);
     const char* lucia_value_string_ptr(LuciaValue v);
     CBool lucia_value_string_clone(LuciaValue v, const char** out, size_t* out_len);
+    LuciaValue lucia_value_clone(LuciaValue v);
+    LuciaValue lucia_value_deep_clone(LuciaValue v);
+    CBool lucia_value_is_valid(LuciaValue v);
+    Cbool lucia_value_is_valid_ptr(const LuciaValue* v);
+    Cbool lucia_value_is_truthy(LuciaValue v);
     CBool lucia_value_is_null(LuciaValue v);
     const char* lucia_value_debug(LuciaValue v);
     const char* lucia_value_display(LuciaValue v);
@@ -121,8 +135,6 @@ extern "C" {
         CBool cast;
     } lucia__ValueAsArgs;
     CBool lucia__value_as_args(LuciaValue v, LuciaValueType t, void* out, lucia__ValueAsArgs args);
-    #define value_as(v, t, out, ...) \
-        lucia__value_as_args(v, t, out, (lucia__ValueAsArgs){ __VA_ARGS__ })
     typedef struct LuciaError {
         const char* err_type;
         const char* err_msg;
@@ -131,12 +143,6 @@ extern "C" {
         const char* line_text;
         size_t column;
     } LuciaError;
-    enum LuciaResultTag : uint8_t {
-        LUCIA_RESULT_OK = 1,
-        LUCIA_RESULT_ERROR = 2,
-        LUCIA_RESULT_CONFIG_ERR = 3,
-        LUCIA_RESULT_PANIC = 4,
-    };
     typedef union LuciaResultData {
         LuciaValue value;
         LuciaError error;
@@ -225,6 +231,7 @@ namespace lucia {
             return s ? std::string(s) : std::string{};
         }
         std::vector<uint8_t> as_bytes() const {
+            if (v.tag != VALUE_BYTES) return {};
             const uint8_t* p = value_as_bytes_ptr(v);
             size_t len = value_as_bytes_len(v);
             return p ? std::vector<uint8_t>(p, p + len) : std::vector<uint8_t>{};
@@ -274,6 +281,13 @@ namespace lucia {
         }
 
         bool is_null() const { return lucia_value_is_null(v); }
+
+        bool is_valid() const { return lucia_value_is_valid(v); }
+        bool is_truthy() const { return lucia_value_is_truthy(v); }
+        static bool is_valid(const Value& val) { return lucia_value_is_valid(val.v); }
+
+        Value clone() const { return Value(lucia_value_clone(v), true); }
+        Value deep_clone() const { return Value(lucia_value_deep_clone(v), true); }
     };
 
     class Error {
@@ -314,12 +328,12 @@ namespace lucia {
         explicit Result(LuciaResult res) : r(res) {}
         ~Result() { lucia_free_result(r); }
 
-        Result(Result&& other) noexcept : r(other.r) { other.r.tag = (LuciaResultTag)0; }
+        Result(Result&& other) noexcept : r(other.r) { other.r.tag = LUCIA_RESULT_NONE; }
         Result& operator=(Result&& other) noexcept {
             if (this != &other) {
                 lucia_free_result(r);
                 r = other.r;
-                other.r.tag = (LuciaResultTag)0;
+                other.r.tag = LUCIA_RESULT_NONE;
             }
             return *this;
         }
@@ -390,6 +404,7 @@ namespace lucia {
 
         static BuildInfo get() {
             const ::BuildInfo* b = lucia_get_build_info();
+            if (!b) throw std::runtime_error("lucia_get_build_info() returned null");
             BuildInfo info;
             info.name = b->name;
             info.version = b->version;
@@ -405,6 +420,14 @@ namespace lucia {
             return info;
         }
     };
+
+    inline bool value_as(LuciaValue v, LuciaValueType t, void* out,
+                        bool force = 0, bool cast = 0) {
+        lucia__ValueAsArgs args;
+        args.force = (CBool)force;
+        args.cast  = (CBool)cast;
+        return (bool)(lucia__value_as_args(v, t, out, args));
+    }
 
     inline std::ostream& operator<<(std::ostream& os, const Value& val) {
         os << val.display();

@@ -131,6 +131,17 @@ return argv[0], argv[1]
     std::cout << "[BuildInfo] git_hash: " << info.git_hash << "\n";
     std::cout << "[BuildInfo] build_date: " << info.build_date << "\n";
 
+    auto val = lucia::Value(lucia_value_string("hello"), true);
+    auto clone = val.clone();
+    std::cout << "\n[Clone] " << clone.debug();
+    clone.~Value(); // manually free clone to test destructor
+    if (val.is_valid()) {
+        printf(" (valid)\n");
+    } else {
+        printf(" (invalid)\n");
+    }
+
+
     std::cout << "\n=== End of Test ===\n";
     return 0;
 }

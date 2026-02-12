@@ -138,6 +138,16 @@ int main(void) {
     printf("[BuildInfo] git_hash    : %s\n", info->git_hash);
     printf("[BuildInfo] build_date  : %s\n", info->build_date);
 
+    const LuciaValue val = lucia_value_string("hello");
+    LuciaValue clone = lucia_value_clone(val);
+    printf("\n[Clone] %s", lucia_value_debug(clone));
+    lucia_free_value(clone);
+    if (lucia_value_is_valid(val)) {
+        printf(" (valid)\n");
+    } else {
+        printf(" (invalid)\n");
+    }
+
     printf("\n=== End of Test ===\n");
 
     lucia_free_config(cfg);
