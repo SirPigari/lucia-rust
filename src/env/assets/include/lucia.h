@@ -132,8 +132,8 @@ CBool lucia_value_string_clone(LuciaValue v, const char** out, size_t* out_len);
 
 // validating
 CBool lucia_value_is_valid(LuciaValue v);
-Cbool lucia_value_is_valid_ptr(const LuciaValue* v);
-Cbool lucia_value_is_truthy(LuciaValue v);
+CBool lucia_value_is_valid_ptr(const LuciaValue* v);
+CBool lucia_value_is_truthy(LuciaValue v);
 
 // borrowed from internal thread-local buffer. Valid until next call to lucia_value_debug.
 const char* lucia_value_debug(LuciaValue v);

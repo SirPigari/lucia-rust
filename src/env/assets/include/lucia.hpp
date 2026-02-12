@@ -98,8 +98,8 @@ extern "C" {
     LuciaValue lucia_value_clone(LuciaValue v);
     LuciaValue lucia_value_deep_clone(LuciaValue v);
     CBool lucia_value_is_valid(LuciaValue v);
-    Cbool lucia_value_is_valid_ptr(const LuciaValue* v);
-    Cbool lucia_value_is_truthy(LuciaValue v);
+    CBool lucia_value_is_valid_ptr(const LuciaValue* v);
+    CBool lucia_value_is_truthy(LuciaValue v);
     CBool lucia_value_is_null(LuciaValue v);
     const char* lucia_value_debug(LuciaValue v);
     const char* lucia_value_display(LuciaValue v);
