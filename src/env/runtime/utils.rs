@@ -21,7 +21,7 @@ use crate::env::runtime::types::VALID_TYPES;
 use crate::env::runtime::precompile::interpret;
 use crate::env::runtime::tokens::Token;
 use crate::env::runtime::native;
-use crate::env::runtime::internal_structs::{EffectFlags, PathElement};
+use crate::env::runtime::internal_structs::{EffectFlags, PathElement, Doc, Param};
 use crate::interpreter::Interpreter;
 use regex::Regex;
 
@@ -436,7 +436,7 @@ pub fn format_value(value: &Value) -> String {
     match value {
         Value::Float(n) => format_float(&n),
         Value::Int(n) => format_int(&n),
-        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('\"', "\\\"")),
+        Value::String(s) => format!("\"{}\"", escape_string(s).unwrap_or(s.to_string())),
         Value::Boolean(b) => b.to_string(),
         Value::Null => "null".to_string(),
 
@@ -732,13 +732,14 @@ pub fn unescape_string_premium_edition(s: &str) -> Result<String, String> {
 
 pub fn make_native_method<F>(
     name: &str,
+    docs: &str,
     func: F,
     parameters: Vec<Parameter>,
     return_type: &str,
     is_public: bool,
     is_static: bool,
     is_final: bool,
-    state: Option<String>
+    state: Option<String>,
 ) -> Function
 where
     F: Fn(&mut Value, &std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
@@ -755,6 +756,7 @@ where
             is_native: true,
             state,
             effects: EffectFlags::UNKNOWN,
+            doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) },
         },
     };
 
@@ -786,6 +788,7 @@ where
             is_native: true,
             state,
             effects: EffectFlags::UNKNOWN,
+            doc: None,
         },
     };
 
@@ -817,6 +820,7 @@ where
             is_native: true,
             state,
             effects: EffectFlags::UNKNOWN,
+            doc: None,
         },
     };
 
@@ -825,6 +829,7 @@ where
 
 pub fn make_native_method_pt<F>(
     name: &str,
+    docs: &str,
     func: F,
     parameters: Vec<Parameter>,
     return_type: &Type,
@@ -848,6 +853,7 @@ where
             is_native: true,
             state,
             effects: EffectFlags::UNKNOWN,
+            doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) },
         },
     };
 
@@ -856,6 +862,7 @@ where
 
 pub fn make_native_shared_fn<F>(
     name: &str,
+    docs: &str,
     func: F,
     parameters: Vec<Parameter>,
     return_type: &str,
@@ -879,6 +886,7 @@ where
             is_native: true,
             state,
             effects: EffectFlags::UNKNOWN,
+            doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) },
         },
     };
 
@@ -1186,7 +1194,23 @@ static SPECIAL_FUNCTION_MAP: Lazy<HashMap<String, FunctionMetadata>> = Lazy::new
 });
 
 fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
-    let mut map = HashMap::with_capacity_and_hasher(9, Default::default());
+    let mut map = HashMap::with_capacity_and_hasher(10, Default::default());
+
+    map.insert(
+        "exit".to_string(),
+        FunctionMetadata {
+            name: "exit".to_string(),
+            parameters: vec![],
+            return_type: Type::new_simple("void"),
+            is_public: true,
+            is_static: true,
+            is_final: true,
+            is_native: true,
+            state: None,
+            effects: EffectFlags::IO,
+            doc: Some(Doc::from("Exits the current interpreter. To exit the entire program, use os.exit().")),
+        },
+    );
 
     map.insert(
         "breakpoint".to_string(),
@@ -1200,6 +1224,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::IO,
+            doc: Some(Doc::from("Triggers a breakpoint in the debugger if available. Optionally takes a condition and a message.")),
         },
     );
     map.insert(
@@ -1221,6 +1246,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::IO,
+            doc: Some(Doc::from("Performs an HTTP request. Optionally takes a method, headers, parameters, data, and JSON payload.")),
         }
     );
     map.insert(
@@ -1235,6 +1261,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::UNKNOWN,
+            doc: Some(Doc::from("Evaluates a string of code in the current context and returns the result.")),
         },
     );
     map.insert(
@@ -1249,6 +1276,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::UNKNOWN,
+            doc: Some(Doc::from("Executes the given code string.")),
         },
     );
     map.insert(
@@ -1263,6 +1291,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::IO,
+            doc: Some(Doc::from("Prints a warning message.")),
         },
     );
     map.insert(
@@ -1277,6 +1306,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::PURE,
+            doc: Some(Doc::from("Converts a standalone function into a method (debugging purposes).")),
         },
     );
     map.insert(
@@ -1295,6 +1325,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::IO,
+            doc: Some(Doc::from("Creates a new module from the given code string. Optionally takes a name and path.")),
         },
     );
     map.insert(
@@ -1312,6 +1343,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::STATE,
+            doc: Some(Doc::from("Sets a configuration value. This is used internally for things like setting the debug mode.")),
         },
     );
     map.insert(
@@ -1329,6 +1361,7 @@ fn generate_special_function_meta() -> HashMap<String, FunctionMetadata> {
             is_native: true,
             state: None,
             effects: EffectFlags::STATE,
+            doc: Some(Doc::from("Sets the directive. This is used internally.")),
         },
     );
 
@@ -2546,9 +2579,6 @@ pub fn convert_json_value_to_lucia_value(json_value: &serde_json::Value) -> Valu
             Value::List(list)
         }
         serde_json::Value::Object(obj) => {
-            // let keys: Vec<Value> = obj.keys().map(|k| Value::String(k.clone())).collect();
-            // let values: Vec<Value> = obj.values().map(convert_json_value_to_lucia_value).collect();
-            // Value::Map { keys, values }
             Value::Map(HashMap::from_iter(
                 obj.iter().map(|(k, v)| (Value::String(k.clone()), convert_json_value_to_lucia_value(v)))
             ))
@@ -2571,6 +2601,125 @@ pub fn to_hex(bytes: &[u8]) -> String {
         });
     }
     s
+}
+
+pub fn wrap_text(s: &str, max: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+
+    for (li, line) in s.lines().enumerate() {
+        if li > 0 {
+            out.push('\n');
+        }
+
+        if line.chars().count() <= max {
+            out.push_str(line);
+            continue;
+        }
+
+        let mut len = 0;
+        for word in line.split(' ') {
+            let wlen = word.chars().count();
+
+            if len > 0 && len + 1 + wlen > max {
+                out.push('\n');
+                out.push_str(word);
+                len = wlen;
+            } else {
+                if len > 0 {
+                    out.push(' ');
+                    len += 1;
+                }
+                out.push_str(word);
+                len += wlen;
+            }
+        }
+    }
+
+    out
+}
+
+pub fn parse_doc(doc_comment: &str) -> Doc {
+    let mut doc = Doc::default();
+    let mut current_tag: Option<String> = None;
+    let mut current_value: Vec<String> = vec![];
+
+    for line in doc_comment.lines() {
+        let line = line.trim_start_matches('/').trim();
+
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(stripped) = line.strip_prefix('@') {
+            if let Some(tag) = current_tag.take() {
+                let value = current_value.join("\n");
+                match tag.to_lowercase().as_str() {
+                    "param" => {
+                        if let Some((name_ty, desc)) = value.split_once('-') {
+                            let name_ty = name_ty.trim();
+                            let desc = desc.trim().to_string();
+                            let (name, ty) = if let Some((n, t)) = name_ty.split_once(':') {
+                                (n.trim().to_string(), Some(t.trim().to_string()))
+                            } else {
+                                (name_ty.to_string(), None)
+                            };
+                            doc.params.push(Param { name, ty, desc });
+                        }
+                    }
+                    "return" | "returns" => doc.returns = Some(value.trim().to_string()),
+                    "example" => doc.examples.push(value),
+                    other => {
+                        doc.others
+                            .entry(other.to_string())
+                            .or_default()
+                            .push(value);
+                    }
+                }
+                current_value.clear();
+            }
+
+            if let Some((tag_name, rest)) = stripped.split_once(' ') {
+                current_tag = Some(tag_name.to_string().trim_end_matches(':').to_string());
+                if !rest.trim().is_empty() {
+                    current_value.push(rest.trim().to_string());
+                }
+            } else {
+                current_tag = Some(stripped.to_string().trim_end_matches(':').to_string());
+            }
+        } else if current_tag.is_some() {
+            current_value.push(line.to_string());
+        } else {
+            if !doc.description.is_empty() {
+                doc.description.push('\n');
+            }
+            doc.description.push_str(line);
+        }
+    }
+
+    if let Some(tag) = current_tag {
+        let value = current_value.join("\n");
+        match tag.as_str() {
+            "param" => {
+                if let Some((name_ty, desc)) = value.split_once('-') {
+                    let name_ty = name_ty.trim();
+                    let desc = desc.trim().to_string();
+                    let (name, ty) = if let Some((n, t)) = name_ty.split_once(':') {
+                        (n.trim().to_string(), Some(t.trim().to_string()))
+                    } else {
+                        (name_ty.to_string(), None)
+                    };
+                    doc.params.push(Param { name, ty, desc });
+                }
+            }
+            "return" => doc.returns = Some(value),
+            "example" => doc.examples.push(value),
+            other => {
+                doc.others.entry(other.to_string()).or_default().push(value);
+            }
+        }
+    }
+
+    doc
 }
 
 static VALID_ALIAS_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -2596,11 +2745,7 @@ pub const RESERVED_KEYWORDS: &[&str] = &[
     "forget", "match", "defer", "true", "false", "null", "typedef", "type"
 ];
 
-#[cfg(target_pointer_width = "64")]
-pub const MAX_PTR: usize = 0x0000_FFFF_FFFF_FFFF;
-
-#[cfg(target_pointer_width = "32")]
-pub const MAX_PTR: usize = 0xFFFF_FFFF;
+pub const MAX_PTR: Lazy<usize> = Lazy::new(|| if cfg!(target_pointer_width = "64") { 0x0000_FFFF_FFFF_FFFF } else { 0xFFFF_FFFF });
 
 pub const NULL: Value = Value::Null;
 pub const TRUE: Value = Value::Boolean(true);

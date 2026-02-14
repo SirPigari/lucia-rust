@@ -371,7 +371,7 @@ impl<C> Decode<C> for Value {
             11 => Ok(Value::Struct(Box::<Struct>::decode(decoder)?)),
             12 => {
                 let ptr_usize = usize::decode(decoder)?;
-                if ptr_usize < 0x1000 || ptr_usize > MAX_PTR {
+                if ptr_usize < 0x1000 || ptr_usize > *MAX_PTR {
                     return Err(DecodeError::Other("Pointer value out of range".into()));
                 }
 

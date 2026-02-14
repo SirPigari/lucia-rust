@@ -301,6 +301,7 @@ pub enum Node {
         modifiers: Vec<String>,
         return_type: Box<Statement>,
         effect_flags: EffectFlags,
+        docs: Option<String>,
     },
     GeneratorDeclaration {
         name: String,
@@ -623,12 +624,13 @@ impl Statement {
             Node::Group { body } => format!(", \"body\": [{}]",
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
             ),
-            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{}\", \"body\": [{}]",
+            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags, docs } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{}\", \"docs\": {}, \"body\": [{}]",
                 name,
                 args.iter().map(|v| v.format_for_debug()).collect::<Vec<String>>().join(", "),
                 modifiers.into_iter().map(|m| format!("{:?}", m)).collect::<Vec<String>>().join(", "),
                 return_type.format_for_debug(),
                 effect_flags.display(),
+                docs.as_ref().map_or("null".to_string(), |d| format!("\"{}\"", d)),
                 body.iter().map(|s| s.format_for_debug()).collect::<Vec<String>>().join(", ")
             ),
             Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => format!(", \"name\": \"{}\", \"args\": [{}], \"modifiers\": [{}], \"return_type\": {}, \"effect_flags\": \"{}\", \"body\": [{}]",

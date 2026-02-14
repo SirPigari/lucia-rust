@@ -27,6 +27,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "levenshtein_distance",
+        "Calculate the Levenshtein distance between two strings.",
         levenshtein_distance_handler,
         vec![
             Parameter::positional("s1", "str"),
@@ -38,6 +39,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "hex_to_ansi",
+        "Convert a hex color code to an ANSI escape code.",
         hex_to_ansi_handler,
         vec![Parameter::positional("hex", "str")],
         "str",
@@ -46,6 +48,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "format_value",
+        "Format a value as a string for display.",
         format_value_handler,
         vec![Parameter::positional("value", "any")],
         "str",
@@ -54,6 +57,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "unescape_string",
+        "Unescape a string containing escape sequences like \\n, \\t, etc.",
         unescape_string_handler,
         vec![Parameter::positional("s", "str")],
         "str",
@@ -62,6 +66,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "replace_accented",
+        "Replace accented characters in a string with their unaccented equivalents.",
         replace_accented_handler,
         vec![Parameter::positional("s", "str")],
         "str",
@@ -70,6 +75,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "valid_alias",
+        "Check if a string is a valid alias (only contains alphanumeric characters and underscores).",
         sanitize_alias_handler,
         vec![Parameter::positional("s", "str")],
         "str",
@@ -78,6 +84,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "decode_rle",
+        "Decode a run-length encoded string or list. For strings, the format is '3a2b' which decodes to 'aaabb'. For lists, the format is [[3, 'a'], [2, 'b']] which decodes to ['a', 'a', 'a', 'b', 'b'].",
         decode_rle,
         vec![
             Parameter::positional_pt("rle", &str_or_list),
@@ -88,6 +95,7 @@ pub fn create_utils_map() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "nth_prime",
+        "Calculate the nth prime number. For n <= 1,000,000, it uses a sieve algorithm. For n <= 1,000,000,000, it uses an approximation based on the prime number theorem. For larger n, it uses arbitrary-precision arithmetic to compute the nth prime.",
         nth_prime,
         vec![
             Parameter::positional("n", "int"),

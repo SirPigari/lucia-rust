@@ -217,6 +217,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn_pt!(
         map,
         "compile",
+        "Compile a LASM assembly string into a callable function. Returns a pointer because LasmFunction is internal only.",
         le_compile,
         vec![Parameter::positional("asm", "str")],
         &lasm_fst_ptr,
@@ -225,6 +226,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "call",
+        "Call a compiled LASM function with the given variables. The 'function' argument should be a pointer returned by 'compile'. Returns a tuple of (exit_code, map_of_variables).",
         le_call,
         vec![
             Parameter::positional_pt("function", &lasm_fst_ptr),
@@ -236,6 +238,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "free",
+        "Free a compiled LASM function. After calling this, the function pointer should not be used again. Returns true if the function was successfully freed, false if it was already freed or not found.",
         le_free,
         vec![
             Parameter::positional_pt("function", &lasm_fst_ptr)

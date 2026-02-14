@@ -480,7 +480,7 @@ pub fn get_lib_names() -> HashMap<Arc<str>, Arc<str>> {
 
 #[macro_export]
 macro_rules! insert_native_fn {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+    ($map:expr, $name:expr, $docs:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
@@ -491,6 +491,7 @@ macro_rules! insert_native_fn {
             true,
             None,
             $effects,
+            $docs,
         );
 
         let func = Function::Native(std::sync::Arc::new(native_fn));
@@ -507,11 +508,22 @@ macro_rules! insert_native_fn {
             ),
         );
     }};
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {
+        insert_native_fn!(
+            $map,
+            $name,
+            "",
+            $handler,
+            $params,
+            $ret_type,
+            $effects
+        )
+    };
 }
 
 #[macro_export]
 macro_rules! insert_native_fn_pt {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+    ($map:expr, $name:expr, $docs:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
             $name,
             $handler,
@@ -522,6 +534,7 @@ macro_rules! insert_native_fn_pt {
             true,
             None,
             $effects,
+            $docs,
         );
 
         let func = Function::Native(std::sync::Arc::new(native_fn));
@@ -538,6 +551,17 @@ macro_rules! insert_native_fn_pt {
             ),
         );
     }};
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {
+        insert_native_fn_pt!(
+            $map,
+            $name,
+            "",
+            $handler,
+            $params,
+            $ret_type,
+            $effects
+        )
+    };
 }
 
 #[macro_export]
@@ -553,6 +577,7 @@ macro_rules! insert_native_shared_fn {
             true,
             None,
             $effects,
+            "",
         );
 
         let func = Function::SharedNative(std::sync::Arc::new(native_fn));
@@ -604,7 +629,7 @@ macro_rules! insert_native_shared_fn_pt {
 
 #[macro_export]
 macro_rules! insert_native_fn_state {
-    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr, $effects:expr) => {{
+    ($map:expr, $name:expr, $docs:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new(
             $name,
             $handler,
@@ -615,6 +640,7 @@ macro_rules! insert_native_fn_state {
             true,
             Some($state.to_string()),
             $effects,
+            $docs,
         );
 
         let func = Function::Native(std::sync::Arc::new(native_fn));
@@ -631,6 +657,18 @@ macro_rules! insert_native_fn_state {
             ),
         );
     }};
+    ($map:expr, $name:expr, $handler:expr, $params:expr, $ret_type:expr, $state:expr, $effects:expr) => {
+        insert_native_fn_state!(
+            $map,
+            $name,
+            "",
+            $handler,
+            $params,
+            $ret_type,
+            $state,
+            $effects
+        )
+    };
 }
 
 #[macro_export]
@@ -652,7 +690,7 @@ macro_rules! insert_native_var {
 
 #[macro_export]
 macro_rules! make_native_fn_pt {
-    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+    ($name:expr, $docs:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
             $name,
             $handler,
@@ -663,15 +701,26 @@ macro_rules! make_native_fn_pt {
             true,
             None,
             $effects,
+            $docs,
         );
 
         Function::Native(std::sync::Arc::new(native_fn))
+    }};
+    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        make_native_fn_pt!(
+            $name,
+            "",
+            $handler,
+            $params,
+            $ret_type,
+            $effects
+        )
     }};
 }
 
 #[macro_export]
 macro_rules! make_native_static_fn_pt {
-    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+    ($name:expr, $docs:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
         let native_fn = crate::env::runtime::functions::NativeFunction::new_pt(
             $name,
             $handler,
@@ -682,8 +731,19 @@ macro_rules! make_native_static_fn_pt {
             true,
             None,
             $effects,
+            $docs,
         );
 
         Function::Native(std::sync::Arc::new(native_fn))
+    }};
+    ($name:expr, $handler:expr, $params:expr, $ret_type:expr, $effects:expr) => {{
+        make_native_static_fn_pt!(
+            $name,
+            "",
+            $handler,
+            $params,
+            $ret_type,
+            $effects
+        )
     }};
 }

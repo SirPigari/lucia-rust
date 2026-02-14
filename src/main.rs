@@ -1613,7 +1613,6 @@ fn repl(
             continue;
         }
         
-        
         if input.starts_with(":load") {
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() < 2 {

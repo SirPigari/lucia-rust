@@ -7,7 +7,7 @@ use crate::env::runtime::internal_structs::EffectFlags;
 use crate::env::runtime::variables::Variable;
 use imagnum::ApproxEq;
 
-use crate::{insert_native_fn, insert_native_var};
+use crate::{insert_native_fn, insert_native_fn_state, insert_native_var};
 
 // This module provides mathematical functions and constants.
 // It includes basic operations like sqrt, sin, cos, etc., and constants like PI, E, etc.
@@ -601,7 +601,7 @@ fn delta(args: &HashMap<String, Value>) -> Value {
         },
         _ => return Value::new_error("TypeError", "expected int or float", None),
     };
-    Value::Boolean(a == b)
+    Value::Float((a - b).unwrap_or(Float::ZERO.clone()).abs())
 }
 
 fn max_handler(args: &HashMap<String, Value>) -> Value {
@@ -685,6 +685,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "log",
+        "Calculate the logarithm of x to the given base (default is e)",
         log,
         vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_optional_pt("base", &int_float_type, Value::Float(Float::from_f64(10.0)))],
         "float",
@@ -693,38 +694,46 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "conj",
+        "Calculate the complex conjugate of a number (for real numbers, this is just the number itself)",
         conj,
         vec![Parameter::positional_pt("x", &int_float_type)],
         "float",
         EffectFlags::PURE
     );
-    insert_native_fn!(
+    insert_native_fn_state!(
         map,
         "powf",
+        "Calculate x raised to the power of y (floating-point exponent)",
         pow,
         vec![Parameter::positional("x", "float"), Parameter::positional("y", "float")],
         "float",
+        "Deprecated: use the '^' operator instead (e.g., 5^3 for 5 raised to the power of 3)",
         EffectFlags::PURE
     );
-    insert_native_fn!(
+    insert_native_fn_state!(
         map,
         "powi",
+        "Calculate x raised to the power of y (integer exponent)",
         pow,
         vec![Parameter::positional("x", "int"), Parameter::positional("y", "int")],
         "int",
+        "Deprecated: use the '^' operator instead (e.g., 5^3 for 5 raised to the power of 3)",
         EffectFlags::PURE
     );
-    insert_native_fn!(
+    insert_native_fn_state!(
         map,
         "pow",
+        "Calculate x raised to the power of y",
         pow,
         vec![Parameter::positional_pt("x", &int_float_type), Parameter::positional_pt("y", &int_float_type)],
         "any",
+        "Deprecated: use the '^' operator instead (e.g., 5^3 for 5 raised to the power of 3)",
         EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "sign",
+        "Determine the sign of a number: returns -1 for negative, 0 for zero, and 1 for positive",
         sign,
         vec![Parameter::positional_pt("x", &int_float_type)],
         "int",
@@ -734,6 +743,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "gcd",
+        "Calculate the greatest common divisor (GCD) of two integers using the Euclidean algorithm",
         gcd_fn,
         vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
         "int",
@@ -742,6 +752,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "lcm",
+        "Calculate the least common multiple of two integers",
         lcm_fn,
         vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
         "int",
@@ -750,6 +761,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "divmod",
+        "Calculate the quotient and remainder of integer division a // b and a % b",
         divmod_fn,
         vec![Parameter::positional("a", "int"), Parameter::positional("b", "int")],
         "tuple",
@@ -758,22 +770,26 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "modpow",
+        "Calculate (base^exp) % mod efficiently using modular exponentiation",
         modpow_fn,
         vec![Parameter::positional("base", "int"), Parameter::positional("exp", "int"), Parameter::positional("mod", "int")],
         "int",
         EffectFlags::PURE
     );
-    insert_native_fn!(
+    insert_native_fn_state!(
         map,
         "factorial",
+        "Calculate the factorial of a non-negative integer n (n!)",
         factorial_fn,
         vec![Parameter::positional("n", "int")],
         "int",
+        "Deprecated: use the '!' operator instead (e.g., 5! for factorial of 5)",
         EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "binom",
+        "Calculate the binomial coefficient C(n, k) = n! / (k! * (n - k)!)",
         binom_fn,
         vec![Parameter::positional("n", "int"), Parameter::positional("k", "int")],
         "int",
@@ -782,6 +798,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "is_prime",
+        "Check if a number is prime using the Miller-Rabin primality test",
         is_prime_fn,
         vec![Parameter::positional("n", "int")],
         "bool",
@@ -802,6 +819,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "pi_approx",
+        "Calculate an approximation of pi using the Gauss-Legendre algorithm",
         |args: &HashMap<String, Value>| {
             let precision = match args.get("precision") {
                 Some(Value::Int(i)) => i.to_usize().unwrap_or(53),
@@ -818,6 +836,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "e_approx",
+        "Calculate an approximation of Euler's number",
         |args: &HashMap<String, Value>| {
             let precision = match args.get("precision") {
                 Some(Value::Int(i)) => i.to_usize().unwrap_or(53),
@@ -834,6 +853,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "phi_approx",
+        "Calculate an approximation of the golden ratio",
         |_: &HashMap<String, Value>| {
             Value::Float(approx_phi())
         },
@@ -845,6 +865,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "approx",
+        "Check if two numbers are approximately equal within a given epsilon",
         approx,
         vec![
             Parameter::positional_pt("a", &int_float_type),
@@ -857,17 +878,19 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "delta",
+        "Calculate the difference between two values",
         delta,
         vec![
             Parameter::positional_pt("a", &int_float_type),
             Parameter::positional_pt("b", &int_float_type),
         ],
-        "bool",
+        "float",
         EffectFlags::PURE
     );
     insert_native_fn!(
         map,
         "max",
+        "Get the maximum of two numbers",
         max_handler,
         vec![
             Parameter::positional_pt("a", &int_float_type),
@@ -879,6 +902,7 @@ pub fn register() -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "min",
+        "Get the minimum of two values.",
         min_handler,
         vec![
             Parameter::positional_pt("a", &int_float_type),

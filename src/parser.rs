@@ -17,6 +17,7 @@ pub struct Parser {
     pub err: Option<Error>,
     ignore_pipe_count: usize,
     parse_var_decl: bool,
+    doc_comment_buffer: Vec<String>,
 }
 
 impl Parser {
@@ -28,6 +29,7 @@ impl Parser {
             err: None,
             ignore_pipe_count: 0,
             parse_var_decl: true,
+            doc_comment_buffer: vec![],
         }
     }
 
@@ -924,6 +926,7 @@ impl Parser {
                             modifiers: vec!["mutable".to_string()],
                             return_type: Box::new(return_type_stmt),
                             effect_flags: EffectFlags::UNKNOWN,
+                            docs: None,
                         },
                         loc: alloc_loc(self.get_loc()),
                     };
@@ -1138,6 +1141,16 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Statement {
+        let dcb = self.doc_comment_buffer.clone();
+        if let Some(Token(kind, value, _)) = self.token() {
+            if kind == "DOC_COMMENT" {
+                self.doc_comment_buffer.push(value.to_string());
+                self.next();
+                return Statement::Null;
+            } else {
+                self.doc_comment_buffer.clear();
+            }
+        }
         let expr = match self.token().cloned() {
             Some(token) => match token.0.as_ref() {
                 "IDENTIFIER" if VALID_TYPES.contains(&token.1.as_ref()) => {
@@ -1973,6 +1986,13 @@ impl Parser {
                             self.next();
                             let name = self.token().map(|tok| if tok.0.as_ref() == "IDENTIFIER" { tok.1.clone().into_owned() } else { "".to_string() }).unwrap_or_default();
                             let is_function = x == "fun";
+                            let loc = alloc_loc(self.get_loc());
+                            let docs = if !dcb.is_empty() {
+                                let combined = dcb.join("\n").trim().to_string();
+                                Some(combined)
+                            } else {
+                                None
+                            };
                             if RESERVED_KEYWORDS.contains(&name.as_ref()) {
                                 self.raise("SyntaxError", &format!("'{}' is a reserved keyword and cannot be used as a {} name", name, if is_function { "function" } else { "generator" }));
                                 return Statement::Null;
@@ -2181,7 +2201,13 @@ impl Parser {
                             }
 
                             let mut body = vec![];
+                            let mut body_docs = vec![];
                             while let Some(tok) = self.token() {
+                                if tok.0 == "DOC_COMMENT" {
+                                    body_docs.push(tok.1.clone());
+                                    self.next();
+                                    continue;
+                                }
                                 if tok.0 == "IDENTIFIER" && tok.1 == "end" {
                                     break;
                                 }
@@ -2191,6 +2217,17 @@ impl Parser {
                                 }
                                 body.push(stmt);
                             }
+
+                            let body_docs = if !body_docs.is_empty() {
+                                let combined = body_docs.join("\n").trim().to_string();
+                                Some(combined)
+                            } else {
+                                None
+                            };
+
+                            let docs = docs.clone().zip(body_docs.clone()).map(|(x, y)| x + &y)
+                                .or(docs.clone())
+                                .or(body_docs.clone());
 
                             self.check_for("IDENTIFIER", "end");
                             self.next();
@@ -2204,6 +2241,7 @@ impl Parser {
                                         modifiers,
                                         return_type: Box::new(return_type),
                                         effect_flags,
+                                        docs,
                                     }
                                 } else {
                                     Node::GeneratorDeclaration {
@@ -2215,7 +2253,7 @@ impl Parser {
                                         effect_flags,
                                     }
                                 },
-                                loc: alloc_loc(self.get_loc()),
+                                loc,
                             };
                         }
                         "typedef" => {

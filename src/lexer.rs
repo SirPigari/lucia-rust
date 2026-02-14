@@ -1,4 +1,4 @@
-use crate::env::runtime::tokens::{Token, Location, TK_BOOLEAN, TK_EOF, TK_IDENTIFIER, TK_INVALID, TK_NUMBER, TK_OPERATOR, TK_RAW_STRING, TK_SEPARATOR, TK_STRING};
+use crate::env::runtime::tokens::{Location, TK_BOOLEAN, TK_DOC_COMMENT, TK_EOF, TK_IDENTIFIER, TK_INVALID, TK_NUMBER, TK_OPERATOR, TK_RAW_STRING, TK_SEPARATOR, TK_STRING, Token};
 #[allow(unused_imports)]
 use crate::env::runtime::tokens::{ConcreteToken, CTK_COMMENT, CTK_WS};
 use std::borrow::Cow;
@@ -74,6 +74,7 @@ impl<'a> Lexer<'a> {
     }
 
     #[allow(dead_code)]
+    /// currently unstable.
     pub fn tokenize_concrete(&self) -> Vec<ConcreteToken<'a>> {
         let mut pos = 0;
         let len = self.code.len();
@@ -482,6 +483,19 @@ impl<'a> Lexer<'a> {
                 if end < len && self.code[end..].starts_with("#>") {
                     end += 2;
                 }
+                pos = end;
+                continue;
+            }
+
+            // DOC COMMENT ///
+            if slice.starts_with("///") {
+                let mut end = pos + 3;
+                let mut comment_text = String::new();
+                while end < len && !self.code[end..].starts_with("\n") {
+                    comment_text.push_str(&self.code[end..].chars().next().unwrap().to_string());
+                    end += self.code[end..].chars().next().unwrap().len_utf8();
+                }
+                tokens.push(self.make_token(TK_DOC_COMMENT, &comment_text, pos, end));
                 pos = end;
                 continue;
             }

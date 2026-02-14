@@ -120,6 +120,7 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "hello",
+        "world?",
         hello,
         vec![],
         "str",
@@ -148,6 +149,7 @@ pub fn register(_config: &Config) -> HashMap<String, Variable> {
     insert_native_fn!(
         map,
         "ask_deep_thought",
+        "Ask the Deep Thought computer the Ultimate Question of Life, The Universe, and Everything.\nNote: The reason why you don't pass any arguments to this function is because the Deep Thought computer already knows the question, and it doesn't need you to tell it.",
         ask_deep_thought,
         vec![],
         "int",

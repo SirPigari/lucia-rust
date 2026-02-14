@@ -35,6 +35,7 @@ use crate::env::runtime::utils::{
     is_type_ident_available,
     get_object_type_ident,
     unalias_type,
+    parse_doc,
 };
 
 use crate::env::runtime::pattern_reg::{predict_sequence, predict_sequence_until_length};
@@ -1554,8 +1555,8 @@ impl Interpreter {
             Node::Match { condition, cases } => self.handle_match(*condition, &cases),
             Node::Group { body } => self.handle_group(body),
 
-            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
-                self.handle_function_declaration(name, args, body, modifiers, *return_type, effect_flags, false),
+            Node::FunctionDeclaration { name, args, body, modifiers, return_type, effect_flags, docs } => 
+                self.handle_function_declaration(name, args, body, modifiers, *return_type, effect_flags, docs, false),
             Node::GeneratorDeclaration { name, args, body, modifiers, return_type, effect_flags } => 
                 self.handle_generator_declaration(name, args, body, modifiers, *return_type, effect_flags),
             Node::Return { value } => self.handle_return(*value),
@@ -2239,9 +2240,9 @@ impl Interpreter {
         for method in methods_ast {
             let mut m = method.node;
             let mut func;
-            if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags } = &mut m {
+            if let Node::FunctionDeclaration { name, args: a, body, modifiers, return_type, effect_flags, docs } = &mut m {
                 modifiers.insert(0, "final".to_owned());
-                func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags, true);
+                func = self.handle_function_declaration(name.to_owned(), a.to_vec(), body.to_vec(), modifiers.to_vec(), (**return_type).clone(), *effect_flags, docs.clone(), true);
                 if let Value::Function(f) = &mut func {
                     f.promote_to_method(Arc::new(Mutex::new(self.clone())));
                 }
@@ -2614,6 +2615,7 @@ impl Interpreter {
                     is_final,
                     None,
                     effect_flags,
+                    ""
                 )))),
                 "generator".to_owned(),
                 is_static,
@@ -4543,6 +4545,7 @@ impl Interpreter {
         modifiers: Vec<String>, 
         return_type: Statement,
         effect_flags: EffectFlags,
+        docs: Option<String>,
         is_struct_method: bool,
     ) -> Value {
         let mut name = name;
@@ -4629,6 +4632,7 @@ impl Interpreter {
             is_native: false,
             state: None,
             effects: effect_flags,
+            doc: docs.map(|v| parse_doc(&v)),
         };
 
         if self.variables.contains_key(&name) && !name.starts_with("<") && !is_struct_method {
@@ -7541,7 +7545,7 @@ impl Interpreter {
         }
         
         let special_functions = [
-            "breakpoint", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
+            "exit", "breakpoint", "fetch", "exec", "eval", "warn", "as_method", "module", "00__set_cfg__", "00__set_dir__"
         ];
 
         let mut pos_args = Vec::with_capacity(pos_args_stmt.len());
@@ -7576,6 +7580,7 @@ impl Interpreter {
                     is_native: true,
                     state: None,
                     effects: EffectFlags::empty(),
+                    doc: None,
                 },
             }))
         } else {
@@ -8140,6 +8145,10 @@ impl Interpreter {
                 self.internal_storage.in_function = false;
             }
             match function_name {
+                "exit" => {
+                    self.stack.pop();
+                    self.state = State::Exit;
+                }
                 "breakpoint" => {
                     let condition = if let Some(condition) = final_args_no_mods.get("condition") {
                         condition.is_truthy()

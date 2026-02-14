@@ -11,6 +11,7 @@ use crate::env::runtime::statements::Statement;
 use crate::env::runtime::functions::Function;
 use crate::env::runtime::plugins::PluginRuntime;
 use rustc_hash::FxHashMap;
+use std::hash::Hash;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Encode, Decode, Hash)]
 pub struct EffectFlags(u32);
@@ -183,6 +184,60 @@ impl Not for EffectFlags {
     }
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, Encode, Decode, PartialEq)]
+pub struct Doc {
+    pub description: String,
+    pub params: Vec<Param>,
+    pub returns: Option<String>,
+    pub examples: Vec<String>,
+    pub others: HashMap<String, Vec<String>>, // other tags like @see, @note, etc.
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Encode, Decode, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Param {
+    pub name: String,
+    pub ty: Option<String>,
+    pub desc: String,
+}
+
+impl Hash for Doc {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.description.hash(state);
+        for param in &self.params {
+            param.hash(state);
+        }
+        self.returns.hash(state);
+        for example in &self.examples {
+            example.hash(state);
+        }
+        for (key, values) in &self.others {
+            key.hash(state);
+            for value in values {
+                value.hash(state);
+            }
+        }
+    }
+}
+
+impl PartialOrd for Doc {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.description.cmp(&other.description)
+            .then_with(|| self.returns.cmp(&other.returns))
+            .then_with(|| self.examples.cmp(&other.examples)))
+    }
+}
+
+impl Doc {
+    pub fn from(s: &str) -> Self {
+        Doc {
+            description: s.trim().to_string(),
+            params: Vec::new(),
+            returns: None,
+            examples: Vec::new(),
+            others: HashMap::new(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum PathElement {

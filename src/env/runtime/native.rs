@@ -613,6 +613,7 @@ pub fn print_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::IO,
+        "Prints the given arguments to the console. Accepts multiple values and an optional separator and end string.\nExample:\n    print(1, 2, 3, sep='-') // '1-2-3'\nBy default, the separator is a space and the end string is empty. You can also specify end='\\n' to add a newline at the end of the output.",
     )))
 }
 
@@ -628,6 +629,7 @@ pub fn println_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::IO,
+        "Prints the given arguments to the console, followed by a newline. Accepts multiple values and an optional separator.\nExample:\n    println(1, 2, 3, sep='-') // '1-2-3'",
     )))
 }
 
@@ -653,6 +655,7 @@ pub fn styled_print_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::IO,
+        "Prints the given arguments to the console with ANSI styling.\n\nOptions:\n- sep: Separator between values (default: ' ')\n- end: String appended after the last value (default: '\\n\\x1b[0m')\n- fg_color: Foreground color (color name or hex code, default: 'reset')\n- bg_color: Background color (color name or hex code, default: 'reset')\n- bold, italic, underline, blink, reverse, strikethrough: Boolean flags to enable text styles (default: false)\n- link: If provided, makes the text a clickable hyperlink with the given URL.",
     )))
 }
 
@@ -669,6 +672,7 @@ pub fn input_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::IO,
+        "Reads a line of input from the user. If 'multiline' string is provided it uses it as a multiline prompt, allowing multiple lines of input. If 'err' is true, on error it throws the error instead of returning an empty string.",
     )))
 }
 
@@ -683,6 +687,7 @@ pub fn len_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Returns the length of the given value.\n\nSupports strings, lists, tuples, maps, bytes, and structs with an 'op_len' method. For strings, it returns the number of characters. For lists and tuples, it returns the number of elements. For maps, it returns the number of key-value pairs. For bytes, it returns the number of bytes. For structs, it looks for an 'op_len' method and calls it if found; otherwise, it raises a TypeError.",
     )))
 }
 
@@ -697,6 +702,7 @@ pub fn help_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::IO,
+        "Provides help information about a specific value or general usage instructions if no value is provided. If a value is given, it will display detailed information about that value, including its type, methods, and properties. If no value is provided, it will show a welcome message and basic instructions for using the REPL.",
     )))
 }
 
@@ -711,6 +717,7 @@ pub fn type_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Returns the type of the given object as a string.\nExamples:\n    type_of(123) // 'int'\n    type_of([1, 2, 3]) // 'list'\nThis function is useful for debugging and introspection purposes.",
     )))
 }
 
@@ -725,6 +732,7 @@ pub fn size_of_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Returns the size of the given object in bytes. The size is an approximation and may not reflect the actual memory usage, especially for complex objects. For simple types like int, float, bool, and null, it returns a fixed size. For strings, lists, tuples, maps, and bytes, it returns the size of the contained data plus some overhead. For structs and modules, it includes the size of their fields and methods. Note that this function is primarily intended for informational purposes and should not be used for precise memory management.",
     )))
 }
 
@@ -740,6 +748,7 @@ pub fn sum_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Sums up all the numeric values in the provided list, including nested lists and tuples. Non-numeric values will cause a TypeError.",
     )))
 }
 
@@ -754,6 +763,7 @@ pub fn ord_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Returns the Unicode code point of the first character in the given string. If the string is empty, it returns a TypeError.",
     )))
 }
 
@@ -768,6 +778,7 @@ pub fn char_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Converts an integer Unicode code point to its corresponding character. The input integer should represent a valid Unicode code point (0 to 0x10FFFF). If the input is valid, the function returns a string containing the corresponding character. If the input is invalid (e.g., out of range), it returns a TypeError.",
     )))
 }
 
@@ -793,6 +804,7 @@ pub fn styledstr_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Returns the styled string from the arguments using ANSI styling.\n\nOptions:\n- sep: Separator between values (default: ' ')\n- end: String appended after the last value (default: '\\n\\x1b[0m')\n- fg_color: Foreground color (color name or hex code, default: 'reset')\n- bg_color: Background color (color name or hex code, default: 'reset')\n- bold, italic, underline, blink, reverse, strikethrough: Boolean flags to enable text styles (default: false)\n- link: If provided, makes the text a clickable hyperlink with the given URL.",
     )))
 }
 
@@ -808,6 +820,7 @@ pub fn array_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Creates a list of the specified size, filled with the given initial value (or null if not provided).",
     )))
 }
 
@@ -828,6 +841,7 @@ pub fn range_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Similar to python's range() but with more flexibility. It can generate a sequence of numbers from 'a' to 'b' with a specified 'step'. If only 'a' is provided, it generates numbers from 0 to 'a'. The 'step' can be positive or negative but cannot be zero. By default, it returns a list, but if the 'as' parameter is set to 'generator', it returns a generator instead. The function supports both integers and floats for the range parameters.",
     )))
 }
 
@@ -843,6 +857,7 @@ pub fn complex_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "Makes a complex number from the given real and imaginary parts. Both parts can be integers or floats. The result is a complex number represented as a float with special handling for the imaginary part.",
     )))
 }
 
@@ -858,6 +873,7 @@ pub fn placeholder_fn() -> Function {
         true, true, true,
         None,
         EffectFlags::PURE,
+        "This is a placeholder function and should not be called.",
     )))
 }
 
@@ -867,6 +883,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_string = {
         make_native_method(
             "to_string",
+            "Convert the value to its string representation. This method is available on all types and provides a human-readable representation of the value. For complex types like lists, maps, and structs, this will produce a string that shows the structure and content of the value. For primitive types like integers and booleans, it will return their standard string representation.",
             move |value, _args| {
                 Value::String(value.to_string())
             },
@@ -879,6 +896,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let clone = {
         make_native_method(
             "clone",
+            "Create a deep copy of the value. For primitive types, this will simply return the same value. For complex types like lists, maps, and structs, this will create a new instance with the same content. Note that for structs, this will only clone the struct itself and not any internal references it may contain.",
             move |value, _args| {
                 match &value {
                     Value::Pointer(inner_arc) => {
@@ -901,6 +919,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_null = {
         make_native_method(
             "is_null",
+            "Check if the value is specifically null.",
             move |value, _args| {
                 Value::Boolean(value.is_null())
             },
@@ -914,6 +933,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_truthy = {
         make_native_method(
             "is_truthy",
+            "Check if the value is truthy (not null, not false, not empty).",
             move |value, _args| {
                 Value::Boolean(value.is_truthy())
             },
@@ -927,6 +947,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_some = {
         make_native_method(
             "is_some",
+            "Same as is_truthy().",
             move |value, _args| {
                 Value::Boolean(value.is_truthy())
             },
@@ -950,6 +971,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_bytes = {
         make_native_method(
             "to_bytes",
+            "Convert the string to a byte array using UTF-8 encoding. This method is only applicable to string values. If the value is not a string, it will return null.",
             move |value, _args| {
                 match value.to_bytes() {
                     Some(bytes) => Value::Bytes(bytes),
@@ -966,6 +988,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let endswith = {
         make_native_method(
             "endswith",
+            "Check if the string ends with the specified suffix.",
             move |value, args| {
                 if let Some(suffix_value) = args.get("suffix") {
                     match (value, suffix_value) {
@@ -990,6 +1013,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let startswith = {
         make_native_method(
             "startswith",
+            "Check if the string starts with the specified prefix.",
             move |value, args| {
                 if let Some(prefix_value) = args.get("prefix") {
                     dbg!(&prefix_value, &value);
@@ -1017,6 +1041,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let split = {
         make_native_method(
             "split",
+            "Split the string into a list of substrings based on a specified delimiter. The delimiter is provided as an argument to the method. If the delimiter is not found in the string, the result will be a list containing the original string as its only element.",
             move |value, args| {
                 if let Some(delim_value) = args.get("delimiter") {
                     match (value, delim_value) {
@@ -1044,6 +1069,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let split_lines = {
         make_native_method(
             "split_lines",
+            "Split the string into lines based on newline characters. Different types of newline characters (\\n, \\r\\n, \\r) are all recognized as line separators.",
             move |value, _args| {
                 match value {
                     Value::String(s) => {
@@ -1062,9 +1088,32 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         )
     };
 
+    let split_words = {
+        make_native_method(
+            "split_words",
+            "Split the string into words based on whitespace. Consecutive whitespace characters are treated as a single separator.",
+            move |value, _args| {
+                match value {
+                    Value::String(s) => {
+                        let parts: Vec<Value> = s.split_whitespace()
+                            .map(|part| Value::String(part.to_string()))
+                            .collect();
+                        Value::List(parts)
+                    }
+                    _ => Value::new_error("TypeError", "split_words() can only be called on strings", None),
+                }
+            },
+            vec![],
+            "list",
+            true, false, true,
+            None,
+        )
+    };
+
     let join = {
         make_native_method(
             "join",
+            "Join a list of strings into a single string, using the current string as the separator.\nExample:\n    ', '.join(['apple', 'banana', 'cherry']) // 'apple, banana, cherry'",
             move |value, args| {
                 if let Some(parts_value) = args.get("parts") {
                     match (value, parts_value) {
@@ -1093,6 +1142,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let trim = {
         make_native_method(
             "trim",
+            "Return a copy of the string with leading and trailing whitespace removed.",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.trim().to_string()),
@@ -1109,6 +1159,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let chars = {
         make_native_method_pt(
             "chars",
+            "Return a list of characters in the string. Each character is returned as a string of length 1.\nNote: It is planned to add a 'char' type in the future, and when that happens, this method will return a list of 'char' instead of 'str[1]'.",
             move |value, _args| {
                 match value {
                     Value::String(s) => {
@@ -1128,6 +1179,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isalpha = {
         make_native_method(
             "isalpha",
+            "Check if all characters in the string are alphabetic (a-z, A-Z).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphabetic())),
@@ -1144,6 +1196,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isdigit = {
         make_native_method(
             "isdigit",
+            "Check if all characters in the string are digits (0-9).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_digit(10))),
@@ -1160,6 +1213,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let islower = {
         make_native_method(
             "islower",
+            "Check if all characters in the string are lowercase letters.",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_lowercase()) && s.chars().all(|c| !c.is_uppercase())),
@@ -1176,6 +1230,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isupper = {
         make_native_method(
             "isupper",
+            "Check if all characters in the string are uppercase (and there is at least one uppercase character).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().any(|c| c.is_uppercase()) && s.chars().all(|c| !c.is_lowercase())),
@@ -1192,6 +1247,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isalnum = {
         make_native_method(
             "isalnum",
+            "Check if all characters in the string are alphanumeric (letters or digits).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_alphanumeric())),
@@ -1208,6 +1264,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isspace = {
         make_native_method(
             "isspace",
+            "Check if all characters in the string are whitespace (spaces, tabs, newlines).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_whitespace())),
@@ -1224,6 +1281,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let isnumeric = {
         make_native_method(
             "isnumeric",
+            "Check if all characters in the string are numeric (0-9).",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::Boolean(s.chars().all(|c| c.is_numeric())),
@@ -1240,6 +1298,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let replace = {
         make_native_method(
             "replace",
+            "Replace occurrences of a substring in a string with a new substring. Takes two required arguments: 'old' (the substring to replace) and 'new' (the substring to replace with). Optional keyword arguments: 'count' (the maximum number of replacements to perform, default is -1 for all occurrences), 'case_sensitive' (whether the replacement should be case-sensitive, default is true), 'from_left' (whether to replace from the left side, default is true), and 'from_right' (whether to replace from the right side, default is false). If both 'from_left' and 'from_right' are false, replacements will be made from left to right.",
             move |value, args| {
                 if let (Some(old_value), Some(new_value)) = (args.get("old"), args.get("new")) {
                     match (value, old_value, new_value) {
@@ -1353,9 +1412,43 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         )
     };
 
+    let replace_more = {
+        make_native_method(
+            "replace_more",
+            "Replace multiple substrings in a string based on a map of replacements. The keys of the map are the substrings to be replaced, and the values are the substrings to replace with.",
+            move |value, args| {
+                if let Some(replacements_value) = args.get("replacements") {
+                    match (value, replacements_value) {
+                        (Value::String(s), Value::Map(replacements)) => {
+                            let mut result = s.clone();
+                            for (old_value, new_value) in replacements {
+                                if let (Value::String(old), Value::String(new)) = (old_value, new_value) {
+                                    result = result.replace(old, new);
+                                } else {
+                                    return Value::new_error("TypeError", "replace_more() expects a map of string to string replacements", None);
+                                }
+                            }
+                            Value::String(result)
+                        }
+                        _ => Value::new_error("TypeError", "replace_more() expects a map of replacements", None),
+                    }
+                } else {
+                    Value::new_error("TypeError", "replace_more() missing required argument 'replacements'", None)
+                }
+            },
+            vec![
+                Parameter::positional("replacements", "map"),
+            ],
+            "str",
+            true, false, true,
+            None,
+        )
+    };
+
     let to_upper = {
         make_native_method(
             "to_upper",
+            "Convert a string to uppercase.",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.to_uppercase()),
@@ -1372,6 +1465,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_lower = {
         make_native_method(
             "to_lower",
+            "Convert a string to lowercase.",
             move |value, _args| {
                 match value {
                     Value::String(s) => Value::String(s.to_lowercase()),
@@ -1388,6 +1482,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let ord = {
         make_native_method(
             "ord",
+            "Return the Unicode code point of a single character string. If the string is empty or has more than one character, throws a ValueError.",
             move |value, _args| {
                 match value {
                     Value::String(s) => {
@@ -1415,6 +1510,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_int = {
         make_native_method(
             "to_int",
+            "Convert a string to an int. If the string is not a valid integer, throws a ValueError.",
             move |value, _args| {
                 match value {
                     Value::String(s) => {
@@ -1436,6 +1532,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_float = {
         make_native_method(
             "to_float",
+            "Convert a string to a float. If the string is not a valid float, throws a ValueError.",
             move |value, _args| {
                 match value {
                     Value::String(s) => {
@@ -1460,6 +1557,8 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         (("startswith".to_owned(), "str".to_owned()), startswith),
         (("split".to_owned(), "str".to_owned()), split),
         (("split_lines".to_owned(), "str".to_owned()), split_lines),
+        (("split_words".to_owned(), "str".to_owned()), split_words.clone()),
+        (("split_whitespace".to_owned(), "str".to_owned()), split_words),
         (("join".to_owned(), "str".to_owned()), join),
         (("trim".to_owned(), "str".to_owned()), trim),
         (("chars".to_owned(), "str".to_owned()), chars),
@@ -1471,6 +1570,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         (("isspace".to_owned(), "str".to_owned()), isspace),
         (("isnumeric".to_owned(), "str".to_owned()), isnumeric),
         (("replace".to_owned(), "str".to_owned()), replace),
+        (("replace_more".to_owned(), "str".to_owned()), replace_more),
         (("to_upper".to_owned(), "str".to_owned()), to_upper),
         (("to_lower".to_owned(), "str".to_owned()), to_lower),
         (("ord".to_owned(), "str".to_owned()), ord),
@@ -1483,6 +1583,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_float = {
         make_native_method(
             "to_float",
+            "Convert an int to a float. If the int is too large to fit in a float, an error is returned.",
             move |value, _args| {
                 match value {
                     Value::Int(i) => match i.to_float() {
@@ -1502,6 +1603,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let format = {
         make_native_method(
             "format",
+            "Return a string representation of the int with formatting options.\n\n\nSupported keyword arguments:\n- sep (str): Character to use as a separator for thousands (default: '_')\n- width (int): Minimum width of the resulting string, padded with the pad character if necessary (default: 0)\n- pad (str): Character to use for padding if width is specified (default: ' ')\n- show_plus (bool): Whether to show a plus sign for positive numbers (default: false)\n- base (int): Numerical base for formatting (default: 10, other options: 2, 8, 16)\n- abbreviate (bool): Whether to abbreviate large numbers with K, M, B, etc. (default: false)\n- paren_neg (bool): Whether to enclose negative numbers in parentheses instead of using a minus sign (default: false)",
             move |value, args| {
                 if let Value::Int(val) = value {
                     let sep = if let Some(Value::String(s)) = args.get("sep") {
@@ -1616,6 +1718,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let display = {
         make_native_method(
             "display",
+            "Return a string representation of the int without any formatting, just the digits.",
             move |value, _args| {
                 Value::String(value.to_string())
             },
@@ -1629,6 +1732,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_even = {
         make_native_method(
             "is_even",
+            "Return true if the int is even, false if odd.",
             move |value, _args| {
                 match value {
                     Value::Int(i) => Value::Boolean((&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
@@ -1645,6 +1749,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_odd = {
         make_native_method(
             "is_odd",
+            "Return true if the int is odd, false if even.",
             move |value, _args| {
                 match value {
                     Value::Int(i) => Value::Boolean(!(&*i % Int::from(2)).map_or(false, |r| r.is_zero())),
@@ -1671,6 +1776,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_int = {
         make_native_method(
             "to_int",
+            "Convert the float to an int, truncating towards zero. Different than .round(), same as 'as int'.",
             move |value, _args| {
                 match value {
                     Value::Float(f) => match f.to_int() {
@@ -1690,6 +1796,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let format = {
         make_native_method(
             "format",
+            "Return a string representation of the float with formatting options.\n\nOptions:\n- sep: character to use as a thousands separator (default '_')\n- precision: number of decimal places (default 6)\n- width: minimum width of the resulting string, padded with 'pad' (default 0)\n- pad: character to use for padding if width is specified (default ' ')\n- show_plus: whether to show a '+' sign for positive numbers (default false)\n- scientific: whether to use scientific notation (default false)\n- abbreviate: whether to abbreviate large numbers with K/M/B/T suffixes (default false)\n- paren_neg: whether to enclose negative numbers in parentheses instead of using a '-' sign (default false)",
             move |value, args| {
                 if let Value::Float(val) = value {
                     let sep = if let Some(Value::String(s)) = args.get("sep") {
@@ -1820,6 +1927,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let display = {
         make_native_method(
             "display",
+            "Return a string representation of the float for display purposes. Similar to format() but with some differences in how it handles precision and formatting. Mainly intended for user-facing output rather than precise control over formatting.",
             move |value, _args| {
                 Value::String(value.to_string())
             },
@@ -1833,6 +1941,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let round = {
         make_native_method(
             "round",
+            "Round the float to a given precision in decimal digits (default 0 digits). Returns a new float and does not modify original.",
             move |value, args| {
                 let precision = if let Some(Value::Int(i)) = args.get("precision") {
                     i.to_i64().unwrap_or(0)
@@ -1865,6 +1974,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let append = {
         make_native_method(
             "append",
+            "Return a new list with the item appended to the end. Does not modify original list.",
             move |value, args| {
                 if let Some(item) = args.get("item") {
                     match value {
@@ -1889,6 +1999,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let push = {
         make_native_method(
             "push",
+            "Add an item to the end of the list. Modifies list in place.",
             |value, args| {
                 if let Some(item) = args.get("item") {
                     match value {
@@ -1912,6 +2023,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let pop = {
         make_native_method(
             "pop",
+            "Remove and return the last item from the list. Modifies list in place.",
             |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -1934,6 +2046,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let extend_list = {
         make_native_method(
             "extend",
+            "Extend the list by appending all the items from another list. Modifies list in place.",
             |value, args| {
                 if let Some(Value::List(to_extend)) = args.get("item") {
                     match value {
@@ -1957,6 +2070,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let into_list = {
         make_native_method(
             "into",
+            "Convert the items in the list into a the type specified. Only works with primitive types and uses same rules as 'as'.",
             move |value, args| {
                 let type_ = args
                     .get("ty")
@@ -1988,6 +2102,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let into_gen = {
         make_native_method(
             "into_gen",
+            "Convert the list into a generator that yields the items in the list one at a time.",
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
@@ -2016,6 +2131,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let into_repeating_gen = {
         make_native_method(
             "into_repeating_gen",
+            "Create a new generator that repeats the items of the original generator indefinitely",
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
@@ -2051,6 +2167,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let enumerate_list = {
         make_native_method(
             "enumerate",
+            "Return a generator that yields pairs of (index, item) for each item in the list, where index is the position of the item in the list starting from 0.",
             move |value, _args| {
                 let vec = match value {
                     Value::List(list) => list.clone(),
@@ -2081,6 +2198,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let map_list = {
         make_native_shared_fn(
             "map",
+            "Apply the provided function to each item in the list, returning a generator that yields the results. The function should take a single argument, which will be each item from the list in turn.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -2119,6 +2237,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let filter_list = {
         make_native_shared_fn(
             "filter",
+            "Filter the items in the list using the provided function, which should return true for items that should be included in the output generator.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -2158,6 +2277,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         let function_signature = parse_type("function[any] -> any");
         make_native_shared_fn(
             "sort",
+            "Sort the items in the list using the provided key function. If 'reverse' is true, the list will be sorted in reverse order.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
@@ -2215,6 +2335,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         let function_signature = parse_type("function[any, any] -> bool");
         make_native_shared_fn(
             "sort_by",
+            "Sort the items in the list using the provided comparison function, which should return true if the first argument is less than the second. If 'reverse' is true, the function should return true if the first argument is greater than the second.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 let reverse = matches!(args.get("reverse"), Some(Value::Boolean(true)));
@@ -2318,6 +2439,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let all = {
         make_native_shared_fn(
             "all",
+            "Return true if all items in the list are truthy (or if the optional function returns true for all items), false otherwise.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 let function: Option<_> = match args.get("f") {
@@ -2370,6 +2492,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let clear = {
         make_native_method(
             "clear",
+            "Remove all items from the list, leaving it empty.",
             |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -2388,6 +2511,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let contains = {
         make_native_method(
             "contains",
+            "Return true if the specified item is in the list, false otherwise.",
             move |value, args| {
                 if let Some(item) = args.get("item") {
                     match value {
@@ -2414,6 +2538,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let index_of = {
         make_native_method(
             "index_of",
+            "Return the index of the first occurrence of the specified item in the list, or -1 if the item is not found. An optional start argument specifies the index to start the search from.",
             move |value, args| {
                 if let Some(item) = args.get("item") {
                     match value {
@@ -2448,6 +2573,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let undup = {
         make_native_method(
             "undup",
+            "Return a new list with duplicate items removed, preserving the original order of items.",
             move |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -2469,9 +2595,38 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
             None,
         )
     };
+    let count = {
+        make_native_method(
+            "count",
+            "Return the number of occurrences of the specified item in the list.",
+            move |value, args| {
+                if let Some(item) = args.get("item") {
+                    match value {
+                        Value::List(list) => {
+                            let mut count = 0;
+                            for elem in list {
+                                if elem == item {
+                                    count += 1;
+                                }
+                            }
+                            Value::Int(create_int(&count.to_string()))
+                        }
+                        _ => Value::new_error("TypeError", "count() can only be called on lists", None),
+                    }
+                } else {
+                    Value::new_error("TypeError", "count() missing required argument 'item'", None)
+                }
+            },
+            vec![Parameter::positional("item", "any")],
+            "int",
+            true, false, true,
+            None,
+        )
+    };
     let reverse = {
         make_native_method(
             "reverse",
+            "Reverse the items of the list in place.",
             |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -2490,6 +2645,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let reversed = {
         make_native_method(
             "reversed",
+            "Return a new list containing the items of the original list in reverse order.",
             |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -2508,6 +2664,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let reduce = {
         make_native_shared_fn(
             "reduce",
+            "Apply a function of two arguments cumulatively to the items of a list, from left to right, reducing the list to a single value. If an initial value is provided, it is placed before the items of the list in the calculation, and serves as a default when the list is empty.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -2551,6 +2708,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_sorted = {
         make_native_method(
             "is_sorted",
+            "Return true if the list is sorted in non-decreasing order, and false otherwise.",
             |value, _args| {
                 match value {
                     Value::List(list) => {
@@ -2573,6 +2731,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let get = {
         make_native_method(
             "get",
+            "Return the item at the specified index in the list, or a default value if the index is out of bounds. Supports negative indexing, where -1 refers to the last item, -2 to the second-to-last, and so on.",
             move |value, args| {
                 let index = if let Some(Value::Int(i)) = args.get("index") {
                     i.to_isize().unwrap_or(0)
@@ -2629,6 +2788,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
         (("index_of".to_owned(), "list".to_owned()), index_of),
         (("undup".to_owned(), "list".to_owned()), undup.clone()),
         (("dedup".to_owned(), "list".to_owned()), undup),
+        (("count".to_owned(), "list".to_owned()), count),
         (("reverse".to_owned(), "list".to_owned()), reverse),
         (("reversed".to_owned(), "list".to_owned()), reversed),
         (("reduce".to_owned(), "list".to_owned()), reduce),
@@ -2641,6 +2801,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let to_list = {
         make_native_method(
             "to_list",
+            "Convert the tuple into a list. This is a shallow conversion, so if the tuple contains mutable objects, they will be shared between the tuple and the resulting list.",
             move |value, _args| {
                 if let Value::Tuple(tuple) = value {
                     return Value::List(tuple.to_vec());
@@ -2657,6 +2818,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let enumerate_tuple = {
         make_native_method(
             "enumerate",
+            "Return a generator that yields pairs of (index, value) for each item in the tuple.",
             move |value, _args| {
                 let vec = match value {
                     Value::Tuple(v) => v.clone(),
@@ -2694,6 +2856,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let extract_ptr = {
         make_native_method(
             "extract_ptr",
+            "Extract the raw pointer value as an integer. This is unsafe and should be used with caution, as it can lead to undefined behavior if misused. The pointer is valid as long as there are references to it in the program, but once all references are dropped, the pointer may become invalid. Use this method only if you know what you're doing and understand the risks involved.",
             move |value, _args| {
                 match value {
                     Value::Pointer(ptr_arc) => {
@@ -2719,6 +2882,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let collect = {
         make_native_method(
             "collect",
+            "Convert the generator into a list. If the generator is infinite, return an error.",
             move |value, _args| {
                 if let Value::Generator(generator) = value {
                     if !generator.is_infinite() {
@@ -2743,6 +2907,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let collect_into = {
         make_native_method(
             "collect_into",
+            "Convert the generator into a list of the specified type. If any item cannot be converted to the specified type, return an error.",
             move |value, args| {
                 let type_ = args
                     .get("ty")
@@ -2781,6 +2946,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let next = {
         make_native_method(
             "next",
+            "Return the next value from the generator. If the generator is done, return an error.",
             move |value, _args| {
                 if let Value::Generator(generator) = value {
                     if let Some(next_value) = generator.next() {
@@ -2801,6 +2967,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let is_done = {
         make_native_method(
             "is_done",
+            "Return true if the generator is done (i.e., has no more items to yield), false otherwise.",
             move |value, _args| {
                 if let Value::Generator(generator) = value {
                     return Value::Boolean(generator.is_done());
@@ -2817,6 +2984,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let peek = {
         make_native_method(
             "peek",
+            "Return the next value from the generator without advancing it. If the generator is done, return an error.",
             move |value, _args| {
                 if let Value::Generator(generator) = value {
                     if let Some(peeked_value) = generator.peek() {
@@ -2837,6 +3005,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let enumerate_gen = {
         make_native_method(
             "enumerate",
+            "Create a new generator that yields pairs of (index, value) from the original generator",
             move |value, _args| {
                 let generator = match value {
                     Value::Generator(generator) => generator,
@@ -2864,6 +3033,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let map_gen = {
         make_native_shared_fn(
             "map",
+            "Create a new generator that applies a given function to each item from the original generator. The function should take one argument (the item) and return the transformed value.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -2894,6 +3064,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let filter_gen = {
         make_native_shared_fn(
             "filter",
+            "Create a new generator that yields only the items from the original generator for which a given function returns true. The function should take one argument (the item) and return a boolean.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -2924,6 +3095,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let repeating = {
         make_native_method(
             "repeating",
+            "Create a new generator that repeats the items of the original generator indefinitely",
             move |value, _args| {
                 let generator = match value {
                     Value::Generator(generator) => generator,
@@ -2950,6 +3122,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let take = {
         make_native_method(
             "take",
+            "Create a new generator that yields only the first n items from the original generator",
             move |value, args| {
                 if let Value::Generator(generator) = value {
                     if let Some(Value::Int(n)) = args.get("n") {
@@ -2995,6 +3168,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let get = {
         make_native_method(
             "get",
+            "Get the value associated with a key in a map, or return a default value if the key is not present",
             move |value, args| {
                 if let Some(key) = args.get("key") {
                     if let Value::Map(map) = value {
@@ -3018,6 +3192,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let filter_map = {
         make_native_shared_fn(
             "filter",
+            "Create a new map containing only the key-value pairs from the original map for which a given function returns true. The function should take two arguments (key and value) and return a boolean.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -3053,6 +3228,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let map_map = {
         make_native_shared_fn(
             "map",
+            "Create a new map by applying a function to each key-value pair in the original map. The function should take two arguments (key and value) and return the new value for that key.",
             move |args, interpreter| {
                 let value = args.get("self").cloned().unwrap_or(Value::Null);
                 if let Some(Value::Function(func)) = args.get("f") {
@@ -3084,6 +3260,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let keys = {
         make_native_method(
             "keys",
+            "Get the keys of a map as a list",
             move |value, _args| {
                 if let Value::Map(map) = value {
                     return Value::List(map.keys().cloned().collect());
@@ -3100,6 +3277,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let values = {
         make_native_method(
             "values",
+            "Get a list of all values in a map",
             move |value, _args| {
                 if let Value::Map(map) = value {
                     return Value::List(map.values().cloned().collect());
@@ -3116,6 +3294,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let zip = {
         make_native_method(
             "zip",
+            "Zip a map into a list of key-value tuple pairs",
             move |value, _args| {
                 if let Value::Map(map) = value {
                     let zipped: Vec<Value> = map.iter().map(|(k, v)| {
@@ -3135,6 +3314,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let contains_key = {
         make_native_method(
             "contains_key",
+            "Check if a map contains a given key\n\nTime complexity: O(1) on average since maps are implemented as hash maps",
             move |value, args| {
                 if let Some(key) = args.get("key") {
                     if let Value::Map(map) = value {
@@ -3153,6 +3333,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let contains_value = {
         make_native_method(
             "contains_value",
+            "Check if a map contains a given value\n\nTime complexity: O(n) since it has to potentially check every value in the map",
             move |value, args| {
                 if let Some(val) = args.get("value") {
                     if let Value::Map(map) = value {
@@ -3175,6 +3356,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let insert = {
         make_native_method(
             "insert",
+            "Insert a key-value pair into a map",
             move |value, args| {
                 if let (Some(key), Some(val)) = (args.get("key"), args.get("value")) {
                     if let Value::Map(map) = value {
@@ -3197,6 +3379,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let clear = {
         make_native_method(
             "clear",
+            "Clear all key-value pairs from a map (basically resetting it to an empty map)",
             move |value, _args| {
                 if let Value::Map(map) = value {
                     map.clear();
@@ -3214,6 +3397,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let extend_map = {
         make_native_method(
             "extend",
+            "Extend a map with another map's key-value pairs",
             move |value, args| {
                 if let Some(Value::Map(omap)) = args.get("other") {
                     if let Value::Map(smap) = value {
@@ -3249,6 +3433,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let unwrap = {
         make_native_method(
             "unwrap",
+            "Unwrap an enum variant, or raise an error if it's null",
             move |value, _args| {
                 match value {
                     Value::Enum(enm) => {
@@ -3267,6 +3452,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let unwrap_or = {
         make_native_method(
             "unwrap_or",
+            "Unwrap an enum variant, or return a default value if it's null",
             move |value, args| {
                 match value {
                     Value::Enum(enm) => {
@@ -3291,6 +3477,7 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
     let discriminant = {
         make_native_method(
             "discriminant",
+            "Get the discriminant (integer index) of an enum variant",
             move |value, _args| {
                 match value {
                     Value::Enum(enm) => {

@@ -6,14 +6,14 @@ use crate::env::runtime::value::Value;
 use crate::env::runtime::statements::Statement;
 use crate::env::runtime::types::Type;
 use crate::env::runtime::variables::Variable;
-use crate::env::runtime::utils::format_value;
+use crate::env::runtime::utils::{format_value, wrap_text, parse_doc};
 use std::collections::HashMap;
 use crate::interpreter::Interpreter;
 use parking_lot::Mutex;
 use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer};
 use rustc_hash::FxHashMap;
-use crate::env::runtime::internal_structs::EffectFlags;
+use crate::env::runtime::internal_structs::{EffectFlags, Doc};
 use bincode::{
     enc::{Encode, Encoder},
     de::{BorrowDecode, Decode, Decoder},
@@ -49,6 +49,7 @@ pub struct FunctionMetadata {
     pub is_native: bool,
     pub state: Option<String>,
     pub effects: EffectFlags,
+    pub doc: Option<Doc>,
 }
 
 impl std::default::Default for FunctionMetadata {
@@ -63,6 +64,7 @@ impl std::default::Default for FunctionMetadata {
             is_native: false,
             state: None,
             effects: EffectFlags::empty(),
+            doc: None,
         }
     }
 }
@@ -128,6 +130,7 @@ impl SharedNativeFunction {
         is_final: bool,
         state: Option<String>,
         effects: EffectFlags,
+        docs: &str,
     ) -> Self
     where
         F: SharedNativeCallable + 'static,
@@ -144,6 +147,7 @@ impl SharedNativeFunction {
                 is_native: true,
                 state,
                 effects,
+                doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) }
             },
         }
     }
@@ -174,6 +178,7 @@ impl SharedNativeFunction {
                 is_native: true,
                 state,
                 effects,
+                doc: None,
             },
         }
     }
@@ -213,6 +218,7 @@ impl NativeFunction {
         is_final: bool,
         state: Option<String>,
         effects: EffectFlags,
+        docs: &str,
     ) -> Self
     where
         F: NativeCallable + 'static,
@@ -229,6 +235,7 @@ impl NativeFunction {
                 is_native: true,
                 state,
                 effects,
+                doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) }
             },
         }
     }
@@ -243,6 +250,7 @@ impl NativeFunction {
         is_final: bool,
         state: Option<String>,
         effects: EffectFlags,
+        docs: &str,
     ) -> Self
     where
         F: NativeCallable + 'static,
@@ -259,6 +267,7 @@ impl NativeFunction {
                 is_native: true,
                 state,
                 effects,
+                doc: if docs.is_empty() { None } else { Some(parse_doc(docs)) }
             },
         }
     }
@@ -626,17 +635,95 @@ impl Function {
     }
 
     pub fn help_string(&self) -> String {
-        format!("Function: {}\nParameters: {}\nReturn Type: {}\nPublic: {}\nStatic: {}\nFinal: {}\nNative: {}\nState: {}\nEffects: {:?}",
-            self.get_name(),
-            if self.get_parameters().is_empty() { "None".to_string() } else { self.get_parameters().iter().map(|p| if let Some(default) = &p.default { format!("{}: {} = {}", p.name, p.ty.display_simple(), format_value(default)) } else { format!("{}: {}", p.name, p.ty.display_simple()) }).collect::<Vec<_>>().join(", ") },
-            self.get_return_type().display_simple(),
-            self.metadata().is_public,
-            self.metadata().is_static,
-            self.metadata().is_final,
-            self.metadata().is_native,
-            self.metadata().state.as_deref().unwrap_or("None"),
-            self.metadata().effects.get_names().iter().map(|s| s.to_lowercase()).collect::<Vec<_>>().join(", ")
-        )
+        let mut s = String::with_capacity(128);
+        let meta = self.metadata();
+        if meta.is_native {
+            s.push_str("native ");
+        }
+        if meta.is_public {
+            s.push_str("public ");
+        } else {
+            s.push_str("private ");
+        }
+        if meta.is_static {
+            s.push_str("static ");
+        }
+        if meta.is_final {
+            s.push_str("final ");
+        } else {
+            s.push_str("mutable ");
+        }
+        s.push_str(&format!("{}(", meta.name));
+        let ps = s.len() + meta.parameters.iter().map(|p| format!("{}: {}{}", p.name, p.ty.display_simple(), if let Some(default) = &p.default { format!(" = {}", format_value(default)) } else { "".to_string() })).collect::<Vec<_>>().join(", ").len();
+        for (i, param) in meta.parameters.iter().enumerate() {
+            if ps > 80 {
+                s.push_str("\n    ");
+            }
+            match param.kind {
+                ParameterKind::Positional => {}
+                ParameterKind::Variadic => s.push_str("*"),
+                ParameterKind::KeywordVariadic => {}
+                ParameterKind::Instance => s.push_str("self: "),
+            }
+            for m in &param.mods {
+                s.push_str(&format!("{} ", m));
+            }
+            s.push_str(&format!("{}: {}", param.name, param.ty.display_simple()));
+            if let Some(default) = &param.default && matches!(param.kind, ParameterKind::Positional | ParameterKind::KeywordVariadic) {
+                s.push_str(&format!(" = {}", format_value(default)));
+            }
+            if i < meta.parameters.len() - 1 {
+                s.push_str(", ");
+            }
+        }
+        if ps > 80 {
+            s.push_str("\n");
+        }
+        s.push(')');
+        s.push_str(&format!(" -> {}", meta.return_type.display_simple()));
+        if let Some(state) = &meta.state {
+            s.push('\n');
+            s.push_str(state);
+        }
+        let ps = if ps > 80 { 40 } else { 0 };
+        let ls = ps + s.lines().map(|l| l.len()).max().unwrap_or(0);
+        s.push_str(&format!("\n{}\n", "=".repeat(ls)));
+        if let Some(doc) = &meta.doc {
+            s.push_str(&wrap_text(&doc.description, ls));
+            for param in &doc.params {
+                s.push_str(&format!("\n  {}: {}{}", param.name, param.ty.as_deref().unwrap_or("any"), if !param.desc.is_empty() { format!(" - {}", param.desc) } else { "".to_string() }));
+            }
+            if let Some(returns) = &doc.returns {
+                s.push_str(&format!("\nReturns: {}", returns));
+            }
+            if doc.examples.len() == 1 {
+                s.push_str("\nExample:\n");
+            } else if doc.examples.len() > 1 {
+                s.push_str("\nExamples:\n");
+            }
+            for example in &doc.examples {
+                s.push_str(&wrap_text(example, ls));
+                s.push_str("\n");
+            }
+            for (tag, contents) in &doc.others {
+                s.push_str(&format!("\n{}:\n", tag));
+                for content in contents {
+                    s.push_str(&wrap_text(content, ls));
+                    s.push_str("\n");
+                }
+            }
+            s.push('\n');
+        }
+        s.push_str("\nEffects: ");
+        s.push_str(&meta.effects.display());
+        s.push_str("\n");
+        if meta.is_native {
+            s.push_str(&wrap_text("This is a native function implemented in Rust. It may have special behavior or performance characteristics compared to user-defined functions.", ls));
+        }
+        if env!("PROFILE").to_lowercase() == "debug" {
+            s.push_str(&format!("\n[Debug Info] Function type: {}, Size: {} bytes", self.ftype(), self.get_size()));
+        }
+        s
     }
 }
 

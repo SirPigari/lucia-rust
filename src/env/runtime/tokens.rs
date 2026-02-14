@@ -18,6 +18,7 @@ pub const TK_BOOLEAN: &str = "BOOLEAN";
 pub const TK_OPERATOR: &str = "OPERATOR";
 pub const TK_SEPARATOR: &str = "SEPARATOR";
 pub const TK_INVALID: &str = "INVALID";
+pub const TK_DOC_COMMENT: &str = "DOC_COMMENT";
 
 // Static token type constants for concrete tokens
 #[allow(dead_code)]

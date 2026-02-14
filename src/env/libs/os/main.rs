@@ -97,7 +97,7 @@ fn to_ptr(ptr: usize, allow_unsafe: bool) -> Value {
         );
     }
 
-    if ptr < 0x1000 || ptr > MAX_PTR {
+    if ptr < 0x1000 || ptr > *MAX_PTR {
         return Value::new_error("ValueError", "Pointer value is out of valid range", None);
     }
 
@@ -119,7 +119,7 @@ fn from_ptr(ptr: usize, allow_unsafe: bool) -> Value {
         );
     }
 
-    if ptr < 0x1000 || ptr > MAX_PTR {
+    if ptr < 0x1000 || ptr > *MAX_PTR {
         return Value::new_error("ValueError", "Pointer value is out of valid range", None);
     }
 
@@ -1264,10 +1264,10 @@ pub fn register(config: &Config) -> HashMap<String, Variable> {
     }, vec![], "bool", EffectFlags::PURE);
 
     insert_native_fn!(map, "get_max_ptr", |_: &HashMap<String, Value>| -> Value {
-        Value::Int(Int::from_i64(MAX_PTR as i64))
+        Value::Int(Int::from_i64(*MAX_PTR as i64))
     }, vec![], "int", EffectFlags::PURE);
 
-    insert_native_fn!(map, "exit", |args: &HashMap<String, Value>| -> Value {
+    insert_native_fn!(map, "exit", "Exits the program with the given exit code.", |args: &HashMap<String, Value>| -> Value {
         let code = match args.get("code") {
             Some(Value::Int(int)) => match int.to_i64() {
                 Ok(v) => v as i32,
