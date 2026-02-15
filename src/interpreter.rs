@@ -3961,7 +3961,7 @@ impl Interpreter {
             let resolved_module_path: Option<PathBuf>;
             let mut found_in_dirs: Vec<PathBuf> = vec![];
             let module_variants = generate_name_variants(&base_name);
-            let lib_names_map = get_lib_names();
+            let lib_names_map = get_lib_names(&self.config.libs_paths);
 
             if let Some(map_statement) = &module_path_opt {
                 let path_eval = self.evaluate(map_statement);

@@ -680,6 +680,9 @@ impl Function {
             s.push_str("\n");
         }
         s.push(')');
+        if meta.effects.contains(EffectFlags::MAY_FAIL) {
+            s.push_str("?");
+        }
         s.push_str(&format!(" -> {}", meta.return_type.display_simple()));
         if let Some(state) = &meta.state {
             s.push('\n');
