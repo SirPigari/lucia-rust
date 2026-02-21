@@ -2,7 +2,7 @@ use std::{env, fs, process::Command, path::Path, collections::HashSet, io::BufRe
 use sha2::{Digest, Sha256};
 use toml::Value;
 use uuid::{Builder, Uuid};
-use rand::{rng, RngCore};
+use rand::{rng, Rng};
 use std::cmp::Ordering;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

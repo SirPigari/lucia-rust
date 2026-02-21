@@ -1,6 +1,7 @@
 Makefile linguist-language=Text
 *.lc linguist-language=Lucia
 *.lucia linguist-language=Lucia
+tests/lib_tests/* linguist-generated=true
 target/* linguist-generated=true
 src/env/bin/* linguist-generated=true
 src/env/Docs/todos.md merge=ours

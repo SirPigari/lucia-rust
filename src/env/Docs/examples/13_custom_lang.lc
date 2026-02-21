@@ -916,7 +916,7 @@ fun compile_into_x86_64_asm_linux(ast: list[ASTNode]) -> str:
                 inner := "    sub rsp, 32\n"
                 inner += f"    mov rdi, 0\n"
                 inner += f"    mov rsi, {size}\n"
-                inner += "    mov rdx, 3\n"          // PROT_READ|PROT_WRITE
+                inner += "    mov rdx, 3\n"          // PROT_READ|PROT_WRITE (0x03)
                 inner += "    mov r10, 34\n"         // MAP_PRIVATE|MAP_ANONYMOUS (0x22)
                 inner += "    mov r8, -1\n"
                 inner += "    mov r9, 0\n"

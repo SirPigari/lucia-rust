@@ -17,7 +17,6 @@ unsafe extern "C" {
     pub fn strcmp(s1: *const c_char, s2: *const c_char) -> i32;
     pub fn memcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void;
 
-    pub fn printf(format: *const c_char, ...) -> i32;
     pub fn time(tloc: *mut i64) -> i64;
     pub fn getenv(name: *const c_char) -> *mut c_char;
     pub fn exit(status: i32) -> !;
@@ -52,8 +51,6 @@ pub fn register() -> HashMap<String, Variable> {
     let mut map = HashMap::new();
 
     let any_ptr_type = parse_type("&any");
-
-    insert_native_fn!(map, "printf", printf_fn, vec![Parameter::positional("format", "str"), Parameter::variadic("args", "any")], "int", EffectFlags::IO | EffectFlags::UNSAFE);
 
     insert_native_fn_pt!(map, "malloc", malloc_fn, vec![Parameter::positional("size", "int")], &any_ptr_type, EffectFlags::UNSAFE);
     insert_native_fn_pt!(map, "calloc", calloc_fn, vec![
@@ -105,23 +102,6 @@ fn ptr_from_value_pointer(v: &Value) -> Result<*mut c_void, Value> {
 
 fn value_pointer_from_raw(ptr: *mut c_void) -> Value {
     Value::Pointer(Arc::new(Mutex::new((Value::Int((ptr as usize as i64).into()), 1))))
-}
-
-fn printf_fn(args: &HashMap<String, Value>) -> Value {
-    if args.get("args").is_some() {
-        return Value::new_error("NotImplementedError", "Variadic arguments are not supported in this FFI binding", None);
-    }
-
-    match args.get("format") {
-        Some(Value::String(s)) => match CString::new(s.as_str()) {
-            Ok(cstr) => unsafe {
-                let written = printf(cstr.as_ptr());
-                Value::Int((written as i64).into())
-            },
-            Err(_) => Value::new_error("FFIError", "CString conversion failed", None),
-        },
-        _ => Value::new_error("TypeError", "Expected 'text' to be a string", None),
-    }
 }
 
 fn malloc_fn(args: &HashMap<String, Value>) -> Value {

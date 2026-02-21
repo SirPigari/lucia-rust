@@ -48,5 +48,7 @@ Desktop.ini
 /src/env/cache/
 /src/env/.cache/
 
-# Raylib
+# Libraries
 /src/env/libs/raylib_lucia/
+/src/env/libs/languages/
+/src/env/libs/msgbox/
