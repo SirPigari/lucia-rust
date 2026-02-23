@@ -378,8 +378,6 @@ fn _get_lib_names_raw(libs_paths: &[String]) -> Vec<LibName> {
             return out;
         }
 
-        dbg!(&libs_dir);
-
         for entry in fs::read_dir(&libs_dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();

@@ -9,7 +9,7 @@ use crate::env::runtime::functions::Function;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction, SharedNativeFunction, NativeFunction};
+use crate::env::runtime::functions::{Parameter, NativeMethod, FunctionMetadata, UserFunction, SharedNativeFunction};
 use crate::env::runtime::statements::{Statement, Node, TypeNode, PtrNode, IterableNode};
 use crate::env::runtime::structs_and_enums::Struct;
 use crate::env::runtime::types::{Float, Int, SimpleType, Type};
@@ -761,70 +761,6 @@ where
     };
 
     Function::NativeMethod(Arc::new(method))
-}
-
-pub fn make_native_method_val<F>(
-    name: &str,
-    func: F,
-    parameters: Vec<Parameter>,
-    return_type: &str,
-    is_public: bool,
-    is_static: bool,
-    is_final: bool,
-    state: Option<String>
-) -> Value
-where
-    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
-{
-    let method = NativeFunction {
-        func: Arc::new(func),
-        meta: FunctionMetadata {
-            name: name.to_string(),
-            parameters,
-            return_type: Type::new_simple(return_type),
-            is_public,
-            is_static,
-            is_final,
-            is_native: true,
-            state,
-            effects: EffectFlags::UNKNOWN,
-            doc: None,
-        },
-    };
-
-    Value::Function(Function::Native(Arc::new(method)))
-}
-
-pub fn make_native_method_val_pt<F>(
-    name: &str,
-    func: F,
-    parameters: Vec<Parameter>,
-    return_type: &Type,
-    is_public: bool,
-    is_static: bool,
-    is_final: bool,
-    state: Option<String>
-) -> Value
-where
-    F: Fn(&std::collections::HashMap<String, Value>) -> Value + Send + Sync + 'static,
-{
-    let method = NativeFunction {
-        func: Arc::new(func),
-        meta: FunctionMetadata {
-            name: name.to_string(),
-            parameters,
-            return_type: return_type.clone(),
-            is_public,
-            is_static,
-            is_final,
-            is_native: true,
-            state,
-            effects: EffectFlags::UNKNOWN,
-            doc: None,
-        },
-    };
-
-    Value::Function(Function::Native(Arc::new(method)))
 }
 
 pub fn make_native_method_pt<F>(

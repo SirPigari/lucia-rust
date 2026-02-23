@@ -758,6 +758,9 @@ impl Interpreter {
                 
                 for (i, cond) in conditions.iter().enumerate() {
                     if !new_interpreter.evaluate(&cond).is_truthy() {
+                        if new_interpreter.err.is_some() {
+                            return (false, new_interpreter.err.clone());
+                        }
                         return (false, Some(make_err("TypeError", 
                             &format!("Conditions for alias '{}' don't meet condition #{}", alias_name, i + 1), 
                             self.get_location_from_current_statement())));
@@ -6286,7 +6289,7 @@ impl Interpreter {
         let (is_valid, err) = self.check_type(&value, &declared_type);
         if !is_valid {
             if let Some(err) = err {
-                return self.raise_with_ref("TypeError", &format!("Variable '{}' declared with type '{}', but got {} with invalid element types", name, declared_type.display_simple(), value.get_type().display_simple()), err);
+                return self.raise_with_ref("TypeError", &format!("Variable '{}' declared with type '{}', but got {} with value '{}'", name, declared_type.display_simple(), value.get_type().display_simple(), value), err);
             }
             return self.raise("TypeError", &format!("Variable '{}' declared with type '{}', but value is of type '{}'", name, declared_type.display_simple(), value.get_type().display_simple()));
         }
@@ -7182,22 +7185,28 @@ impl Interpreter {
                     return None;
                 };
                 
-                return Some((s.clone().name().to_string(), props));
+                return Some((s.clone().name().to_owned(), props));
             }
             _ => {
                 if !auto_init {
                     return None;
                 }
-                let mut tmp_var = Variable::new(
-                    "_".to_string(),
-                    object_value.clone(),
-                    object_value.type_name(),
-                    false,
-                    true,
-                    true,
-                );
-                tmp_var.init_properties(self);
-                return Some((object_value.get_type().display_simple(), tmp_var.properties));
+                let ty = object_value.get_type().display_simple();
+                let props = crate::env::runtime::native::DEFAULT_TYPE_METHODS
+                    .iter()
+                    .filter(|((_, second), _)| second == &ty)
+                    .map(|((method_name, _), func)| {
+                        (method_name.clone(), Variable::new(
+                            method_name.clone(),
+                            Value::Function(func.clone()),
+                            "function".to_owned(),
+                            false,
+                            true,
+                            true,
+                        ))
+                    })
+                    .collect();
+                return Some((ty, props));
             }
         }
     }
@@ -7333,21 +7342,15 @@ impl Interpreter {
                 }
             }
         } else {
-            let mut temp_var = Variable::new(
-                var_name_opt.clone().unwrap_or_else(|| "_".to_string()),
-                object_value.clone(),
-                object_value.type_name(),
-                false,
-                true,
-                true,
-            );
+            let mut props = HashMap::new();
+            let mut name = "_".to_owned();
 
-            if let Some((var_name, props)) = self.get_properties(temp_var.get_value(), false) {
-                temp_var.properties = props;
-                temp_var.set_name(var_name);
+            if let Some((var_name, var_props)) = self.get_properties(&object_value, false) {
+                name = var_name;
+                props = var_props;
             }
 
-            match temp_var.properties.get(method_name) {
+            match props.get(method_name) {
                 Some(v) => match v.get_value() {
                     Value::Function(f) => f.clone(),
                     other => return self.raise("TypeError", &format!("Expected function, got {}", other)),
@@ -7355,7 +7358,7 @@ impl Interpreter {
                 None => {
                     return self.raise(
                         "NameError",
-                        &format!("No method '{}' in '{}'", method_name, temp_var.get_name()),
+                        &format!("No method '{}' in '{}'", method_name, name),
                     )
                 },
             }
@@ -7381,7 +7384,7 @@ impl Interpreter {
             return NULL;
         }
 
-        // i hate my language
+        // i hate my design choices
         if let Some(var_name) = var_name_opt {
             if let Some(original_var) = self.variables.get_mut(&var_name) {
                 if is_object {
@@ -7397,22 +7400,14 @@ impl Interpreter {
 
     fn handle_property_access(&mut self, object: Statement, property_name: &str) -> Value {
         let object_value = self.evaluate(&object);
-        let object_type = object_value.type_name();
 
-        let mut object_variable = Variable::new(
-            "_".to_string(),
-            object_value.clone(),
-            object_type.clone(),
-            false,
-            true,
-            true,
-        );
+        let mut properties = HashMap::new();
+        let mut name = "_".to_owned();
 
         match object_value {
             Value::Module(ref o) => {
-                let props = o.get_properties();
-                object_variable.properties = props.clone();
-                object_variable.set_name(o.name().to_string());
+                properties = o.get_properties().clone();
+                name = o.name().to_owned();
             }
             Value::Type(t) => {
                 match t {
@@ -7467,29 +7462,32 @@ impl Interpreter {
                 }
             }
             Value::Struct(s) => {
-                object_variable.set_name(s.name().to_string());
-                object_variable.set_type(s.ty.clone());
-                object_variable.properties = s.get_properties();
+                name = s.name().to_string();
+                properties = s.get_properties();
             }
-            _ if !object_variable.is_init() => {
-                object_variable.init_properties(self);
-                object_variable.set_name(object_value.get_type().display_simple());
+            _ => {
+                match self.get_properties(&object_value, true) {
+                    Some((_, p)) => {
+                        properties = p;
+                    },
+                    None => {}
+                };
+                name = object_value.get_type().display_simple();
             }
-            _ => {}
         }
 
         if self.err.is_some() {
             return NULL;
         }
         
-        let var = match object_variable.properties.get(property_name) {
+        let var = match properties.get(property_name) {
             Some(v) => v.clone(),
             None => {
-                let available_names: Vec<String> = object_variable.properties.keys().cloned().collect();
+                let available_names: Vec<String> = properties.keys().cloned().collect();
                 if let Some(closest) = find_closest_match(property_name, &available_names) {
                     return self.raise_with_help(
                         "NameError",
-                        &format!("No property '{}' in '{}'", property_name, object_variable.get_name()),
+                        &format!("No property '{}' in '{}'", property_name, name),
                         &format!("Did you mean '{}{}{}'?",
                             check_ansi("\x1b[4m", &self.config.supports_color),
                             closest,
@@ -7497,7 +7495,7 @@ impl Interpreter {
                         ),
                     );
                 } else {
-                    return self.raise("NameError", &format!("No property '{}' in '{}'", property_name, object_variable.get_name()));
+                    return self.raise("NameError", &format!("No property '{}' in '{}'", property_name, name));
                 }
             }
         };

@@ -35,8 +35,8 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#define LUCIA_API_VERSION 0x1000 // 0x(major)(minor)(02patch) - https://semver.org/
-#define LUCIA_API_VERSION_STRING "1.0.0"
+#define LUCIA_API_VERSION 0x1100 // 0x(major)(minor)(02patch) - https://semver.org/
+#define LUCIA_API_VERSION_STRING "1.1.0"
 
 #define LUCIA_VERSION_MAJOR ((LUCIA_API_VERSION >> 12) & 0xF)
 #define LUCIA_VERSION_MINOR (((LUCIA_API_VERSION) >> 8)  & 0xF)
@@ -80,7 +80,8 @@ enum LuciaValueType {
     VALUE_LIST = 5,
     VALUE_MAP = 6,
     VALUE_BYTES = 7,
-    VALUE_POINTER = 8,
+    VALUE_NATIVE = 8,
+    VALUE_POINTER = 9,
     VALUE_UNSUPPORTED = 255,
 };
 
@@ -94,6 +95,7 @@ typedef union ValueData {
     const uint8_t* bytes_ptr;   // pointer to bytes data
     const LuciaValue* list_ptr; // pointer to list data
     const LuciaValue* map_ptr;  // flattened array: [key0, value0, key1, value1, ...]
+    void* native_func;          // pointer to native function (LuciaNativeFunc), void* to avoid including function pointer type in the union
     void* pointer;              // (advanced use) pointer to rusts Arc<Mutex<(Value, usize)>> where the Value is the rusts Value and usize is the depth
 } ValueData;
 
@@ -142,10 +144,10 @@ const char* lucia_value_debug(LuciaValue v);
 const char* lucia_value_display(LuciaValue v);
 
 // map/list utils - all return borrowed pointers into the backing LuciaValue.
-uint32_t lucia_list_len(LuciaValue list);
+size_t lucia_list_len(LuciaValue list);
 const LuciaValue* lucia_list_get(LuciaValue list, size_t index);                          // returns NULL if not a list or out of bounds
 CBool lucia_list_try_get(LuciaValue list, size_t index, const LuciaValue** out);          // returns 1 on success, 0 on failure
-uint32_t lucia_map_len(LuciaValue map);                                                   // returns number of key-value pairs
+size_t lucia_map_len(LuciaValue map);                                                   // returns number of key-value pairs
 const LuciaValue* lucia_map_get(LuciaValue map, const LuciaValue* key);                   // returns NULL if not found
 CBool lucia_map_try_get(LuciaValue map, const LuciaValue* key, const LuciaValue** out);   // returns 1 if found, 0 if not
 const LuciaValue* lucia_map_get_cstr(LuciaValue map, const char* key);                    // key is converted to a string value internally (temporary, freed automatically). Returns borrowed pointer or NULL.
@@ -229,6 +231,52 @@ const char* lucia_error_message(const LuciaError* err);
 const char* lucia_error_help(const LuciaError* err);
 const char* lucia_error_location(const LuciaError* err); // borrowed from internal thread-local buffer. Valid until next call to lucia_error_location.
 
+LuciaResult lucia_new_result_value(LuciaValue v);   // creates a LuciaResult with the given value. Must lucia_free_result() the result.
+LuciaResult lucia_new_result_error(const char* err_type, const char* err_msg); // creates a LuciaResult with the given error. Must lucia_free_result() the result.
+
+typedef struct LuciaVariables {
+    const char** keys;        // array of keys (borrowed pointers into the backing LuciaValue)
+    const LuciaValue* values; // array of values (borrowed pointers into the backing LuciaValue)
+    size_t len;               // number of variables
+    size_t capacity;          // capacity of the keys and values arrays
+    CBool include_default;    // whether the variables include the default builtins
+} LuciaVariables;
+
+typedef struct LuciaArgs {
+    const LuciaValue* values; // array of values
+    size_t len;               // number of arguments
+} LuciaArgs;
+
+// Users has to validate LuciaArgs passed to the native function
+// native functions are represented with lucia type 'native public mutable function[*any] -> any'
+typedef LuciaResult (*LuciaNativeFunc)(const LuciaArgs* args);
+
+// creates a new LuciaVariables with given capacity. User must free using lucia_free_vars().
+LuciaVariables* lucia_variables_new(size_t capacity);
+// creates a new LuciaVariables with the default variables of lucia (builtins). User must free using lucia_free_vars().
+LuciaVariables* lucia_variables_new_default(void);
+// inserts a key-value pair into the variables. Key is a borrowed pointer (must be valid until vars is freed), value is owned (will be freed when vars is freed).
+void lucia_variables_insert(LuciaVariables* vars, const char* key, LuciaValue value);
+// inserts a function into the variables. Key is a borrowed pointer (must be valid until vars is freed), func is a function pointer to a native function.
+void lucia_variables_insert_function(LuciaVariables* vars, const char* key, LuciaNativeFunc func);
+// clears all variables from the struct, freeing owned values but not keys. vars is still valid for use after this.
+void lucia_variables_clear(LuciaVariables* vars);
+ // removes a variable by key, freeing the owned value but not the key. Does nothing if key not found.
+void lucia_variables_remove(LuciaVariables* vars, const char* key);
+// gets a variable by key. Returns true if found, false if not found. *out is a borrowed pointer into the backing LuciaValue.
+CBool lucia_variables_get(const LuciaVariables* vars, const char* key, const LuciaValue** out);
+// if key not found, returns default_value (owned by caller, will not be freed by API)
+LuciaValue lucia_variables_get_or_default(const LuciaVariables* vars, const char* key, LuciaValue default_value);
+// frees the variables and all owned values. Does not free keys since they are borrowed pointers.
+void lucia_variables_free(LuciaVariables* vars);
+
+// gets an argument by key. Returns true if found, false if not found. *out is a borrowed pointer into the backing LuciaValue.
+CBool lucia_args_get(const LuciaArgs* args, const LuciaValue** out, size_t index);
+// if index is out of bounds, returns default_value (owned by caller, will not be freed by API)
+LuciaValue lucia_args_get_or_default(const LuciaArgs* args, size_t index, LuciaValue default_value);
+// gets the number of arguments in the LuciaArgs struct
+size_t lucia_args_len(const LuciaArgs* args);
+
 // BuildInfo is static, doesnt need freeing
 typedef struct BuildInfo {
     const char* name;           // "lucia"
@@ -266,5 +314,15 @@ LuciaResult lucia_interpret(const char* code, const LuciaConfig* config);
 
 // Same as lucia_interpret but with argv
 LuciaResult lucia_interpret_with_argv(const char* code, const char** argv, size_t argc, const LuciaConfig* config);
+
+// Interprets Lucia code given as a string
+// Returns a LuciaResult struct
+// User has to free the returned LuciaResult struct after use
+// Modifies vars with the final variables after execution. User has to free vars after use.
+LuciaResult lucia_interpret_with_vars(const char* code, const LuciaConfig* config, LuciaVariables* vars);
+
+// Same as lucia_interpret_with_vars but with argv
+LuciaResult lucia_interpret_with_vars_and_argv(const char* code, const LuciaConfig* config, LuciaVariables* vars, const char** argv, size_t argc);
+
 
 #endif // LUCIA_H

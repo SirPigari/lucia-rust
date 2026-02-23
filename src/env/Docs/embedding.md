@@ -2,6 +2,8 @@
 
 Lucia can be embedded with `liblucia`.
 
+## Basic code execution
+
 Here is a simple example to print `Hello World` from C:
 
 ```c
@@ -64,11 +66,91 @@ lucia.lib ws2_32.lib user32.lib kernel32.lib ntdll.lib msvcrt.lib legacy_stdio_d
 userenv.lib pathcch.lib powrprof.lib gdi32.lib shell32.lib bcrypt.lib advapi32.lib
 ```
 
-It has to link with a billion stupid libs because microslop cannot decide what is where.
+It has to link with a billion stupid libs because microslop cant choose between MSVCRT and UCRT
 
-I don't know what else to say its really self documented.
+## Injecting variables and retrieving them
 
-Just copy this and put any code into the `code` variable
+```c
+LuciaConfig config = lucia_default_config();
+LuciaVariables* vars = lucia_variables_new_default(); // default builtins
+
+lucia_variables_insert(vars, "a", lucia_value_int(35));
+lucia_variables_insert(vars, "b", lucia_value_string("hello"));
+
+LuciaResult res = lucia_interpret_with_vars("println(b) c := 34 + a", &config, vars);
+if (lucia_result_is_error(&res)) {
+    LuciaError err = *lucia_result_error(&res);
+    lucia_error_print(&err, stderr)
+    return 1;
+}
+lucia_free_result(res);
+
+// retrieve result
+LuciaValue c = lucia_variables_get_or_default(vars, "c", LUCIA_NULL);
+int64_t i;
+if (try_value_as_int(c, &i))
+    printf("c = %lld\n", i); // prints 69
+
+lucia_variables_free(vars);
+lucia_free_config(config);
+```
+
+If you don't want the default builtins, you can use `lucia_variables_new(size_t capacity)` instead. Be warned that builtins include types.
+
+### Injecting native functions
+
+```c
+#include <lucia.h>
+#include <stdio.h>
+
+LuciaResult b_func(const LuciaArgs* args) {
+    const LuciaValue* a;
+    if (!lucia_args_get(args, &a, 0))
+        return lucia_new_result_error("TypeError", "Missing argument 'a'");
+    
+    int64_t i;
+    if (!try_value_as_int(*a, &i)) {
+        return lucia_new_result_error("TypeError", "Expected 'a' to be an int");
+    }
+    
+    return lucia_new_result_value(lucia_value_int(i + 34));
+}
+
+int main() {
+    LuciaConfig config = lucia_default_config();
+    config.allow_unsafe = true; // allow unsafe operations (calling to native functions is unsafe)
+    LuciaVariables* vars = lucia_variables_new_default();
+
+    lucia_variables_insert(vars, "a", lucia_value_int(35));
+
+    // inject native function
+    lucia_variables_insert_function(vars, "b", b_func);
+
+    LuciaResult res = lucia_interpret_with_vars("c := b(a)", &config, vars);
+    if (lucia_result_is_error(&res)) {
+        LuciaError err = *lucia_result_error(&res);
+        lucia_error_print(&err, stderr)
+        return 1;
+    }
+    lucia_free_result(res);
+
+    const LuciaValue c = lucia_variables_get_or_default(vars, "c", LUCIA_NULL);
+    int64_t i;
+    if (try_value_as_int(c, &i))
+        printf("c = %lld\n", i);
+    else 
+        printf("c is not an int\n");
+
+    lucia_variables_free(vars);
+    lucia_free_config(config);
+}
+```
+
+For calling native C code, we need to enable `allow_unsafe` in config.  
+
+The function you insert into the variables is always of Lucia type `native public mutable function[*any] -> any`.  
+
+Since i wanted a simple API i choose to convert the variadic args into an array that you get. Thats why you need to validate the arguments yourself and make sure they exist and are of the right type. Because Lucia doesnt support kwargs this will work always (i havent found any function that would not be able to be made native).
 
 ## ABI validation
 
@@ -84,7 +166,8 @@ int main() {
 }
 ```
 
-It uses static assert for the checks so if any fails you will not be able to compile.
+It uses static assert for the checks so if any fails you will not be able to compile.  
+It is compile time only so you don't pay any runtime cost.
 
-> [!NOTE]
+> [!WARNING]
 > `lucia_size_check.h` is currently experimental because im not sure how much it works on 32bit machines or on MSVC (fuck you microslop)

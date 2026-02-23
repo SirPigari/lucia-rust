@@ -122,6 +122,11 @@ bench:
     #windows .\tests\run_benchmarks.exe ${argv}
     #unix ./tests/run_benchmarks ${argv}
 
+bench-save:
+    ${MKDIR}
+    #windows .\tests\run_benchmarks.exe ${argv} --save-results
+    #unix ./tests/run_benchmarks ${argv} --save-results
+
 #windows installer-dbg:
     ${MKDIR}
     del .\src\env\assets\installer\LuciaInstaller.exe

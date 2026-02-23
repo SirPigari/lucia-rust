@@ -49,12 +49,19 @@ mod parser;
 mod interpreter;
 
 use crate::env::runtime::config::Config;
+use crate::env::runtime::functions::FunctionMetadata;
+use crate::env::runtime::internal_structs::EffectFlags;
+use crate::env::runtime::types::{Type, SimpleType};
 use crate::env::runtime::value::Value;
 use crate::env::runtime::preprocessor::Preprocessor;
 use crate::env::runtime::libs::load_std_libs_embedded;
 use crate::env::runtime::utils::format_value;
-pub use crate::env::runtime::errors::Error;
+use crate::env::runtime::variables::Variable;
+use crate::env::runtime::errors::Error;
+use crate::env::runtime::functions::{Function, NativeFunction, Parameter};
 use parking_lot::Mutex;
+use rustc_hash::FxHashMap;
+use std::collections::HashMap;
 use core::ffi::{c_char, c_void};
 use std::mem::ManuallyDrop;
 use std::ffi::CString;
@@ -62,6 +69,7 @@ use std::ffi::CStr;
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::cell::RefCell;
+use once_cell::sync::Lazy;
 
 use interpreter::Interpreter;
 use parser::Parser;
@@ -158,7 +166,8 @@ pub enum LuciaValueType {
     VALUE_LIST = 5,
     VALUE_MAP = 6,
     VALUE_BYTES = 7,
-    VALUE_POINTER = 8,
+    VALUE_NATIVE = 8, // for native C functions
+    VALUE_POINTER = 9,
     VALUE_UNSUPPORTED = 255,
 }
 
@@ -180,7 +189,32 @@ pub union ValueData {
     pub bytes_ptr: *const u8,
     pub list_ptr: *const LuciaValue,
     pub map_ptr: *const LuciaValue, // flattened as key,value,key,value
-    pub pointer: *mut core::ffi::c_void,
+    pub native_func: *mut c_void,
+    pub pointer: *mut c_void,
+}
+
+pub type LuciaNativeFunc = extern "C" fn(args: *const LuciaArgs) -> LuciaResult;
+
+struct LuciaVariablesInner {
+    keys: Vec<CString>,
+    values: Vec<LuciaValue>,
+    include_default: CBool,
+}
+
+#[repr(C)]
+pub struct LuciaVariables {
+    keys: *const *const c_char,
+    values: *const LuciaValue,
+    len: usize,
+    capacity: usize,
+    include_default: CBool,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct LuciaArgs {
+    values: *const LuciaValue,
+    len: usize,
 }
 
 fn value_to_abi(v: &Value) -> LuciaValue {
@@ -263,6 +297,57 @@ fn value_to_abi(v: &Value) -> LuciaValue {
     }
 }
 
+pub fn native_call_hashmap_to_lucia_args(map: &HashMap<String, Value>) -> *const LuciaArgs {
+    let binding = Value::List(vec![]);
+    let args = map.get("args").unwrap_or(&binding);
+
+    let l = match args {
+        Value::List(lst) => lst,
+        _ => &vec![],
+    };
+
+    let values: Vec<LuciaValue> = l.iter().map(|v| value_to_abi(&v)).collect();
+    
+    let boxed = values.into_boxed_slice();
+    let len = boxed.len();
+    let values_ptr = boxed.as_ptr();
+    std::mem::forget(boxed);
+
+    let args = Box::new(LuciaArgs {
+        values: values_ptr,
+        len,
+    });
+
+    Box::into_raw(args) as *const LuciaArgs
+}
+
+pub fn lucia_args_free_from_map(args: *const LuciaArgs) {
+    if args.is_null() {
+        return;
+    }
+    unsafe {
+        let args_ref = &*args;
+        if !args_ref.values.is_null() && args_ref.len > 0 {
+            let slice = std::slice::from_raw_parts_mut(
+                args_ref.values as *mut LuciaValue,
+                args_ref.len,
+            );
+            for val in slice.iter() {
+                lucia_free_value(*val);
+            }
+            let _ = Vec::from_raw_parts(
+                args_ref.values as *mut LuciaValue,
+                args_ref.len,
+                args_ref.len,
+            );
+        }
+        let _ = Box::from_raw(args as *mut LuciaArgs);
+    }
+}
+
+static NATIVE_FUNC_CACHE: Lazy<Mutex<HashMap<usize, Arc<NativeFunction>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 fn abi_to_value(v: &LuciaValue) -> Value {
     match v.tag {
         LuciaValueType::VALUE_INT => Value::Int(imagnum::Int::from(unsafe { v.data.int_v })),
@@ -315,6 +400,69 @@ fn abi_to_value(v: &LuciaValue) -> Value {
                 Value::Map(map)
             }
         },
+        LuciaValueType::VALUE_NATIVE => {
+            let func_addr = unsafe { v.data.native_func as usize };
+
+            let func = {
+                let mut cache = NATIVE_FUNC_CACHE.lock();
+                cache.entry(func_addr).or_insert_with(|| {
+                    let func_ptr: LuciaNativeFunc = unsafe { std::mem::transmute(v.data.native_func) };
+
+                    let handler = move |args: &HashMap<String, Value>| -> Value {
+                        let abi_args = native_call_hashmap_to_lucia_args(args);
+                        let res = func_ptr(abi_args);
+                        lucia_args_free_from_map(abi_args);
+
+                        match res.tag {
+                            LuciaResultTag::LUCIA_RESULT_OK => abi_to_value(&(unsafe { res.data.value })),
+                            LuciaResultTag::LUCIA_RESULT_ERROR => {
+                                let err_type_str = if unsafe { res.data.error.err_type.is_null() } {
+                                    "Unknown".to_string()
+                                } else {
+                                    unsafe { CStr::from_ptr(res.data.error.err_type) }
+                                        .to_string_lossy()
+                                        .to_string()
+                                };
+
+                                let err_msg_str = if unsafe { res.data.error.err_msg.is_null() } {
+                                    "Unknown error".to_string()
+                                } else {
+                                    unsafe { CStr::from_ptr(res.data.error.err_msg) }
+                                        .to_string_lossy()
+                                        .to_string()
+                                };
+
+                                Value::new_error(&err_type_str, &err_msg_str, None)
+                            },
+                            _ => Value::new_error(
+                                "NativeError",
+                                "Native function returned invalid result tag",
+                                None,
+                            ),
+                        }
+                    };
+
+                    Arc::new(NativeFunction {
+                        func: Arc::new(handler),
+                        meta: FunctionMetadata {
+                            name: "native".to_owned(),
+                            parameters: vec![Parameter::variadic("args", "any")],
+                            return_type: Type::Simple { ty: SimpleType::Any },
+                            is_public: true,
+                            is_final: false,
+                            is_static: false,
+                            is_native: true,
+                            state: None,
+                            effects: EffectFlags::UNSAFE,
+                            doc: None,
+                        }
+                    })
+                })
+                .clone()
+            };
+
+            Value::Function(Function::Native(func))
+        }
         _ => Value::Null,
     }
 }
@@ -328,6 +476,85 @@ fn error_to_abi(e: &Error) -> LuciaError {
         line_num: location.line_number as u32,
         line_text: CString::new(location.line_string.clone()).unwrap().into_raw(),
         column: location.range.0,
+    }
+}
+
+fn vars_from_abi(v: *const LuciaVariables) -> FxHashMap<String, Variable> {
+    let mut vars = FxHashMap::default();
+    if v.is_null() {
+        return vars;
+    }
+    let vars_ref = unsafe { &*v };
+    if vars_ref.len == 0 || vars_ref.keys.is_null() || vars_ref.values.is_null() {
+        return vars;
+    }
+    let keys_slice = unsafe { std::slice::from_raw_parts(vars_ref.keys, vars_ref.len) };
+    let values_slice = unsafe { std::slice::from_raw_parts(vars_ref.values, vars_ref.len) };
+    for i in 0..vars_ref.len {
+        let key_ptr = keys_slice[i];
+        if key_ptr.is_null() {
+            continue;
+        }
+        let key_cstr = unsafe { CStr::from_ptr(key_ptr) };
+        let key_str = match key_cstr.to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => continue,
+        };
+        let value = abi_to_value(&values_slice[i]);
+        vars.insert(key_str.clone(), Variable::new(key_str, value, "any".to_string(), false, true, false));
+    }
+    vars
+}
+
+fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
+    if vv.is_null() {
+        return;
+    }
+
+    unsafe {
+        let vars_ref = &*vv;
+        if !vars_ref.values.is_null() && vars_ref.len > 0 {
+            let values_slice = std::slice::from_raw_parts(vars_ref.values, vars_ref.len);
+            for val in values_slice {
+                lucia_free_value(*val);
+            }
+        }
+    }
+
+    let inner_ptr = unsafe { (vv as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner };
+
+    let mut keys_cstrings: Vec<CString> = Vec::with_capacity(v.len());
+    let mut values_abi: Vec<LuciaValue> = Vec::with_capacity(v.len());
+
+    for (s, val) in v.iter() {
+        match CString::new(s.as_str()) {
+            Ok(cstr) => {
+                keys_cstrings.push(cstr);
+                values_abi.push(value_to_abi(val.get_value()));
+            }
+            Err(_) => {}
+        }
+    }
+
+    let key_ptrs: Vec<*const c_char> = keys_cstrings.iter().map(|s| s.as_ptr()).collect();
+
+    unsafe {
+        std::ptr::write(inner_ptr, LuciaVariablesInner {
+            keys: keys_cstrings,
+            values: values_abi,
+            include_default: (*vv).include_default,
+        });
+
+        let inner = &*inner_ptr;
+        let key_ptrs_boxed = key_ptrs.into_boxed_slice();
+        let keys_ptr = key_ptrs_boxed.as_ptr();
+        let len = inner.values.len();
+        std::mem::forget(key_ptrs_boxed);
+
+        (*vv).keys = keys_ptr;
+        (*vv).values = inner.values.as_ptr();
+        (*vv).len = len;
+        (*vv).capacity = len;
     }
 }
 
@@ -478,6 +705,7 @@ fn error_to_abi(e: &Error) -> LuciaError {
         LuciaValueType::VALUE_LIST        => b"list\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_MAP         => b"map\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_BYTES       => b"bytes\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_NATIVE      => b"native public mutable function[*any] -> any\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_POINTER     => b"<ptr>\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_UNSUPPORTED => b"<unsupported>\0".as_ptr() as *const c_char,
     }
@@ -551,11 +779,11 @@ fn error_to_abi(e: &Error) -> LuciaError {
     })
 }
 
-#[unsafe(no_mangle)] pub extern "C" fn lucia_list_len(list: LuciaValue) -> u32 {
+#[unsafe(no_mangle)] pub extern "C" fn lucia_list_len(list: LuciaValue) -> usize {
     if list.tag != LuciaValueType::VALUE_LIST {
         return 0;
     }
-    list.length as u32
+    list.length as usize
 }
 #[unsafe(no_mangle)] pub extern "C" fn lucia_list_get(list: LuciaValue, index: usize) -> *const LuciaValue {
     if list.tag != LuciaValueType::VALUE_LIST {
@@ -576,11 +804,11 @@ fn error_to_abi(e: &Error) -> LuciaError {
     unsafe { *out = &*list.data.list_ptr.add(index) as *const LuciaValue; }
     1
 }
-#[unsafe(no_mangle)] pub extern "C" fn lucia_map_len(map: LuciaValue) -> u32 {
+#[unsafe(no_mangle)] pub extern "C" fn lucia_map_len(map: LuciaValue) -> usize {
     if map.tag != LuciaValueType::VALUE_MAP {
         return 0;
     }
-    (map.length / 2) as u32 // length is flattened [k,v,k,v,...], so divide by 2 for pair count
+    (map.length / 2) as usize // length is flattened [k,v,k,v,...], so divide by 2 for pair count
 }
 #[unsafe(no_mangle)] pub extern "C" fn lucia_map_get(map: LuciaValue, key: *const LuciaValue) -> *const LuciaValue {
     if map.tag != LuciaValueType::VALUE_MAP || key.is_null() {
@@ -1009,6 +1237,30 @@ pub extern "C" fn lucia_result_try_as_error(res: *const LuciaResult, error: *mut
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lucia_new_result_value(v: LuciaValue) -> LuciaResult {
+    LuciaResult {
+        tag: LuciaResultTag::LUCIA_RESULT_OK,
+        data: LuciaResultData { value: v },
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_new_result_error(err_type: *const c_char, err_msg: *const c_char) -> LuciaResult {
+    let err = LuciaError {
+        err_type,
+        err_msg,
+        help_msg: std::ptr::null(),
+        line_num: 0,
+        line_text: std::ptr::null(),
+        column: 0,
+    };
+    LuciaResult {
+        tag: LuciaResultTag::LUCIA_RESULT_ERROR,
+        data: LuciaResultData { error: ManuallyDrop::new(err) },
+    }
+}
+
+#[unsafe(no_mangle)]
 pub static BUILD_INFO: BuildInfo = BuildInfo {
     name:          concat!(env!("CARGO_PKG_NAME"), "\0").as_ptr() as *const c_char,
     version:       concat!(env!("VERSION"), "\0").as_ptr() as *const c_char,
@@ -1131,6 +1383,281 @@ pub extern "C" fn lucia_free_result(mut res: LuciaResult) {
         }
         _ => {}
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_new(capacity: usize) -> *mut LuciaVariables {
+    let layout = std::alloc::Layout::new::<LuciaVariables>()
+        .extend(std::alloc::Layout::new::<LuciaVariablesInner>())
+        .expect("layout extend failed")
+        .0
+        .pad_to_align();
+
+    let ptr = unsafe { std::alloc::alloc(layout) };
+    if ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+
+    let vars_ptr = ptr as *mut LuciaVariables;
+    let inner_ptr = unsafe { ptr.add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner };
+
+    unsafe {
+        std::ptr::write(inner_ptr, LuciaVariablesInner {
+            keys: Vec::with_capacity(capacity),
+            values: Vec::with_capacity(capacity),
+            include_default: 0,
+        });
+
+        std::ptr::write(vars_ptr, LuciaVariables {
+            keys: std::ptr::null(),
+            values: std::ptr::null(),
+            len: 0,
+            capacity,
+            include_default: 0,
+        });
+    }
+
+    vars_ptr
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_new_default() -> *mut LuciaVariables {
+    let v = lucia_variables_new(0);
+    unsafe { (*v).include_default = 1; }
+    let inner_ptr = unsafe { (v as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner };
+    unsafe { (*inner_ptr).include_default = 1; }
+    v
+}
+
+unsafe fn lucia_variables_rebuild_ptrs(vars: *mut LuciaVariables) {
+    let inner_ptr = unsafe { (vars as *mut u8)
+        .add(std::mem::size_of::<LuciaVariables>()) 
+        as *mut LuciaVariablesInner };
+
+    let inner = unsafe { &*inner_ptr };
+
+    let key_ptrs: Vec<*const c_char> = inner.keys.iter().map(|s| s.as_ptr()).collect();
+    let len = key_ptrs.len();
+    let boxed = key_ptrs.into_boxed_slice();
+    let keys_ptr = boxed.as_ptr();
+    std::mem::forget(boxed);
+
+    let vars_ref: &mut LuciaVariables = unsafe { &mut *vars };
+
+    vars_ref.keys = keys_ptr;
+    vars_ref.values = if inner.values.is_empty() { std::ptr::null() } else { inner.values.as_ptr() };
+    vars_ref.len = len;
+    vars_ref.capacity = inner.keys.capacity();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_insert(
+    vars: *mut LuciaVariables,
+    key: *const c_char,
+    value: LuciaValue,
+) {
+    if vars.is_null() || key.is_null() {
+        return;
+    }
+
+    let key_str = unsafe { CStr::from_ptr(key) };
+    let key_owned = match key_str.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => return,
+    };
+
+    unsafe {
+        let inner_ptr = (vars as *mut u8)
+            .add(std::mem::size_of::<LuciaVariables>())
+            as *mut LuciaVariablesInner;
+
+        for (i, existing_key) in (&(*inner_ptr).keys).iter().enumerate() {
+            if existing_key.to_str().unwrap_or("") == key_owned.as_str() {
+                let old = (&(*inner_ptr).values)[i];
+                lucia_free_value(old);
+
+                (&mut (*inner_ptr).values)[i] = value;
+
+                lucia_variables_rebuild_ptrs(vars);
+                return;
+            }
+        }
+
+        if let Ok(cstr) = CString::new(key_owned) {
+            (&mut (*inner_ptr).keys).push(cstr);
+            (&mut (*inner_ptr).values).push(value);
+        }
+
+        lucia_variables_rebuild_ptrs(vars);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_insert_function(vars: *mut LuciaVariables, key: *const c_char, func: LuciaNativeFunc) {
+    let value = LuciaValue {
+        tag: LuciaValueType::VALUE_NATIVE,
+        data: ValueData { native_func: func as *mut c_void },
+        length: 0,
+    };
+    lucia_variables_insert(vars, key, value);
+}
+
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_remove(vars: *mut LuciaVariables, key: *const c_char) {
+    if vars.is_null() || key.is_null() {
+        return;
+    }
+
+    let key_str = unsafe { CStr::from_ptr(key) };
+    let key_s = match key_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    unsafe {
+        let inner_ptr = (vars as *mut u8)
+            .add(std::mem::size_of::<LuciaVariables>())
+            as *mut LuciaVariablesInner;
+
+        if let Some(pos) = (&(*inner_ptr).keys).iter().position(|k| k.to_str().unwrap_or("") == key_s) {
+            let old_value = (&(*inner_ptr).values)[pos];
+            lucia_free_value(old_value);
+
+            (&mut (*inner_ptr).keys).remove(pos);
+            (&mut (*inner_ptr).values).remove(pos);
+
+            lucia_variables_rebuild_ptrs(vars);
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_clear(vars: *mut LuciaVariables) {
+    if vars.is_null() {
+        return;
+    }
+
+    unsafe {
+        let inner_ptr = (vars as *mut u8)
+            .add(std::mem::size_of::<LuciaVariables>())
+            as *mut LuciaVariablesInner;
+
+        let inner = &mut *inner_ptr;
+
+        for val in &inner.values {
+            lucia_free_value(*val);
+        }
+
+        inner.keys.clear();
+        inner.values.clear();
+
+        lucia_variables_rebuild_ptrs(vars);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_get(
+    vars: *const LuciaVariables,
+    key: *const c_char,
+    out: *mut *const LuciaValue,
+) -> CBool {
+    if vars.is_null() || key.is_null() || out.is_null() {
+        return 0;
+    }
+
+    let key_str = unsafe { CStr::from_ptr(key) };
+    let key_s = match key_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
+    unsafe {
+        let inner_ptr = (vars as *const u8)
+            .add(std::mem::size_of::<LuciaVariables>())
+            as *const LuciaVariablesInner;
+
+        for (i, existing_key) in (&(*inner_ptr).keys).iter().enumerate() {
+            if existing_key.to_str().unwrap_or("") == key_s {
+                *out = &(&(*inner_ptr).values)[i] as *const LuciaValue;
+                return 1;
+            }
+        }
+    }
+
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_get_or_default(vars: *const LuciaVariables, key: *const c_char, default_value: LuciaValue) -> LuciaValue {
+    let mut out: *const LuciaValue = std::ptr::null();
+    if lucia_variables_get(vars, key, &mut out) != 0 && !out.is_null() {
+        unsafe { *out }
+    } else {
+        default_value
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_free(vars: *mut LuciaVariables) {
+    if vars.is_null() {
+        return;
+    }
+
+    unsafe {
+        let vars_ref = &*vars;
+        if !vars_ref.keys.is_null() && vars_ref.len > 0 {
+            let _ = Box::from_raw(std::slice::from_raw_parts_mut(
+                vars_ref.keys as *mut *const c_char,
+                vars_ref.len,
+            ));
+        }
+
+        let inner_ptr = (vars as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner;
+        let inner = std::ptr::read(inner_ptr);
+        for val in inner.values {
+            lucia_free_value(val);
+        }
+
+        let layout = std::alloc::Layout::new::<LuciaVariables>()
+            .extend(std::alloc::Layout::new::<LuciaVariablesInner>())
+            .expect("layout extend failed")
+            .0
+            .pad_to_align();
+        std::alloc::dealloc(vars as *mut u8, layout);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_args_get(args: *const LuciaArgs, out: *mut *const LuciaValue, index: usize) -> CBool {
+    if args.is_null() || out.is_null() {
+        return 0;
+    }
+    unsafe {
+        if index >= (*args).len || (*args).values.is_null() {
+            return 0;
+        }
+        *out = (*args).values.add(index);
+        1
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_args_get_or_default(args: *const LuciaArgs, index: usize, default_value: LuciaValue) -> LuciaValue {
+    let mut out: *const LuciaValue = std::ptr::null();
+    if lucia_args_get(args, &mut out, index) != 0 && !out.is_null() {
+        unsafe { *out }
+    } else {
+        default_value
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_args_len(args: *const LuciaArgs) -> usize {
+    if args.is_null() {
+        return 0;
+    }
+    unsafe { (*args).len }
 }
 
 // very useful
@@ -1279,12 +1806,137 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
     }
 }
 
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_interpret(
+    code: *const c_char,
+    config: *const LuciaConfig,
+) -> LuciaResult {
+    lucia_interpret_with_argv(code, std::ptr::null(), 0, config)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_interpret_with_argv(
     code: *const c_char,
     argv: *const *const c_char,
     argc: usize,
     config: *const LuciaConfig,
+) -> LuciaResult {
+    // let result = std::panic::catch_unwind(|| {
+    //     if code.is_null() || config.is_null() {
+    //         return LuciaResult {
+    //             tag: LuciaResultTag::LUCIA_RESULT_CONFIG_ERR,
+    //             data: unsafe { std::mem::zeroed() },
+    //         };
+    //     }
+
+    //     let code_str = unsafe { CStr::from_ptr(code).to_string_lossy().into_owned() };
+    //     let cfg = unsafe { config_from_abi(&*config) };
+    //     let mut argv_vec: Vec<String> = Vec::new();
+    //     for i in 0..argc {
+    //         let arg_ptr = unsafe { *argv.add(i) };
+    //         if !arg_ptr.is_null() {
+    //             let arg_str = unsafe { CStr::from_ptr(arg_ptr).to_string_lossy().into_owned() };
+    //             argv_vec.push(arg_str);
+    //         }
+    //     }
+
+    //     let lexer = Lexer::new(&code_str, "<foreign>");
+    //     let tokens = lexer.tokenize();
+
+    //     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    //     let mut preprocessor = Preprocessor::new(&cwd, "<foreign>");
+    //     let processed_tokens = match preprocessor.process(tokens, &cwd) {
+    //         Ok(toks) => toks,
+    //         Err(e) => {
+    //             let err_abi = error_to_abi(&e);
+    //             return LuciaResult {
+    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
+    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
+    //             };
+    //         }
+    //     };
+
+    //     let mut parser = Parser::new(processed_tokens);
+    //     let statements = match parser.parse_safe() {
+    //         Ok(stmts) => stmts,
+    //         Err(e) => {
+    //             let err_abi = error_to_abi(&e);
+    //             return LuciaResult {
+    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
+    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
+    //             };
+    //         }
+    //     };
+
+    //     let _ = load_std_libs_embedded();
+
+    //     let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
+    //     interpreter.set_main_thread(true);
+        
+    //     match interpreter.interpret(statements, false) {
+    //         Ok(val) => {
+    //             let val_abi = value_to_abi(&val);
+    //             LuciaResult {
+    //                 tag: LuciaResultTag::LUCIA_RESULT_OK,
+    //                 data: LuciaResultData { value: val_abi },
+    //             }
+    //         }
+    //         Err(e) => {
+    //             let err_abi = error_to_abi(&e);
+    //             LuciaResult {
+    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
+    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
+    //             }
+    //         }
+    //     }
+    // });
+
+    // match result {
+    //     Ok(r) => r,
+    //     Err(panic_payload) => {
+    //         let msg: String = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+    //             s.to_string()
+    //         } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+    //             s.clone()
+    //         } else {
+    //             "unknown panic".into()
+    //         };
+
+    //         let display_msg: String = if msg.as_bytes().first() == Some(&CUSTOM_PANIC_MARKER) {
+    //             msg[1..].to_string()
+    //         } else {
+    //             msg
+    //         };
+
+    //         let c_msg = CString::new(display_msg).unwrap_or_else(|_| CString::new("panic").unwrap());
+
+    //         LuciaResult {
+    //             tag: LuciaResultTag::LUCIA_RESULT_PANIC,
+    //             data: LuciaResultData { panic_msg: c_msg.into_raw() },
+    //         }
+    //     }
+    // }
+    lucia_interpret_with_vars_and_argv(code, config, std::ptr::null_mut(), argv, argc)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_interpret_with_vars(
+    code: *const c_char,
+    config: *const LuciaConfig,
+    vars: *mut LuciaVariables,
+) -> LuciaResult {
+    lucia_interpret_with_vars_and_argv(code, config, vars, std::ptr::null(), 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_interpret_with_vars_and_argv(
+    code: *const c_char,
+    config: *const LuciaConfig,
+    vars: *mut LuciaVariables,
+    argv: *const *const c_char,
+    argc: usize,
 ) -> LuciaResult {
     let result = std::panic::catch_unwind(|| {
         if code.is_null() || config.is_null() {
@@ -1336,12 +1988,21 @@ pub extern "C" fn lucia_interpret_with_argv(
 
         let _ = load_std_libs_embedded();
 
+        let include_default = vars.is_null() || unsafe { (*vars).include_default } != 0;
+
         let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
         interpreter.set_main_thread(true);
+        let vv = vars_from_abi(vars);
+        if include_default {
+            interpreter.variables.extend(vv);
+        } else {
+            interpreter.variables = vv;
+        }
         
         match interpreter.interpret(statements, false) {
             Ok(val) => {
                 let val_abi = value_to_abi(&val);
+                vars_to_abi(&interpreter.variables, vars);
                 LuciaResult {
                     tag: LuciaResultTag::LUCIA_RESULT_OK,
                     data: LuciaResultData { value: val_abi },
@@ -1382,12 +2043,4 @@ pub extern "C" fn lucia_interpret_with_argv(
             }
         }
     }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn lucia_interpret(
-    code: *const c_char,
-    config: *const LuciaConfig,
-) -> LuciaResult {
-    lucia_interpret_with_argv(code, std::ptr::null(), 0, config)
 }

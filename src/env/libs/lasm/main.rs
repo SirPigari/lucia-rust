@@ -162,10 +162,10 @@ fn le_call(args: &HashMap<String, Value>) -> Value {
         vars.insert(ks, lv);
     }
 
-    match call(function, &vars) {
-        Ok((exit, map)) => Value::Tuple(vec![
+    match call(function, &mut vars) {
+        Ok(exit) => Value::Tuple(vec![
             Value::Int(Int::from(exit as i64)),
-            Value::Map(map.into_iter().map(|(k, v)| (Value::String(k), v.into())).collect()),
+            Value::Map(vars.into_iter().map(|(k, v)| (Value::String(k), v.into())).collect()),
         ]),
         Err(e) => handle_lasm_error(e),
     }

@@ -1016,14 +1016,12 @@ fn generate_methods_for_default_types() -> FxHashMap<(String, String), Function>
             "Check if the string starts with the specified prefix.",
             move |value, args| {
                 if let Some(prefix_value) = args.get("prefix") {
-                    dbg!(&prefix_value, &value);
                     let res = match (value, prefix_value) {
                         (Value::String(s), Value::String(prefix)) => {
                             Value::Boolean(s.starts_with(&*prefix))
                         }
                         _ => Value::new_error("TypeError", "startswith() expects a string prefix", None),
                     };
-                    dbg!(&res);
                     res
                 } else {
                     Value::new_error("TypeError", "startswith() missing required argument 'prefix'", None)
