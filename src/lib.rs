@@ -868,30 +868,55 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
     result
 }
 
-#[unsafe(no_mangle)] pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE) {
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE) {
     if err.is_null() || out.is_null() {
         return;
     }
+
     unsafe {
+        let line_text = if !(*err).line_text.is_null() {
+            CStr::from_ptr((*err).line_text)
+        } else {
+            CStr::from_bytes_with_nul_unchecked(b"<null>\0")
+        };
+
+        let err_type = if !(*err).err_type.is_null() {
+            CStr::from_ptr((*err).err_type)
+        } else {
+            CStr::from_bytes_with_nul_unchecked(b"<null>\0")
+        };
+
+        let err_msg = if !(*err).err_msg.is_null() {
+            CStr::from_ptr((*err).err_msg)
+        } else {
+            CStr::from_bytes_with_nul_unchecked(b"<null>\0")
+        };
+
+        let help_msg = if !(*err).help_msg.is_null() {
+            Some(CStr::from_ptr((*err).help_msg))
+        } else {
+            None
+        };
+
+        let fmt = std::ffi::CString::new("%d:%zu: %s\n - %s: %s\n").unwrap();
         libc::fprintf(
             out,
-            b"%d:%zu: %s\n - %s: %s".as_ptr() as *const c_char,
+            fmt.as_ptr(),
             (*err).line_num,
             (*err).column,
-            (*err).line_text,
-            (*err).err_type,
-            (*err).err_msg,
+            line_text.as_ptr(),
+            err_type.as_ptr(),
+            err_msg.as_ptr(),
         );
-        if !(*err).help_msg.is_null() {
-            libc::fprintf(
-                out,
-                b"\nHelp: %s".as_ptr() as *const c_char,
-                (*err).help_msg,
-            );
+
+        if let Some(help) = help_msg {
+            let help_fmt = std::ffi::CString::new("Help: %s\n").unwrap();
+            libc::fprintf(out, help_fmt.as_ptr(), help.as_ptr());
         }
-        libc::fprintf(out, b"\n".as_ptr() as *const c_char);
     }
 }
+
 #[unsafe(no_mangle)] pub extern "C" fn lucia_error_type(err: *const LuciaError) -> *const c_char {
     if err.is_null() { return std::ptr::null(); }
     unsafe { (*err).err_type }

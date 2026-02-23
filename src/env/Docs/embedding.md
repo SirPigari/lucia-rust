@@ -109,9 +109,8 @@ LuciaResult b_func(const LuciaArgs* args) {
         return lucia_new_result_error("TypeError", "Missing argument 'a'");
     
     int64_t i;
-    if (!try_value_as_int(*a, &i)) {
+    if (!try_value_as_int(*a, &i))
         return lucia_new_result_error("TypeError", "Expected 'a' to be an int");
-    }
     
     return lucia_new_result_value(lucia_value_int(i + 34));
 }
@@ -128,8 +127,8 @@ int main() {
 
     LuciaResult res = lucia_interpret_with_vars("c := b(a)", &config, vars);
     if (lucia_result_is_error(&res)) {
-        LuciaError err = *lucia_result_error(&res);
-        lucia_error_print(&err, stderr)
+        const LuciaError* err = lucia_result_error(&res);
+        lucia_error_print(err, stderr);
         return 1;
     }
     lucia_free_result(res);

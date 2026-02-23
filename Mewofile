@@ -58,7 +58,7 @@ call run
 build:
     cargo build --bin lucia
     ${MKDIR}
-    ${MOVE} ${DEBUG_TARGET} ${TARGET} ${MOVE_END}
+    #ignorefail ${MOVE} ${DEBUG_TARGET} ${TARGET} ${MOVE_END}
 
 build-single:
     cargo build --bin lucia --features single_executable
