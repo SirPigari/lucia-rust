@@ -70,6 +70,7 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::cell::RefCell;
 use once_cell::sync::Lazy;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use interpreter::Interpreter;
 use parser::Parser;
@@ -868,10 +869,11 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
     result
 }
 
+
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE) {
-    if err.is_null() || out.is_null() {
-        return;
+pub extern "C" fn lucia_error_display(err: *const LuciaError) -> *const c_char {
+    if err.is_null() {
+        return std::ptr::null();
     }
 
     unsafe {
@@ -899,21 +901,35 @@ pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE
             None
         };
 
-        let fmt = std::ffi::CString::new("%d:%zu: %s\n - %s: %s\n").unwrap();
-        libc::fprintf(
-            out,
-            fmt.as_ptr(),
+        let mut display_str = format!("{}:{}: {}\n - {}: {}\n",
             (*err).line_num,
             (*err).column,
-            line_text.as_ptr(),
-            err_type.as_ptr(),
-            err_msg.as_ptr(),
+            line_text.to_string_lossy(),
+            err_type.to_string_lossy(),
+            err_msg.to_string_lossy()
         );
 
         if let Some(help) = help_msg {
-            let help_fmt = std::ffi::CString::new("Help: %s\n").unwrap();
-            libc::fprintf(out, help_fmt.as_ptr(), help.as_ptr());
+            display_str.push_str(&format!("Help: {}\n", help.to_string_lossy()));
         }
+        DISPLAY_BUFFER.with(|buf_cell| {
+            let mut buf = buf_cell.borrow_mut();
+            buf.clear();
+            buf.push_str(&display_str);
+            buf.push('\0');
+            buf.as_ptr() as *const c_char
+        })
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_error_print(err: *const LuciaError, out: *mut libc::FILE) {
+    if err.is_null() || out.is_null() {
+        return;
+    }
+
+    unsafe {
+        libc::fprintf(out, b"%s\0".as_ptr() as *const c_char, lucia_error_display(err));
     }
 }
 
@@ -1154,6 +1170,7 @@ pub enum LuciaResultTag {
     LUCIA_RESULT_ERROR = 2,
     LUCIA_RESULT_CONFIG_ERR = 3,
     LUCIA_RESULT_PANIC = 4,
+    LUCIA_RESULT_INTERRUPT = 5,
 }
 
 #[repr(C)]
@@ -1167,6 +1184,7 @@ pub union LuciaResultData {
     pub value: LuciaValue,
     pub error: ManuallyDrop<LuciaError>,
     pub panic_msg: *const c_char,
+    pub interrupt_msg: *const c_char,
 }
 
 #[unsafe(no_mangle)]
@@ -1258,6 +1276,26 @@ pub extern "C" fn lucia_result_try_as_error(res: *const LuciaResult, error: *mut
             }
             _ => 0,
         }
+    }
+}
+
+#[unsafe(no_mangle)] pub extern "C" fn lucia_result_display(res: LuciaResult) -> *const c_char {
+    match res.tag {
+        LuciaResultTag::LUCIA_RESULT_OK => {
+            lucia_value_display(unsafe { res.data.value })
+        },
+        LuciaResultTag::LUCIA_RESULT_ERROR => {
+            lucia_error_display(unsafe { &*res.data.error as *const _ })
+        },
+        LuciaResultTag::LUCIA_RESULT_CONFIG_ERR => {
+            b"Invalid config data (Config Error)\0".as_ptr() as *const c_char
+        },
+        LuciaResultTag::LUCIA_RESULT_PANIC => {
+            unsafe { res.data.panic_msg }
+        },
+        LuciaResultTag::LUCIA_RESULT_INTERRUPT => {
+            unsafe { res.data.interrupt_msg }
+        },
     }
 }
 
@@ -1404,6 +1442,12 @@ pub extern "C" fn lucia_free_result(mut res: LuciaResult) {
             let panic_msg_ptr = unsafe { res.data.panic_msg as *mut c_char };
             if !panic_msg_ptr.is_null() {
                 unsafe { let _ = CString::from_raw(panic_msg_ptr); }
+            }
+        }
+        LuciaResultTag::LUCIA_RESULT_INTERRUPT => {
+            let interrupt_msg_ptr = unsafe { res.data.interrupt_msg as *mut c_char };
+            if !interrupt_msg_ptr.is_null() {
+                unsafe { let _ = CString::from_raw(interrupt_msg_ptr); }
             }
         }
         _ => {}
@@ -1831,6 +1875,23 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
     }
 }
 
+static INTERRUPT_FLAG_REF: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
+static INTERRUPT_FLAG_MSG: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_interrupt_current() {
+    INTERRUPT_FLAG_REF.store(true, Ordering::Relaxed);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_interrupt_current_with_message(msg: *const c_char) {
+    INTERRUPT_FLAG_REF.store(true, Ordering::Relaxed);
+    if !msg.is_null() {
+        let msg_str = unsafe { CStr::from_ptr(msg).to_string_lossy().into_owned() };
+        let mut guard = INTERRUPT_FLAG_MSG.lock();
+        *guard = Some(msg_str);
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_interpret(
@@ -1847,102 +1908,6 @@ pub extern "C" fn lucia_interpret_with_argv(
     argc: usize,
     config: *const LuciaConfig,
 ) -> LuciaResult {
-    // let result = std::panic::catch_unwind(|| {
-    //     if code.is_null() || config.is_null() {
-    //         return LuciaResult {
-    //             tag: LuciaResultTag::LUCIA_RESULT_CONFIG_ERR,
-    //             data: unsafe { std::mem::zeroed() },
-    //         };
-    //     }
-
-    //     let code_str = unsafe { CStr::from_ptr(code).to_string_lossy().into_owned() };
-    //     let cfg = unsafe { config_from_abi(&*config) };
-    //     let mut argv_vec: Vec<String> = Vec::new();
-    //     for i in 0..argc {
-    //         let arg_ptr = unsafe { *argv.add(i) };
-    //         if !arg_ptr.is_null() {
-    //             let arg_str = unsafe { CStr::from_ptr(arg_ptr).to_string_lossy().into_owned() };
-    //             argv_vec.push(arg_str);
-    //         }
-    //     }
-
-    //     let lexer = Lexer::new(&code_str, "<foreign>");
-    //     let tokens = lexer.tokenize();
-
-    //     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-    //     let mut preprocessor = Preprocessor::new(&cwd, "<foreign>");
-    //     let processed_tokens = match preprocessor.process(tokens, &cwd) {
-    //         Ok(toks) => toks,
-    //         Err(e) => {
-    //             let err_abi = error_to_abi(&e);
-    //             return LuciaResult {
-    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
-    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
-    //             };
-    //         }
-    //     };
-
-    //     let mut parser = Parser::new(processed_tokens);
-    //     let statements = match parser.parse_safe() {
-    //         Ok(stmts) => stmts,
-    //         Err(e) => {
-    //             let err_abi = error_to_abi(&e);
-    //             return LuciaResult {
-    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
-    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
-    //             };
-    //         }
-    //     };
-
-    //     let _ = load_std_libs_embedded();
-
-    //     let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
-    //     interpreter.set_main_thread(true);
-        
-    //     match interpreter.interpret(statements, false) {
-    //         Ok(val) => {
-    //             let val_abi = value_to_abi(&val);
-    //             LuciaResult {
-    //                 tag: LuciaResultTag::LUCIA_RESULT_OK,
-    //                 data: LuciaResultData { value: val_abi },
-    //             }
-    //         }
-    //         Err(e) => {
-    //             let err_abi = error_to_abi(&e);
-    //             LuciaResult {
-    //                 tag: LuciaResultTag::LUCIA_RESULT_ERROR,
-    //                 data: LuciaResultData { error: ManuallyDrop::new(err_abi) },
-    //             }
-    //         }
-    //     }
-    // });
-
-    // match result {
-    //     Ok(r) => r,
-    //     Err(panic_payload) => {
-    //         let msg: String = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-    //             s.to_string()
-    //         } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-    //             s.clone()
-    //         } else {
-    //             "unknown panic".into()
-    //         };
-
-    //         let display_msg: String = if msg.as_bytes().first() == Some(&CUSTOM_PANIC_MARKER) {
-    //             msg[1..].to_string()
-    //         } else {
-    //             msg
-    //         };
-
-    //         let c_msg = CString::new(display_msg).unwrap_or_else(|_| CString::new("panic").unwrap());
-
-    //         LuciaResult {
-    //             tag: LuciaResultTag::LUCIA_RESULT_PANIC,
-    //             data: LuciaResultData { panic_msg: c_msg.into_raw() },
-    //         }
-    //     }
-    // }
     lucia_interpret_with_vars_and_argv(code, config, std::ptr::null_mut(), argv, argc)
 }
 
@@ -2016,6 +1981,9 @@ pub extern "C" fn lucia_interpret_with_vars_and_argv(
         let include_default = vars.is_null() || unsafe { (*vars).include_default } != 0;
 
         let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
+        let flag = INTERRUPT_FLAG_REF.clone();
+        flag.store(false, Ordering::Relaxed);
+        interpreter.stop_flag = Some(flag);
         interpreter.set_main_thread(true);
         let vv = vars_from_abi(vars);
         if include_default {
@@ -2023,8 +1991,24 @@ pub extern "C" fn lucia_interpret_with_vars_and_argv(
         } else {
             interpreter.variables = vv;
         }
+
+        let result = interpreter.interpret(statements, false);
         
-        match interpreter.interpret(statements, false) {
+        if INTERRUPT_FLAG_REF.load(Ordering::Relaxed) {
+            return LuciaResult {
+                tag: LuciaResultTag::LUCIA_RESULT_INTERRUPT,
+                data: LuciaResultData { interrupt_msg: {
+                    let guard = INTERRUPT_FLAG_MSG.lock();
+                    if let Some(msg) = &*guard {
+                        CString::new(msg.clone()).unwrap_or_else(|_| CString::new("interrupt").unwrap()).into_raw()
+                    } else {
+                        CString::new("interrupt").unwrap().into_raw()
+                    }
+                } },
+            };
+        }
+
+        match result {
             Ok(val) => {
                 let val_abi = value_to_abi(&val);
                 vars_to_abi(&interpreter.variables, vars);

@@ -35,8 +35,8 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#define LUCIA_API_VERSION 0x1100 // 0x(major)(minor)(02patch) - https://semver.org/
-#define LUCIA_API_VERSION_STRING "1.1.0"
+#define LUCIA_API_VERSION 0x1200 // 0x(major)(minor)(02patch) - https://semver.org/
+#define LUCIA_API_VERSION_STRING "1.2.0"
 
 #define LUCIA_VERSION_MAJOR ((LUCIA_API_VERSION >> 12) & 0xF)
 #define LUCIA_VERSION_MINOR (((LUCIA_API_VERSION) >> 8)  & 0xF)
@@ -223,16 +223,17 @@ const LuciaValue* lucia_result_value(const LuciaResult* res);  // returns NULL i
 const LuciaError* lucia_result_error(const LuciaResult* res);  // returns NULL if not error
 CBool lucia_result_try_as_value(const LuciaResult* res, const LuciaValue** out); // returns true on value, false on error
 CBool lucia_result_try_as_error(const LuciaResult* res, const LuciaError** out); // returns true on error, false on value
+const char* lucia_result_display(const LuciaResult res); // borrowed pointer to a human-readable display string for the result. Valid until next call to lucia_result_display.
+LuciaResult lucia_new_result_value(LuciaValue v);   // creates a LuciaResult with the given value. Must lucia_free_result() the result.
+LuciaResult lucia_new_result_error(const char* err_type, const char* err_msg); // creates a LuciaResult with the given error. Must lucia_free_result() the result.
 
 // error helpers - all take borrowed pointers to LuciaError
+const char* lucia_error_display(const LuciaError* err); // borrowed pointer to a human-readable display string for the error. Valid until next call to lucia_error_display.
 void lucia_error_print(const LuciaError* err, FILE* out); // prints formatted error to FILE*. No allocation.
 const char* lucia_error_type(const LuciaError* err);
 const char* lucia_error_message(const LuciaError* err);
 const char* lucia_error_help(const LuciaError* err);
 const char* lucia_error_location(const LuciaError* err); // borrowed from internal thread-local buffer. Valid until next call to lucia_error_location.
-
-LuciaResult lucia_new_result_value(LuciaValue v);   // creates a LuciaResult with the given value. Must lucia_free_result() the result.
-LuciaResult lucia_new_result_error(const char* err_type, const char* err_msg); // creates a LuciaResult with the given error. Must lucia_free_result() the result.
 
 typedef struct LuciaVariables {
     const char** keys;        // array of keys (borrowed pointers into the backing LuciaValue)
@@ -306,6 +307,11 @@ const BuildInfo* lucia_get_build_info(void);
 // Gets the default configuration
 // User has to free the returned LuciaConfig struct after use
 LuciaConfig lucia_default_config(void);
+
+// Interrupts the currently running interpretation (if any). Safe to call from another thread.
+void lucia_interrupt_current(void);
+ // interrupts with a custom message that can be retrieved
+void lucia_interrupt_current_with_message(const char* msg);
 
 // Interprets Lucia code given as a string
 // Returns a LuciaResult struct

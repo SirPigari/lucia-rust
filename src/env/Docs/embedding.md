@@ -151,6 +151,69 @@ The function you insert into the variables is always of Lucia type `native publi
 
 Since i wanted a simple API i choose to convert the variadic args into an array that you get. Thats why you need to validate the arguments yourself and make sure they exist and are of the right type. Because Lucia doesnt support kwargs this will work always (i havent found any function that would not be able to be made native).
 
+### Interrupting
+
+If you want to interrupt the currently running interpreter, call `lucia_interrupt_current()`. You can also provide an optional message with `lucia_interrupt_current_with_message(const char* msg)`. The message will be available to you in the LuciaResult returned by the interpreter.
+
+```c
+#include <lucia.h>
+#include <stdio.h>
+#include <pthread.h>
+#include <unistd.h>
+
+typedef struct {
+    LuciaConfig config;
+    const char* code;
+} ThreadData;
+
+void* interpret_thread(void* arg) {
+    ThreadData* data = (ThreadData*)arg;
+    LuciaResult res = lucia_interpret(data->code, &data->config);
+    fprintf(stderr, "%s\n", lucia_result_display(res));
+    lucia_free_result(res);
+    return NULL;
+}
+
+int main() {
+    LuciaConfig config = lucia_default_config();
+
+    // yes sleep is in milliseconds.
+    ThreadData data = {config, "import time for _ in [0..5]: time.sleep(1000) end return 420"};
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, interpret_thread, &data);
+
+    sleep(5); // wait 5 seconds
+    lucia_interrupt_current_with_message("Interrupted by user"); // interrupt the currently running interpreter
+
+    pthread_join(thread, NULL);
+
+    lucia_free_config(config);
+    return 0;
+}
+```
+
+This example should output someting like:
+
+```
+lucia git:(main) ✗ gcc test.c -o test src/env/bin/liblucia.a -Isrc/env/assets/include -lm -Wall -Werror -std=c99
+lucia git:(main) ✗ time ./test                                                                                  
+Interrupted by user
+./test  0.01s user 0.01s system 0% cpu 5.020 total
+```
+
+It should print `Interrupted by user` after 5 seconds, which is the message we provided to `lucia_interrupt_current_with_message`. The interpreter will stop immediately and return a result with tag `LUCIA_RESULT_INTERRUPT` and the interrupt message.
+
+Im aware there is an issue with multiple interpreters running at the same time and interrupting the wrong one. I will fix that in the future but for now just dont do that.
+
+If no interpreter is running when you call `lucia_interrupt_current()` or `lucia_interrupt_current_with_message()`, it will do nothing.
+
+The future fix may look like:
+
+```c
+lucia_interrupt_thread(pthread_self(), "Interrupted by user");
+```
+
 ## ABI validation
 
 If you want to be sure all the ABI is correct, include [lucia_size_check.h](../assets/include/lucia_size_check.h).
