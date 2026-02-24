@@ -153,7 +153,7 @@ Since i wanted a simple API i choose to convert the variadic args into an array 
 
 ### Interrupting
 
-If you want to interrupt the currently running interpreter, call `lucia_interrupt_current()`. You can also provide an optional message with `lucia_interrupt_current_with_message(const char* msg)`. The message will be available to you in the LuciaResult returned by the interpreter.
+If you want to interrupt the currently running interpreter, call `lucia_interrupt()`. For more docs read [lucia.h](../assets/include/lucia.h#L312)
 
 ```c
 #include <lucia.h>
@@ -184,7 +184,7 @@ int main() {
     pthread_create(&thread, NULL, interpret_thread, &data);
 
     sleep(5); // wait 5 seconds
-    lucia_interrupt_current_with_message("Interrupted by user"); // interrupt the currently running interpreter
+    lucia_interrupt(.last_thread = true, .msg = "Interrupted by user"); // interrupt the currently running interpreter
 
     pthread_join(thread, NULL);
 
@@ -195,23 +195,46 @@ int main() {
 
 This example should output someting like:
 
-```
-lucia git:(main) ✗ gcc test.c -o test src/env/bin/liblucia.a -Isrc/env/assets/include -lm -Wall -Werror -std=c99
-lucia git:(main) ✗ time ./test                                                                                  
+```console
+lucia git:(main) gcc test.c -o test src/env/bin/liblucia.a -Isrc/env/assets/include -lm -Wall -Werror -std=c99
+lucia git:(main) time ./test                                                                                  
 Interrupted by user
 ./test  0.01s user 0.01s system 0% cpu 5.020 total
 ```
 
-It should print `Interrupted by user` after 5 seconds, which is the message we provided to `lucia_interrupt_current_with_message`. The interpreter will stop immediately and return a result with tag `LUCIA_RESULT_INTERRUPT` and the interrupt message.
+It should print `Interrupted by user` after 5 seconds, which is the message we provided to `.msg`. The interpreter will stop immediately and return a result with tag `LUCIA_RESULT_INTERRUPT` and the interrupt message.
 
-Im aware there is an issue with multiple interpreters running at the same time and interrupting the wrong one. I will fix that in the future but for now just dont do that.
+If no interpreter is running when you call `lucia_interrupt()` will do nothing.  
 
-If no interpreter is running when you call `lucia_interrupt_current()` or `lucia_interrupt_current_with_message()`, it will do nothing.
-
-The future fix may look like:
+If you want to interrupt a specific interpreter on a thread you need the thread id as `uint64_t`.  
 
 ```c
-lucia_interrupt_thread(pthread_self(), "Interrupted by user");
+uint64_t thread_id = (uint64_t)pthread_self(); // or (uint64_t)GetCurrentThreadId() on windows
+...
+lucia_interrupt(.thread = thread_id, .msg = "This specific thread was interrupted")
+```
+
+If you want to interrupt *all* interpreters, pass in `.all = true`.
+
+```c
+lucia_interrupt(.all = true, .msg = "Yall getting canceled")
+```
+
+To cancel an interrupt, pass in `.cancel = true`.
+
+```c
+lucia_interrupt(.last_thread = true, .cancel = true)
+```
+
+Only use case of this i found is that you can do run interpreter with a native function that takes time (for example `sleep` is one of that, because its a native function that sleeps the thread so it cant check the interrupt flag)  
+So you can run `import time time.sleep(5000) return 42` which sleeps for 5 seconds.
+Then:
+
+```c
+// create thread, save id to `thread_id`, run interpreter
+lucia_interrupt(.thread = thread_id)  // sets the flag but the interpreter still runs
+sleep(3)  // sleep 3 seconds, so the lucia timer has now ~2 seconds to end
+lucia_interrupt(.thread = thread_id, .cancel = true) // now cancels the flag, the interpreter thread can still run and get the result `42`
 ```
 
 ## ABI validation

@@ -308,10 +308,25 @@ const BuildInfo* lucia_get_build_info(void);
 // User has to free the returned LuciaConfig struct after use
 LuciaConfig lucia_default_config(void);
 
-// Interrupts the currently running interpretation (if any). Safe to call from another thread.
-void lucia_interrupt_current(void);
- // interrupts with a custom message that can be retrieved
-void lucia_interrupt_current_with_message(const char* msg);
+// internal arguments struct for lucia_interrupt with args
+typedef struct lucia__InterruptArgs {
+    const char* msg;   // message to interrupt with, if NULL then "interrupt" is used
+    CBool all;         // whether to interrupt all threads
+    CBool last_thread; // whether to interrupt the last thread that started executing code
+    uint64_t thread;   // specific thread id to interrupt, on unix its (uint64_t)pthread_self(), on windows its (uint64_t)GetCurrentThreadId()
+    CBool cancel;      // whether to cancel the interrupt
+} lucia__InterruptArgs;
+
+// internal function for lucia_interrupt with args
+CBool lucia__lucia_interrupt(lucia__InterruptArgs args);
+
+// value_as(.msg = "custom interrupt message", .all = true, .last_thread = false, .thread = 0, .cancel = false)
+// you must provide only one of .all, .last_thread, or .thread to specify which threads to interrupt. 
+// I don't know the precedence so take it as UB if multiple are provided
+// .cancel applies to the thread you selected, optional
+// .msg applies also to the thread you selected, optional. If not provided, defaults to "interrupt"
+#define lucia_interrupt(...) \
+    lucia__lucia_interrupt((lucia__InterruptArgs){ __VA_ARGS__ })
 
 // Interprets Lucia code given as a string
 // Returns a LuciaResult struct

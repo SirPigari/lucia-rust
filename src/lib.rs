@@ -70,7 +70,7 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::cell::RefCell;
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use interpreter::Interpreter;
 use parser::Parser;
@@ -1731,22 +1731,34 @@ pub extern "C" fn lucia_args_len(args: *const LuciaArgs) -> usize {
 
 // very useful
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_print_size_checks() {
+pub extern "C" fn lucia_print_size_checks(out: *mut libc::FILE) {
     use std::mem::{size_of, align_of};
+
+    macro_rules! output {
+        ($($arg:tt)*) => {{
+            unsafe {
+                use std::ffi::CString;
+                let s = format!($($arg)*);
+                let cstr = CString::new(s).expect("CString::new failed");
+                libc::fputs(cstr.as_ptr(), out);
+                libc::fputs("\n\0".as_ptr() as *const c_char, out);
+            }
+        }};
+    }
 
     macro_rules! static_assert_type {
         ($t:ty) => {
             if stringify!($t) == "usize" || stringify!($t).starts_with("*") {
-                println!("#if UINTPTR_MAX == 0xffffffffffffffff"); // 64-bit
-                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == 8, \"{t} expected to be 8 bytes on 64-bit\");", t=stringify!($t));
-                println!("LUCIA_STATIC_ASSERT(alignof({t}) == 8, \"{t} alignment expected to be 8 on 64-bit\");", t=stringify!($t));
-                println!("#else"); // 32-bit
-                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == 4, \"{t} expected to be 4 bytes on 32-bit\");", t=stringify!($t));
-                println!("LUCIA_STATIC_ASSERT(alignof({t}) == 4, \"{t} alignment expected to be 4 on 32-bit\");", t=stringify!($t));
-                println!("#endif");
+                output!("#if UINTPTR_MAX == 0xffffffffffffffff"); // 64-bit
+                output!("LUCIA_STATIC_ASSERT(sizeof({t}) == 8, \"{t} expected to be 8 bytes on 64-bit\");", t=stringify!($t));
+                output!("LUCIA_STATIC_ASSERT(alignof({t}) == 8, \"{t} alignment expected to be 8 on 64-bit\");", t=stringify!($t));
+                output!("#else"); // 32-bit
+                output!("LUCIA_STATIC_ASSERT(sizeof({t}) == 4, \"{t} expected to be 4 bytes on 32-bit\");", t=stringify!($t));
+                output!("LUCIA_STATIC_ASSERT(alignof({t}) == 4, \"{t} alignment expected to be 4 on 32-bit\");", t=stringify!($t));
+                output!("#endif");
             } else {
-                println!("LUCIA_STATIC_ASSERT(sizeof({t}) == {s}, \"Size of {t} was expected to be {s}\");", t=stringify!($t), s=size_of::<$t>());
-                println!("LUCIA_STATIC_ASSERT(alignof({t}) == {a}, \"Alignment of {t} was expected to be {a}\");", t=stringify!($t), a=align_of::<$t>());
+                output!("LUCIA_STATIC_ASSERT(sizeof({t}) == {s}, \"Size of {t} was expected to be {s} byte{plural}\");", t=stringify!($t), s=size_of::<$t>(), plural=if size_of::<$t>() == 1 { "" } else { "s" });
+                output!("LUCIA_STATIC_ASSERT(alignof({t}) == {a}, \"Alignment of {t} was expected to be {a}\");", t=stringify!($t), a=align_of::<$t>());
             }
         };
     }
@@ -1754,16 +1766,22 @@ pub extern "C" fn lucia_print_size_checks() {
     macro_rules! static_assert_field {
         ($struct:ty, $field:ident, $ty:ty) => {
             if stringify!($ty) == "usize" || stringify!($ty).starts_with("*") {
-                println!("#if UINTPTR_MAX == 0xffffffffffffffff");
-                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 8, \"{s}.{f} expected to be 8 bytes on 64-bit\");", s=stringify!($struct), f=stringify!($field));
-                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 8, \"{s}.{f} alignment expected to be 8 on 64-bit\");", s=stringify!($struct), f=stringify!($field));
-                println!("#else");
-                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 4, \"{s}.{f} expected to be 4 bytes on 32-bit\");", s=stringify!($struct), f=stringify!($field));
-                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 4, \"{s}.{f} alignment expected to be 4 on 32-bit\");", s=stringify!($struct), f=stringify!($field));
-                println!("#endif");
+                output!("#if UINTPTR_MAX == 0xffffffffffffffff"); // 64-bit
+                output!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 8, \"{s}.{f} expected to be 8 bytes on 64-bit\");", s=stringify!($struct), f=stringify!($field));
+                output!("#ifndef _MSC_VER");
+                output!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 8, \"{s}.{f} alignment expected to be 8 on 64-bit\");", s=stringify!($struct), f=stringify!($field));
+                output!("#endif");
+                output!("#else"); // 32-bit
+                output!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == 4, \"{s}.{f} expected to be 4 bytes on 32-bit\");", s=stringify!($struct), f=stringify!($field));
+                output!("#ifndef _MSC_VER");
+                output!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == 4, \"{s}.{f} alignment expected to be 4 on 32-bit\");", s=stringify!($struct), f=stringify!($field));
+                output!("#endif");
+                output!("#endif");
             } else {
-                println!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == {sz}, \"{s}.{f} was expected to be {sz}\");", s=stringify!($struct), f=stringify!($field), sz=size_of::<$ty>());
-                println!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == {a}, \"{s}.{f} alignment was expected to be {a}\");", s=stringify!($struct), f=stringify!($field), a=align_of::<$ty>());
+                output!("LUCIA_STATIC_ASSERT(sizeof((({s}*)0)->{f}) == {sz}, \"{s}.{f} was expected to be {sz} byte{plural}\");", s=stringify!($struct), f=stringify!($field), sz=size_of::<$ty>(), plural=if size_of::<$ty>() == 1 { "" } else { "s" });
+                output!("#ifndef _MSC_VER");
+                output!("LUCIA_STATIC_ASSERT(alignof((({s}*)0)->{f}) == {a}, \"{s}.{f} alignment was expected to be {a}\");", s=stringify!($struct), f=stringify!($field), a=align_of::<$ty>());
+                output!("#endif");
             }
         };
     }
@@ -1779,7 +1797,10 @@ pub extern "C" fn lucia_print_size_checks() {
     static_assert_type!(LuciaValue);
     static_assert_type!(LuciaError);
     static_assert_type!(LuciaResult);
+    static_assert_type!(LuciaVariables);
+    static_assert_type!(LuciaArgs);
     static_assert_type!(ValueAsArgs);
+    static_assert_type!(InterruptArgs);
 
     // ValueData fields
     static_assert_field!(ValueData, int_v, i64);
@@ -1842,9 +1863,27 @@ pub extern "C" fn lucia_print_size_checks() {
     static_assert_field!(LuciaResult, tag, LuciaResultTag);
     static_assert_field!(LuciaResult, data, LuciaResultData);
 
+    // LuciaVariables fields
+    static_assert_field!(LuciaVariables, keys, *const *const c_char);
+    static_assert_field!(LuciaVariables, values, *const LuciaValue);
+    static_assert_field!(LuciaVariables, len, usize);
+    static_assert_field!(LuciaVariables, capacity, usize);
+    static_assert_field!(LuciaVariables, include_default, CBool);
+
+    // LuciaArgs fields
+    static_assert_field!(LuciaArgs, values, *const LuciaValue);
+    static_assert_field!(LuciaArgs, len, usize);
+
     // ValueAsArgs fields
     static_assert_field!(ValueAsArgs, force, CBool);
     static_assert_field!(ValueAsArgs, cast, CBool);
+
+    // InterruptArgs fields
+    static_assert_field!(InterruptArgs, msg, *const c_char);
+    static_assert_field!(InterruptArgs, all, CBool);
+    static_assert_field!(InterruptArgs, last_thread, CBool);
+    static_assert_field!(InterruptArgs, thread, u64);
+    static_assert_field!(InterruptArgs, cancel, CBool);
 }
 
 #[unsafe(no_mangle)]
@@ -1875,22 +1914,84 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
     }
 }
 
-static INTERRUPT_FLAG_REF: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
-static INTERRUPT_FLAG_MSG: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    unsafe fn GetCurrentThreadId() -> u32;
+}
 
-#[unsafe(no_mangle)]
-pub extern "C" fn lucia_interrupt_current() {
-    INTERRUPT_FLAG_REF.store(true, Ordering::Relaxed);
+fn current_thread_id() -> u64 {
+    #[cfg(windows)]
+    unsafe {
+        GetCurrentThreadId() as u64
+    }
+
+    #[cfg(unix)]
+    unsafe {
+        libc::pthread_self() as u64
+    }
+}
+
+static LAST_THREAD_ID: AtomicU64 = AtomicU64::new(0);
+static INTERRUPTS: Lazy<Mutex<HashMap<u64, (Option<String>, Arc<AtomicBool>)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[repr(C)]
+pub struct InterruptArgs {
+    pub msg: *const c_char,
+    pub all: CBool,
+    pub last_thread: CBool,
+    pub thread: u64,
+    pub cancel: CBool,
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn lucia_interrupt_current_with_message(msg: *const c_char) {
-    INTERRUPT_FLAG_REF.store(true, Ordering::Relaxed);
-    if !msg.is_null() {
-        let msg_str = unsafe { CStr::from_ptr(msg).to_string_lossy().into_owned() };
-        let mut guard = INTERRUPT_FLAG_MSG.lock();
-        *guard = Some(msg_str);
+pub extern "C" fn lucia__lucia_interrupt(args: InterruptArgs) {
+    let msg = if args.msg.is_null() {
+        None
+    } else {
+        unsafe { CStr::from_ptr(args.msg).to_str().ok().map(|s| s.to_owned()) }
+    };
+
+    let mut map = INTERRUPTS.lock();
+
+    let apply = |entry: &mut (Option<String>, Arc<AtomicBool>)| {
+        if args.cancel != 0 {
+            entry.1.store(false, Ordering::Release);
+            entry.0 = None;
+        } else {
+            entry.1.store(true, Ordering::Release);
+            if msg.is_some() {
+                entry.0 = msg.clone();
+            }
+        }
+    };
+
+    if args.all != 0 {
+        for entry in map.values_mut() {
+            apply(entry);
+        }
+        return;
     }
+
+    if args.thread != 0 {
+        if let Some(entry) = map.get_mut(&args.thread) {
+            apply(entry);
+        }
+        return;
+    }
+
+    if args.last_thread != 0 {
+        let id = LAST_THREAD_ID.load(Ordering::Acquire);
+        if id != 0 {
+            let entry = map.entry(id).or_insert_with(|| (None, Arc::new(AtomicBool::new(false))));
+            apply(entry);
+        }
+        return;
+    }
+
+    let id = current_thread_id();
+    let entry = map.entry(id).or_insert_with(|| (None, Arc::new(AtomicBool::new(false))));
+    apply(entry);
 }
 
 #[unsafe(no_mangle)]
@@ -1981,9 +2082,20 @@ pub extern "C" fn lucia_interpret_with_vars_and_argv(
         let include_default = vars.is_null() || unsafe { (*vars).include_default } != 0;
 
         let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
-        let flag = INTERRUPT_FLAG_REF.clone();
-        flag.store(false, Ordering::Relaxed);
-        interpreter.stop_flag = Some(flag);
+        let thread_id = current_thread_id();
+        LAST_THREAD_ID.store(thread_id, Ordering::Release);
+        let flag = {
+            let mut map = INTERRUPTS.lock();
+
+            let entry = map.entry(thread_id).or_insert_with(|| {
+                (None, Arc::new(AtomicBool::new(false)))
+            });
+
+            entry.1.store(false, Ordering::Release);
+
+            entry.1.clone()
+        };
+        interpreter.stop_flag = Some(flag.clone());
         interpreter.set_main_thread(true);
         let vv = vars_from_abi(vars);
         if include_default {
@@ -1994,17 +2106,19 @@ pub extern "C" fn lucia_interpret_with_vars_and_argv(
 
         let result = interpreter.interpret(statements, false);
         
-        if INTERRUPT_FLAG_REF.load(Ordering::Relaxed) {
+        if flag.load(Ordering::Acquire) {
+            let msg = {
+                let map = INTERRUPTS.lock();
+                map.get(&thread_id).and_then(|v| v.0.clone())
+            };
+
+            let msg = msg.unwrap_or_else(|| "interrupt".to_string());
+
             return LuciaResult {
                 tag: LuciaResultTag::LUCIA_RESULT_INTERRUPT,
-                data: LuciaResultData { interrupt_msg: {
-                    let guard = INTERRUPT_FLAG_MSG.lock();
-                    if let Some(msg) = &*guard {
-                        CString::new(msg.clone()).unwrap_or_else(|_| CString::new("interrupt").unwrap()).into_raw()
-                    } else {
-                        CString::new("interrupt").unwrap().into_raw()
-                    }
-                } },
+                data: LuciaResultData {
+                    interrupt_msg: CString::new(msg).unwrap().into_raw()
+                }
             };
         }
 
