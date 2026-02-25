@@ -29,6 +29,10 @@
 //
 // IMPORTANT: VALUE_POINTER values ARE automatically freed by lucia_free_value() - the Arc reference count is decremented.
 //            Do NOT manually free the pointer inside VALUE_POINTER values.
+// IMPORTANT: VALUE_MODULE values have their module_ptr owned by the USER. You must call
+//            lucia_variables_free(module_vars) yourself after you are done with vars.
+//            lucia_free_value() does NOT free the module_ptr. After lucia_interpret_with_vars
+//            returns, the runtime will have updated module_vars in-place with the final state.
 // IMPORTANT: Anything marked as "borrowed" must NOT be freed by the user.
 
 #include <stdint.h>
@@ -80,12 +84,14 @@ enum LuciaValueType {
     VALUE_LIST = 5,
     VALUE_MAP = 6,
     VALUE_BYTES = 7,
-    VALUE_NATIVE = 8,
-    VALUE_POINTER = 9,
+    VALUE_MODULE = 8,
+    VALUE_FUNCTION = 9,
+    VALUE_POINTER = 10,
     VALUE_UNSUPPORTED = 255,
 };
 
 typedef struct LuciaValue LuciaValue;
+typedef struct LuciaVariables LuciaVariables;
 
 typedef union ValueData {
     int64_t int_v;              // integer value, if bigger than i64, return i64::MAX
@@ -95,6 +101,7 @@ typedef union ValueData {
     const uint8_t* bytes_ptr;   // pointer to bytes data
     const LuciaValue* list_ptr; // pointer to list data
     const LuciaValue* map_ptr;  // flattened array: [key0, value0, key1, value1, ...]
+    LuciaVariables* module_ptr; // pointer to module variables. User-owned; must be freed separately
     void* native_func;          // pointer to native function (LuciaNativeFunc), void* to avoid including function pointer type in the union
     void* pointer;              // (advanced use) pointer to rusts Arc<Mutex<(Value, usize)>> where the Value is the rusts Value and usize is the depth
 } ValueData;
@@ -203,12 +210,14 @@ enum LuciaResultTag {
     LUCIA_RESULT_OK = 1,         // contains LuciaValue
     LUCIA_RESULT_ERROR = 2,      // contains LuciaError
     LUCIA_RESULT_CONFIG_ERR = 3, // means config or code was invalid, empty
-    LUCIA_RESULT_PANIC = 4,      // contains panic message
+    LUCIA_RESULT_INTERRUPT = 4,  // means execution was interrupted, contains interrupt message
+    LUCIA_RESULT_PANIC = 5,      // contains panic message
 };
 
 typedef union LuciaResultData {
     LuciaValue value;
     LuciaError error;
+    const char* interrupt_msg;
     const char* panic_msg;
 } LuciaResultData;
 
@@ -223,7 +232,7 @@ const LuciaValue* lucia_result_value(const LuciaResult* res);  // returns NULL i
 const LuciaError* lucia_result_error(const LuciaResult* res);  // returns NULL if not error
 CBool lucia_result_try_as_value(const LuciaResult* res, const LuciaValue** out); // returns true on value, false on error
 CBool lucia_result_try_as_error(const LuciaResult* res, const LuciaError** out); // returns true on error, false on value
-const char* lucia_result_display(const LuciaResult res); // borrowed pointer to a human-readable display string for the result. Valid until next call to lucia_result_display.
+const char* lucia_result_display(const LuciaResult* res); // borrowed pointer to a human-readable display string for the result. Valid until next call to lucia_result_display.
 LuciaResult lucia_new_result_value(LuciaValue v);   // creates a LuciaResult with the given value. Must lucia_free_result() the result.
 LuciaResult lucia_new_result_error(const char* err_type, const char* err_msg); // creates a LuciaResult with the given error. Must lucia_free_result() the result.
 
@@ -252,14 +261,16 @@ typedef struct LuciaArgs {
 // native functions are represented with lucia type 'native public mutable function[*any] -> any'
 typedef LuciaResult (*LuciaNativeFunc)(const LuciaArgs* args);
 
-// creates a new LuciaVariables with given capacity. User must free using lucia_free_vars().
+// creates a new LuciaVariables with given capacity. User must free using lucia_variables_free().
 LuciaVariables* lucia_variables_new(size_t capacity);
-// creates a new LuciaVariables with the default variables of lucia (builtins). User must free using lucia_free_vars().
+// creates a new LuciaVariables with the default variables of lucia (builtins). User must free using lucia_variables_free().
 LuciaVariables* lucia_variables_new_default(void);
 // inserts a key-value pair into the variables. Key is a borrowed pointer (must be valid until vars is freed), value is owned (will be freed when vars is freed).
 void lucia_variables_insert(LuciaVariables* vars, const char* key, LuciaValue value);
 // inserts a function into the variables. Key is a borrowed pointer (must be valid until vars is freed), func is a function pointer to a native function.
 void lucia_variables_insert_function(LuciaVariables* vars, const char* key, LuciaNativeFunc func);
+// inserts a module into the variables. Key is a borrowed pointer (must be valid until vars is freed).
+void lucia_variables_insert_module(LuciaVariables* vars, const char* key, LuciaVariables* module_vars);
 // clears all variables from the struct, freeing owned values but not keys. vars is still valid for use after this.
 void lucia_variables_clear(LuciaVariables* vars);
  // removes a variable by key, freeing the owned value but not the key. Does nothing if key not found.
@@ -313,7 +324,7 @@ typedef struct lucia__InterruptArgs {
     const char* msg;   // message to interrupt with, if NULL then "interrupt" is used
     CBool all;         // whether to interrupt all threads
     CBool last_thread; // whether to interrupt the last thread that started executing code
-    uint64_t thread;   // specific thread id to interrupt, on unix its (uint64_t)pthread_self(), on windows its (uint64_t)GetCurrentThreadId()
+    uint64_t thread;   // specific thread id to interrupt, from lucia_current_thread_id()
     CBool cancel;      // whether to cancel the interrupt
 } lucia__InterruptArgs;
 
@@ -327,6 +338,9 @@ CBool lucia__lucia_interrupt(lucia__InterruptArgs args);
 // .msg applies also to the thread you selected, optional. If not provided, defaults to "interrupt"
 #define lucia_interrupt(...) \
     lucia__lucia_interrupt((lucia__InterruptArgs){ __VA_ARGS__ })
+
+// Gets the current thread id as uint64_t. On unix, this is (uint64_t)pthread_self(), on windows, this is (uint64_t)GetCurrentThreadId().
+uint64_t lucia_current_thread_id(void);
 
 // Interprets Lucia code given as a string
 // Returns a LuciaResult struct

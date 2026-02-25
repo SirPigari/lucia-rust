@@ -167,8 +167,9 @@ pub enum LuciaValueType {
     VALUE_LIST = 5,
     VALUE_MAP = 6,
     VALUE_BYTES = 7,
-    VALUE_NATIVE = 8, // for native C functions
-    VALUE_POINTER = 9,
+    VALUE_MODULE = 8,
+    VALUE_FUNCTION = 9, // for native C functions
+    VALUE_POINTER = 10,
     VALUE_UNSUPPORTED = 255,
 }
 
@@ -190,6 +191,7 @@ pub union ValueData {
     pub bytes_ptr: *const u8,
     pub list_ptr: *const LuciaValue,
     pub map_ptr: *const LuciaValue, // flattened as key,value,key,value
+    pub module_ptr: *mut LuciaVariables,
     pub native_func: *mut c_void,
     pub pointer: *mut c_void,
 }
@@ -284,6 +286,31 @@ fn value_to_abi(v: &Value) -> LuciaValue {
                 length: len,
             }
         },
+        Value::Module(module) => {
+            let module_vars = Box::new(LuciaVariables {
+                keys: std::ptr::null(),
+                values: std::ptr::null(),
+                len: 0,
+                capacity: 0,
+                include_default: 1,
+            });
+
+            let module_vars_ptr = Box::into_raw(module_vars);
+
+            let vars: FxHashMap<String, Variable> =
+                module.get_properties()
+                    .iter()
+                    .map(|(k,v)| (k.clone(), v.clone()))
+                    .collect();
+            vars_to_abi(&vars, module_vars_ptr);
+
+            LuciaValue {
+                tag: LuciaValueType::VALUE_MODULE,
+                data: ValueData { module_ptr: module_vars_ptr },
+                length: 0,
+            }
+        }
+        Value::Function(_) => LuciaValue { tag: LuciaValueType::VALUE_FUNCTION, data: ValueData { native_func: std::ptr::null_mut() }, length: 0 },
         Value::Pointer(p) => {
             let arc_ptr = Arc::into_raw(Arc::clone(p)) as *mut std::ffi::c_void;
             LuciaValue {
@@ -351,6 +378,7 @@ static NATIVE_FUNC_CACHE: Lazy<Mutex<HashMap<usize, Arc<NativeFunction>>>> =
 
 fn abi_to_value(v: &LuciaValue) -> Value {
     match v.tag {
+        LuciaValueType::VALUE_NULL => Value::Null,
         LuciaValueType::VALUE_INT => Value::Int(imagnum::Int::from(unsafe { v.data.int_v })),
         LuciaValueType::VALUE_FLOAT => Value::Float(imagnum::Float::from(unsafe { v.data.float_v })),
         LuciaValueType::VALUE_BOOLEAN => Value::Boolean(unsafe { v.data.bool_v } != 0),
@@ -401,7 +429,45 @@ fn abi_to_value(v: &LuciaValue) -> Value {
                 Value::Map(map)
             }
         },
-        LuciaValueType::VALUE_NATIVE => {
+        LuciaValueType::VALUE_MODULE => {
+            if unsafe { v.data.module_ptr }.is_null() {
+                Value::Null
+            } else {
+                let module_vars = unsafe { &*v.data.module_ptr };
+                let mut properties = HashMap::new();
+                if !module_vars.keys.is_null() && !module_vars.values.is_null() && module_vars.len > 0 {
+                    let keys_slice = unsafe { std::slice::from_raw_parts(module_vars.keys, module_vars.len) };
+                    let values_slice = unsafe { std::slice::from_raw_parts(module_vars.values, module_vars.len) };
+                    for i in 0..module_vars.len {
+                        let key_ptr = keys_slice[i];
+                        if key_ptr.is_null() {
+                            continue;
+                        }
+                        let key_cstr = unsafe { CStr::from_ptr(key_ptr) };
+                        let key_str = match key_cstr.to_str() {
+                            Ok(s) => s.to_string(),
+                            Err(_) => continue,
+                        };
+                        let value = abi_to_value(&values_slice[i]);
+                        properties.insert(key_str.clone(), Variable::new(key_str, value, "any".to_string(), false, true, false));
+                    }
+                }
+                Value::Module(crate::env::runtime::modules::Module {
+                    name: "module".to_string(),
+                    properties,
+                    parameters: vec![],
+                    is_public: true,
+                    is_static: false,
+                    is_final: false,
+                    path: PathBuf::new(),
+                    state: None,
+                })
+            }
+        }
+        LuciaValueType::VALUE_FUNCTION => {
+            if unsafe { v.data.native_func }.is_null() {
+                return Value::Null;
+            }
             let func_addr = unsafe { v.data.native_func as usize };
 
             let func = {
@@ -464,7 +530,7 @@ fn abi_to_value(v: &LuciaValue) -> Value {
 
             Value::Function(Function::Native(func))
         }
-        _ => Value::Null,
+        LuciaValueType::VALUE_POINTER | LuciaValueType::VALUE_UNSUPPORTED => Value::Null,
     }
 }
 
@@ -512,17 +578,25 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
         return;
     }
 
+    let inner_ptr = unsafe { (vv as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner };
+
+    let mut existing_modules: HashMap<String, *mut LuciaVariables> = HashMap::new();
     unsafe {
-        let vars_ref = &*vv;
-        if !vars_ref.values.is_null() && vars_ref.len > 0 {
-            let values_slice = std::slice::from_raw_parts(vars_ref.values, vars_ref.len);
-            for val in values_slice {
-                lucia_free_value(*val);
+        if !inner_ptr.is_null() {
+            let inner = &*inner_ptr;
+            for (i, val) in inner.values.iter().enumerate() {
+                if val.tag == LuciaValueType::VALUE_MODULE {
+                    if let Some(key_cstr) = inner.keys.get(i) {
+                        if let Ok(key_str) = key_cstr.to_str() {
+                            existing_modules.insert(key_str.to_string(), val.data.module_ptr);
+                        }
+                    }
+                } else {
+                    lucia_free_value(*val);
+                }
             }
         }
     }
-
-    let inner_ptr = unsafe { (vv as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner };
 
     let mut keys_cstrings: Vec<CString> = Vec::with_capacity(v.len());
     let mut values_abi: Vec<LuciaValue> = Vec::with_capacity(v.len());
@@ -530,8 +604,34 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
     for (s, val) in v.iter() {
         match CString::new(s.as_str()) {
             Ok(cstr) => {
+                let abi_val = match val.get_value() {
+                    Value::Module(module) => {
+                        if let Some(&existing_ptr) = existing_modules.get(s) {
+                            if !existing_ptr.is_null() {
+                                let props: FxHashMap<String, Variable> = module
+                                    .get_properties()
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                    .collect();
+                                vars_to_abi(&props, existing_ptr);
+                            }
+                            LuciaValue {
+                                tag: LuciaValueType::VALUE_MODULE,
+                                data: ValueData { module_ptr: existing_ptr },
+                                length: 0,
+                            }
+                        } else {
+                            LuciaValue {
+                                tag: LuciaValueType::VALUE_MODULE,
+                                data: ValueData { module_ptr: std::ptr::null_mut() },
+                                length: 0,
+                            }
+                        }
+                    }
+                    other => value_to_abi(other),
+                };
                 keys_cstrings.push(cstr);
-                values_abi.push(value_to_abi(val.get_value()));
+                values_abi.push(abi_val);
             }
             Err(_) => {}
         }
@@ -540,6 +640,8 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
     let key_ptrs: Vec<*const c_char> = keys_cstrings.iter().map(|s| s.as_ptr()).collect();
 
     unsafe {
+        std::ptr::drop_in_place(inner_ptr);
+
         std::ptr::write(inner_ptr, LuciaVariablesInner {
             keys: keys_cstrings,
             values: values_abi,
@@ -551,6 +653,12 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
         let keys_ptr = key_ptrs_boxed.as_ptr();
         let len = inner.values.len();
         std::mem::forget(key_ptrs_boxed);
+
+        let old_keys_ptr = (*vv).keys;
+        let old_len = (*vv).len;
+        if !old_keys_ptr.is_null() && old_len > 0 {
+            let _ = Vec::from_raw_parts(old_keys_ptr as *mut *const c_char, old_len, old_len);
+        }
 
         (*vv).keys = keys_ptr;
         (*vv).values = inner.values.as_ptr();
@@ -706,7 +814,8 @@ fn vars_to_abi(v: &FxHashMap<String, Variable>, vv: *mut LuciaVariables) {
         LuciaValueType::VALUE_LIST        => b"list\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_MAP         => b"map\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_BYTES       => b"bytes\0".as_ptr() as *const c_char,
-        LuciaValueType::VALUE_NATIVE      => b"native public mutable function[*any] -> any\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_MODULE      => b"module\0".as_ptr() as *const c_char,
+        LuciaValueType::VALUE_FUNCTION    => b"function[*any] -> any\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_POINTER     => b"<ptr>\0".as_ptr() as *const c_char,
         LuciaValueType::VALUE_UNSUPPORTED => b"<unsupported>\0".as_ptr() as *const c_char,
     }
@@ -1279,22 +1388,26 @@ pub extern "C" fn lucia_result_try_as_error(res: *const LuciaResult, error: *mut
     }
 }
 
-#[unsafe(no_mangle)] pub extern "C" fn lucia_result_display(res: LuciaResult) -> *const c_char {
-    match res.tag {
+#[unsafe(no_mangle)] pub extern "C" fn lucia_result_display(res: *const LuciaResult) -> *const c_char {
+    if res.is_null() {
+        return std::ptr::null();
+    }
+
+    match unsafe { (*res).tag } {
         LuciaResultTag::LUCIA_RESULT_OK => {
-            lucia_value_display(unsafe { res.data.value })
+            lucia_value_display(unsafe { (*res).data.value })
         },
         LuciaResultTag::LUCIA_RESULT_ERROR => {
-            lucia_error_display(unsafe { &*res.data.error as *const _ })
+            lucia_error_display(unsafe { &*(*res).data.error as *const _ })
         },
         LuciaResultTag::LUCIA_RESULT_CONFIG_ERR => {
             b"Invalid config data (Config Error)\0".as_ptr() as *const c_char
         },
         LuciaResultTag::LUCIA_RESULT_PANIC => {
-            unsafe { res.data.panic_msg }
+            unsafe { (*res).data.panic_msg }
         },
         LuciaResultTag::LUCIA_RESULT_INTERRUPT => {
-            unsafe { res.data.interrupt_msg }
+            unsafe { (*res).data.interrupt_msg }
         },
     }
 }
@@ -1505,6 +1618,14 @@ unsafe fn lucia_variables_rebuild_ptrs(vars: *mut LuciaVariables) {
 
     let inner = unsafe { &*inner_ptr };
 
+    let old_keys_ptr = unsafe { (*vars).keys };
+    let old_len = unsafe { (*vars).len };
+    if !old_keys_ptr.is_null() && old_len > 0 {
+        unsafe {
+            let _ = Vec::from_raw_parts(old_keys_ptr as *mut *const c_char, old_len, old_len);
+        }
+    }
+
     let key_ptrs: Vec<*const c_char> = inner.keys.iter().map(|s| s.as_ptr()).collect();
     let len = key_ptrs.len();
     let boxed = key_ptrs.into_boxed_slice();
@@ -1564,13 +1685,22 @@ pub extern "C" fn lucia_variables_insert(
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_variables_insert_function(vars: *mut LuciaVariables, key: *const c_char, func: LuciaNativeFunc) {
     let value = LuciaValue {
-        tag: LuciaValueType::VALUE_NATIVE,
+        tag: LuciaValueType::VALUE_FUNCTION,
         data: ValueData { native_func: func as *mut c_void },
         length: 0,
     };
     lucia_variables_insert(vars, key, value);
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_variables_insert_module(vars: *mut LuciaVariables, key: *const c_char, module_vars: *mut LuciaVariables) {
+    let value = LuciaValue {
+        tag: LuciaValueType::VALUE_MODULE,
+        data: ValueData { module_ptr: module_vars },
+        length: 0,
+    };
+    lucia_variables_insert(vars, key, value);
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn lucia_variables_remove(vars: *mut LuciaVariables, key: *const c_char) {
@@ -1676,10 +1806,11 @@ pub extern "C" fn lucia_variables_free(vars: *mut LuciaVariables) {
     unsafe {
         let vars_ref = &*vars;
         if !vars_ref.keys.is_null() && vars_ref.len > 0 {
-            let _ = Box::from_raw(std::slice::from_raw_parts_mut(
+            let _ = Vec::from_raw_parts(
                 vars_ref.keys as *mut *const c_char,
                 vars_ref.len,
-            ));
+                vars_ref.len,
+            );
         }
 
         let inner_ptr = (vars as *mut u8).add(std::mem::size_of::<LuciaVariables>()) as *mut LuciaVariablesInner;
@@ -1687,6 +1818,7 @@ pub extern "C" fn lucia_variables_free(vars: *mut LuciaVariables) {
         for val in inner.values {
             lucia_free_value(val);
         }
+        // inner.keys (Vec<CString>) is dropped here, freeing all CString allocations
 
         let layout = std::alloc::Layout::new::<LuciaVariables>()
             .extend(std::alloc::Layout::new::<LuciaVariablesInner>())
@@ -1810,11 +1942,14 @@ pub extern "C" fn lucia_print_size_checks(out: *mut libc::FILE) {
     static_assert_field!(ValueData, bytes_ptr, *const u8);
     static_assert_field!(ValueData, list_ptr, *const LuciaValue);
     static_assert_field!(ValueData, map_ptr, *const LuciaValue);
+    static_assert_field!(ValueData, module_ptr, *mut c_void);
+    static_assert_field!(ValueData, native_func, *mut c_void);
     static_assert_field!(ValueData, pointer, *mut c_void);
 
     // LuciaResultData fields
     static_assert_field!(LuciaResultData, value, LuciaValue);
     static_assert_field!(LuciaResultData, error, ManuallyDrop<LuciaError>);
+    static_assert_field!(LuciaResultData, interrupt_msg, *const c_char);
     static_assert_field!(LuciaResultData, panic_msg, *const c_char);
 
     // BuildInfo fields
@@ -1920,7 +2055,8 @@ unsafe extern "system" {
     unsafe fn GetCurrentThreadId() -> u32;
 }
 
-fn current_thread_id() -> u64 {
+#[unsafe(no_mangle)]
+pub extern "C" fn lucia_current_thread_id() -> u64 {
     #[cfg(windows)]
     unsafe {
         GetCurrentThreadId() as u64
@@ -1989,7 +2125,7 @@ pub extern "C" fn lucia__lucia_interrupt(args: InterruptArgs) {
         return;
     }
 
-    let id = current_thread_id();
+    let id = lucia_current_thread_id();
     let entry = map.entry(id).or_insert_with(|| (None, Arc::new(AtomicBool::new(false))));
     apply(entry);
 }
@@ -2082,7 +2218,7 @@ pub extern "C" fn lucia_interpret_with_vars_and_argv(
         let include_default = vars.is_null() || unsafe { (*vars).include_default } != 0;
 
         let mut interpreter = Interpreter::new(cfg, "<foreign>", &cwd, (cwd.clone(), cwd.clone(), false), &argv_vec);
-        let thread_id = current_thread_id();
+        let thread_id = lucia_current_thread_id();
         LAST_THREAD_ID.store(thread_id, Ordering::Release);
         let flag = {
             let mut map = INTERRUPTS.lock();

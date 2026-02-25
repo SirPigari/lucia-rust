@@ -2,6 +2,21 @@
 
 Lucia can be embedded with `liblucia`.
 
+Starting example:
+
+```c
+LuciaConfig cfg = lucia_default_config();
+LuciaResult r = lucia_interpret("println('hello world!')", &cfg);
+
+if (!lucia_result_is_ok(&r))
+    fprintf(stderr,"%s\n",lucia_result_display(&r)); 
+    // lucia_result_display returns a string stored in thread local buffer, 
+    // valid until next call to any *_display function on the same thread
+
+lucia_free_result(r);
+lucia_free_config(cfg);
+```
+
 ## Basic code execution
 
 Here is a simple example to print `Hello World` from C:
@@ -17,7 +32,7 @@ int main() {
     const char* code = "println(\"Hello World\") 42";
     LuciaResult result = lucia_interpret(code, &config);
 
-    if (lucia_result_is_ok(result)) {
+    if (lucia_result_is_ok(&result)) {
         printf("Script executed successfully.\n");
         int64_t i;
         if (!try_value_as_int(result.data.value, &i)) {
@@ -25,7 +40,7 @@ int main() {
         } else {
             printf("Return value as int: %lld\n", i);
         }
-    } else if (lucia_result_is_error(result)) {
+    } else if (lucia_result_is_error(&result)) {
         printf("Error: %s\n", result.data.error.err_msg);
     } else {
         printf("Panic: %s\n", result.data.panic.panic_msg);
@@ -68,6 +83,8 @@ userenv.lib pathcch.lib powrprof.lib gdi32.lib shell32.lib bcrypt.lib advapi32.l
 
 It has to link with a billion stupid libs because microslop cant choose between MSVCRT and UCRT
 
+## Injecting
+
 ## Injecting variables and retrieving them
 
 ```c
@@ -78,10 +95,8 @@ lucia_variables_insert(vars, "a", lucia_value_int(35));
 lucia_variables_insert(vars, "b", lucia_value_string("hello"));
 
 LuciaResult res = lucia_interpret_with_vars("println(b) c := 34 + a", &config, vars);
-if (lucia_result_is_error(&res)) {
-    LuciaError err = *lucia_result_error(&res);
-    lucia_error_print(&err, stderr)
-    return 1;
+if (!lucia_result_is_ok(&res)) {
+    printf("%s\n", lucia_result_display(&res));
 }
 lucia_free_result(res);
 
@@ -129,7 +144,6 @@ int main() {
     if (lucia_result_is_error(&res)) {
         const LuciaError* err = lucia_result_error(&res);
         lucia_error_print(err, stderr);
-        return 1;
     }
     lucia_free_result(res);
 
@@ -142,6 +156,7 @@ int main() {
 
     lucia_variables_free(vars);
     lucia_free_config(config);
+    return 0;
 }
 ```
 
@@ -151,9 +166,46 @@ The function you insert into the variables is always of Lucia type `native publi
 
 Since i wanted a simple API i choose to convert the variadic args into an array that you get. Thats why you need to validate the arguments yourself and make sure they exist and are of the right type. Because Lucia doesnt support kwargs this will work always (i havent found any function that would not be able to be made native).
 
-### Interrupting
+### Injecting modules
 
-If you want to interrupt the currently running interpreter, call `lucia_interrupt()`. For more docs read [lucia.h](../assets/include/lucia.h#L312)
+```c
+LuciaConfig config = lucia_default_config();
+LuciaVariables* vars = lucia_variables_new_default();
+
+lucia_variables_insert(vars, "a", lucia_value_int(34));
+
+LuciaVariables* module_vars = lucia_variables_new(8); // empty module with capacity 8
+
+lucia_variables_insert(module_vars, "a", lucia_value_int(35));
+
+lucia_variables_insert_module(vars, "b", module_vars);
+
+LuciaResult res = lucia_interpret_with_vars("c := b.a + a", &config, vars);
+if (lucia_result_is_error(&res)) {
+    const LuciaError* err = lucia_result_error(&res);
+    lucia_error_print(err, stderr);
+}
+lucia_free_result(res);
+
+const LuciaValue c = lucia_variables_get_or_default(vars, "c", LUCIA_NULL);
+int64_t i;
+if (try_value_as_int(c, &i))
+    printf("c = %lld\n", i); // prints 69
+else 
+    printf("c is not an int\n");
+
+lucia_variables_free(module_vars);
+lucia_variables_free(vars);
+lucia_free_config(config);
+```
+
+This injects a module `b` with a variable `a` into the variables. The code can access it with `b.a`. The module variables are user-owned and must be freed separately via `lucia_variables_free()`.
+
+The reason why we use `lucia_variables_new_default()` for the main variables but `lucia_variables_new()` for the module is that the main variables need to have the builtins for the code to work, but the module can be empty and just used as a namespace. If we used the default for the module, it would have builtins, so the `a` module would have stuff like `a.println` and `a.int` which would be weird and not what we want.
+
+## Interrupting
+
+If you want to interrupt the currently running interpreter, call `lucia_interrupt()` macro. For more docs read [lucia.h](../assets/include/lucia.h#L312)
 
 ```c
 #include <lucia.h>
@@ -169,7 +221,7 @@ typedef struct {
 void* interpret_thread(void* arg) {
     ThreadData* data = (ThreadData*)arg;
     LuciaResult res = lucia_interpret(data->code, &data->config);
-    fprintf(stderr, "%s\n", lucia_result_display(res));
+    fprintf(stderr, "%s\n", lucia_result_display(&res));
     lucia_free_result(res);
     return NULL;
 }
@@ -209,7 +261,7 @@ If no interpreter is running when you call `lucia_interrupt()` will do nothing.
 If you want to interrupt a specific interpreter on a thread you need the thread id as `uint64_t`.  
 
 ```c
-uint64_t thread_id = (uint64_t)pthread_self(); // or (uint64_t)GetCurrentThreadId() on windows
+uint64_t thread_id = lucia_current_thread_id();
 ...
 lucia_interrupt(.thread = thread_id, .msg = "This specific thread was interrupted")
 ```
@@ -247,7 +299,7 @@ If you want to be sure all the ABI is correct, include [lucia_size_check.h](../a
 
 int main() {
     // ...
-    return 0
+    return 0;
 }
 ```
 
