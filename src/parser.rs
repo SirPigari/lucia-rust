@@ -2225,7 +2225,7 @@ impl Parser {
                                 None
                             };
 
-                            let docs = docs.clone().zip(body_docs.clone()).map(|(x, y)| x + &y)
+                            let docs = docs.clone().zip(body_docs.clone()).map(|(x, y)| x + "\n" + &y)
                                 .or(docs.clone())
                                 .or(body_docs.clone());
 
