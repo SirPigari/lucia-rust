@@ -23,6 +23,7 @@ The `config.json` file contains configurable options controlling the behavior an
   "libs_paths": [
     "lucia/src/env/libs"
   ],
+  "operation_cache_size": 8192,
   "stack_size": 16777216,
   "version": "2.0.0",
   "type_checker": {
@@ -144,22 +145,27 @@ The `config.json` file contains configurable options controlling the behavior an
 - **Type:** `list`  
 - **Description:** List of directories to search for libraries when using `import`. Default: `["lucia/src/env/libs"]`
 
-### 13. `stack_size`
+### 13. `operation_cache_size`
+
+- **Type:** `int`
+- **Description:** Size for the operation cache
+
+### 14. `stack_size`
 
 - **Type:** `int`  
 - **Description:** Maximum stack size for running programs in bytes. Default: `16777216` (16 MB)
 
-### 14. `version`
+### 15. `version`
 
 - **Type:** `string`  
 - **Description:** Current version of Lucia. Update with new releases. Default: `"2.0.0"`
 
-### 15. `type_checker`
+### 16. `type_checker`
 
 - **Type:** `object`
 - **Description:** Configuration for the optional type checker. (experimental)
 
-### 16. `color_scheme`
+### 17. `color_scheme`
 
 - **Type:** `object`  
 - **Description:** Defines colors for terminal output. Default values:  

@@ -1,0 +1,111 @@
+name: Lucia Rust Build Nightly
+
+on:
+  schedule:
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    name: Build (Windows) - x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Get commit short hash
+        id: commit
+        shell: pwsh
+        run: |
+          $hash = git rev-parse --short HEAD
+          echo "short_hash=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Install system dependencies
+        run: choco install make --no-progress
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-windows-x86_64-${{ steps.commit.outputs.short_hash }}.exe
+          path: src/env/bin/lucia.exe
+          retention-days: 30
+
+  build-linux:
+    name: Build (Linux) - x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Get commit short hash
+        id: commit
+        run: |
+          echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y make
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-linux-x86_64-${{ steps.commit.outputs.short_hash }}
+          path: src/env/bin/lucia
+          retention-days: 30
+
+  build-macos:
+    name: Build (macOS) - x86_64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Get commit short hash
+        id: commit
+        run: |
+          echo "short_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Install system dependencies
+        run: brew install make
+
+      - name: Prepare Makefile
+        run: mv src/env/assets/Makefile.old ./Makefile
+
+      - name: Build project (release)
+        run: make release
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-macos-x86_64-${{ steps.commit.outputs.short_hash }}
+          path: src/env/bin/lucia
+          retention-days: 30
