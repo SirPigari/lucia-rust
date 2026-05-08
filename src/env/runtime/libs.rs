@@ -418,7 +418,11 @@ fn _get_lib_names_raw(libs_paths: &[String]) -> Vec<LibName> {
 
             let mut hasher = Sha256::new();
             hasher.update(&manifest_data);
-            let hash = format!("{:x}", hasher.finalize());
+            let hash = hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>();
 
             let mut names = Vec::new();
             names.push(name.clone());
@@ -501,7 +505,11 @@ fn load_or_generate_cache(libs_paths: &[String]) -> Vec<LibName> {
 
         let mut hasher = Sha256::new();
         hasher.update(&data);
-        let new_hash = format!("{:x}", hasher.finalize());
+        let new_hash = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
 
         if new_hash != row.manifest_hash {
             changed = true;

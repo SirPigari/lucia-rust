@@ -71,6 +71,7 @@ typedef struct LuciaConfig {
     const char* home_dir;                    // path to home directory, or NULL for default
     const char* libs_paths[16];              // array of paths to search for libraries, limit to 16 for simplicity. NULL entries are ignored
     size_t stack_size;                       // stack size in bytes
+    size_t operation_cache_size;             // max number of cached operation results (LRU)
     const char* version;                     // lucia version string
 } LuciaConfig;
 

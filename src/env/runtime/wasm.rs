@@ -7,6 +7,11 @@ use serde_wasm_bindgen::{from_value, to_value};
 use std::cell::RefCell;
 use js_sys::Function;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 thread_local! {
     static IS_PANIC_HOOK_SET: OnceCell<bool> = OnceCell::new();
     static IS_SLEEPING: RefCell<bool> = RefCell::new(false);

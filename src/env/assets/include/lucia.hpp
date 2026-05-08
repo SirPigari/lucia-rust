@@ -63,6 +63,7 @@ extern "C" {
         const char* home_dir;
         const char* libs_paths[16];
         size_t stack_size;
+        size_t operation_cache_size;
         const char* version;
     } LuciaConfig;
     typedef struct LuciaValue LuciaValue;

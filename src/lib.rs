@@ -120,6 +120,7 @@ pub struct LuciaConfig {
     pub home_dir: *const c_char,
     pub libs_paths: [*const c_char; 16], // only allow up to 16 paths for simplicity
     pub stack_size: usize,
+    pub operation_cache_size: usize,
     pub version: *const c_char,
 }
 
@@ -148,6 +149,7 @@ unsafe fn config_from_abi(cfg: &LuciaConfig) -> Config {
             paths
         },
         stack_size: cfg.stack_size,
+        operation_cache_size: cfg.operation_cache_size,
         version: if cfg.version.is_null() { "".into() } else { unsafe { CStr::from_ptr(cfg.version).to_string_lossy().into_owned() } },
         color_scheme: Default::default(),
         cache_format: Default::default(),
@@ -1979,6 +1981,7 @@ pub extern "C" fn lucia_print_size_checks(out: *mut libc::FILE) {
     static_assert_field!(LuciaConfig, home_dir, *const c_char);
     static_assert_field!(LuciaConfig, libs_paths, [*const c_char; 16]);
     static_assert_field!(LuciaConfig, stack_size, usize);
+    static_assert_field!(LuciaConfig, operation_cache_size, usize);
     static_assert_field!(LuciaConfig, version, *const c_char);
 
     // LuciaValue fields
@@ -2045,6 +2048,7 @@ pub extern "C" fn lucia_default_config() -> LuciaConfig {
             arr
         },
         stack_size: default_cfg.stack_size,
+        operation_cache_size: default_cfg.operation_cache_size,
         version: CString::new(default_cfg.version).unwrap().into_raw()
     }
 }

@@ -9,9 +9,9 @@ use crate::env::runtime::types::Int;
 use crate::{insert_native_fn, insert_native_var, insert_native_fn_pt, insert_native_shared_fn_pt};
 use crate::interpreter::Interpreter;
 
-use sha2::{Sha224, Sha256, Sha384, Sha512, Digest};
+use sha2::{Sha224, Sha256, Sha384, Sha512, Digest as ShaDigest};
 use sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512};
-use blake2::{Blake2b512, Blake2s256};
+use blake2::{Blake2b512, Blake2s256, Digest as BlakeDigest};
 use blake3;
 use md5;
 use sha1::Sha1;
@@ -280,7 +280,7 @@ pub fn register() -> HashMap<String, Variable> {
         let out_len = args.get("output_len").and_then(|v| if let Value::Int(i) = v { Some(i) } else { None }).and_then(|i| i.to_usize().ok()).unwrap_or(32);
         let mut out = vec![0u8; out_len];
         let log_n = n.ilog2() as u8;
-        match ScryptParams::new(log_n, r, p, out_len) {
+        match ScryptParams::new(log_n, r, p) {
             Ok(params) => {
                 if let Err(_) = scrypt(&password, &salt, &params, &mut out) {
                     return Value::new_error("HashError", "scrypt failed", None);

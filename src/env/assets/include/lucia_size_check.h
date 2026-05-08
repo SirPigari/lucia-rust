@@ -60,7 +60,7 @@ LUCIA_STATIC_ASSERT(sizeof(LuciaResultData) == 48, "Size of LuciaResultData was 
 LUCIA_STATIC_ASSERT(alignof(LuciaResultData) == 8, "Alignment of LuciaResultData was expected to be 8");
 LUCIA_STATIC_ASSERT(sizeof(BuildInfo) == 88, "Size of BuildInfo was expected to be 88 bytes");
 LUCIA_STATIC_ASSERT(alignof(BuildInfo) == 8, "Alignment of BuildInfo was expected to be 8");
-LUCIA_STATIC_ASSERT(sizeof(LuciaConfig) == 176, "Size of LuciaConfig was expected to be 176 bytes");
+LUCIA_STATIC_ASSERT(sizeof(LuciaConfig) == 184, "Size of LuciaConfig was expected to be 184 bytes");
 LUCIA_STATIC_ASSERT(alignof(LuciaConfig) == 8, "Alignment of LuciaConfig was expected to be 8");
 LUCIA_STATIC_ASSERT(sizeof(LuciaValue) == 24, "Size of LuciaValue was expected to be 24 bytes");
 LUCIA_STATIC_ASSERT(alignof(LuciaValue) == 8, "Alignment of LuciaValue was expected to be 8");
@@ -344,6 +344,17 @@ LUCIA_STATIC_ASSERT(alignof(((LuciaConfig*)0)->home_dir) == 4, "LuciaConfig.home
 LUCIA_STATIC_ASSERT(sizeof(((LuciaConfig*)0)->libs_paths) == 128, "LuciaConfig.libs_paths was expected to be 128 bytes");
 #ifndef _MSC_VER
 LUCIA_STATIC_ASSERT(alignof(((LuciaConfig*)0)->libs_paths) == 8, "LuciaConfig.libs_paths alignment was expected to be 8");
+#endif
+#if UINTPTR_MAX == 0xffffffffffffffff
+LUCIA_STATIC_ASSERT(sizeof(((LuciaConfig*)0)->operation_cache_size) == 8, "LuciaConfig.operation_cache_size expected to be 8 bytes on 64-bit");
+#ifndef _MSC_VER
+LUCIA_STATIC_ASSERT(alignof(((LuciaConfig*)0)->operation_cache_size) == 8, "LuciaConfig.operation_cache_size alignment expected to be 8 on 64-bit");
+#endif
+#else
+LUCIA_STATIC_ASSERT(sizeof(((LuciaConfig*)0)->operation_cache_size) == 4, "LuciaConfig.operation_cache_size expected to be 4 bytes on 32-bit");
+#ifndef _MSC_VER
+LUCIA_STATIC_ASSERT(alignof(((LuciaConfig*)0)->operation_cache_size) == 4, "LuciaConfig.operation_cache_size alignment expected to be 4 on 32-bit");
+#endif
 #endif
 #if UINTPTR_MAX == 0xffffffffffffffff
 LUCIA_STATIC_ASSERT(sizeof(((LuciaConfig*)0)->stack_size) == 8, "LuciaConfig.stack_size expected to be 8 bytes on 64-bit");

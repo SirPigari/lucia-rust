@@ -47,6 +47,7 @@ impl Completer for ReplCompleter {
                     extra: None,
                     span: Span::new(pos, pos),
                     append_whitespace: false,
+                    display_override: None,
                 }
             ];
         }
@@ -90,6 +91,7 @@ impl Completer for ReplCompleter {
                             extra: None,
                             span,
                             append_whitespace: false,
+                            display_override: None,
                         });
                     }
                 }
@@ -580,11 +582,15 @@ pub fn read_input(
                     ValidationResult::Incomplete => {},
                 }
             }
-            Ok(Signal::CtrlC) => {
-                println!("^C");
+            Ok(Signal::CtrlD) => {
                 std::process::exit(0);
             }
-            Ok(Signal::CtrlD) => {
+            Ok(Signal::ExternalBreak(s)) => {
+                println!("{}", s);
+                std::process::exit(0);
+            }
+            Ok(_) => {
+                println!("^C");
                 std::process::exit(0);
             }
             Err(err) => {
@@ -689,7 +695,11 @@ pub fn read_input_no_repl(prompt: &str, multiline_prompt: Option<&str>) -> Resul
                     "Input was interrupted by user".to_string(),
                 ));
             }
-            Ok(Signal::CtrlC) => {
+            Ok(Signal::ExternalBreak(s)) => {
+                println!("{}", s);
+                std::process::exit(0);
+            }
+            Ok(_) => {
                 std::process::exit(0);
             }
             Err(err) => {

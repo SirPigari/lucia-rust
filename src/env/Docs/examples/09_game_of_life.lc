@@ -1,6 +1,6 @@
 import (*) from os.terminal
 import (sleep) from time
-import (exit) from os
+import os
 
 // Conway's game of life in Lucia
 // made by Markofwitch 2025, the developer of Lucia
@@ -45,7 +45,7 @@ fun main():
     end
     disable_raw_mode()
     show_cursor()
-    exit(0)
+    os.exit(0)
 end
 
 fun draw(grid: Grid, cx: int, cy: int, t: str) -> void:
@@ -99,7 +99,7 @@ fun run_simulation():
         draw(grid, 999, 999, f"Conway's Game of Life - Running Simulation ({iteration}) (Press Esc to Stop)")
         flush()
         if (read_key() == KeyCode.Esc) || grid.all((row) => row.all((cell) => !cell)) || (grid == last_iter):
-            exit(0)
+            os.exit(0)
         end
         flush_input_buffer()
         last_iter = grid

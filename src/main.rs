@@ -11,6 +11,10 @@ use std::sync::{
     Arc,
 };
 use std::time::{Duration, Instant};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 mod env {
     pub mod runtime {
@@ -652,6 +656,7 @@ fn merge_configs(primary: Config, fallback: Config) -> Config {
         home_dir: if primary.home_dir.is_empty() { fallback.home_dir } else { primary.home_dir },
         libs_paths: if primary.libs_paths.len() <= 1 { fallback.libs_paths } else { primary.libs_paths },
         stack_size: if primary.stack_size == 0 { fallback.stack_size } else { primary.stack_size },
+        operation_cache_size: if primary.operation_cache_size == 0 { fallback.operation_cache_size } else { primary.operation_cache_size },
         type_checker: merge_type_checker_configs(primary.type_checker, fallback.type_checker),
         color_scheme: merge_color_schemes(primary.color_scheme, fallback.color_scheme),
     }
@@ -716,6 +721,7 @@ fn create_default_config(env_path: &Path) -> Config {
         libs_paths: vec![env_path.join("libs").to_str().unwrap_or("./libs").to_string()],
         disable_runtime_type_checking: false,
         stack_size: 16777216,
+        operation_cache_size: 8192,
         type_checker: TypeCheckerConfig::default(),
         color_scheme: ColorScheme {
             exception: "#F44350".to_string(),

@@ -9,27 +9,28 @@ colored = "3.1.1"
 imagnum = "0.2.30"
 once_cell = { version = "1.21.3", default-features = false }
 regex = "1.12.3"
-rand = { version = "0.10.0", default-features = false, features = ["thread_rng"] }
-reqwest = { version = "0.13.2", features = ["json"], default-features = false }
+rand = { version = "0.10.1", default-features = false, features = ["thread_rng"] }
+reqwest = { version = "0.13.3", features = ["json"], default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_urlencoded = "0.7.1"
-sha2 = "0.10.9"
-fancy-regex = { version = "0.17.0", optional = true }
+sha2 = "0.11.0"
+fancy-regex = { version = "0.18.0", optional = true }
 bincode = "2.0.1" # fuck you doxxers
-rustc-hash = "2.1.1"
+rustc-hash = "2.1.2"
 parking_lot = "0.12.5"
+mimalloc = "0.1.50"
 
 # [target.'cfg(feature = "hash")'.dependencies]
 md5 = { version = "0.8.0", optional = true }
-sha1 = { version = "0.10.6", optional = true }
-sha3 = { version = "0.10.8", optional = true }
-blake3 = { version = "1.8.3", optional = true }
-ripemd = { version = "0.1.3", optional = true }
-pbkdf2 = { version = "0.12.2", optional = true }
+sha1 = { version = "0.11.0", optional = true }
+sha3 = { version = "0.11.0", optional = true }
+blake3 = { version = "1.8.5", optional = true }
+ripemd = { version = "0.2.0", optional = true }
+pbkdf2 = { version = "0.13.0", optional = true }
 crc32fast = { version = "1.5.0", optional = true }
 fnv = { version = "1.0.7", optional = true }
-bcrypt = { version = "0.18.0", optional = true }
+bcrypt = { version = "0.19.0", optional = true }
 blake2 = { version = "0.10.6", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -37,20 +38,20 @@ crossterm = "0.29.0"
 sys-info = "0.9.1"
 libffi = { version = "4.1.2", optional = true }                               # DO NOT UPDATE TO 5.x.x IT BREAKS EVERYTHING
 libloading = { version = "0.9.0", optional = true }
-libc = "0.2.182"
-tar = "0.4.44"
+libc = "0.2.186"
+tar = "0.4.45"
 zstd = "0.13.3"
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
-reedline = { version = "0.45.0", features = ["system_clipboard"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }
+reedline = { version = "0.47.0", features = ["system_clipboard"] }
 nu-ansi-term = "0.50.3"
 lasm = { version = "2.1.0", package = "lucia-lasm", optional = true }
 argon2 = { version = "0.5.3", optional = true }
-scrypt = { version = "0.11.0", optional = true }
+scrypt = { version = "0.12.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { version = "0.2.111", features = ["serde-serialize"] }
-wasm-bindgen-futures = "0.4.61"
-web-sys = { version = "0.3.88", features = [
+wasm-bindgen = { version = "0.2.121", features = ["serde-serialize"] }
+wasm-bindgen-futures = "0.4.71"
+web-sys = { version = "0.3.98", features = [
     "Window",
     "Request",
     "Response",
@@ -60,20 +61,20 @@ web-sys = { version = "0.3.88", features = [
     "Crypto",
     "Performance",
 ] }
-js-sys = "0.3.88"
+js-sys = "0.3.98"
 serde-wasm-bindgen = "0.6.5"
-gloo-timers = { version = "0.3.0", features = ["futures"] }
-getrandom = { version = "0.3.4", features = ["wasm_js"] }
+gloo-timers = { version = "0.4.0", features = ["futures"] }
+getrandom = { version = "0.4.2", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.build-dependencies]
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 toml = { version = "0.9.8", default-features = false, features = [
     "serde",
     "parse",
 ] }
 chrono = "0.4.43"
 rand = "0.10.0"
-uuid = { version = "1.20.1", features = ["v4"] }
+uuid = { version = "1.23.1", features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1.12"

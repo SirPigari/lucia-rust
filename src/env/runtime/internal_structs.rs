@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::env::runtime::value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use core::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign, Not};
 use bincode::{Encode, Decode};
@@ -594,6 +594,8 @@ impl<'de> Deserialize<'de> for CacheFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Cache {
+    pub operation_cache_order: VecDeque<String>,
+    pub operation_cache_size: usize,
     pub operations: FxHashMap<String, Value>,
     pub constants: FxHashMap<String, Value>,
     pub iterables: FxHashMap<Value, Value>,

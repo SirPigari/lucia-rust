@@ -17,7 +17,11 @@ fn hash_file_content(path: &str) -> std::io::Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(abs_path_str.as_bytes());
     hasher.update(&content_bytes);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>())
 }
 
 fn cache_dir_for_file(cache_dir: &Path, file_path: &str, file_hash: &str) -> PathBuf {

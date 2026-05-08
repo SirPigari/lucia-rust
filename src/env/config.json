@@ -15,6 +15,7 @@
     "\\\\?\\C:\\Users\\sirpigari\\Desktop\\Projects\\Rust\\lucia\\src\\env\\libs"
   ],
   "stack_size": 16777216,
+  "operation_cache_size": 8192,
   "version": "2.0.0",
   "type_checker": {
     "enabled": false,

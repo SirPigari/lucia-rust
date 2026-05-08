@@ -190,8 +190,11 @@ fn clear_terminal_handler(_args: &HashMap<String, Value>) -> Value {
 fn sha256_hash(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input);
-    let result = hasher.finalize();
-    format!("{:x}", result)
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
 }
 
 fn levenshtein_distance_handler(args: &HashMap<String, Value>) -> Value {

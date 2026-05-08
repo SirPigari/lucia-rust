@@ -1,5 +1,5 @@
 
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{HashMap, BTreeMap, VecDeque};
 use crate::env::runtime::config::{Config, get_from_config, set_in_config};
 use crate::env::runtime::utils::{
     hex_to_ansi,
@@ -117,6 +117,8 @@ impl Interpreter {
             cwd: cwd.clone(),
             preprocessor_info,
             cache: Cache {
+                operation_cache_order: VecDeque::new(),
+                operation_cache_size: config.operation_cache_size.max(16),
                 operations: FxHashMap::default(),
                 constants: FxHashMap::default(),
                 iterables: FxHashMap::default(),
@@ -8830,6 +8832,43 @@ impl Interpreter {
     }
 
     #[inline]
+    fn touch_operation_cache_key(&mut self, key: &str) {
+        if let Some(pos) = self.cache.operation_cache_order.iter().position(|k| k == key) {
+            self.cache.operation_cache_order.remove(pos);
+        }
+        self.cache.operation_cache_order.push_back(key.to_owned());
+    }
+
+    #[inline]
+    fn get_cached_operation_value(&mut self, key: &str) -> Option<Value> {
+        let cached = self.cache.operations.get(key).cloned();
+        if cached.is_some() {
+            self.touch_operation_cache_key(key);
+        }
+        cached
+    }
+
+    #[inline]
+    fn cache_operation_value(&mut self, key: String, value: Value) {
+        if self.cache.operations.contains_key(&key) {
+            self.cache.operations.insert(key.clone(), value);
+            self.touch_operation_cache_key(&key);
+            return;
+        }
+
+        if self.cache.operations.len() >= self.cache.operation_cache_size {
+            while let Some(oldest_key) = self.cache.operation_cache_order.pop_front() {
+                if self.cache.operations.remove(&oldest_key).is_some() {
+                    break;
+                }
+            }
+        }
+
+        self.cache.operations.insert(key.clone(), value);
+        self.cache.operation_cache_order.push_back(key);
+    }
+
+    #[inline]
     fn handle_operation(&mut self, left_stmt: Statement, operator: String, right_stmt: Statement) -> Value {
         let left = self.evaluate(&left_stmt);
         if self.err.is_some() {
@@ -8903,7 +8942,7 @@ impl Interpreter {
 
         let cache_key = format!("{}::{}::{}", format_value(&left), format_value(&right), &operator);
 
-        if let Some(cached) = self.cache.operations.get(&cache_key) {
+        if let Some(cached) = self.get_cached_operation_value(&cache_key) {
             return cached.clone();
         }
 
@@ -8913,7 +8952,7 @@ impl Interpreter {
             return NULL;
         }
 
-        self.cache.operations.insert(cache_key, result.clone());
+        self.cache_operation_value(cache_key, result.clone());
         result
     }
     
@@ -8935,7 +8974,7 @@ impl Interpreter {
 
         let cache_key = format!("{}{}", operator, format_value(&operand));
 
-        if let Some(cached) = self.cache.operations.get(&cache_key) {
+        if let Some(cached) = self.get_cached_operation_value(&cache_key) {
             return cached.clone();
         }
 
@@ -8971,7 +9010,7 @@ impl Interpreter {
             _ => return self.raise("SyntaxError", &format!("Unexpected unary operator: '{}'", operator)),
         };
 
-        self.cache.operations.insert(cache_key, result.clone());
+        self.cache_operation_value(cache_key, result.clone());
 
         result
     }
@@ -9404,11 +9443,11 @@ impl Interpreter {
                 (Value::Int(base), Value::Int(height)) if !height.is_negative() => {
                     fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
                         let key = format!("{}::{}::^", base, exp);
-                        if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
+                        if let Some(Value::Int(cached)) = this.get_cached_operation_value(&key) {
                             return Some(cached.clone());
                         }
                         let res = base.pow(exp).ok()?;
-                        this.cache.operations.insert(key, Value::Int(res.clone()));
+                        this.cache_operation_value(key, Value::Int(res.clone()));
                         Some(res)
                     }
 
@@ -9439,11 +9478,11 @@ impl Interpreter {
                 (Value::Float(base), Value::Int(height)) if !height.is_negative() => {
                     let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
                         let key = format!("{}::{}::^", base, exp);
-                        if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
+                        if let Some(Value::Float(cached)) = this.get_cached_operation_value(&key) {
                             return Some(cached.clone());
                         }
                         let res = base.pow(exp).ok()?;
-                        this.cache.operations.insert(key, Value::Float(res.clone()));
+                        this.cache_operation_value(key, Value::Float(res.clone()));
                         Some(res)
                     };
 
@@ -9492,11 +9531,11 @@ impl Interpreter {
                 (Value::Int(base), Value::Int(height)) if !height.is_negative() => {
                     fn pow_cached(this: &mut Interpreter, base: &Int, exp: &Int) -> Option<Int> {
                         let key = format!("{}::{}::^", base, exp);
-                        if let Some(Value::Int(cached)) = this.cache.operations.get(&key) {
+                        if let Some(Value::Int(cached)) = this.get_cached_operation_value(&key) {
                             return Some(cached.clone());
                         }
                         let res = base.pow(exp).ok()?;
-                        this.cache.operations.insert(key, Value::Int(res.clone()));
+                        this.cache_operation_value(key, Value::Int(res.clone()));
                         Some(res)
                     }
 
@@ -9548,11 +9587,11 @@ impl Interpreter {
                 (Value::Float(base), Value::Int(height)) if !height.is_negative() => {
                     let pow_cached = |this: &mut Interpreter, base: &Float, exp: &Float| -> Option<Float> {
                         let key = format!("{}::{}::^", base, exp);
-                        if let Some(Value::Float(cached)) = this.cache.operations.get(&key) {
+                        if let Some(Value::Float(cached)) = this.get_cached_operation_value(&key) {
                             return Some(cached.clone());
                         }
                         let res = base.pow(exp).ok()?;
-                        this.cache.operations.insert(key, Value::Float(res.clone()));
+                        this.cache_operation_value(key, Value::Float(res.clone()));
                         Some(res)
                     };
 

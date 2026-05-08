@@ -29,6 +29,7 @@ pub struct Config {
     pub home_dir: String,
     pub libs_paths: Vec<String>,
     pub stack_size: usize,
+    pub operation_cache_size: usize,
     pub version: String,
     pub type_checker: TypeCheckerConfig,
     pub color_scheme: ColorScheme,
@@ -127,6 +128,7 @@ impl Default for Config {
                 .into_owned(),
             libs_paths: vec![home_dir.join("libs").to_string_lossy().into_owned()],
             stack_size: 16777216, // 16 MB
+            operation_cache_size: 8192,
             type_checker: TypeCheckerConfig::default(),
             color_scheme: ColorScheme::default(),
         }
@@ -252,6 +254,21 @@ pub fn set_in_config(config: &mut Config, key: &str, value: Value) -> Result<(),
                 Err("Expected an integer value for 'stack_size'".to_string())
             }
         }
+        "operation_cache_size" => {
+            if let Value::Int(val) = value {
+                if let Ok(i64_val) = val.to_i64() {
+                    if i64_val <= 0 {
+                        return Err("Expected an integer value > 0 for 'operation_cache_size'".to_string());
+                    }
+                    config.operation_cache_size = i64_val as usize;
+                    Ok(())
+                } else {
+                    Err("Expected an integer value for 'operation_cache_size'".to_string())
+                }
+            } else {
+                Err("Expected an integer value for 'operation_cache_size'".to_string())
+            }
+        }
         "disable_runtime_type_checking" => {
             if let Value::Boolean(val) = value {
                 if !(config.allow_unsafe || config.moded) && val {
@@ -340,6 +357,7 @@ pub fn get_from_config(config: &Config, key: &str) -> Value {
         "allow_inline_config" => Value::Boolean(config.allow_inline_config),
         "home_dir" => Value::String(config.home_dir.clone()),
         "stack_size" => Value::Int(Int::from_i64(config.stack_size as i64)),
+        "operation_cache_size" => Value::Int(Int::from_i64(config.operation_cache_size as i64)),
         "version" => Value::String(config.version.clone()),
         "disable_runtime_type_checking" => Value::Boolean(config.disable_runtime_type_checking),
         "type_checker" => {
